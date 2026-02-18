@@ -2193,6 +2193,10 @@ class PipelineOrchestrator:
 
         output_dir = f"{DEFAULT_MUSIC_DIR}/{key}"
 
+        # Ask to save to config BEFORE download (only if not dry-run and not auto)
+        if not dry_run and not auto:
+            self._ask_save_to_config(key, url, album_name)
+
         success, key, album_name, download_stats = downloader.download(
             url,
             output_dir,
@@ -2207,10 +2211,6 @@ class PipelineOrchestrator:
             self.stats.playlist_name = album_name
             self.stats.download_stats = download_stats
             self.stats.stages_completed.append("download")
-
-            # Ask to save to config (only if not dry-run and not auto)
-            if not dry_run and not auto:
-                self._ask_save_to_config(key, url, album_name)
 
             return True
         else:
@@ -2541,7 +2541,7 @@ class InteractiveMenu:
         while True:
             # Display menu
             print("\n╔══════════════════════════════════════════════════════════════╗")
-            print("║          Apple Music to Ride Command MP3 Converter          ║")
+            print("║          Apple Music to Ride Command MP3 Converter           ║")
             print("╚══════════════════════════════════════════════════════════════╝")
             print("\nAvailable playlists:")
 
