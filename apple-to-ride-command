@@ -4186,9 +4186,12 @@ def main():
     logger = Logger(verbose=args.verbose)
 
     # Display startup banner
-    print("\n╔══════════════════════════════════════════════════════════════╗")
-    print(f"║  Apple Music to Ride Command MP3 Converter v{VERSION:<15}  ║")
-    print("╚══════════════════════════════════════════════════════════════╝\n")
+    banner_text = f"  Apple Music to Ride Command MP3 Converter v{VERSION}  "
+    banner_width = max(len(banner_text), 62)
+    banner_text = banner_text.ljust(banner_width)
+    print(f"\n╔{'═' * banner_width}╗")
+    print(f"║{banner_text}║")
+    print(f"╚{'═' * banner_width}╝\n")
 
     # Log startup (file only)
     logger.file_info(f"apple-to-ride-command v{VERSION}")
