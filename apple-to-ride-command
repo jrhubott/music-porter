@@ -3605,6 +3605,13 @@ class InteractiveMenu:
 
         self.logger.info(f"Selected: {playlist.name}")
 
+        # Check cookies before processing
+        if not dry_run:
+            if not self._check_and_refresh_cookies():
+                self.logger.error("Cannot process playlist without valid cookies")
+                input("\nPress Enter to return to menu...")
+                return False
+
         # Run pipeline for this playlist
         orchestrator = PipelineOrchestrator(self.logger, self.deps, self.config)
 
@@ -3628,6 +3635,13 @@ class InteractiveMenu:
     def _handle_all_playlists(self, dry_run, verbose):
         """Handle 'All playlists' selection."""
         self.logger.info("Processing all playlists...")
+
+        # Check cookies before batch processing
+        if not dry_run:
+            if not self._check_and_refresh_cookies():
+                self.logger.error("Cannot process playlists without valid cookies")
+                input("\nPress Enter to return to menu...")
+                return False
 
         # Create aggregate statistics tracker
         aggregate_stats = AggregateStatistics()
@@ -3670,6 +3684,13 @@ class InteractiveMenu:
             if not url:
                 self.logger.error("No URL provided")
                 return False
+
+            # Check cookies before processing
+            if not dry_run:
+                if not self._check_and_refresh_cookies():
+                    self.logger.error("Cannot process URL without valid cookies")
+                    input("\nPress Enter to return to menu...")
+                    return False
 
             # Run pipeline for this URL
             orchestrator = PipelineOrchestrator(self.logger, self.deps, self.config)
@@ -3727,6 +3748,46 @@ class InteractiveMenu:
                 pass
 
         return success
+
+    def _check_and_refresh_cookies(self, cookie_path='cookies.txt'):
+        """
+        Check cookie validity and offer to refresh if invalid.
+        Returns True if cookies are valid or successfully refreshed, False otherwise.
+        """
+        cookie_manager = CookieManager(cookie_path, self.logger)
+        status = cookie_manager.validate()
+
+        if status.valid:
+            # Cookies are valid, no action needed
+            return True
+
+        # Cookies are invalid - show instructions and offer refresh
+        self.logger.error(status.reason)
+        cookie_manager.show_manual_instructions()
+
+        try:
+            response = input("Attempt automatic cookie refresh? [Y/n] ").strip().lower()
+            if response in ['', 'y', 'yes']:
+                # User wants to try auto-refresh
+                if cookie_manager.auto_refresh():
+                    # Refresh succeeded, re-validate
+                    status = cookie_manager.validate()
+                    if status.valid:
+                        self.logger.ok("Cookie refresh successful!")
+                        return True
+                    else:
+                        self.logger.error("Cookies still invalid after refresh")
+                        return False
+                else:
+                    self.logger.error("Automatic cookie refresh failed")
+                    return False
+            else:
+                # User declined auto-refresh
+                self.logger.info("Skipping cookie refresh")
+                return False
+        except KeyboardInterrupt:
+            print("\n\nCancelled by user")
+            return False
 
     def _ask_copy_to_usb(self, source_dir, dry_run):
         """Ask user if they want to copy to USB."""
