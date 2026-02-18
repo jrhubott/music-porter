@@ -162,6 +162,22 @@ The codebase uses a "hard gate" protection system for original metadata:
 ./apple-to-ride-command sync-usb export/Pop_Workout --usb-dir "RZR/Music"
 ```
 
+**Library Summary:**
+```bash
+# Display export library statistics (default mode)
+# Always checks all files for tag integrity
+./apple-to-ride-command summary
+
+# Quick mode (aggregate statistics only)
+./apple-to-ride-command summary --quick
+
+# Detailed mode (extended per-playlist information)
+./apple-to-ride-command summary --detailed
+
+# Analyze custom directory
+./apple-to-ride-command summary --export-dir /path/to/export
+```
+
 ### Global Flags (Apply to All Commands)
 
 ```bash
@@ -323,11 +339,11 @@ EXCLUDED_USB_VOLUMES = [
 
 ### Overview
 
-The `apple-to-ride-command` script is a modern, unified Python tool (2,458 lines) that replaces both legacy scripts with a professional subcommand architecture.
+The `apple-to-ride-command` script is a modern, unified Python tool (3,065 lines) that replaces both legacy scripts with a professional subcommand architecture.
 
 ### Key Components
 
-**15 Classes:**
+**18 Classes:**
 1. `Logger` - Timestamped logging to console and file
 2. `PlaylistConfig` - Playlist configuration representation
 3. `ConfigManager` - Loads and manages playlists.conf
@@ -338,11 +354,14 @@ The `apple-to-ride-command` script is a modern, unified Python tool (2,458 lines
 8. `Converter` - M4A → MP3 conversion with ffmpeg
 9. `Downloader` - Downloads from Apple Music via gamdl
 10. `USBManager` - USB drive detection and syncing
-11. `PipelineStatistics` - Aggregates statistics across stages
-12. `PipelineOrchestrator` - Coordinates multi-stage workflows
-13. `InteractiveMenu` - Interactive user interface
-14. `PlaylistResult` - Results for single playlist in batch processing
-15. `AggregateStatistics` - Cumulative statistics across multiple playlists
+11. `PlaylistSummary` - Statistics for a single playlist
+12. `LibrarySummaryStatistics` - Statistics for entire export library
+13. `SummaryManager` - Generates export library summaries
+14. `PipelineStatistics` - Aggregates statistics across stages
+15. `PipelineOrchestrator` - Coordinates multi-stage workflows
+16. `InteractiveMenu` - Interactive user interface
+17. `PlaylistResult` - Results for single playlist in batch processing
+18. `AggregateStatistics` - Cumulative statistics across multiple playlists
 
 **Subcommands:**
 - `pipeline` - Full download + convert + tag workflow (default)
@@ -352,6 +371,7 @@ The `apple-to-ride-command` script is a modern, unified Python tool (2,458 lines
 - `restore` - Restore original tags from TXXX frames
 - `reset` - Reset tags from source M4A files (⚠️ overwrites TXXX frames)
 - `sync-usb` - Copy files to USB drive
+- `summary` - Display export library statistics
 
 **Features:**
 - Professional CLI with `--help` for every command
@@ -417,12 +437,29 @@ The `apple-to-ride-command` script is a modern, unified Python tool (2,458 lines
 - Error recovery (continues on individual failures)
 
 **Interactive Menu (InteractiveMenu class):**
-- Beautiful formatted menu display
+- Beautiful formatted menu display with automatic loop-back
 - Numbered playlist selection (1-N)
-- Letter-based action options: A (All playlists), U (Enter URL), C (Copy to USB), X (Exit)
+- Letter-based action options:
+  - A (All playlists)
+  - U (Enter URL)
+  - C (Copy to USB)
+  - S (Show library summary)
+  - X (Exit)
 - Case-insensitive input handling
 - Post-processing prompts for USB copy
 - Save new URLs to config
+- Returns to main menu after each operation (except X to exit)
+- Summary display with pause-to-review before returning to menu
+
+**Library Summary (SummaryManager class):**
+- Displays comprehensive export library statistics
+- Three output modes: default (balanced), quick (aggregate only), detailed (extended)
+- Always scans all files for both size/count and tag integrity (no sampling)
+- Graceful error handling: continues on permission errors, displays partial results
+- Performance: ~0.4 seconds for full library scan (643 files)
+- Statistics tracked: total files, total size, per-playlist breakdowns, tag integrity percentages
+- Uses same TXXX protection detection as other managers for consistency
+- Available in interactive menu as "S. Show library summary" option
 
 ### Testing Workflow
 

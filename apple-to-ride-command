@@ -1570,6 +1570,379 @@ class USBManager:
 
 
 # ══════════════════════════════════════════════════════════════════
+# Section 8A: Library Summary Management
+# ══════════════════════════════════════════════════════════════════
+
+class PlaylistSummary:
+    """Statistics for a single playlist."""
+
+    def __init__(self, name, path):
+        self.name = name
+        self.path = path
+        self.file_count = 0
+        self.total_size_bytes = 0
+        self.avg_file_size_mb = 0.0
+        self.last_modified = None  # datetime
+
+        # Tag integrity (from sampling)
+        self.sample_files_checked = 0
+        self.sample_files_with_tags = 0
+
+
+class LibrarySummaryStatistics:
+    """Statistics for the entire export library."""
+
+    def __init__(self):
+        # Aggregate stats
+        self.total_playlists = 0
+        self.total_files = 0
+        self.total_size_bytes = 0
+        self.scan_duration = 0.0
+
+        # Tag integrity (from sampling)
+        self.sample_size = 0
+        self.files_with_protection_tags = 0
+        self.files_missing_protection_tags = 0
+
+        # Per-playlist breakdown
+        self.playlists = []  # List of PlaylistSummary objects
+
+
+class SummaryManager:
+    """Generates summary statistics for the export directory."""
+
+    def __init__(self, logger=None):
+        self.logger = logger or Logger()
+        self.stats = LibrarySummaryStatistics()
+
+    def generate_summary(self, export_dir='export/', detailed=False, quick=False, dry_run=False):
+        """
+        Generate and display export library summary.
+
+        Args:
+            export_dir: Directory to analyze
+            detailed: Show detailed statistics
+            quick: Show only aggregate statistics
+            dry_run: Preview mode (not applicable for summary)
+
+        Returns:
+            bool: True if successful
+        """
+        start_time = time.time()
+
+        # Check if directory exists
+        export_path = Path(export_dir)
+        if not export_path.exists():
+            print()
+            print("╔" + "═" * 60 + "╗")
+            print("║" + "EXPORT LIBRARY SUMMARY".center(60) + "║")
+            print("╚" + "═" * 60 + "╝")
+            print()
+            print("  ℹ️  Export directory not found")
+            print(f"  Path: '{export_dir}'")
+            print()
+            print("  Suggested next steps:")
+            print("    • Run: ./apple-to-ride-command pipeline --auto")
+            print("    • Or specify custom directory: --export-dir /path/to/export")
+            print()
+            return True  # Not an error, just no data
+
+        # Scan playlists
+        playlist_dirs = self._scan_playlists(export_path)
+
+        if not playlist_dirs:
+            print()
+            print("╔" + "═" * 60 + "╗")
+            print("║" + "EXPORT LIBRARY SUMMARY".center(60) + "║")
+            print("╚" + "═" * 60 + "╝")
+            print()
+            print(f"  Directory:               '{export_dir}'")
+            print(f"  Total playlists:         0")
+            print(f"  Total MP3 files:         0")
+            print()
+            print("  ℹ️  Library is empty")
+            print()
+            print("  Suggested next steps:")
+            print("    • Run: ./apple-to-ride-command pipeline --auto")
+            print("    • Or download a playlist: ./apple-to-ride-command download --playlist 1")
+            print()
+            return True  # Not an error
+
+        # Analyze each playlist
+        for playlist_dir in playlist_dirs:
+            playlist_summary = self._analyze_playlist(playlist_dir)
+            if playlist_summary:
+                self.stats.playlists.append(playlist_summary)
+
+        # Calculate aggregate statistics
+        self.stats.total_playlists = len(self.stats.playlists)
+        self.stats.total_files = sum(p.file_count for p in self.stats.playlists)
+        self.stats.total_size_bytes = sum(p.total_size_bytes for p in self.stats.playlists)
+
+        # Check tag integrity (always checks all files)
+        self._check_tag_integrity()
+
+        # Record scan duration
+        self.stats.scan_duration = time.time() - start_time
+
+        # Display results
+        if quick:
+            self._print_quick_summary(export_dir)
+        elif detailed:
+            self._print_detailed_summary(export_dir)
+        else:
+            self._print_summary(export_dir)
+
+        return True
+
+    def _scan_playlists(self, export_path):
+        """Discover playlist directories in export directory."""
+        playlist_dirs = []
+
+        try:
+            for item in export_path.iterdir():
+                # Skip files, only process directories
+                if item.is_dir() and not item.name.startswith('.'):
+                    playlist_dirs.append(item)
+        except PermissionError as e:
+            self.logger.warning(f"Permission denied accessing export directory: {e}")
+        except Exception as e:
+            self.logger.warning(f"Error scanning export directory: {e}")
+
+        # Sort by name for consistent output
+        return sorted(playlist_dirs, key=lambda p: p.name)
+
+    def _analyze_playlist(self, playlist_dir):
+        """Analyze statistics for a single playlist directory."""
+        try:
+            mp3_files = list(playlist_dir.glob("*.mp3"))
+
+            if not mp3_files:
+                return None  # Skip empty playlists
+
+            summary = PlaylistSummary(playlist_dir.name, str(playlist_dir))
+            summary.file_count = len(mp3_files)
+
+            # Calculate total size and find most recent modification
+            total_size = 0
+            latest_mtime = 0
+
+            for mp3_file in mp3_files:
+                try:
+                    stat = mp3_file.stat()
+                    total_size += stat.st_size
+                    if stat.st_mtime > latest_mtime:
+                        latest_mtime = stat.st_mtime
+                except Exception as e:
+                    self.logger.debug(f"Error reading stats for {mp3_file}: {e}")
+
+            summary.total_size_bytes = total_size
+            if summary.file_count > 0:
+                summary.avg_file_size_mb = (total_size / summary.file_count) / (1024 * 1024)
+
+            if latest_mtime > 0:
+                summary.last_modified = datetime.fromtimestamp(latest_mtime)
+
+            return summary
+
+        except PermissionError as e:
+            self.logger.warning(f"Permission denied accessing playlist '{playlist_dir.name}': {e}")
+            return None
+        except Exception as e:
+            self.logger.warning(f"Error analyzing playlist '{playlist_dir.name}': {e}")
+            return None
+
+    def _check_tag_integrity(self):
+        """Check all files for TXXX protection tags."""
+        from mutagen.id3 import ID3, TXXX, ID3NoHeaderError
+
+        for playlist in self.stats.playlists:
+            playlist_path = Path(playlist.path)
+            mp3_files = list(playlist_path.glob("*.mp3"))
+
+            # Check all files in this playlist
+            for mp3_file in mp3_files:
+                playlist.sample_files_checked += 1
+
+                try:
+                    tags = ID3(mp3_file)
+
+                    # Check for TXXX protection frames
+                    has_original_title = self._txxx_exists(tags, 'OriginalTitle', TXXX)
+                    has_original_artist = self._txxx_exists(tags, 'OriginalArtist', TXXX)
+                    has_original_album = self._txxx_exists(tags, 'OriginalAlbum', TXXX)
+
+                    if has_original_title and has_original_artist and has_original_album:
+                        playlist.sample_files_with_tags += 1
+                        self.stats.files_with_protection_tags += 1
+                    else:
+                        self.stats.files_missing_protection_tags += 1
+
+                except ID3NoHeaderError:
+                    self.logger.debug(f"No ID3 tags found in {mp3_file}")
+                    self.stats.files_missing_protection_tags += 1
+                except Exception as e:
+                    self.logger.debug(f"Error reading tags from {mp3_file}: {e}")
+                    self.stats.files_missing_protection_tags += 1
+
+        # Calculate aggregate sample size
+        self.stats.sample_size = sum(p.sample_files_checked for p in self.stats.playlists)
+
+    def _txxx_exists(self, tags, description, TXXX):
+        """Check if a TXXX frame with given description exists."""
+        for frame in tags.values():
+            if isinstance(frame, TXXX) and frame.desc == description:
+                return True
+        return False
+
+    def _print_summary(self, export_dir):
+        """Print default balanced summary."""
+        print()
+        print("╔" + "═" * 60 + "╗")
+        print("║" + "EXPORT LIBRARY SUMMARY".center(60) + "║")
+        print("╚" + "═" * 60 + "╝")
+        print()
+        print(f"  Directory:               '{export_dir}'")
+
+        # Format scan date
+        scan_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"  Scan date:               {scan_date}")
+        print(f"  Scan duration:           {self.stats.scan_duration:.1f}s")
+        print()
+
+        # Aggregate statistics
+        print("─" * 60)
+        print("  AGGREGATE STATISTICS")
+        print("─" * 60)
+        print(f"  Total playlists:         {self.stats.total_playlists}")
+        print(f"  Total MP3 files:         {self.stats.total_files}")
+        print(f"  Total library size:      {self._format_size(self.stats.total_size_bytes)}")
+
+        if self.stats.total_files > 0:
+            avg_size = self.stats.total_size_bytes / self.stats.total_files
+            print(f"  Average file size:       {self._format_size(avg_size)}")
+
+        print()
+
+        # Tag integrity
+        print("─" * 60)
+        print(f"  TAG INTEGRITY")
+        print("─" * 60)
+
+        if self.stats.sample_size > 0:
+            percentage = (self.stats.files_with_protection_tags / self.stats.sample_size) * 100
+            print(f"  Files with protection:   {self.stats.files_with_protection_tags}/{self.stats.sample_size} ({percentage:.0f}%)")
+
+            if self.stats.files_missing_protection_tags == 0:
+                print(f"  Status:                  ✅ All files have TXXX protection tags")
+            else:
+                print(f"  Status:                  ⚠️  Some files missing TXXX protection tags")
+        else:
+            print("  Status:                  ℹ️  No files checked")
+
+        print()
+
+        # Playlist breakdown
+        print("─" * 60)
+        print("  PLAYLIST BREAKDOWN")
+        print("─" * 60)
+        self._print_playlist_table()
+        print()
+
+        # Final status
+        print("═" * 60)
+        print("  Status:                  ✅ Library scan completed")
+        print("═" * 60)
+        print()
+
+    def _print_quick_summary(self, export_dir):
+        """Print minimal aggregate-only summary."""
+        print()
+        print("╔" + "═" * 60 + "╗")
+        print("║" + "EXPORT LIBRARY SUMMARY (QUICK)".center(60) + "║")
+        print("╚" + "═" * 60 + "╝")
+        print()
+        print(f"  Directory:               '{export_dir}'")
+        print(f"  Total playlists:         {self.stats.total_playlists}")
+        print(f"  Total MP3 files:         {self.stats.total_files}")
+        print(f"  Total library size:      {self._format_size(self.stats.total_size_bytes)}")
+        print(f"  Scan duration:           {self.stats.scan_duration:.1f}s")
+        print()
+
+    def _print_detailed_summary(self, export_dir):
+        """Print extended summary with detailed breakdowns."""
+        # Start with default summary
+        self._print_summary(export_dir)
+
+        # Add detailed per-playlist breakdowns
+        print("─" * 60)
+        print("  DETAILED PLAYLIST INFORMATION")
+        print("─" * 60)
+        print()
+
+        for playlist in self.stats.playlists:
+            print(f"  📁 {playlist.name}")
+            print(f"     Files:                {playlist.file_count}")
+            print(f"     Total size:           {self._format_size(playlist.total_size_bytes)}")
+            print(f"     Average file size:    {playlist.avg_file_size_mb:.1f} MB")
+
+            if playlist.last_modified:
+                modified_str = playlist.last_modified.strftime("%b %d, %Y %H:%M")
+                print(f"     Last modified:        {modified_str}")
+
+            # Tag integrity for this playlist
+            if playlist.sample_files_checked > 0:
+                percentage = (playlist.sample_files_with_tags / playlist.sample_files_checked) * 100
+                print(f"     Tag integrity:        {playlist.sample_files_with_tags}/{playlist.sample_files_checked} ({percentage:.0f}%)")
+
+            print()
+
+        print("═" * 60)
+        print()
+
+    def _print_playlist_table(self):
+        """Print formatted table of playlists."""
+        if not self.stats.playlists:
+            print("  (no playlists found)")
+            return
+
+        # Header
+        print(f"  {'Playlist':<25} {'Files':>6}  {'Size':>10}  {'Avg Size':>8}  {'Updated':<10}")
+        print("  " + "─" * 60)
+
+        # Sort by name
+        sorted_playlists = sorted(self.stats.playlists, key=lambda p: p.name)
+
+        # Rows
+        for playlist in sorted_playlists:
+            name = playlist.name[:24]  # Truncate long names
+            files = str(playlist.file_count)
+            size = self._format_size(playlist.total_size_bytes)
+            avg_size = f"{playlist.avg_file_size_mb:.1f} MB"
+
+            if playlist.last_modified:
+                # Format as "Feb 17" or "Feb 18"
+                updated = playlist.last_modified.strftime("%b %d")
+            else:
+                updated = "N/A"
+
+            print(f"  {name:<25} {files:>6}  {size:>10}  {avg_size:>8}  {updated:<10}")
+
+        print("  " + "─" * 60)
+
+    def _format_size(self, bytes_size):
+        """Format bytes to human-readable size."""
+        if bytes_size < 1024:
+            return f"{bytes_size} B"
+        elif bytes_size < 1024 * 1024:
+            return f"{bytes_size / 1024:.1f} KB"
+        elif bytes_size < 1024 * 1024 * 1024:
+            return f"{bytes_size / (1024 * 1024):.1f} MB"
+        else:
+            return f"{bytes_size / (1024 * 1024 * 1024):.1f} GB"
+
+
+# ══════════════════════════════════════════════════════════════════
 # Section 9: Pipeline Orchestration
 # ══════════════════════════════════════════════════════════════════
 
@@ -2161,65 +2534,76 @@ class InteractiveMenu:
             self.logger.info("Use --url to download from a direct URL")
             return False
 
-        # Display menu
-        print("\n╔══════════════════════════════════════════════════════════════╗")
-        print("║          Apple Music to Ride Command MP3 Converter          ║")
-        print("╚══════════════════════════════════════════════════════════════╝")
-        print("\nAvailable playlists:")
+        # Loop until user exits
+        while True:
+            # Display menu
+            print("\n╔══════════════════════════════════════════════════════════════╗")
+            print("║          Apple Music to Ride Command MP3 Converter          ║")
+            print("╚══════════════════════════════════════════════════════════════╝")
+            print("\nAvailable playlists:")
 
-        for i, playlist in enumerate(self.config.playlists, 1):
-            print(f"  {i}. {playlist.name} ({playlist.key})")
+            for i, playlist in enumerate(self.config.playlists, 1):
+                print(f"  {i}. {playlist.name} ({playlist.key})")
 
-        print(f"  A. All playlists")
-        print(f"  U. Enter URL")
-        print(f"  C. Copy to USB only")
-        print(f"  X. Exit")
+            print(f"  A. All playlists")
+            print(f"  U. Enter URL")
+            print(f"  C. Copy to USB only")
+            print(f"  S. Show library summary")
+            print(f"  X. Exit")
 
-        # Get user selection
-        try:
-            selection = input("\nEnter number or letter: ").strip()
+            # Get user selection
+            try:
+                selection = input("\nEnter number or letter: ").strip()
 
-            # Normalize to uppercase for case-insensitive comparison
-            selection_upper = selection.upper()
+                # Normalize to uppercase for case-insensitive comparison
+                selection_upper = selection.upper()
 
-            # Validate input: must be digit (1-N) or valid letter (A, U, C, X)
-            valid_letters = ['A', 'U', 'C', 'X']
+                # Validate input: must be digit (1-N) or valid letter (A, U, C, S, X)
+                valid_letters = ['A', 'U', 'C', 'S', 'X']
 
-            is_valid_digit = selection.isdigit() and 1 <= int(selection) <= len(self.config.playlists)
-            is_valid_letter = selection_upper in valid_letters
+                is_valid_digit = selection.isdigit() and 1 <= int(selection) <= len(self.config.playlists)
+                is_valid_letter = selection_upper in valid_letters
 
-            if not (is_valid_digit or is_valid_letter):
-                self.logger.error(f"Invalid selection: {selection}")
-                self.logger.info(f"Enter a playlist number (1-{len(self.config.playlists)}) or option (A/U/C/X)")
+                if not (is_valid_digit or is_valid_letter):
+                    self.logger.error(f"Invalid selection: {selection}")
+                    self.logger.info(f"Enter a playlist number (1-{len(self.config.playlists)}) or option (A/U/C/S/X)")
+                    continue  # Loop back to menu
+
+                # Handle selection
+                if selection_upper == 'X':
+                    print("Exiting...")
+                    return False
+
+                elif selection_upper == 'C':
+                    self._handle_usb_only(dry_run)
+                    # Return to menu after USB copy
+
+                elif selection_upper == 'U':
+                    self._handle_url_entry(dry_run, verbose)
+                    # Return to menu after URL entry
+
+                elif selection_upper == 'A':
+                    self._handle_all_playlists(dry_run, verbose)
+                    # Return to menu after processing all playlists
+
+                elif selection_upper == 'S':
+                    self._handle_summary(dry_run)
+                    # Return to menu after showing summary
+
+                elif selection.isdigit():
+                    # Must be valid digit at this point (validated earlier)
+                    playlist_num = int(selection)
+                    self._handle_playlist_selection(playlist_num - 1, dry_run, verbose)
+                    # Return to menu after processing playlist
+
+                else:
+                    # This should never be reached due to earlier validation
+                    self.logger.error(f"Invalid selection: {selection}")
+                    continue  # Loop back to menu
+
+            except KeyboardInterrupt:
+                print("\n\nCancelled by user")
                 return False
-
-            # Handle selection
-            if selection_upper == 'X':
-                print("Exiting...")
-                return False
-
-            elif selection_upper == 'C':
-                return self._handle_usb_only(dry_run)
-
-            elif selection_upper == 'U':
-                return self._handle_url_entry(dry_run, verbose)
-
-            elif selection_upper == 'A':
-                return self._handle_all_playlists(dry_run, verbose)
-
-            elif selection.isdigit():
-                # Must be valid digit at this point (validated earlier)
-                playlist_num = int(selection)
-                return self._handle_playlist_selection(playlist_num - 1, dry_run, verbose)
-
-            else:
-                # This should never be reached due to earlier validation
-                self.logger.error(f"Invalid selection: {selection}")
-                return False
-
-        except KeyboardInterrupt:
-            print("\n\nCancelled by user")
-            return False
 
     def _handle_playlist_selection(self, index, dry_run, verbose):
         """Handle selection of a single playlist."""
@@ -2328,6 +2712,28 @@ class InteractiveMenu:
         )
         return success
 
+    def _handle_summary(self, dry_run):
+        """Handle 'Show library summary' selection."""
+        self.logger.info("Displaying export library summary...")
+
+        summary_manager = SummaryManager(self.logger)
+        success = summary_manager.generate_summary(
+            export_dir=DEFAULT_EXPORT_DIR,
+            detailed=False,
+            quick=False,
+            dry_run=dry_run
+        )
+
+        # Pause for user to review before returning to menu
+        if success:
+            try:
+                input("\nPress Enter to continue...")
+            except KeyboardInterrupt:
+                print()
+                pass
+
+        return success
+
     def _ask_copy_to_usb(self, source_dir, dry_run):
         """Ask user if they want to copy to USB."""
         try:
@@ -2424,6 +2830,16 @@ def create_parser():
                             help='Source directory to copy')
     sync_parser.add_argument('--usb-dir', default=DEFAULT_USB_DIR,
                             help=f'USB directory (default: {DEFAULT_USB_DIR})')
+
+    # ── summary ───────────────────────────────────────────────────
+    summary_parser = subparsers.add_parser('summary',
+        help='Display export library statistics')
+    summary_parser.add_argument('--export-dir', default=DEFAULT_EXPORT_DIR,
+                               help=f'Export directory to analyze (default: {DEFAULT_EXPORT_DIR})')
+    summary_parser.add_argument('--detailed', action='store_true',
+                               help='Show detailed statistics and breakdowns')
+    summary_parser.add_argument('--quick', action='store_true',
+                               help='Show only aggregate statistics')
 
     return parser
 
@@ -2566,6 +2982,23 @@ def main():
         success, _ = usb_manager.sync_to_usb(
             args.source_dir,
             usb_dir=args.usb_dir,
+            dry_run=args.dry_run
+        )
+        sys.exit(0 if success else 1)
+
+    elif args.command == 'summary':
+        # Display export library summary
+        summary_manager = SummaryManager(logger)
+
+        # Validate mutually exclusive flags
+        if args.detailed and args.quick:
+            logger.error("Cannot use --detailed and --quick together")
+            sys.exit(1)
+
+        success = summary_manager.generate_summary(
+            export_dir=args.export_dir,
+            detailed=args.detailed,
+            quick=args.quick,
             dry_run=args.dry_run
         )
         sys.exit(0 if success else 1)
