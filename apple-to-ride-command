@@ -1306,7 +1306,10 @@ class Downloader:
 
             # Parse output line by line
             for line in process.stdout:
-                print(line, end='')  # Still show to user
+                # Filter out download progress lines to reduce console clutter
+                # Example: "[download]  74.8% of ~  11.01MiB at    4.15MiB/s ETA 00:01"
+                if not line.strip().startswith('[download]'):
+                    print(line, end='')  # Show non-progress lines to user
 
                 try:
                     # Extract total tracks from [Track X/Y] pattern
