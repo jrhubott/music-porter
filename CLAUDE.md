@@ -207,7 +207,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 
 # Install dependencies
-pip install gamdl mutagen
+pip install -r requirements.txt
 
 # Configure playlists
 # Edit playlists.conf with format: key|url|name
