@@ -613,11 +613,13 @@ class TaggerManager:
                 if new_album:
                     if current_album != new_album:
                         file_changed = True
+                        self.stats.album_updated += 1  # Track album updates
                     tags["TALB"] = TALB(encoding=3, text=new_album)
 
                 if new_artist:
                     if current_artist != new_artist:
                         file_changed = True
+                        self.stats.artist_updated += 1  # Track artist updates
                     tags["TPE1"] = TPE1(encoding=3, text=new_artist)
 
                 # ── Refresh Title to 'Artist - Title' format ──────────
