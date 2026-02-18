@@ -1110,6 +1110,10 @@ class Converter:
                 tags["TPE1"] = TPE1(encoding=3, text=artist)
                 tags["TALB"] = TALB(encoding=3, text=album)
 
+                # Track that artist and album tags were set
+                self.tag_stats.artist_updated += 1
+                self.tag_stats.album_updated += 1
+
                 # ── Restore preserved TXXX frames BEFORE save_original_tag() runs ──
                 if preserved_txxx.get('OriginalTitle'):
                     from mutagen.id3 import TXXX
