@@ -921,6 +921,16 @@ class ConversionStatistics:
         self.errors = 0
 
 
+class DownloadStatistics:
+    """Tracks download operation statistics."""
+
+    def __init__(self):
+        self.playlist_total = 0      # Total tracks in playlist
+        self.downloaded = 0          # Newly downloaded tracks
+        self.skipped = 0             # Already existed
+        self.failed = 0              # Failed downloads
+
+
 class Converter:
     """Manages M4A to MP3 conversion with tag preservation."""
 
@@ -1198,14 +1208,16 @@ class Downloader:
     def download(self, url, output_dir, key=None, confirm=True, dry_run=False):
         """
         Download playlist from Apple Music using gamdl.
-        Returns (success, key, album_name)
+        Returns (success, key, album_name, download_stats)
         """
+        import re
+
         # Extract info from URL if key not provided
         if not key:
             key, album_name = self.extract_url_info(url)
             if not key:
                 self.logger.error(f"Could not extract playlist info from URL: {url}")
-                return False, None, None
+                return False, None, None, None
         else:
             _, album_name = self.extract_url_info(url)
 
@@ -1220,12 +1232,12 @@ class Downloader:
             response = input(f"Download {key}? [y/N] ").strip().lower()
             if response != 'y':
                 self.logger.info(f"Skipping download for {key}")
-                return False, key, album_name
+                return False, key, album_name, None
 
         if dry_run:
             self.logger.dry_run(f"Would download: {url}")
             self.logger.dry_run(f"  → Output: {output_path}")
-            return True, key, album_name
+            return True, key, album_name, None
 
         # Create output directory
         output_path.mkdir(parents=True, exist_ok=True)
@@ -1237,6 +1249,9 @@ class Downloader:
             url
         ]
 
+        stats = DownloadStatistics()
+        last_downloading = None  # Track which song was last "Downloading"
+
         try:
             self.logger.info(f"Running: {' '.join(cmd)}")
             process = subprocess.Popen(
@@ -1247,22 +1262,54 @@ class Downloader:
                 bufsize=1
             )
 
-            # Stream output line by line
+            # Parse output line by line
             for line in process.stdout:
-                print(line, end='')
+                print(line, end='')  # Still show to user
+
+                try:
+                    # Extract total tracks from [Track X/Y] pattern
+                    track_pattern = re.search(r'\[Track\s+\d+/(\d+)\]', line)
+                    if track_pattern and stats.playlist_total == 0:
+                        stats.playlist_total = int(track_pattern.group(1))
+
+                    # Check for download start
+                    if '[INFO' in line and 'Downloading "' in line:
+                        # If we had a previous download in progress, it succeeded
+                        if last_downloading:
+                            stats.downloaded += 1
+                        last_downloading = line
+
+                    # Check for skip
+                    elif '[WARNING' in line and 'Skipping "' in line and 'Media file already exists' in line:
+                        stats.skipped += 1
+                        last_downloading = None  # Clear since it was skipped
+
+                    # Check for errors in final message
+                    elif 'Finished with' in line:
+                        error_match = re.search(r'Finished with (\d+) error', line)
+                        if error_match:
+                            stats.failed = int(error_match.group(1))
+                        # If last_downloading is still set, it succeeded
+                        if last_downloading:
+                            stats.downloaded += 1
+                            last_downloading = None
+
+                except Exception as parse_error:
+                    # If parsing fails for a line, continue without crashing
+                    pass
 
             process.wait()
 
             if process.returncode == 0:
                 self.logger.ok(f"Download complete: {key}")
-                return True, key, album_name
+                return True, key, album_name, stats
             else:
                 self.logger.error(f"Download failed with exit code {process.returncode}")
-                return False, key, album_name
+                return False, key, album_name, stats
 
         except Exception as e:
             self.logger.error(f"Failed to download {key}: {e}")
-            return False, key, album_name
+            return False, key, album_name, stats
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1392,7 +1439,7 @@ class PipelineStatistics:
         self.download_success = False
         self.playlist_key = None
         self.playlist_name = None
-        self.tracks_downloaded = 0
+        self.download_stats = None  # DownloadStatistics object
 
         # Conversion stats
         self.conversion_stats = None
@@ -1465,7 +1512,6 @@ class PipelineOrchestrator:
         if success:
             self.stats.stages_completed.append("convert")
             self.stats.conversion_stats = converter.stats
-            self.stats.tracks_downloaded = converter.stats.total_found
         else:
             self.stats.stages_failed.append("convert")
             self.logger.error("Conversion stage failed")
@@ -1524,7 +1570,7 @@ class PipelineOrchestrator:
 
         output_dir = f"{DEFAULT_MUSIC_DIR}/{key}"
 
-        success, key, album_name = downloader.download(
+        success, key, album_name, download_stats = downloader.download(
             url,
             output_dir,
             key=key,
@@ -1536,6 +1582,7 @@ class PipelineOrchestrator:
             self.stats.download_success = True
             self.stats.playlist_key = key
             self.stats.playlist_name = album_name
+            self.stats.download_stats = download_stats
             self.stats.stages_completed.append("download")
 
             # Ask to save to config (only if not dry-run and not auto)
@@ -1567,7 +1614,7 @@ class PipelineOrchestrator:
         output_dir = f"{DEFAULT_MUSIC_DIR}/{playlist.key}"
 
         downloader = Downloader(self.logger, self.deps.venv_python)
-        success, _, _ = downloader.download(
+        success, _, _, download_stats = downloader.download(
             playlist.url,
             output_dir,
             key=playlist.key,
@@ -1577,6 +1624,7 @@ class PipelineOrchestrator:
 
         if success:
             self.stats.download_success = True
+            self.stats.download_stats = download_stats
             self.stats.stages_completed.append("download")
             return True
         else:
@@ -1609,9 +1657,17 @@ class PipelineOrchestrator:
             print(f"{'─' * 70}")
             print(f"  DOWNLOAD STAGE")
             print(f"{'─' * 70}")
-            if "download" in self.stats.stages_completed:
+            if "download" in self.stats.stages_completed and self.stats.download_stats:
+                s = self.stats.download_stats
+                if s.playlist_total > 0:
+                    print(f"  Total tracks in playlist:{s.playlist_total}")
+                print(f"  Downloaded (new):        {s.downloaded}")
+                print(f"  Skipped (already exist): {s.skipped}")
+                if s.failed > 0:
+                    print(f"  Failed:                  {s.failed}")
                 print(f"  Status:                  ✅ Success")
-                print(f"  Tracks downloaded:       {self.stats.tracks_downloaded}")
+            elif "download" in self.stats.stages_completed:
+                print(f"  Status:                  ✅ Success")
             else:
                 print(f"  Status:                  ❌ Failed")
 
@@ -1647,6 +1703,42 @@ class PipelineOrchestrator:
                 print(f"  USB destination:         {self.stats.usb_destination}")
             else:
                 print(f"  Status:                  ❌ Failed")
+
+        # Comprehensive file summary
+        # Show if any pipeline stages completed (always show for comprehensive view)
+        if len(self.stats.stages_completed) > 0:
+            print(f"{'─' * 70}")
+            print(f"  COMPREHENSIVE FILES SUMMARY")
+            print(f"{'─' * 70}")
+
+            # Download phase
+            if self.stats.download_stats:
+                d = self.stats.download_stats
+                if d.playlist_total > 0:
+                    print(f"  Playlist tracks:         {d.playlist_total}")
+                total_after_download = d.downloaded + d.skipped
+                print(f"  M4A files after download:{total_after_download} "
+                      f"({d.downloaded} new, {d.skipped} existing)")
+
+            # Conversion phase
+            if self.stats.conversion_stats:
+                c = self.stats.conversion_stats
+                total_processed = c.converted + c.overwritten + c.skipped
+                print(f"  MP3s after conversion:   {total_processed} "
+                      f"({c.converted + c.overwritten} converted, {c.skipped} skipped)")
+
+            # Tagging phase
+            if self.stats.tagging_stats:
+                t = self.stats.tagging_stats
+                print(f"  Tags updated:            {t.title_updated}")
+                total_original_stored = t.title_stored + t.artist_stored + t.album_stored
+                if total_original_stored > 0:
+                    print(f"  Original tags stored:    {total_original_stored}")
+
+            # USB sync
+            if self.stats.usb_success and self.stats.conversion_stats:
+                files_on_usb = self.stats.conversion_stats.converted + self.stats.conversion_stats.overwritten + self.stats.conversion_stats.skipped
+                print(f"  Files copied to USB:     {files_on_usb}")
 
         # Overall status
         print(f"{'─' * 70}")
@@ -2030,7 +2122,7 @@ def main():
                 sys.exit(1)
 
             output_dir = args.output or f"{DEFAULT_MUSIC_DIR}/{playlist.key}"
-            success, _, _ = downloader.download(
+            success, _, _, _ = downloader.download(
                 playlist.url,
                 output_dir,
                 key=playlist.key,
@@ -2042,7 +2134,7 @@ def main():
         elif args.url:
             key, album_name = downloader.extract_url_info(args.url)
             output_dir = args.output or f"{DEFAULT_MUSIC_DIR}/{key}"
-            success, _, _ = downloader.download(
+            success, _, _, _ = downloader.download(
                 args.url,
                 output_dir,
                 key=key,
