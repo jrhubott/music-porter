@@ -223,6 +223,15 @@ class DependencyChecker:
     def __init__(self, logger=None):
         self.logger = logger or Logger()
         self.venv_python = None
+        self.venv_path = None
+        self.dep_status = {
+            'venv': False,
+            'mutagen': False,
+            'gamdl': False,
+            'ffmpeg_python': False,
+            'ffmpeg': False,
+            'playlists': 0
+        }
         self._detect_venv()
 
     def _detect_venv(self):
@@ -230,7 +239,9 @@ class DependencyChecker:
         # Check if already in venv
         if os.environ.get('VIRTUAL_ENV'):
             self.venv_python = sys.executable
-            self.logger.info(f"Using active venv: {os.environ['VIRTUAL_ENV']}")
+            self.venv_path = os.environ['VIRTUAL_ENV']
+            self.dep_status['venv'] = True
+            self.logger.info(f"Using active venv: {self.venv_path}")
             return
 
         # Check for .venv directory with OS-appropriate path
@@ -241,20 +252,25 @@ class DependencyChecker:
 
         if venv_path.exists():
             self.venv_python = str(venv_path.absolute())
+            self.venv_path = str(Path('.venv').absolute())
+            self.dep_status['venv'] = True
             self.logger.info(f"Found venv at: {venv_path}")
         else:
             self.logger.warn("No virtual environment detected")
             self.venv_python = sys.executable
+            self.dep_status['venv'] = False
 
     def check_python_packages(self):
         """Check if Python packages are installed, install from requirements.txt if needed."""
         # Check if mutagen is available
         try:
             import mutagen
-            self.logger.info(f"mutagen {mutagen.version_string} already installed")
+            self.logger.info(f"mutagen {mutagen.version_string} installed")
+            self.dep_status['mutagen'] = True
             mutagen_installed = True
         except ImportError:
             mutagen_installed = False
+            self.dep_status['mutagen'] = False
 
         # Check if gamdl is available
         try:
@@ -263,18 +279,22 @@ class DependencyChecker:
                 capture_output=True,
                 check=True
             )
-            self.logger.info("gamdl is already installed")
+            self.logger.info("gamdl installed")
+            self.dep_status['gamdl'] = True
             gamdl_installed = True
         except (subprocess.CalledProcessError, FileNotFoundError):
             gamdl_installed = False
+            self.dep_status['gamdl'] = False
 
         # Check if ffmpeg-python is available
         try:
             import ffmpeg
-            self.logger.info("ffmpeg-python is already installed")
+            self.logger.info("ffmpeg-python installed")
+            self.dep_status['ffmpeg_python'] = True
             ffmpeg_python_installed = True
         except ImportError:
             ffmpeg_python_installed = False
+            self.dep_status['ffmpeg_python'] = False
 
         # If any packages are missing, try to install from requirements.txt
         if not mutagen_installed or not gamdl_installed or not ffmpeg_python_installed:
@@ -306,10 +326,12 @@ class DependencyChecker:
                 capture_output=True,
                 check=True
             )
-            self.logger.info("ffmpeg is available")
+            self.logger.info("ffmpeg available")
+            self.dep_status['ffmpeg'] = True
             return True
         except (subprocess.CalledProcessError, FileNotFoundError):
             self.logger.error("ffmpeg is not installed or not in PATH")
+            self.dep_status['ffmpeg'] = False
             self._show_ffmpeg_install_help()
             return False
 
@@ -360,6 +382,44 @@ class DependencyChecker:
             return True
         except (subprocess.CalledProcessError, FileNotFoundError):
             return False
+
+    def display_summary(self, config=None):
+        """Display formatted dependency summary."""
+        print("\n  ── Dependencies ──")
+
+        # Virtual environment
+        if self.dep_status['venv']:
+            venv_display = self.venv_path.replace(str(Path.home()), '~') if self.venv_path else 'active'
+            print(f"  Python:   ✓ venv ({venv_display})")
+            self.logger.info(f"Virtual environment: {self.venv_path}")
+        else:
+            print(f"  Python:   ⚠ No virtual environment")
+
+        # Python packages
+        deps_ok = self.dep_status['mutagen'] and self.dep_status['gamdl'] and self.dep_status['ffmpeg_python']
+        if deps_ok:
+            print(f"  Packages: ✓ mutagen, gamdl, ffmpeg-python")
+        else:
+            missing = []
+            if not self.dep_status['mutagen']: missing.append('mutagen')
+            if not self.dep_status['gamdl']: missing.append('gamdl')
+            if not self.dep_status['ffmpeg_python']: missing.append('ffmpeg-python')
+            print(f"  Packages: ⚠ Missing: {', '.join(missing)}")
+
+        # System dependencies
+        if self.dep_status['ffmpeg']:
+            print(f"  System:   ✓ ffmpeg")
+        else:
+            print(f"  System:   ⚠ ffmpeg not found")
+
+        # Playlists (if config provided)
+        if config:
+            count = len(config.playlists)
+            self.dep_status['playlists'] = count
+            print(f"  Config:   ✓ {count} playlist{'s' if count != 1 else ''} loaded")
+            self.logger.info(f"Loaded {count} playlists from playlists.conf")
+
+        print()  # Blank line after summary
 
     def check_all(self, require_ffmpeg=True, require_gamdl=True):
         """Check all dependencies."""
@@ -4057,12 +4117,28 @@ def main():
     # Initialize logger
     logger = Logger(verbose=args.verbose)
 
-    # Display startup information including OS
+    # Display startup banner
+    print("\n╔══════════════════════════════════════════════════════════════╗")
+    print(f"║  Apple Music to Ride Command MP3 Converter v{VERSION:<15}║")
+    print("╚══════════════════════════════════════════════════════════════╝\n")
+
+    # Log to file
     logger.info(f"apple-to-ride-command v{VERSION}")
-    logger.info(f"Platform: {get_os_display_name()} ({CURRENT_OS})")
-    logger.info(f"Command: {args.command or 'interactive'}")
+    logger.info(f"Session started")
+
+    # Display system information
+    platform_str = f"{get_os_display_name()} ({CURRENT_OS})"
+    command_str = args.command or 'interactive'
+
+    print(f"  Platform: {platform_str}")
+    print(f"  Command:  {command_str}")
+
+    # Log to file
+    logger.info(f"Platform: {platform_str}")
+    logger.info(f"Command: {command_str}")
 
     if args.dry_run:
+        print(f"  Mode:     DRY-RUN (no files will be modified)")
         logger.info("DRY-RUN MODE: No files will be modified")
 
     # Check cookie status on startup (informational only, not blocking)
@@ -4071,21 +4147,20 @@ def main():
     cookie_status = cookie_manager.validate()
 
     # Display cookie status
-    if cookie_status.valid:
-        logger.ok(f"Cookie status: {cookie_status.reason}")
-    elif cookie_status.exists and cookie_status.has_required_cookie:
-        # Cookie exists but expired - warn but don't block non-download commands
-        logger.warn(f"Cookie status: {cookie_status.reason}")
-        if args.command in ['download', 'pipeline', None]:  # None = interactive menu
-            logger.warn("Downloads will fail until cookies are refreshed")
-    elif cookie_status.exists:
-        logger.warn(f"Cookie status: {cookie_status.reason}")
-        if args.command in ['download', 'pipeline', None]:
-            logger.warn("Downloads will fail - required cookie not found")
-    else:
-        logger.warn(f"Cookie status: {cookie_status.reason}")
-        if args.command in ['download', 'pipeline', None]:
-            logger.warn("Downloads will fail until cookies.txt is created")
+    cookie_icon = "✓" if cookie_status.valid else "⚠"
+    print(f"  Cookies:  {cookie_icon} {cookie_status.reason}")
+
+    # Log to file
+    logger.info(f"Cookie status: {cookie_status.reason}")
+
+    # Additional warning for invalid cookies
+    if not cookie_status.valid and args.command in ['download', 'pipeline', None]:
+        if cookie_status.exists and cookie_status.has_required_cookie:
+            print(f"            ⚠ Downloads will fail until cookies are refreshed")
+        elif cookie_status.exists:
+            print(f"            ⚠ Downloads will fail - required cookie not found")
+        else:
+            print(f"            ⚠ Downloads will fail until cookies.txt is created")
 
     # Route to appropriate handlers based on command
     if args.command == 'convert':
@@ -4330,6 +4405,10 @@ def main():
             sys.exit(1)
 
         config = ConfigManager(logger=logger)
+
+        # Display dependency summary
+        deps.display_summary(config)
+
         menu = InteractiveMenu(logger, config, deps)
 
         success = menu.show(dry_run=args.dry_run, verbose=args.verbose)
