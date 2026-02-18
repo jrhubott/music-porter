@@ -10,6 +10,7 @@ A powerful music playlist management and conversion tool that downloads Apple Mu
 - **USB sync** with automatic drive detection and intelligent copying
 - **Pipeline orchestration** for automated multi-stage workflows
 - **Interactive menu** for user-friendly operation
+- **Automatic cookie management** with browser-based refresh and validation
 - **Comprehensive statistics** and detailed logging
 - **Tag management** with update, restore, and reset operations
 - **Dry-run mode** for safe preview of all operations
@@ -185,6 +186,7 @@ MP3 conversion supports configurable quality presets to balance file size and au
 ## Documentation
 
 - **[User Guide](APPLE-TO-RIDE-COMMAND-GUIDE.md)** - Complete usage guide with detailed examples
+- **[Cookie Management Guide](COOKIE-MANAGEMENT-GUIDE.md)** - Cookie validation, auto-refresh, and troubleshooting
 - **[Quick Reference](QUICK-REFERENCE.md)** - Command cheat sheet for quick lookup
 - **[Architecture](CLAUDE.md)** - Developer guide and AI assistant context
 - **[Technical Details](IMPLEMENTATION-SUMMARY.md)** - Implementation architecture and design decisions
@@ -205,11 +207,72 @@ Thumbs_Up|https://music.apple.com/us/playlist/...|Thumbs Up
 
 ### Apple Music Authentication
 
-Requires `cookies.txt` file with valid Apple Music session cookies:
+Requires `cookies.txt` file with valid Apple Music session cookies. The tool automatically manages cookie validation and refresh:
+
+**Automatic Cookie Management (Recommended):**
+- Cookies are checked at startup and before downloads
+- Expired cookies trigger automatic refresh prompt
+- Uses your browser (Chrome, Firefox, Safari, or Edge) to extract fresh cookies
+- No manual cookie export needed!
+
+**Manual Cookie Export (Alternative):**
 1. Log in to music.apple.com in your browser
 2. Export cookies using a browser extension
 3. Save as `cookies.txt` in the project root
-4. Cookie file expires periodically and needs refresh
+
+See [Cookie Management Guide](COOKIE-MANAGEMENT-GUIDE.md) for detailed instructions.
+
+## Cookie Management
+
+The tool includes intelligent cookie management to prevent authentication failures:
+
+### Automatic Features
+
+✅ **Cookie Validation**
+- Checks cookies at startup (shows days remaining)
+- Validates before download operations
+- Clear status messages (valid/expired/missing)
+
+✅ **Automatic Refresh**
+- Interactive prompt when cookies expire: "Attempt automatic cookie refresh? [Y/n]"
+- Uses your browser to extract fresh cookies (Chrome, Firefox, Safari, Edge)
+- Auto-installs selenium if needed (just press Enter!)
+- Creates backup before overwriting (cookies.txt.backup)
+
+✅ **Multi-Browser Support**
+- Automatically detects and uses your OS default browser
+- Falls back to other installed browsers if needed
+- Handles login flow if you're not already logged in
+
+### Quick Examples
+
+```bash
+# Automatic refresh (interactive)
+./apple-to-ride-command download --playlist 1
+# If cookies expired, press Enter to auto-refresh
+
+# Automatic refresh (command-line)
+./apple-to-ride-command pipeline --auto --auto-refresh-cookies
+
+# Use custom cookie file
+./apple-to-ride-command download --playlist 1 --cookies /path/to/cookies.txt
+
+# Skip validation (not recommended)
+./apple-to-ride-command download --playlist 1 --skip-cookie-validation
+```
+
+### Optional Dependencies
+
+For automatic cookie refresh, install optional dependencies:
+
+```bash
+source .venv/bin/activate
+pip install -r requirements-optional.txt
+```
+
+This installs `selenium` and `webdriver-manager` for browser automation. Alternatively, the tool will offer to install these automatically when you first use auto-refresh.
+
+**See [Cookie Management Guide](COOKIE-MANAGEMENT-GUIDE.md) for complete documentation including troubleshooting, security details, and manual refresh instructions.**
 
 ## Project Structure
 
@@ -233,9 +296,12 @@ Requires `cookies.txt` file with valid Apple Music session cookies:
 
 ### Common Issues
 
-**gamdl fails with authentication error**
-- Refresh your `cookies.txt` file from music.apple.com
-- Ensure you're logged in to Apple Music in your browser
+**Cookies expired / Downloads fail with authentication error**
+- Tool automatically detects expired cookies at startup
+- Use auto-refresh: `./apple-to-ride-command download --playlist 1` → press Enter when prompted
+- Or use `--auto-refresh-cookies` flag for non-interactive refresh
+- Manual refresh: Export cookies from music.apple.com browser extension
+- See [Cookie Management Guide](COOKIE-MANAGEMENT-GUIDE.md) for detailed troubleshooting
 
 **FFmpeg not found**
 - Install ffmpeg: `brew install ffmpeg` (macOS) or equivalent

@@ -25,8 +25,8 @@ The system follows an integrated pipeline:
 - Interactive menu for easy operation
 - Comprehensive error handling and statistics
 - Full pipeline orchestration (download → convert → tag → USB)
-- Modular design with 15 classes
-- 2,458 lines of production-ready Python code
+- Modular design with 20 classes
+- 4,270 lines of production-ready Python code
 - See `APPLE-TO-RIDE-COMMAND-GUIDE.md` for complete documentation
 
 **do-it-all** (bash) - **DEPRECATED**
@@ -282,11 +282,19 @@ pip install -r requirements.txt
 
 ### Common Gotchas
 
-**Apple Music Authentication:**
+**Apple Music Authentication & Cookie Management:**
 - Requires `cookies.txt` file with Apple Music session cookies
-- Get cookies from browser after logging into music.apple.com
-- Cookie file expires periodically and needs refresh
-- gamdl will fail without valid authentication
+- Tool automatically validates cookies at startup and before downloads
+- Expired cookies trigger interactive prompt: "Attempt automatic cookie refresh? [Y/n]"
+- Automatic refresh uses selenium to extract cookies from browser (Chrome, Firefox, Safari, Edge)
+- Selenium auto-installs if missing (prompts user for confirmation)
+- Backup created before overwriting: `cookies.txt.backup`
+- Cookie validation checks `media-user-token` for `.music.apple.com` domain
+- Expiration shown in days: "Cookies valid until 2026-08-16 (178 days remaining)"
+- Use `--auto-refresh-cookies` flag for non-interactive refresh
+- Use `--skip-cookie-validation` to bypass checks (not recommended)
+- Manual refresh via browser extension still supported as fallback
+- See `COOKIE-MANAGEMENT-GUIDE.md` for complete documentation
 
 **Virtual Environment:**
 - Must activate venv before running
@@ -325,13 +333,17 @@ pip install -r requirements.txt
 ├── do-it-all.backup                 # Original bash script (backup)
 ├── ride-command-mp3-export.backup   # Original Python script (backup)
 ├── playlists.conf                   # Playlist configuration
+├── cookies.txt                      # Apple Music authentication cookies
+├── cookies.txt.backup               # Automatic backup before refresh
 ├── music/                           # Downloaded M4A files (organized by playlist)
 │   └── Pop_Workout/                 # Nested: Artist/Album/Track.m4a
 ├── export/                          # Converted MP3 files (flat structure)
 │   └── Pop_Workout/                 # Flat: "Artist - Title.mp3"
 ├── logs/                            # Execution logs (timestamped)
 ├── .venv/                           # Python virtual environment
+├── requirements-optional.txt        # Optional: selenium, webdriver-manager
 ├── APPLE-TO-RIDE-COMMAND-GUIDE.md   # Complete usage guide
+├── COOKIE-MANAGEMENT-GUIDE.md       # Cookie validation and refresh guide
 ├── QUICK-REFERENCE.md               # Command cheat sheet
 └── IMPLEMENTATION-SUMMARY.md        # Technical documentation
 ```
@@ -355,11 +367,26 @@ pip install -r requirements.txt
 - M4A sources remain in nested directory structure
 - Existing MP3s are skipped unless `--force` is used
 
+### Cookie Management (CookieManager class)
+- **Validation:** Uses `http.cookiejar.MozillaCookieJar` to parse Netscape format cookies
+- **Browser Detection:** Detects OS default browser via LaunchServices (macOS), xdg-settings (Linux), registry (Windows)
+- **Multi-Browser Support:** Chrome, Firefox, Safari, Edge with automatic fallback
+- **Selenium Integration:** Launches browser headless first, falls back to visible if login needed
+- **Login Detection:** Checks for sign-in button presence to determine if user is logged in
+- **Cookie Extraction:** Converts Selenium cookies to `http.cookiejar.Cookie` objects
+- **Backup Strategy:** Creates `.backup` file before overwriting (preserves working cookies)
+- **Interactive Prompts:** Menu-level checks before batch operations, per-download checks for single operations
+- **Auto-Installation:** Offers to `pip install selenium webdriver-manager` when missing
+- **Non-Interactive Mode:** Fails immediately with clear error if cookies invalid (prevents hanging)
+- **Key Methods:** `validate()`, `auto_refresh()`, `_extract_with_selenium()`, `_detect_default_browser()`
+
 ### Error Handling
 - Scripts continue on individual file errors (don't fail entire batch)
 - Comprehensive logging to timestamped log files
 - Summary statistics printed at completion (converted, skipped, errors)
 - USB drive selection with auto-detection and excluded volume list
+- Cookie validation errors fail fast with clear instructions
+- Browser automation errors trigger fallback to manual instructions
 
 ### FFmpeg Integration
 - Uses ffmpeg-python library for cleaner API and better error handling
@@ -399,7 +426,7 @@ The `apple-to-ride-command` script is a modern, unified Python tool (3,065 lines
 
 ### Key Components
 
-**18 Classes:**
+**20 Classes:**
 1. `Logger` - Timestamped logging to console and file
 2. `PlaylistConfig` - Playlist configuration representation
 3. `ConfigManager` - Loads and manages playlists.conf
@@ -409,15 +436,17 @@ The `apple-to-ride-command` script is a modern, unified Python tool (3,065 lines
 7. `ConversionStatistics` - Tracks conversion statistics
 8. `Converter` - M4A → MP3 conversion with ffmpeg
 9. `Downloader` - Downloads from Apple Music via gamdl
-10. `USBManager` - USB drive detection and syncing
-11. `PlaylistSummary` - Statistics for a single playlist
-12. `LibrarySummaryStatistics` - Statistics for entire export library
-13. `SummaryManager` - Generates export library summaries
-14. `PipelineStatistics` - Aggregates statistics across stages
-15. `PipelineOrchestrator` - Coordinates multi-stage workflows
-16. `InteractiveMenu` - Interactive user interface
-17. `PlaylistResult` - Results for single playlist in batch processing
-18. `AggregateStatistics` - Cumulative statistics across multiple playlists
+10. `CookieStatus` - Cookie validation result data structure
+11. `CookieManager` - Cookie validation, refresh, and browser automation
+12. `USBManager` - USB drive detection and syncing
+13. `PlaylistSummary` - Statistics for a single playlist
+14. `LibrarySummaryStatistics` - Statistics for entire export library
+15. `SummaryManager` - Generates export library summaries
+16. `PipelineStatistics` - Aggregates statistics across stages
+17. `PipelineOrchestrator` - Coordinates multi-stage workflows
+18. `InteractiveMenu` - Interactive user interface
+19. `PlaylistResult` - Results for single playlist in batch processing
+20. `AggregateStatistics` - Cumulative statistics across multiple playlists
 
 **Subcommands:**
 - `pipeline` - Full download + convert + tag workflow (default)

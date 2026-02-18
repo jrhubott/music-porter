@@ -59,6 +59,109 @@ Shows an interactive menu for easy playlist selection and processing.
 ./apple-to-ride-command pipeline --playlist "Pop_Workout" --copy-to-usb
 ```
 
+## Cookie Management
+
+The tool automatically manages Apple Music authentication cookies, validating them before downloads and offering to refresh when expired.
+
+### Automatic Cookie Validation
+
+Cookies are checked at **two points**:
+1. **Startup** - Shows status (informational, doesn't block)
+2. **Before downloads** - Validates and blocks if invalid
+
+**Status messages:**
+```bash
+# Valid cookies
+[OK] Cookie status: Cookies valid until 2026-08-16 (178 days remaining)
+
+# Expired cookies
+[WARN] Cookie status: Cookies expired on 2026-02-15 (3 days ago)
+Downloads will fail until cookies are refreshed
+```
+
+### Interactive Auto-Refresh
+
+When cookies are invalid, you'll be prompted:
+
+```bash
+[ERROR] Cookies expired on 2026-02-15 (3 days ago)
+
+============================================================
+Apple Music Cookie Refresh Required
+============================================================
+[... manual instructions ...]
+============================================================
+
+Attempt automatic cookie refresh? [Y/n]  ← Just press Enter!
+```
+
+**What happens:**
+1. Tool detects and uses your OS default browser
+2. Opens browser (headless if already logged in, visible if not)
+3. Extracts cookies from your browser session
+4. Creates backup: `cookies.txt.backup`
+5. Saves new cookies and validates them
+6. Continues with your operation
+
+### Command-Line Flags
+
+```bash
+# Auto-refresh cookies (non-interactive)
+./apple-to-ride-command pipeline --auto --auto-refresh-cookies
+
+# Use custom cookie file
+./apple-to-ride-command download --playlist 1 --cookies /path/to/cookies.txt
+
+# Skip validation (not recommended)
+./apple-to-ride-command download --playlist 1 --skip-cookie-validation
+```
+
+### Browser Support
+
+Supports **Chrome**, **Firefox**, **Safari**, and **Edge**:
+- Automatically detects your default browser
+- Falls back to other installed browsers if needed
+- Works on macOS, Linux, and Windows
+
+### Optional Dependencies
+
+For automatic cookie refresh:
+
+```bash
+source .venv/bin/activate
+pip install -r requirements-optional.txt
+```
+
+Alternatively, the tool will **offer to auto-install** selenium when you first use `--auto-refresh-cookies`.
+
+### Manual Cookie Refresh (Alternative)
+
+If you prefer manual control or automation fails:
+
+1. Open your browser and go to: https://music.apple.com
+2. Log in to your Apple Music account
+3. Install browser extension:
+   - **Chrome**: "Get cookies.txt LOCALLY" extension
+   - **Firefox**: "cookies.txt" extension
+4. Click extension icon → Export cookies.txt
+5. Save as `cookies.txt` in project directory
+
+### Troubleshooting
+
+**Selenium not installed:**
+```
+[ERROR] Selenium not installed
+Install selenium now? [Y/n]  ← Press Enter to auto-install
+```
+
+**All browsers failed:**
+- Update your browser to the latest version
+- Try a different browser
+- Use manual refresh method
+- Check if you're logged in to Apple Music
+
+**See [Cookie Management Guide](COOKIE-MANAGEMENT-GUIDE.md) for complete troubleshooting and security details.**
+
 ## Commands Overview
 
 ### 1. pipeline
