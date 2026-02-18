@@ -4024,6 +4024,37 @@ def resolve_quality_preset(args, logger):
     return quality_preset
 
 
+def _create_quality_args_parser():
+    """Create shared parent parser for quality-related arguments."""
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--preset', default='lossless',
+                        choices=['low', 'medium', 'high', 'lossless', 'custom'],
+                        help='Quality preset (default: lossless)')
+    parser.add_argument('--quality', type=int, metavar='0-9',
+                        help='Custom VBR quality (0=best, 9=worst). Requires --preset custom')
+    return parser
+
+
+def _create_cookie_args_parser():
+    """Create shared parent parser for cookie-related arguments."""
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--cookies', default='cookies.txt',
+                        help='Path to cookies.txt file (default: cookies.txt)')
+    parser.add_argument('--auto-refresh-cookies', action='store_true',
+                        help='Automatically refresh cookies if expired (requires selenium, opens browser)')
+    parser.add_argument('--skip-cookie-validation', action='store_true',
+                        help='Skip cookie validation (not recommended)')
+    return parser
+
+
+def _create_usb_args_parser():
+    """Create shared parent parser for USB-related arguments."""
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--usb-dir', default=DEFAULT_USB_DIR,
+                        help=f'USB directory (default: {DEFAULT_USB_DIR})')
+    return parser
+
+
 def create_parser():
     """Create the argument parser with subcommands."""
     parser = argparse.ArgumentParser(
@@ -4063,8 +4094,14 @@ For command-specific help: \033[36mapple-to-ride-command <command> --help\033[0m
 
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
 
+    # Shared parent parsers
+    quality_parent = _create_quality_args_parser()
+    cookie_parent = _create_cookie_args_parser()
+    usb_parent = _create_usb_args_parser()
+
     # ── pipeline (default) ────────────────────────────────────────
     pipeline_parser = subparsers.add_parser('pipeline',
+        parents=[quality_parent, cookie_parent, usb_parent],
         help='Full download + convert + tag workflow (default)')
     pipeline_parser.add_argument('--playlist', help='Playlist name or number')
     pipeline_parser.add_argument('--url', help='Apple Music playlist URL')
@@ -4072,45 +4109,23 @@ For command-specific help: \033[36mapple-to-ride-command <command> --help\033[0m
                                 help='Process all playlists without prompting')
     pipeline_parser.add_argument('--copy-to-usb', action='store_true',
                                 help='Copy to USB drive after processing')
-    pipeline_parser.add_argument('--usb-dir', default=DEFAULT_USB_DIR,
-                                help=f'USB directory (default: {DEFAULT_USB_DIR})')
-    pipeline_parser.add_argument('--preset', default='lossless',
-                                choices=['low', 'medium', 'high', 'lossless', 'custom'],
-                                help='Quality preset (default: lossless)')
-    pipeline_parser.add_argument('--quality', type=int, metavar='0-9',
-                                help='Custom VBR quality (0=best, 9=worst). Requires --preset custom')
-    pipeline_parser.add_argument('--cookies', default='cookies.txt',
-                                help='Path to cookies.txt file (default: cookies.txt)')
-    pipeline_parser.add_argument('--auto-refresh-cookies', action='store_true',
-                                help='Automatically refresh cookies if expired (requires selenium, opens browser)')
-    pipeline_parser.add_argument('--skip-cookie-validation', action='store_true',
-                                help='Skip cookie validation (not recommended)')
 
     # ── download ──────────────────────────────────────────────────
     download_parser = subparsers.add_parser('download',
+        parents=[cookie_parent],
         help='Download from Apple Music using gamdl')
     download_parser.add_argument('--playlist', help='Playlist name or number')
     download_parser.add_argument('--url', required=False, help='Apple Music playlist URL')
     download_parser.add_argument('--output', help='Output directory')
-    download_parser.add_argument('--cookies', default='cookies.txt',
-                                help='Path to cookies.txt file (default: cookies.txt)')
-    download_parser.add_argument('--auto-refresh-cookies', action='store_true',
-                                help='Automatically refresh cookies if expired (requires selenium, opens browser)')
-    download_parser.add_argument('--skip-cookie-validation', action='store_true',
-                                help='Skip cookie validation (not recommended)')
 
     # ── convert ───────────────────────────────────────────────────
     convert_parser = subparsers.add_parser('convert',
+        parents=[quality_parent],
         help='Convert M4A → MP3 with tag preservation')
     convert_parser.add_argument('input_dir', help='Input directory with M4A files')
     convert_parser.add_argument('--output', help='Output directory')
     convert_parser.add_argument('--force', action='store_true',
                                help='Re-convert existing files')
-    convert_parser.add_argument('--preset', default='lossless',
-                               choices=['low', 'medium', 'high', 'lossless', 'custom'],
-                               help='Quality preset (default: lossless)')
-    convert_parser.add_argument('--quality', type=int, metavar='0-9',
-                               help='Custom VBR quality (0=best, 9=worst). Requires --preset custom')
 
     # ── tag ───────────────────────────────────────────────────────
     tag_parser = subparsers.add_parser('tag',
@@ -4140,11 +4155,10 @@ For command-specific help: \033[36mapple-to-ride-command <command> --help\033[0m
 
     # ── sync-usb ──────────────────────────────────────────────────
     sync_parser = subparsers.add_parser('sync-usb',
+        parents=[usb_parent],
         help='Copy files to USB drive')
     sync_parser.add_argument('source_dir', nargs='?', default=DEFAULT_EXPORT_DIR,
                             help='Source directory to copy')
-    sync_parser.add_argument('--usb-dir', default=DEFAULT_USB_DIR,
-                            help=f'USB directory (default: {DEFAULT_USB_DIR})')
 
     # ── summary ───────────────────────────────────────────────────
     summary_parser = subparsers.add_parser('summary',
