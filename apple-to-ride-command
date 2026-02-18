@@ -1457,6 +1457,104 @@ class PipelineStatistics:
         self.stages_failed = []
 
 
+class PlaylistResult:
+    """Results for a single playlist in multi-playlist processing."""
+
+    def __init__(self, key, name):
+        self.key = key
+        self.name = name
+        self.success = False
+        self.failed_stage = None  # "download", "convert", "tag", "usb-sync"
+        self.download_stats = None  # DownloadStatistics
+        self.conversion_stats = None  # ConversionStatistics
+        self.tagging_stats = None  # TagStatistics
+        self.usb_success = False
+        self.duration = 0.0
+
+
+class AggregateStatistics:
+    """Tracks cumulative statistics across multiple playlists."""
+
+    def __init__(self):
+        self.playlist_results = []  # List[PlaylistResult]
+        self.total_playlists = 0
+        self.successful_playlists = 0
+        self.failed_playlists = 0
+        self.start_time = time.time()
+        self.end_time = None
+        self.usb_destination = None
+
+    def add_playlist_result(self, orchestrator_stats):
+        """Add results from a PipelineOrchestrator run."""
+        result = PlaylistResult(
+            orchestrator_stats.playlist_key,
+            orchestrator_stats.playlist_name
+        )
+        result.success = len(orchestrator_stats.stages_failed) == 0
+        result.failed_stage = orchestrator_stats.stages_failed[0] if orchestrator_stats.stages_failed else None
+        result.download_stats = orchestrator_stats.download_stats
+        result.conversion_stats = orchestrator_stats.conversion_stats
+        result.tagging_stats = orchestrator_stats.tagging_stats
+        result.usb_success = orchestrator_stats.usb_success
+        result.duration = time.time() - orchestrator_stats.start_time
+
+        self.playlist_results.append(result)
+        self.total_playlists += 1
+        if result.success:
+            self.successful_playlists += 1
+        else:
+            self.failed_playlists += 1
+
+        if orchestrator_stats.usb_destination:
+            self.usb_destination = orchestrator_stats.usb_destination
+
+    def get_cumulative_stats(self):
+        """Calculate cumulative statistics across all playlists."""
+        totals = {
+            'playlist_total': 0,
+            'downloaded': 0,
+            'skipped_download': 0,
+            'failed_download': 0,
+            'converted': 0,
+            'overwritten': 0,
+            'skipped_conversion': 0,
+            'errors_conversion': 0,
+            'title_updated': 0,
+            'original_tags_stored': 0,
+            'files_on_usb': 0
+        }
+
+        for result in self.playlist_results:
+            if result.download_stats:
+                totals['playlist_total'] += result.download_stats.playlist_total
+                totals['downloaded'] += result.download_stats.downloaded
+                totals['skipped_download'] += result.download_stats.skipped
+                totals['failed_download'] += result.download_stats.failed
+
+            if result.conversion_stats:
+                totals['converted'] += result.conversion_stats.converted
+                totals['overwritten'] += result.conversion_stats.overwritten
+                totals['skipped_conversion'] += result.conversion_stats.skipped
+                totals['errors_conversion'] += result.conversion_stats.errors
+
+            if result.tagging_stats:
+                totals['title_updated'] += result.tagging_stats.title_updated
+                totals['original_tags_stored'] += (
+                    result.tagging_stats.title_stored +
+                    result.tagging_stats.artist_stored +
+                    result.tagging_stats.album_stored
+                )
+
+            if result.usb_success and result.conversion_stats:
+                totals['files_on_usb'] += (
+                    result.conversion_stats.converted +
+                    result.conversion_stats.overwritten +
+                    result.conversion_stats.skipped
+                )
+
+        return totals
+
+
 class PipelineOrchestrator:
     """Coordinates multi-stage workflows: download → convert → tag → USB sync."""
 
@@ -1749,6 +1847,127 @@ class PipelineOrchestrator:
             print(f"  Failed stages:           {', '.join(self.stats.stages_failed)}")
         print(f"{'=' * 70}")
 
+    def _print_aggregate_summary(self, aggregate_stats):
+        """Print comprehensive summary for multiple playlists."""
+        aggregate_stats.end_time = time.time()
+        duration = aggregate_stats.end_time - aggregate_stats.start_time
+        duration_mins = int(duration // 60)
+        duration_secs = int(duration % 60)
+
+        print(f"\n{'=' * 70}")
+        print(f"  TOTAL SUMMARY - ALL PLAYLISTS")
+        print(f"{'=' * 70}")
+        print(f"  Playlists processed:     {aggregate_stats.total_playlists}")
+        print(f"  Total duration:          {duration:.1f}s ({duration_mins}m {duration_secs}s)")
+
+        if aggregate_stats.failed_playlists == 0:
+            print(f"  Overall status:          ✅ All succeeded")
+        else:
+            print(f"  Overall status:          ⚠️  Some failed")
+
+        # Playlist results table
+        print(f"{'─' * 70}")
+        print(f"  PLAYLIST RESULTS")
+        print(f"{'─' * 70}")
+        print(f"  {'Playlist':<24} {'Downloaded':<12} {'Converted':<11} {'Tagged':<8} Status")
+        print(f"  {'─' * 70}")
+
+        for result in aggregate_stats.playlist_results:
+            # Format download stats
+            if result.download_stats:
+                dl_str = f"{result.download_stats.downloaded}/{result.download_stats.playlist_total}"
+            elif result.failed_stage == "download":
+                dl_str = "ERROR"
+            else:
+                dl_str = "-/-"
+
+            # Format conversion stats
+            if result.conversion_stats:
+                conv_count = result.conversion_stats.converted + result.conversion_stats.overwritten
+                conv_total = conv_count + result.conversion_stats.skipped
+                conv_str = f"{conv_count}/{conv_total}"
+            elif result.failed_stage in ["download", "convert"]:
+                conv_str = "-/-"
+            else:
+                conv_str = "0/0"
+
+            # Format tag stats
+            if result.tagging_stats:
+                tag_str = str(result.tagging_stats.title_updated)
+            else:
+                tag_str = "-"
+
+            # Status
+            if result.success:
+                status = "✅ Success"
+            else:
+                status = f"❌ {result.failed_stage or 'Failed'}"
+
+            # Display name (truncate if needed)
+            display_name = result.name[:22] if len(result.name) > 22 else result.name
+
+            print(f"  {display_name:<24} {dl_str:<12} {conv_str:<11} {tag_str:<8} {status}")
+
+        # Calculate totals
+        totals = aggregate_stats.get_cumulative_stats()
+
+        print(f"  {'─' * 70}")
+        total_dl = f"{totals['downloaded']}/{totals['playlist_total']}"
+        total_conv = f"{totals['converted'] + totals['overwritten']}/{totals['converted'] + totals['overwritten'] + totals['skipped_conversion']}"
+        success_ratio = f"✅ {aggregate_stats.successful_playlists}/{aggregate_stats.total_playlists}"
+
+        print(f"  {'TOTALS':<24} {total_dl:<12} {total_conv:<11} {totals['title_updated']:<8} {success_ratio}")
+
+        # Cumulative statistics
+        print(f"{'─' * 70}")
+        print(f"  CUMULATIVE STATISTICS")
+        print(f"{'─' * 70}")
+        print(f"  Total tracks in playlists:    {totals['playlist_total']}")
+        print(f"")
+        print(f"  Downloads:")
+        print(f"    New downloads:              {totals['downloaded']}")
+        print(f"    Already existed (skipped):  {totals['skipped_download']}")
+        if totals['failed_download'] > 0:
+            print(f"    Failed:                     {totals['failed_download']}")
+        print(f"")
+        print(f"  Conversions:")
+        print(f"    Newly converted:            {totals['converted']}")
+        if totals['overwritten'] > 0:
+            print(f"    Overwritten:                {totals['overwritten']}")
+        print(f"    Skipped (already exist):    {totals['skipped_conversion']}")
+        if totals['errors_conversion'] > 0:
+            print(f"    Errors:                     {totals['errors_conversion']}")
+        print(f"")
+        print(f"  Tag Operations:")
+        print(f"    Titles updated:             {totals['title_updated']}")
+        if totals['original_tags_stored'] > 0:
+            print(f"    Original tags stored:       {totals['original_tags_stored']}")
+
+        # USB sync
+        if aggregate_stats.usb_destination and totals['files_on_usb'] > 0:
+            print(f"")
+            print(f"  USB Sync:")
+            print(f"    Files copied to USB:        {totals['files_on_usb']}")
+            print(f"    Destination:                {aggregate_stats.usb_destination}")
+
+        # Final status
+        print(f"{'─' * 70}")
+        if aggregate_stats.failed_playlists == 0:
+            print(f"  STATUS:  ✅ All playlists completed successfully")
+        else:
+            print(f"  STATUS:  ⚠️  {aggregate_stats.failed_playlists} of {aggregate_stats.total_playlists} playlists failed")
+
+            # List failed playlists
+            failed_names = [
+                f"{r.name} ({r.failed_stage})"
+                for r in aggregate_stats.playlist_results
+                if not r.success
+            ]
+            if failed_names:
+                print(f"  Failed:  {', '.join(failed_names)}")
+
+        print(f"{'=' * 70}")
+
 
 # ══════════════════════════════════════════════════════════════════
 # Section 9b: Interactive Menu
@@ -1847,7 +2066,9 @@ class InteractiveMenu:
         """Handle 'All playlists' selection."""
         self.logger.info("Processing all playlists...")
 
-        all_success = True
+        # Create aggregate statistics tracker
+        aggregate_stats = AggregateStatistics()
+
         for i, playlist in enumerate(self.config.playlists):
             self.logger.info(f"\n{'=' * 70}")
             self.logger.info(f"Processing playlist {i+1}/{len(self.config.playlists)}: {playlist.name}")
@@ -1862,15 +2083,21 @@ class InteractiveMenu:
                 verbose=verbose
             )
 
+            # Collect statistics from this run
+            aggregate_stats.add_playlist_result(orchestrator.stats)
+
             if not success:
-                all_success = False
                 self.logger.error(f"Failed to process {playlist.name}")
 
         # Ask about USB copy after all playlists
         if not dry_run:
             self._ask_copy_to_usb(DEFAULT_EXPORT_DIR, dry_run)
 
-        return all_success
+        # Print aggregate summary (only for multiple playlists)
+        if len(self.config.playlists) > 1:
+            orchestrator._print_aggregate_summary(aggregate_stats)
+
+        return aggregate_stats.failed_playlists == 0
 
     def _handle_url_entry(self, dry_run, verbose):
         """Handle 'Enter URL' selection."""
@@ -2170,7 +2397,9 @@ def main():
         if args.auto:
             # Process all playlists
             logger.info("Auto mode: processing all playlists")
-            all_success = True
+
+            # Create aggregate statistics tracker
+            aggregate_stats = AggregateStatistics()
 
             for i, playlist in enumerate(config.playlists):
                 logger.info(f"\n{'=' * 70}")
@@ -2186,10 +2415,14 @@ def main():
                     verbose=args.verbose
                 )
 
-                if not success:
-                    all_success = False
+                # Collect statistics from this run
+                aggregate_stats.add_playlist_result(orchestrator.stats)
 
-            sys.exit(0 if all_success else 1)
+            # Print aggregate summary (only for multiple playlists)
+            if len(config.playlists) > 1:
+                orchestrator._print_aggregate_summary(aggregate_stats)
+
+            sys.exit(0 if aggregate_stats.failed_playlists == 0 else 1)
 
         elif args.playlist or args.url:
             # Process specific playlist or URL
