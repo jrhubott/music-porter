@@ -13,7 +13,7 @@ RideCommandMP3Export is a music playlist management and conversion tool that dow
 The system follows an integrated pipeline:
 
 1. **Download** → Downloads Apple Music playlists as M4A files via gamdl
-2. **Convert** → Converts M4A to MP3 using ffmpeg (libmp3lame, quality: -q:a 2)
+2. **Convert** → Converts M4A to MP3 using ffmpeg (libmp3lame, default: lossless 320kbps CBR)
 3. **Tag** → Updates and preserves tags with TXXX frame protection
 4. **Sync** → Optionally copies to USB drives
 
@@ -77,6 +77,24 @@ The codebase uses a "hard gate" protection system for original metadata:
 ./apple-to-ride-command [command] --help
 ```
 
+## MP3 Quality Presets
+
+The conversion system supports configurable quality presets to balance file size and audio quality:
+
+| Preset | Mode | Value | Est. Bitrate | Use Case |
+|--------|------|-------|--------------|----------|
+| `lossless` | CBR | 320kbps | 320kbps | **Default** - Maximum quality, no compromises |
+| `high` | VBR | 2 | ~190-250kbps | High quality, smaller files than lossless |
+| `medium` | VBR | 4 | ~165-210kbps | Balanced quality and file size |
+| `low` | VBR | 6 | ~115-150kbps | Space-constrained devices |
+| `custom` | VBR | 0-9 | Variable | Advanced users (0=best quality, 9=worst) |
+
+**Usage:**
+- All `convert` and `pipeline` commands support `--preset` flag
+- Default is `lossless` (320kbps CBR) for maximum quality
+- VBR (Variable Bit Rate) adjusts bitrate dynamically based on audio complexity
+- Custom quality requires both `--preset custom` and `--quality 0-9` flags
+
 ### Full Pipeline Workflows
 
 ```bash
@@ -89,6 +107,10 @@ The codebase uses a "hard gate" protection system for original metadata:
 
 # Process all playlists (auto mode, no prompts)
 ./apple-to-ride-command pipeline --auto
+
+# With quality presets (lossless, high, medium, low, custom)
+./apple-to-ride-command pipeline --playlist "Pop_Workout" --preset high
+./apple-to-ride-command pipeline --auto --preset medium
 
 # Include USB copy after processing
 ./apple-to-ride-command pipeline --playlist "Pop_Workout" --copy-to-usb
@@ -113,11 +135,18 @@ The codebase uses a "hard gate" protection system for original metadata:
 
 **Convert:**
 ```bash
-# Convert M4A files to MP3
+# Convert M4A files to MP3 (default: lossless 320kbps)
 ./apple-to-ride-command convert music/Pop_Workout
 
 # Specify output directory
 ./apple-to-ride-command convert music/Pop_Workout --output export/Pop_Workout
+
+# Use quality presets (lossless, high, medium, low)
+./apple-to-ride-command convert music/Pop_Workout --preset high
+./apple-to-ride-command convert music/Pop_Workout --preset medium
+
+# Custom VBR quality (0=best, 9=worst)
+./apple-to-ride-command convert music/Pop_Workout --preset custom --quality 0
 
 # Force re-conversion of existing files
 ./apple-to-ride-command convert music/Pop_Workout --force
@@ -424,7 +453,10 @@ The `apple-to-ride-command` script is a modern, unified Python tool (3,065 lines
 - Statistics tracking for all operations
 
 **Conversion (Converter class):**
-- Uses ffmpeg with same settings: `libmp3lame -q:a 2`
+- Uses ffmpeg with configurable quality presets
+- Default: lossless 320kbps CBR (libmp3lame -b:a 320k)
+- VBR presets: high (q:a 2), medium (q:a 4), low (q:a 6)
+- Custom VBR quality 0-9 supported (0=best, 9=worst)
 - Immediate tag application after conversion
 - Preserves TXXX frames on force re-conversion
 - Identical filename sanitization and output structure
@@ -476,6 +508,7 @@ tail -100 logs/$(ls -t logs/ | head -1)
 
 ## Additional Resources
 
+- **README.md** - Project overview, quick start guide, and future features roadmap
 - **APPLE-TO-RIDE-COMMAND-GUIDE.md** - Complete usage guide with examples
 - **QUICK-REFERENCE.md** - Command cheat sheet for quick lookup
 - **IMPLEMENTATION-SUMMARY.md** - Technical implementation details

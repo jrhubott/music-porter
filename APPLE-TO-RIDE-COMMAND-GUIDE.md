@@ -25,6 +25,9 @@ Shows an interactive menu for easy playlist selection and processing.
 # Process all playlists (auto mode)
 ./apple-to-ride-command pipeline --auto
 
+# With quality preset (lossless, high, medium, low, custom)
+./apple-to-ride-command pipeline --playlist "Pop_Workout" --preset high
+
 # Include USB copy
 ./apple-to-ride-command pipeline --playlist "Pop_Workout" --copy-to-usb
 ```
@@ -44,6 +47,10 @@ Shows an interactive menu for easy playlist selection and processing.
 
 # Process all playlists (no prompts)
 ./apple-to-ride-command pipeline --auto
+
+# With quality preset
+./apple-to-ride-command pipeline --playlist "Pop_Workout" --preset high
+./apple-to-ride-command pipeline --auto --preset medium
 
 # Include USB sync
 ./apple-to-ride-command pipeline --playlist "Pop_Workout" --copy-to-usb --usb-dir "RZR/Music"
@@ -76,18 +83,27 @@ Shows an interactive menu for easy playlist selection and processing.
 **Convert M4A → MP3 with tag preservation**
 
 ```bash
-# Basic conversion
+# Basic conversion (default: lossless 320kbps)
 ./apple-to-ride-command convert music/Pop_Workout
 
 # Specify output directory
 ./apple-to-ride-command convert music/Pop_Workout --output export/Pop_Workout
 
+# With quality presets
+./apple-to-ride-command convert music/Pop_Workout --preset high
+./apple-to-ride-command convert music/Pop_Workout --preset medium
+./apple-to-ride-command convert music/Pop_Workout --preset custom --quality 0
+
 # Force re-conversion of existing files
 ./apple-to-ride-command convert music/Pop_Workout --force
+
+# Combine flags
+./apple-to-ride-command convert music/Pop_Workout --preset high --force
 ```
 
 **Features:**
-- Converts M4A → MP3 using ffmpeg (high quality: -q:a 2)
+- Converts M4A → MP3 using ffmpeg with configurable quality (default: lossless 320kbps CBR)
+- Quality presets: lossless, high, medium, low, custom (see Quality Presets section)
 - Preserves original tags in TXXX frames (OriginalTitle, OriginalArtist, OriginalAlbum)
 - Formats title as "Artist - Title"
 - Flat output structure: all files saved as "Artist - Title.mp3"
@@ -169,6 +185,144 @@ Show detailed information during processing
 ### Combined
 ```bash
 ./apple-to-ride-command --dry-run --verbose convert music/Pop_Workout
+```
+
+## Quality Presets
+
+MP3 conversion supports configurable quality presets to balance file size and audio quality. All `convert` and `pipeline` commands accept the `--preset` flag.
+
+### Available Presets
+
+| Preset | Mode | Value | Est. Bitrate | Use Case |
+|--------|------|-------|--------------|----------|
+| `lossless` | CBR | 320kbps | 320kbps | **Default** - Maximum quality, no compromises |
+| `high` | VBR | 2 | ~190-250kbps | High quality, smaller files than lossless |
+| `medium` | VBR | 4 | ~165-210kbps | Balanced quality and file size |
+| `low` | VBR | 6 | ~115-150kbps | Space-constrained devices |
+| `custom` | VBR | 0-9 | Variable | Advanced users (0=best quality, 9=worst) |
+
+### Understanding the Modes
+
+**CBR (Constant Bit Rate):**
+- Fixed bitrate throughout the entire file
+- Predictable file sizes
+- Used for `lossless` preset (320kbps)
+- Best for maximum quality and compatibility
+
+**VBR (Variable Bit Rate):**
+- Bitrate varies based on audio complexity
+- More efficient encoding (better quality per MB)
+- Used for `high`, `medium`, `low`, and `custom` presets
+- Quality scale: 0 (best) to 9 (worst)
+
+### Usage Examples
+
+#### Basic Usage
+```bash
+# Default (lossless 320kbps CBR)
+./apple-to-ride-command convert music/Pop_Workout
+
+# High quality VBR
+./apple-to-ride-command convert music/Pop_Workout --preset high
+
+# Medium quality VBR (balanced)
+./apple-to-ride-command convert music/Pop_Workout --preset medium
+
+# Low quality VBR (space-saving)
+./apple-to-ride-command convert music/Pop_Workout --preset low
+```
+
+#### Custom Quality
+```bash
+# Custom VBR quality 0 (best possible)
+./apple-to-ride-command convert music/Pop_Workout --preset custom --quality 0
+
+# Custom VBR quality 5 (medium-low)
+./apple-to-ride-command convert music/Pop_Workout --preset custom --quality 5
+
+# Note: --preset custom REQUIRES --quality parameter
+```
+
+#### Pipeline Integration
+```bash
+# Full pipeline with high quality
+./apple-to-ride-command pipeline --playlist "Pop_Workout" --preset high
+
+# Batch process all playlists with medium quality
+./apple-to-ride-command pipeline --auto --preset medium
+
+# URL download with custom quality
+./apple-to-ride-command pipeline --url "https://..." --preset custom --quality 0
+```
+
+#### Force Re-conversion with New Quality
+```bash
+# Re-convert existing files with different quality
+./apple-to-ride-command convert music/Pop_Workout --preset high --force
+```
+
+### Quality Setting Display
+
+When using `--verbose`, quality settings are displayed:
+```bash
+./apple-to-ride-command --verbose convert music/Pop_Workout --preset high
+# Output includes:
+# Quality: VBR quality 2 (preset: high)
+```
+
+Conversion summaries also show quality settings:
+```
+QUALITY SETTINGS
+─────────────────────────────────────────────────────────
+Preset:                  high
+Mode:                    VBR quality 2
+```
+
+### Choosing the Right Preset
+
+**Use `lossless` when:**
+- Maximum quality is priority
+- Storage space is not a concern
+- You want bit-perfect audio
+- Default for most users
+
+**Use `high` when:**
+- You want great quality with smaller files
+- ~20-30% file size reduction vs lossless
+- Good balance for most listening scenarios
+
+**Use `medium` when:**
+- File size is important
+- ~40-50% file size reduction vs lossless
+- Still good quality for casual listening
+- Good for space-constrained USB drives
+
+**Use `low` when:**
+- Maximum space savings needed
+- ~60-70% file size reduction vs lossless
+- Acceptable for background music
+- Limited storage devices
+
+**Use `custom` when:**
+- You know exactly what VBR quality you need
+- Fine-tuning for specific requirements
+- Advanced users only
+
+### Error Handling
+
+Invalid quality settings produce clear errors:
+```bash
+# Missing --quality with custom preset
+./apple-to-ride-command convert music/Pop_Workout --preset custom
+# Error: --preset custom requires --quality parameter (0-9)
+
+# Out of range quality value
+./apple-to-ride-command convert music/Pop_Workout --preset custom --quality 15
+# Error: --quality must be between 0-9, got: 15
+
+# --quality without custom preset (warning, not error)
+./apple-to-ride-command convert music/Pop_Workout --preset high --quality 5
+# Warning: --quality ignored unless --preset custom is specified
 ```
 
 ## Configuration

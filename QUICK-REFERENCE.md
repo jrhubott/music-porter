@@ -33,6 +33,7 @@ Processes all configured playlists and copies to USB.
 | **Full workflow** | `./apple-to-ride-command pipeline --playlist "Name"` |
 | **Download only** | `./apple-to-ride-command download --playlist "Name"` |
 | **Convert only** | `./apple-to-ride-command convert music/Name` |
+| **Convert with quality** | `./apple-to-ride-command convert music/Name --preset high` |
 | **Update tags** | `./apple-to-ride-command tag export/Name --album "Album"` |
 | **Restore tags** | `./apple-to-ride-command restore export/Name --all` |
 | **Copy to USB** | `./apple-to-ride-command sync-usb export/Name` |
@@ -80,6 +81,33 @@ Processes all configured playlists and copies to USB.
 | `--force` | Overwrite existing files | `convert music/Pop_Workout --force` |
 | `--copy-to-usb` | Auto-copy after pipeline | `pipeline --playlist "Name" --copy-to-usb` |
 | `--auto` | No prompts (batch mode) | `pipeline --auto` |
+| `--preset` | Quality preset | `convert music/Pop_Workout --preset high` |
+| `--quality 0-9` | Custom VBR quality | `convert music/Pop_Workout --preset custom --quality 0` |
+
+## 🎵 Quality Presets
+
+| Preset | Bitrate | File Size | Use Case |
+|--------|---------|-----------|----------|
+| `lossless` | 320kbps CBR | Largest | **Default** - Maximum quality |
+| `high` | ~190-250kbps VBR | Large | High quality, smaller than lossless |
+| `medium` | ~165-210kbps VBR | Medium | Balanced quality/size |
+| `low` | ~115-150kbps VBR | Small | Space-constrained |
+| `custom` | Variable VBR | Custom | Advanced (0=best, 9=worst) |
+
+### Examples:
+```bash
+# Default (lossless)
+./apple-to-ride-command convert music/Pop_Workout
+
+# High quality VBR
+./apple-to-ride-command convert music/Pop_Workout --preset high
+
+# Custom quality (best)
+./apple-to-ride-command convert music/Pop_Workout --preset custom --quality 0
+
+# Full pipeline with quality
+./apple-to-ride-command pipeline --playlist "Pop_Workout" --preset medium
+```
 
 ## 📁 Where Files Go
 

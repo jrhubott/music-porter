@@ -33,7 +33,14 @@ EXCLUDED_USB_VOLUMES = [
     "Macintosh HD - Data",
 ]
 
-FFMPEG_QUALITY = "2"  # -q:a parameter for libmp3lame
+# Quality presets for MP3 conversion
+QUALITY_PRESETS = {
+    'lossless': {'mode': 'cbr', 'value': '320'},  # 320kbps CBR (default)
+    'high': {'mode': 'vbr', 'value': '2'},        # ~190-250kbps VBR
+    'medium': {'mode': 'vbr', 'value': '4'},      # ~165-210kbps VBR
+    'low': {'mode': 'vbr', 'value': '6'},         # ~115-150kbps VBR
+}
+DEFAULT_QUALITY_PRESET = 'lossless'
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1058,7 +1065,7 @@ class USBSyncStatistics:
 class Converter:
     """Manages M4A to MP3 conversion with tag preservation."""
 
-    def __init__(self, logger=None, cleanup_options=None):
+    def __init__(self, logger=None, cleanup_options=None, quality_preset='lossless'):
         self.logger = logger or Logger()
         self.cleanup_options = cleanup_options or {
             "remove_id3v1": True,
@@ -1066,6 +1073,26 @@ class Converter:
             "remove_duplicates": True
         }
         self.stats = ConversionStatistics()
+        self.quality_preset = quality_preset
+        self.quality_settings = self._get_quality_settings(quality_preset)
+
+    def _get_quality_settings(self, preset):
+        """Resolve quality preset to FFmpeg parameters."""
+        # Check predefined presets
+        if preset in QUALITY_PRESETS:
+            return QUALITY_PRESETS[preset]
+
+        # Custom quality value (0-9 for VBR)
+        try:
+            quality_val = int(preset)
+            if 0 <= quality_val <= 9:
+                return {'mode': 'vbr', 'value': str(quality_val)}
+            else:
+                self.logger.warn(f"Invalid quality '{preset}', using '{DEFAULT_QUALITY_PRESET}'")
+                return QUALITY_PRESETS[DEFAULT_QUALITY_PRESET]
+        except ValueError:
+            self.logger.warn(f"Unknown preset '{preset}', using '{DEFAULT_QUALITY_PRESET}'")
+            return QUALITY_PRESETS[DEFAULT_QUALITY_PRESET]
 
     def _sanitize_filename(self, name):
         """Remove invalid filename characters."""
@@ -1139,6 +1166,13 @@ class Converter:
                     self.logger.debug(f"File size:    {input_file.stat().st_size / 1024:.1f} KB")
                     if already_exists and force:
                         self.logger.debug(f"Force flag set — overwriting: '{output_filename}'")
+                    # Display quality settings
+                    quality_desc = f"{self.quality_settings['mode'].upper()}"
+                    if self.quality_settings['mode'] == 'vbr':
+                        quality_desc += f" quality {self.quality_settings['value']}"
+                    else:
+                        quality_desc += f" {self.quality_settings['value']}kbps"
+                    self.logger.debug(f"Quality:      {quality_desc} (preset: {self.quality_preset})")
                     self.logger.debug(f"Source tags:")
                     self.logger.debug(f"  → Title:  '{title}'")
                     self.logger.debug(f"  → Artist: '{artist}'")
@@ -1157,10 +1191,17 @@ class Converter:
 
                 # Run ffmpeg conversion
                 try:
+                    # Build FFmpeg parameters based on quality mode
+                    ffmpeg_params = {'acodec': 'libmp3lame'}
+                    if self.quality_settings['mode'] == 'vbr':
+                        ffmpeg_params['q:a'] = self.quality_settings['value']
+                    else:  # cbr for lossless
+                        ffmpeg_params['b:a'] = self.quality_settings['value'] + 'k'
+
                     (
                         ffmpeg
                         .input(str(input_file))
-                        .output(str(output_file), acodec='libmp3lame', **{'q:a': FFMPEG_QUALITY})
+                        .output(str(output_file), **ffmpeg_params)
                         .run(overwrite_output=True, quiet=True)
                     )
                 except ffmpeg.Error as e:
@@ -1206,6 +1247,13 @@ class Converter:
 
     def _print_summary(self, input_dir, output_dir, duration):
         """Print conversion summary statistics."""
+        # Format quality settings for display
+        quality_desc = f"{self.quality_settings['mode'].upper()}"
+        if self.quality_settings['mode'] == 'vbr':
+            quality_desc += f" quality {self.quality_settings['value']}"
+        else:
+            quality_desc += f" {self.quality_settings['value']}kbps"
+
         print(f"\n{'=' * 60}")
         print(f"  CONVERSION SUMMARY")
         print(f"{'=' * 60}")
@@ -1213,6 +1261,11 @@ class Converter:
         print(f"  Input directory:         '{input_dir}'")
         print(f"  Output directory:        '{output_dir}'")
         print(f"  Duration:                {duration:.1f}s")
+        print(f"{'─' * 60}")
+        print(f"  QUALITY SETTINGS")
+        print(f"{'─' * 60}")
+        print(f"  Preset:                  {self.quality_preset}")
+        print(f"  Mode:                    {quality_desc}")
         print(f"{'─' * 60}")
         print(f"  FILES")
         print(f"{'─' * 60}")
@@ -2214,15 +2267,16 @@ class AggregateStatistics:
 class PipelineOrchestrator:
     """Coordinates multi-stage workflows: download → convert → tag → USB sync."""
 
-    def __init__(self, logger=None, deps=None, config=None):
+    def __init__(self, logger=None, deps=None, config=None, quality_preset='lossless'):
         self.logger = logger or Logger()
         self.deps = deps or DependencyChecker(self.logger)
         self.config = config or ConfigManager(logger=self.logger)
         self.stats = PipelineStatistics()
+        self.quality_preset = quality_preset
 
     def run_full_pipeline(self, playlist=None, url=None, auto=False,
                          copy_to_usb=False, usb_dir=DEFAULT_USB_DIR,
-                         dry_run=False, verbose=False):
+                         dry_run=False, verbose=False, quality_preset=None):
         """
         Execute the complete pipeline: download → convert → tag → USB sync.
         """
@@ -2254,7 +2308,9 @@ class PipelineOrchestrator:
         music_dir = f"{DEFAULT_MUSIC_DIR}/{self.stats.playlist_key}"
         export_dir = f"{DEFAULT_EXPORT_DIR}/{self.stats.playlist_key}"
 
-        converter = Converter(self.logger)
+        # Use quality_preset parameter if provided, otherwise use instance default
+        preset = quality_preset if quality_preset is not None else self.quality_preset
+        converter = Converter(self.logger, quality_preset=preset)
         success = converter.convert(
             music_dir,
             export_dir,
@@ -2677,20 +2733,30 @@ class InteractiveMenu:
             print("\n╔══════════════════════════════════════════════════════════════╗")
             print("║          Apple Music to Ride Command MP3 Converter           ║")
             print("╚══════════════════════════════════════════════════════════════╝")
-            print("\nAvailable playlists:")
+            print("\n  📝 Process playlist:")
+            print()
 
             for i, playlist in enumerate(self.config.playlists, 1):
-                print(f"  {i}. {playlist.name} ({playlist.key})")
+                print(f"     {i}. {playlist.name} ({playlist.key})")
 
-            print(f"  A. All playlists")
-            print(f"  U. Enter URL")
-            print(f"  C. Copy to USB only")
-            print(f"  S. Show library summary")
-            print(f"  X. Exit")
+            print()  # Blank line before separator
+            print("   ────────────────────────────────────────────────────────────")
+            print()  # Blank line after separator
+
+            print(f"  📁 A. Process all playlists")
+            print(f"  🔗 U. Enter URL to add a new playlist")
+            print(f"  💾 C. Copy to USB only")
+            print(f"  📊 S. Show library summary")
+            print(f"  ❌ X. Exit (or press Enter)")
 
             # Get user selection
             try:
-                selection = input("\nEnter number or letter: ").strip()
+                selection = input("\nEnter selection (or press Enter to exit): ").strip()
+
+                # Handle empty input as exit
+                if selection == "":
+                    print("Exiting...")
+                    return False
 
                 # Normalize to uppercase for case-insensitive comparison
                 selection_upper = selection.upper()
@@ -2703,7 +2769,7 @@ class InteractiveMenu:
 
                 if not (is_valid_digit or is_valid_letter):
                     self.logger.error(f"Invalid selection: {selection}")
-                    self.logger.info(f"Enter a playlist number (1-{len(self.config.playlists)}) or option (A/U/C/S/X)")
+                    self.logger.info(f"Enter a playlist number (1-{len(self.config.playlists)}) or option (A/U/C/S/X/Enter)")
                     continue  # Loop back to menu
 
                 # Handle selection
@@ -2918,6 +2984,11 @@ def create_parser():
                                 help='Copy to USB drive after processing')
     pipeline_parser.add_argument('--usb-dir', default=DEFAULT_USB_DIR,
                                 help=f'USB directory (default: {DEFAULT_USB_DIR})')
+    pipeline_parser.add_argument('--preset', default='lossless',
+                                choices=['low', 'medium', 'high', 'lossless', 'custom'],
+                                help='Quality preset (default: lossless)')
+    pipeline_parser.add_argument('--quality', type=int, metavar='0-9',
+                                help='Custom VBR quality (0=best, 9=worst). Requires --preset custom')
 
     # ── download ──────────────────────────────────────────────────
     download_parser = subparsers.add_parser('download',
@@ -2933,6 +3004,11 @@ def create_parser():
     convert_parser.add_argument('--output', help='Output directory')
     convert_parser.add_argument('--force', action='store_true',
                                help='Re-convert existing files')
+    convert_parser.add_argument('--preset', default='lossless',
+                               choices=['low', 'medium', 'high', 'lossless', 'custom'],
+                               help='Quality preset (default: lossless)')
+    convert_parser.add_argument('--quality', type=int, metavar='0-9',
+                               help='Custom VBR quality (0=best, 9=worst). Requires --preset custom')
 
     # ── tag ───────────────────────────────────────────────────────
     tag_parser = subparsers.add_parser('tag',
@@ -3006,8 +3082,21 @@ def main():
         if not deps.check_all(require_ffmpeg=True, require_gamdl=False):
             sys.exit(1)
 
+        # Resolve quality preset
+        quality_preset = args.preset
+        if quality_preset == 'custom':
+            if args.quality is None:
+                logger.error("--preset custom requires --quality parameter (0-9)")
+                sys.exit(1)
+            if not (0 <= args.quality <= 9):
+                logger.error(f"--quality must be between 0-9, got: {args.quality}")
+                sys.exit(1)
+            quality_preset = str(args.quality)
+        elif args.quality is not None:
+            logger.warn("--quality ignored unless --preset custom is specified")
+
         output_dir = args.output or DEFAULT_EXPORT_DIR
-        converter = Converter(logger)
+        converter = Converter(logger, quality_preset=quality_preset)
         success = converter.convert(
             args.input_dir,
             output_dir,
@@ -3146,8 +3235,21 @@ def main():
         if not deps.check_all(require_ffmpeg=True, require_gamdl=True):
             sys.exit(1)
 
+        # Resolve quality preset
+        quality_preset = args.preset
+        if quality_preset == 'custom':
+            if args.quality is None:
+                logger.error("--preset custom requires --quality parameter (0-9)")
+                sys.exit(1)
+            if not (0 <= args.quality <= 9):
+                logger.error(f"--quality must be between 0-9, got: {args.quality}")
+                sys.exit(1)
+            quality_preset = str(args.quality)
+        elif args.quality is not None:
+            logger.warn("--quality ignored unless --preset custom is specified")
+
         config = ConfigManager(logger=logger)
-        orchestrator = PipelineOrchestrator(logger, deps, config)
+        orchestrator = PipelineOrchestrator(logger, deps, config, quality_preset=quality_preset)
 
         # Determine what to process
         if args.auto:
@@ -3168,7 +3270,8 @@ def main():
                     copy_to_usb=args.copy_to_usb,
                     usb_dir=args.usb_dir,
                     dry_run=args.dry_run,
-                    verbose=args.verbose
+                    verbose=args.verbose,
+                    quality_preset=quality_preset
                 )
 
                 # Collect statistics from this run
@@ -3189,7 +3292,8 @@ def main():
                 copy_to_usb=args.copy_to_usb,
                 usb_dir=args.usb_dir,
                 dry_run=args.dry_run,
-                verbose=args.verbose
+                verbose=args.verbose,
+                quality_preset=quality_preset
             )
             sys.exit(0 if success else 1)
 
