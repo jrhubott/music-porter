@@ -168,7 +168,7 @@ process_playlist() {
         fi
     fi
 
-    run ./ride-command-mp3-export "music/$key/" --output "export/$key" --new-album "$album_name"
+    run ./ride-command-mp3-export "music/$key/" --output "export/$key" --new-album "$album_name" --new-artist "Various"
 
     log "Done processing: $key"
 }
@@ -207,7 +207,7 @@ process_url() {
         fi
     fi
 
-    run ./ride-command-mp3-export "music/$key/" --output "export/$key" --new-album "$album_name"
+    run ./ride-command-mp3-export "music/$key/" --output "export/$key" --new-album "$album_name" --new-artist "Various"
 
     log "Done processing: $key"
 }
