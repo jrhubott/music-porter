@@ -3430,6 +3430,28 @@ def main():
     if args.dry_run:
         logger.info("DRY-RUN MODE: No files will be modified")
 
+    # Check cookie status on startup (informational only, not blocking)
+    cookie_path = getattr(args, 'cookies', 'cookies.txt')
+    cookie_manager = CookieManager(cookie_path, logger)
+    cookie_status = cookie_manager.validate()
+
+    # Display cookie status
+    if cookie_status.valid:
+        logger.ok(f"Cookie status: {cookie_status.reason}")
+    elif cookie_status.exists and cookie_status.has_required_cookie:
+        # Cookie exists but expired - warn but don't block non-download commands
+        logger.warn(f"Cookie status: {cookie_status.reason}")
+        if args.command in ['download', 'pipeline', None]:  # None = interactive menu
+            logger.warn("Downloads will fail until cookies are refreshed")
+    elif cookie_status.exists:
+        logger.warn(f"Cookie status: {cookie_status.reason}")
+        if args.command in ['download', 'pipeline', None]:
+            logger.warn("Downloads will fail - required cookie not found")
+    else:
+        logger.warn(f"Cookie status: {cookie_status.reason}")
+        if args.command in ['download', 'pipeline', None]:
+            logger.warn("Downloads will fail until cookies.txt is created")
+
     # Route to appropriate handlers based on command
     if args.command == 'convert':
         # Convert M4A to MP3
