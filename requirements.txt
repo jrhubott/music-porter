@@ -6,3 +6,6 @@ gamdl>=2.8.0
 
 # Python ID3 tag library for MP3 metadata management
 mutagen>=1.47.0
+
+# FFmpeg Python wrapper for audio conversion
+ffmpeg-python>=0.2.0
