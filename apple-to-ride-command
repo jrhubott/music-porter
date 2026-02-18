@@ -47,6 +47,7 @@ DEFAULT_MUSIC_DIR = "music"
 DEFAULT_EXPORT_DIR = "export"
 DEFAULT_LOG_DIR = "logs"
 DEFAULT_PLAYLISTS_CONF = "playlists.conf"
+DEFAULT_COOKIES = "cookies.txt"
 DEFAULT_USB_DIR = "RZR/Music"
 
 # Excluded USB volumes by OS
@@ -4006,7 +4007,29 @@ def create_parser():
     """Create the argument parser with subcommands."""
     parser = argparse.ArgumentParser(
         prog='apple-to-ride-command',
-        description='Unified Apple Music to Ride Command MP3 converter',
+        description='''Apple Music to Ride Command MP3 Converter
+
+A comprehensive music playlist management and conversion tool that:
+  • Downloads Apple Music playlists using gamdl
+  • Converts M4A to MP3 with configurable quality presets
+  • Preserves metadata with TXXX frame protection
+  • Manages tags with update, restore, and reset operations
+  • Syncs to USB drives with automatic detection
+  • Validates and auto-refreshes Apple Music cookies
+  • Provides interactive menu and pipeline orchestration
+  • Supports dry-run mode for safe previews
+  • Cross-platform: macOS, Linux, and Windows
+''',
+        epilog=f'''Default Paths:
+  Downloads:  {DEFAULT_MUSIC_DIR}/
+  Exports:    {DEFAULT_EXPORT_DIR}/
+  Logs:       {DEFAULT_LOG_DIR}/
+  Config:     {DEFAULT_PLAYLISTS_CONF}
+  Cookies:    {DEFAULT_COOKIES}
+  USB Target: {DEFAULT_USB_DIR}
+
+Use 'apple-to-ride-command <command> --help' for command-specific help.
+''',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
@@ -4173,6 +4196,19 @@ def main():
         else:
             print(f"            ⚠ Downloads will fail until cookies.txt is created")
             logger.file_info("Warning: Downloads will fail until cookies.txt is created")
+
+    # Display default paths
+    print("\n  ── Default Paths ──")
+    print(f"  Downloads:  {DEFAULT_MUSIC_DIR}/")
+    print(f"  Exports:    {DEFAULT_EXPORT_DIR}/")
+    print(f"  Logs:       {DEFAULT_LOG_DIR}/")
+    print(f"  Config:     {DEFAULT_PLAYLISTS_CONF}")
+    print(f"  Cookies:    {DEFAULT_COOKIES}")
+    print(f"  USB Target: {DEFAULT_USB_DIR}")
+    print()  # Blank line after paths
+
+    # Log to file
+    logger.file_info(f"Default paths: downloads={DEFAULT_MUSIC_DIR}, exports={DEFAULT_EXPORT_DIR}, logs={DEFAULT_LOG_DIR}, config={DEFAULT_PLAYLISTS_CONF}, cookies={DEFAULT_COOKIES}, usb={DEFAULT_USB_DIR}")
 
     # Route to appropriate handlers based on command
     if args.command == 'convert':
