@@ -2,6 +2,10 @@
 
 The unified Apple Music to Ride Command MP3 converter combines download, conversion, tag management, and USB sync into a single powerful tool.
 
+## Technical Notes
+
+The tool uses the ffmpeg-python library for audio conversion, which provides a Pythonic API around the system ffmpeg binary. The ffmpeg binary must be installed on your system (typically via `brew install ffmpeg` on macOS). The Python library is automatically installed when running the tool for the first time.
+
 ## Quick Start
 
 ### Interactive Menu (Recommended)

@@ -56,9 +56,16 @@ Successfully created a unified Python script (`apple-to-ride-command`) that comb
 
 ### Conversion Module (Section 6)
 
+#### Audio Conversion
+- **Library**: ffmpeg-python >= 0.2.0
+- **System Requirement**: ffmpeg binary (not bundled)
+- **Quality Settings**: VBR encoding with libmp3lame, quality level 2
+- **Error Handling**: Catches ffmpeg.Error exceptions, extracts stderr for detailed error messages
+- **Silent Mode**: Uses quiet=True to suppress output during batch operations
+
 #### Converter Class
 - Recursive M4A file discovery
-- FFmpeg-based conversion (libmp3lame, quality: -q:a 2)
+- FFmpeg-based conversion via ffmpeg-python library
 - Flat output structure: "Artist - Title.mp3"
 - Filename sanitization (removes invalid characters)
 - Immediate tag application after conversion

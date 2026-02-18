@@ -194,9 +194,10 @@ The codebase uses a "hard gate" protection system for original metadata:
 
 ### Prerequisites
 - Python 3.8+ (uses Python virtual environment)
-- ffmpeg (for audio conversion)
+- ffmpeg (for audio conversion, system binary required)
 - gamdl (Apple Music downloader, installed via pip in venv)
 - mutagen (Python ID3 tag library, auto-installed by scripts)
+- ffmpeg-python (Python wrapper for FFmpeg, auto-installed by scripts)
 
 ### Initial Setup
 ```bash
@@ -287,6 +288,13 @@ pip install -r requirements.txt
 - Comprehensive logging to timestamped log files
 - Summary statistics printed at completion (converted, skipped, errors)
 - USB drive selection with auto-detection and excluded volume list
+
+### FFmpeg Integration
+- Uses ffmpeg-python library for cleaner API and better error handling
+- Still requires system ffmpeg binary (ffmpeg-python is a wrapper, not a replacement)
+- Quality setting: VBR mode with libmp3lame, quality level 2 (high quality)
+- Error handling: Catches ffmpeg.Error, logs details, continues processing remaining files
+- Silent operation: Uses quiet=True to suppress ffmpeg output during batch processing
 
 ## Configuration
 
