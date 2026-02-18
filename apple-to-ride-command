@@ -546,6 +546,25 @@ def _strip_artist_prefix(title, artist):
     return title
 
 
+def sanitize_filename(name):
+    """Remove invalid filename characters."""
+    invalid_chars = r'\/:*?"<>|'
+    return "".join(c for c in name if c not in invalid_chars)
+
+
+def read_m4a_tags(input_file):
+    """
+    Read title, artist, and album tags from an M4A file.
+    Returns (title, artist, album) tuple with 'Unknown *' defaults.
+    """
+    from mutagen.mp4 import MP4
+    m4a = MP4(str(input_file))
+    title  = str(m4a.tags.get(M4A_TAG_TITLE, ['Unknown Title'])[0])
+    artist = str(m4a.tags.get(M4A_TAG_ARTIST, ['Unknown Artist'])[0])
+    album  = str(m4a.tags.get(M4A_TAG_ALBUM, ['Unknown Album'])[0])
+    return title, artist, album
+
+
 def update_title_tag(tags, cleanup_options, logger=None, dry_run=False, verbose=False):
     """
     Update the TIT2 (Title) tag to 'Artist - Title' format.
@@ -999,7 +1018,6 @@ class TaggerManager:
 
         ⚠️ WARNING: This permanently overwrites TXXX:Original* frames!
         """
-        from mutagen.mp4 import MP4
         from mutagen.id3 import ID3, TIT2, TPE1, TALB, TXXX, ID3NoHeaderError
 
         start_time = time.time()
@@ -1059,10 +1077,7 @@ class TaggerManager:
 
             try:
                 # Read M4A tags
-                m4a = MP4(str(input_file))
-                title  = str(m4a.tags.get(M4A_TAG_TITLE, ['Unknown Title'])[0])
-                artist = str(m4a.tags.get(M4A_TAG_ARTIST, ['Unknown Artist'])[0])
-                album  = str(m4a.tags.get(M4A_TAG_ALBUM, ['Unknown Album'])[0])
+                title, artist, album = read_m4a_tags(input_file)
 
                 # Find matching MP3
                 safe_title = self._sanitize_filename(title)
@@ -1177,8 +1192,7 @@ class TaggerManager:
 
     def _sanitize_filename(self, name):
         """Remove invalid filename characters."""
-        invalid_chars = r'\/:*?"<>|'
-        return "".join(c for c in name if c not in invalid_chars)
+        return sanitize_filename(name)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1246,8 +1260,7 @@ class Converter:
 
     def _sanitize_filename(self, name):
         """Remove invalid filename characters."""
-        invalid_chars = r'\/:*?"<>|'
-        return "".join(c for c in name if c not in invalid_chars)
+        return sanitize_filename(name)
 
     def convert(self, input_dir, output_dir, force=False, dry_run=False, verbose=False):
         """
@@ -1255,7 +1268,6 @@ class Converter:
         using ffmpeg, and save all output files flat into output_dir.
         Tags are written immediately after each conversion.
         """
-        from mutagen.mp4 import MP4
         from mutagen.id3 import ID3, TIT2, TPE1, TALB, ID3NoHeaderError
 
         start_time = time.time()
@@ -1294,10 +1306,7 @@ class Converter:
 
             try:
                 # Read M4A tags
-                m4a = MP4(str(input_file))
-                title  = str(m4a.tags.get(M4A_TAG_TITLE, ['Unknown Title'])[0])
-                artist = str(m4a.tags.get(M4A_TAG_ARTIST, ['Unknown Artist'])[0])
-                album  = str(m4a.tags.get(M4A_TAG_ALBUM, ['Unknown Album'])[0])
+                title, artist, album = read_m4a_tags(input_file)
 
                 # Create output filename
                 safe_title = self._sanitize_filename(title)
@@ -2927,7 +2936,7 @@ class SummaryManager:
 
     def _check_tag_integrity(self):
         """Check all files for TXXX protection tags."""
-        from mutagen.id3 import ID3, TXXX, ID3NoHeaderError
+        from mutagen.id3 import ID3, ID3NoHeaderError
 
         for playlist in self.stats.playlists:
             playlist_path = Path(playlist.path)
@@ -2941,9 +2950,9 @@ class SummaryManager:
                     tags = ID3(mp3_file)
 
                     # Check for TXXX protection frames
-                    has_original_title = self._txxx_exists(tags, TXXX_ORIGINAL_TITLE, TXXX)
-                    has_original_artist = self._txxx_exists(tags, TXXX_ORIGINAL_ARTIST, TXXX)
-                    has_original_album = self._txxx_exists(tags, TXXX_ORIGINAL_ALBUM, TXXX)
+                    has_original_title = _txxx_exists(tags, TXXX_ORIGINAL_TITLE)
+                    has_original_artist = _txxx_exists(tags, TXXX_ORIGINAL_ARTIST)
+                    has_original_album = _txxx_exists(tags, TXXX_ORIGINAL_ALBUM)
 
                     if has_original_title and has_original_artist and has_original_album:
                         playlist.sample_files_with_tags += 1
@@ -2961,12 +2970,6 @@ class SummaryManager:
         # Calculate aggregate sample size
         self.stats.sample_size = sum(p.sample_files_checked for p in self.stats.playlists)
 
-    def _txxx_exists(self, tags, description, TXXX):
-        """Check if a TXXX frame with given description exists."""
-        for frame in tags.values():
-            if isinstance(frame, TXXX) and frame.desc == description:
-                return True
-        return False
 
     def _print_summary(self, export_dir):
         """Print default balanced summary."""
@@ -4012,6 +4015,26 @@ class InteractiveMenu:
 # Section 10: CLI Argument Parsing
 # ══════════════════════════════════════════════════════════════════
 
+def resolve_quality_preset(args, logger):
+    """
+    Resolve quality preset from CLI args.
+    Validates --preset custom + --quality combinations.
+    Returns the resolved preset string.
+    """
+    quality_preset = args.preset
+    if quality_preset == 'custom':
+        if args.quality is None:
+            logger.error("--preset custom requires --quality parameter (0-9)")
+            sys.exit(1)
+        if not (0 <= args.quality <= 9):
+            logger.error(f"--quality must be between 0-9, got: {args.quality}")
+            sys.exit(1)
+        quality_preset = str(args.quality)
+    elif args.quality is not None:
+        logger.warn("--quality ignored unless --preset custom is specified")
+    return quality_preset
+
+
 def create_parser():
     """Create the argument parser with subcommands."""
     parser = argparse.ArgumentParser(
@@ -4227,18 +4250,7 @@ def main():
         if not deps.check_all(require_ffmpeg=True, require_gamdl=False):
             sys.exit(1)
 
-        # Resolve quality preset
-        quality_preset = args.preset
-        if quality_preset == 'custom':
-            if args.quality is None:
-                logger.error("--preset custom requires --quality parameter (0-9)")
-                sys.exit(1)
-            if not (0 <= args.quality <= 9):
-                logger.error(f"--quality must be between 0-9, got: {args.quality}")
-                sys.exit(1)
-            quality_preset = str(args.quality)
-        elif args.quality is not None:
-            logger.warn("--quality ignored unless --preset custom is specified")
+        quality_preset = resolve_quality_preset(args, logger)
 
         output_dir = args.output or DEFAULT_EXPORT_DIR
         converter = Converter(logger, quality_preset=quality_preset)
@@ -4384,18 +4396,7 @@ def main():
         if not deps.check_all(require_ffmpeg=True, require_gamdl=True):
             sys.exit(1)
 
-        # Resolve quality preset
-        quality_preset = args.preset
-        if quality_preset == 'custom':
-            if args.quality is None:
-                logger.error("--preset custom requires --quality parameter (0-9)")
-                sys.exit(1)
-            if not (0 <= args.quality <= 9):
-                logger.error(f"--quality must be between 0-9, got: {args.quality}")
-                sys.exit(1)
-            quality_preset = str(args.quality)
-        elif args.quality is not None:
-            logger.warn("--quality ignored unless --preset custom is specified")
+        quality_preset = resolve_quality_preset(args, logger)
 
         config = ConfigManager(logger=logger)
         orchestrator = PipelineOrchestrator(logger, deps, config,
