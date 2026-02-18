@@ -10,6 +10,7 @@ import subprocess
 import os
 import argparse
 import time
+import shutil
 from pathlib import Path
 from datetime import datetime
 import ffmpeg
@@ -1050,6 +1051,7 @@ class USBSyncStatistics:
     def __init__(self):
         self.files_found = 0         # Total files to copy
         self.files_copied = 0        # Successfully copied
+        self.files_skipped = 0       # Files skipped (unchanged)
         self.files_failed = 0        # Copy failures
 
 
@@ -1494,9 +1496,42 @@ class USBManager:
             self.logger.error("Invalid input")
             return None
 
+    def _should_copy_file(self, src_path, dst_path):
+        """
+        Determine if file needs copying (incremental logic).
+        Returns True if file should be copied, False if up-to-date.
+
+        Args:
+            src_path: Path object for source file
+            dst_path: Path object for destination file
+
+        Returns:
+            bool: True if file should be copied
+        """
+        # If destination doesn't exist, must copy
+        if not dst_path.exists():
+            return True
+
+        # Compare file size
+        src_size = src_path.stat().st_size
+        dst_size = dst_path.stat().st_size
+        if src_size != dst_size:
+            return True
+
+        # Compare modification time (source newer than dest)
+        # Use 2-second tolerance for FAT32/exFAT timestamp precision
+        src_mtime = src_path.stat().st_mtime
+        dst_mtime = dst_path.stat().st_mtime
+        if src_mtime > dst_mtime + 2:
+            return True
+
+        # File is up-to-date, skip
+        return False
+
     def sync_to_usb(self, source_dir, usb_dir=DEFAULT_USB_DIR, dry_run=False):
         """
-        Copy files from source_dir to USB drive using rsync.
+        Copy files from source_dir to USB drive with incremental sync.
+        Only copies new or modified files, skips unchanged files.
         Returns (success boolean, USBSyncStatistics).
         """
         start_time = time.time()
@@ -1507,15 +1542,19 @@ class USBManager:
             self.logger.error(f"Source directory does not exist: {source_path}")
             return False, stats
 
-        # Count files to copy
+        # Collect all .mp3 files to process
+        mp3_files = []
         if source_path.is_file():
             if source_path.suffix == '.mp3':
-                stats.files_found = 1
+                mp3_files.append(source_path)
         else:
             for root, dirs, files in os.walk(source_path):
-                stats.files_found += len([f for f in files if f.endswith('.mp3')])
+                for file in files:
+                    if file.endswith('.mp3'):
+                        mp3_files.append(Path(root) / file)
 
-        self.logger.info(f"Files to copy: {stats.files_found}")
+        stats.files_found = len(mp3_files)
+        self.logger.info(f"Files to process: {stats.files_found}")
 
         # Select USB drive
         volume = self.select_usb_drive()
@@ -1524,13 +1563,22 @@ class USBManager:
 
         dest = Path('/Volumes') / volume / usb_dir
 
-        self.logger.info(f"Copying {source_path} to {dest}")
+        self.logger.info(f"Syncing {source_path} to {dest}")
 
         if dry_run:
             self.logger.dry_run(f"Would create directory: {dest}")
-            self.logger.dry_run(f"Would rsync: {source_path}/ → {dest}/")
+            # Simulate incremental check
+            for src_file in mp3_files:
+                rel_path = src_file.relative_to(source_path) if source_path.is_dir() else src_file.name
+                dst_file = dest / rel_path
+                if self._should_copy_file(src_file, dst_file):
+                    self.logger.dry_run(f"Would copy: {src_file.name}")
+                    stats.files_copied += 1
+                else:
+                    if self.logger.verbose:
+                        self.logger.dry_run(f"Would skip (unchanged): {src_file.name}")
+                    stats.files_skipped += 1
             self.logger.dry_run("Would prompt to eject USB drive after copy")
-            stats.files_copied = stats.files_found
             duration = time.time() - start_time
             self._print_usb_summary(str(source_path), str(dest), stats, duration)
             return True, stats
@@ -1545,33 +1593,49 @@ class USBManager:
             self._print_usb_summary(str(source_path), str(dest), stats, duration)
             return False, stats
 
-        # Run rsync
-        cmd = [
-            "rsync", "-av", "--progress",
-            str(source_path) + "/",
-            str(dest) + "/"
-        ]
+        # Copy files with incremental check
+        for src_file in mp3_files:
+            try:
+                # Preserve directory structure relative to source
+                if source_path.is_dir():
+                    rel_path = src_file.relative_to(source_path)
+                else:
+                    rel_path = src_file.name
+                dst_file = dest / rel_path
 
-        try:
-            self.logger.info(f"Running: {' '.join(cmd)}")
-            result = subprocess.run(cmd, check=True)
-            self.logger.ok("Copy complete")
-            stats.files_copied = stats.files_found
-            duration = time.time() - start_time
-            self._print_usb_summary(str(source_path), str(dest), stats, duration)
+                # Create parent directory if needed
+                dst_file.parent.mkdir(parents=True, exist_ok=True)
 
-            # Prompt to eject USB drive after successful copy
-            if not dry_run:
-                self._prompt_and_eject_usb(volume)
-                # Note: eject operation is non-critical, doesn't affect return status
+                # Incremental check
+                if self._should_copy_file(src_file, dst_file):
+                    shutil.copy2(src_file, dst_file)  # Preserves timestamps
+                    stats.files_copied += 1
+                    self.logger.info(f"Copied: {src_file.name}")
+                else:
+                    stats.files_skipped += 1
+                    if self.logger.verbose:
+                        self.logger.info(f"Skipped (unchanged): {src_file.name}")
+                    else:
+                        # Only log every 10th skip to avoid spam
+                        if stats.files_skipped % 10 == 0:
+                            self.logger.info(f"Skipped {stats.files_skipped} unchanged files...")
 
-            return True, stats
-        except subprocess.CalledProcessError as e:
-            self.logger.error(f"rsync failed: {e}")
-            stats.files_failed = stats.files_found
-            duration = time.time() - start_time
-            self._print_usb_summary(str(source_path), str(dest), stats, duration)
-            return False, stats
+            except Exception as e:
+                stats.files_failed += 1
+                self.logger.error(f"Failed to copy {src_file.name}: {e}")
+
+        # Log summary
+        self.logger.ok("Sync complete")
+        duration = time.time() - start_time
+        self._print_usb_summary(str(source_path), str(dest), stats, duration)
+
+        # Prompt to eject USB drive after successful copy
+        if not dry_run:
+            self._prompt_and_eject_usb(volume)
+            # Note: eject operation is non-critical, doesn't affect return status
+
+        # Success if no failures (skipped files are OK)
+        return stats.files_failed == 0, stats
 
     def _print_usb_summary(self, source, destination, stats, duration):
         """Print formatted summary after USB sync."""
@@ -1588,6 +1652,7 @@ class USBManager:
         print("─" * 60)
         print(f"  Files found:             {stats.files_found}")
         print(f"  Files copied:            {stats.files_copied}")
+        print(f"  Files skipped:           {stats.files_skipped}")
         print(f"  Files failed:            {stats.files_failed}")
         print("─" * 60)
         status_emoji = "✅" if stats.files_failed == 0 else "❌"
