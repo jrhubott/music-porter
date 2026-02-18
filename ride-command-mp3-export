@@ -17,8 +17,8 @@ Usage:
   # Convert and update tags in one step:
   ./ride-command-mp3-export.py /path/to/music --output /path/to/output --new-album "New Album Name"
 
-  # Rescan source .m4a files and reset MP3 tags:
-  ./ride-command-mp3-export.py /path/to/music --output /path/to/output --rescan
+  # Reset tags from source .m4a files:
+  ./ride-command-mp3-export.py /path/to/music --output /path/to/output --reset-tags-from-input
 
   # Restore original tags:
   ./ride-command-mp3-export.py /path/to/music --restore-all
@@ -230,13 +230,26 @@ def _apply_cleanup(tags, filepath, cleanup_options):
 
     # ── Remove duplicate frames ────────────────────────────────────
     if cleanup_options.get("remove_duplicates"):
+        from mutagen.id3 import TXXX
         seen = {}
         for key in list(tags.keys()):
-            base = key.split(":")[0]
-            if base in seen:
-                del tags[key]
+            frame = tags[key]
+
+            # Special handling for TXXX frames: track by description, not base key
+            if isinstance(frame, TXXX):
+                # Use full TXXX:desc as the unique identifier
+                unique_key = f"TXXX:{frame.desc}"
+                if unique_key in seen:
+                    del tags[key]
+                else:
+                    seen[unique_key] = True
             else:
-                seen[base] = True
+                # For all other frame types, use base key as before
+                base = key.split(":")[0]
+                if base in seen:
+                    del tags[key]
+                else:
+                    seen[base] = True
 
     tags.save(filepath, v2_version=v2_version, v1=v1)
 
@@ -329,6 +342,20 @@ def convert_m4a_to_mp3(input_dir, output_dir,
             output_path     = os.path.join(output_dir, output_filename)
             already_exists  = os.path.isfile(output_path)
 
+            # ── Preserve existing TXXX frames before ffmpeg overwrites file ──
+            preserved_txxx = {}
+            if already_exists and force:
+                try:
+                    existing_tags = ID3(output_path)
+                    # Extract all Original* TXXX frames to preserve them
+                    preserved_txxx['OriginalTitle'] = _get_txxx(existing_tags, 'OriginalTitle')
+                    preserved_txxx['OriginalArtist'] = _get_txxx(existing_tags, 'OriginalArtist')
+                    preserved_txxx['OriginalAlbum'] = _get_txxx(existing_tags, 'OriginalAlbum')
+                    if any(preserved_txxx.values()):
+                        print(f"  [INFO] Preserving existing original tags from '{output_filename}'")
+                except ID3NoHeaderError:
+                    pass  # No existing tags to preserve
+
             if already_exists and not force:
                 print(f"  [SKIP] Already exists: '{output_filename}'")
                 skipped += 1
@@ -375,6 +402,18 @@ def convert_m4a_to_mp3(input_dir, output_dir,
             tags["TIT2"] = TIT2(encoding=3, text=title)
             tags["TPE1"] = TPE1(encoding=3, text=artist)
             tags["TALB"] = TALB(encoding=3, text=album)
+
+            # ── Restore preserved TXXX frames BEFORE save_original_tag() runs ──
+            # This ensures the hard gate protection works correctly on re-runs
+            if preserved_txxx.get('OriginalTitle'):
+                from mutagen.id3 import TXXX
+                tags.add(TXXX(encoding=3, desc='OriginalTitle', text=preserved_txxx['OriginalTitle']))
+            if preserved_txxx.get('OriginalArtist'):
+                from mutagen.id3 import TXXX
+                tags.add(TXXX(encoding=3, desc='OriginalArtist', text=preserved_txxx['OriginalArtist']))
+            if preserved_txxx.get('OriginalAlbum'):
+                from mutagen.id3 import TXXX
+                tags.add(TXXX(encoding=3, desc='OriginalAlbum', text=preserved_txxx['OriginalAlbum']))
 
             # ── Store originals FIRST — hard gate prevents overwrite ──
             r_title = save_original_tag(
@@ -915,7 +954,7 @@ def rescan_from_source(input_dir, output_dir, cleanup_options=None,
     for input_path in m4a_files:
         count += 1
         display_name = os.path.relpath(input_path, input_dir)
-        print(f"\n[{count}/{total}] Rescanning: '{display_name}'")
+        print(f"\n[{count}/{total}] Resetting tags from source: '{display_name}'")
 
         try:
             m4a = MP4(input_path)
@@ -984,7 +1023,7 @@ def rescan_from_source(input_dir, output_dir, cleanup_options=None,
             _apply_cleanup(tags, mp3_path, cleanup_options)
 
             if verbose:
-                print(f"  [VERBOSE] Tags AFTER rescan:")
+                print(f"  [VERBOSE] Tags AFTER reset:")
                 print(f"            → Title:          '{str(tags['TIT2'])}'")
                 print(f"            → Artist:         '{artist}'")
                 print(f"            → Album:          '{album}'")
@@ -996,7 +1035,7 @@ def rescan_from_source(input_dir, output_dir, cleanup_options=None,
             updated += 1
 
         except Exception as e:
-            print(f"  [ERROR] Failed to rescan '{display_name}': {e}")
+            print(f"  [ERROR] Failed to reset tags for '{display_name}': {e}")
             errors += 1
 
     duration = time.time() - start_time
@@ -1064,8 +1103,8 @@ RESTORE OPTIONS:
   --restore-title           Restore original title from TXXX:OriginalTitle
   --restore-artist          Restore original artist from TXXX:OriginalArtist
 
-RESCAN OPTIONS:
-  --rescan                  Re-read tags from source .m4a files and reset
+RESET OPTIONS:
+  --reset-tags-from-input   Re-read tags from source .m4a files and reset
                             all MP3 tags and TXXX:Original* protection tags.
                             Requires input_dir and --output.
                             Prompts for confirmation before running.
@@ -1087,8 +1126,8 @@ EXAMPLES:
   # Convert and update tags in one step:
   ./ride-command-mp3-export.py music/Pop_Workout --output Pop_Workout --new-album "Pop Workout"
 
-  # Rescan source files and reset all MP3 tags:
-  ./ride-command-mp3-export.py /Users/jason/Music --output /Users/jason/MP3s --rescan
+  # Reset tags from source files:
+  ./ride-command-mp3-export.py /Users/jason/Music --output /Users/jason/MP3s --reset-tags-from-input
 
   # Restore original tags:
   ./ride-command-mp3-export.py --output /Users/jason/MP3s --restore-all
@@ -1114,7 +1153,7 @@ def parse_args():
     parser.add_argument("--restore-album",    action="store_true")
     parser.add_argument("--restore-title",    action="store_true")
     parser.add_argument("--restore-artist",   action="store_true")
-    parser.add_argument("--rescan",           action="store_true")
+    parser.add_argument("--reset-tags-from-input", dest="reset_tags_from_input", action="store_true")
     parser.add_argument("--keep-id3v1",       action="store_true")
     parser.add_argument("--keep-id3v24",      action="store_true")
     parser.add_argument("--keep-duplicates",  action="store_true")
@@ -1157,8 +1196,8 @@ def main():
         else os.path.join(os.getcwd(), "converted_mp3")
     )
 
-    # ── Rescan mode ───────────────────────────────────────────────
-    if args.rescan:
+    # ── Reset tags from input mode ────────────────────────────────
+    if args.reset_tags_from_input:
         input_dir = (
             os.path.abspath(args.input_dir)
             if args.input_dir
@@ -1170,7 +1209,7 @@ def main():
 
         # ── Confirmation prompt (skipped for --dry-run) ───────────
         if not dry_run:
-            print(f"\n⚠️  WARNING: --rescan will permanently overwrite all")
+            print(f"\n⚠️  WARNING: --reset-tags-from-input will permanently overwrite all")
             print(f"   TXXX:Original* protection tags in '{output_dir}'")
             print(f"   with values read fresh from '{input_dir}'.")
             print(f"   This cannot be undone.\n")
@@ -1178,7 +1217,7 @@ def main():
                 "   Type 'yes' to continue, anything else to cancel: "
             ).strip().lower()
             if confirm != "yes":
-                print("\n[CANCELLED] Rescan aborted. No files were modified.")
+                print("\n[CANCELLED] Reset aborted. No files were modified.")
                 sys.exit(0)
             print()
 
