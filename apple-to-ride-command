@@ -982,7 +982,6 @@ class Converter:
             "remove_duplicates": True
         }
         self.stats = ConversionStatistics()
-        self.tag_stats = TagStatistics()
 
     def _sanitize_filename(self, name):
         """Remove invalid filename characters."""
@@ -1048,19 +1047,6 @@ class Converter:
                 output_file = output_path / output_filename
                 already_exists = output_file.exists()
 
-                # ── Preserve existing TXXX frames before ffmpeg overwrites file ──
-                preserved_txxx = {}
-                if already_exists and force:
-                    try:
-                        existing_tags = ID3(str(output_file))
-                        preserved_txxx['OriginalTitle'] = _get_txxx(existing_tags, 'OriginalTitle')
-                        preserved_txxx['OriginalArtist'] = _get_txxx(existing_tags, 'OriginalArtist')
-                        preserved_txxx['OriginalAlbum'] = _get_txxx(existing_tags, 'OriginalAlbum')
-                        if any(preserved_txxx.values()):
-                            self.logger.info(f"Preserving existing original tags from '{output_filename}'")
-                    except ID3NoHeaderError:
-                        pass  # No existing tags to preserve
-
                 if already_exists and not force:
                     self.logger.skip(f"Already exists: '{output_filename}'")
                     self.stats.skipped += 1
@@ -1082,7 +1068,7 @@ class Converter:
                     else:
                         self.logger.dry_run(f"Would convert:   '{display_name}'")
                     self.logger.dry_run(f"  → Output:     '{output_filename}'")
-                    self.logger.dry_run(f"  → Title:      '{artist} - {title}'")
+                    self.logger.dry_run(f"  → Title:      '{title}'")
                     self.logger.dry_run(f"  → Artist:     '{artist}'")
                     self.logger.dry_run(f"  → Album:      '{album}'")
                     continue
@@ -1100,7 +1086,7 @@ class Converter:
                     error_msg = e.stderr.decode('utf-8') if e.stderr else str(e)
                     raise Exception(f"FFmpeg conversion failed: {error_msg}")
 
-                # Write ID3 tags
+                # Write basic ID3 tags from source M4A (no modifications)
                 try:
                     tags = ID3(str(output_file))
                 except ID3NoHeaderError:
@@ -1110,68 +1096,21 @@ class Converter:
                 tags["TPE1"] = TPE1(encoding=3, text=artist)
                 tags["TALB"] = TALB(encoding=3, text=album)
 
-                # Track that artist and album tags were set
-                self.tag_stats.artist_updated += 1
-                self.tag_stats.album_updated += 1
-
-                # ── Restore preserved TXXX frames BEFORE save_original_tag() runs ──
-                if preserved_txxx.get('OriginalTitle'):
-                    from mutagen.id3 import TXXX
-                    tags.add(TXXX(encoding=3, desc='OriginalTitle', text=preserved_txxx['OriginalTitle']))
-                if preserved_txxx.get('OriginalArtist'):
-                    from mutagen.id3 import TXXX
-                    tags.add(TXXX(encoding=3, desc='OriginalArtist', text=preserved_txxx['OriginalArtist']))
-                if preserved_txxx.get('OriginalAlbum'):
-                    from mutagen.id3 import TXXX
-                    tags.add(TXXX(encoding=3, desc='OriginalAlbum', text=preserved_txxx['OriginalAlbum']))
-
-                # ── Store originals FIRST — hard gate prevents overwrite ──
-                r_title, title_was_stored = save_original_tag(
-                    tags, "TXXX:OriginalTitle", "OriginalTitle",
-                    title, "title", self.logger)
-                r_artist, artist_was_stored = save_original_tag(
-                    tags, "TXXX:OriginalArtist", "OriginalArtist",
-                    artist, "artist", self.logger)
-                r_album, album_was_stored = save_original_tag(
-                    tags, "TXXX:OriginalAlbum", "OriginalAlbum",
-                    album, "album", self.logger)
-
-                if title_was_stored:
-                    self.tag_stats.title_stored += 1
-                else:
-                    self.tag_stats.title_protected += 1
-                if artist_was_stored:
-                    self.tag_stats.artist_stored += 1
-                else:
-                    self.tag_stats.artist_protected += 1
-                if album_was_stored:
-                    self.tag_stats.album_stored += 1
-                else:
-                    self.tag_stats.album_protected += 1
-
-                # ── Update Title AFTER originals are safely stored ────
-                if update_title_tag(tags, self.cleanup_options,
-                                   self.logger, dry_run=dry_run, verbose=verbose):
-                    self.tag_stats.title_updated += 1
-
-                _apply_cleanup(tags, str(output_file), self.cleanup_options)
+                # Save with ID3v2.3 for compatibility, remove ID3v1
+                tags.save(str(output_file), v2_version=3, v1=0)
 
                 if verbose:
-                    final_title = str(tags["TIT2"]) if "TIT2" in tags else ""
-                    self.logger.debug(f"Tags AFTER conversion:")
-                    self.logger.debug(f"  → Title:          '{final_title}'")
-                    self.logger.debug(f"  → Artist:         '{artist}'")
-                    self.logger.debug(f"  → Album:          '{album}'")
-                    self.logger.debug(f"  → OriginalTitle:  '{title}'")
-                    self.logger.debug(f"  → OriginalArtist: '{artist}'")
-                    self.logger.debug(f"  → OriginalAlbum:  '{album}'")
-                    self.logger.debug(f"Output size:  {output_file.stat().st_size / 1024:.1f} KB")
+                    self.logger.debug(f"Tags AFTER conversion (copied from source):")
+                    self.logger.debug(f"  → Title:  '{title}'")
+                    self.logger.debug(f"  → Artist: '{artist}'")
+                    self.logger.debug(f"  → Album:  '{album}'")
+                    self.logger.debug(f"Output size: {output_file.stat().st_size / 1024:.1f} KB")
 
                 if already_exists and force:
-                    self.logger.ok(f"Overwritten and tagged → '{output_filename}'")
+                    self.logger.ok(f"Overwritten → '{output_filename}'")
                     self.stats.overwritten += 1
                 else:
-                    self.logger.ok(f"Converted and tagged → '{output_filename}'")
+                    self.logger.ok(f"Converted → '{output_filename}'")
                     self.stats.converted += 1
 
             except Exception as e:
@@ -1203,15 +1142,7 @@ class Converter:
         print(f"{'─' * 60}")
         print(f"  TAGGING")
         print(f"{'─' * 60}")
-        print(f"  Title updated:           {self.tag_stats.title_updated}")
-        print(f"  Album updated:           {self.tag_stats.album_updated}")
-        print(f"  Artist updated:          {self.tag_stats.artist_updated}")
-        print(f"  OriginalTitle stored:    {self.tag_stats.title_stored}")
-        print(f"  OriginalArtist stored:   {self.tag_stats.artist_stored}")
-        print(f"  OriginalAlbum stored:    {self.tag_stats.album_stored}")
-        print(f"  OriginalTitle protected: {self.tag_stats.title_protected}")
-        print(f"  OriginalArtist protected:{self.tag_stats.artist_protected}")
-        print(f"  OriginalAlbum protected: {self.tag_stats.album_protected}")
+        print(f"  Tags copied from source: Title, Artist, Album")
         print(f"{'─' * 60}")
         if self.stats.errors > 0:
             print(f"  Status:                  ⚠️  Completed with errors")
@@ -1501,6 +1432,8 @@ class PipelineStatistics:
 
         # Tagging stats
         self.tagging_stats = None
+        self.tagging_album = None
+        self.tagging_artist = None
 
         # USB sync stats
         self.usb_success = False
@@ -1685,6 +1618,8 @@ class PipelineOrchestrator:
         if success:
             self.stats.stages_completed.append("tag")
             self.stats.tagging_stats = tagger.stats
+            self.stats.tagging_album = self.stats.playlist_name
+            self.stats.tagging_artist = "Various"
         else:
             self.stats.stages_failed.append("tag")
             self.logger.error("Tagging stage failed")
@@ -1860,6 +1795,10 @@ class PipelineOrchestrator:
             print(f"  TAGGING STAGE")
             print(f"{'─' * 70}")
             s = self.stats.tagging_stats
+            if self.stats.tagging_album:
+                print(f"  Album set to:            {self.stats.tagging_album}")
+            if self.stats.tagging_artist:
+                print(f"  Artist set to:           {self.stats.tagging_artist}")
             print(f"  Title updated:           {s.title_updated}")
             print(f"  Album updated:           {s.album_updated}")
             print(f"  Artist updated:          {s.artist_updated}")
