@@ -1842,6 +1842,44 @@ class CookieManager:
 
         return browsers
 
+    def _install_selenium(self):
+        """
+        Attempt to install selenium and webdriver-manager.
+        Returns True if successful, False otherwise.
+        """
+        import subprocess
+        import sys
+
+        self.logger.info("Selenium is required for automatic cookie refresh")
+        self.logger.info("This will install: selenium, webdriver-manager")
+
+        try:
+            response = input("Install selenium now? [Y/n] ").strip().lower()
+            if response not in ['', 'y', 'yes']:
+                self.logger.info("Installation cancelled")
+                return False
+
+            self.logger.info("Installing selenium and webdriver-manager...")
+
+            # Use the same python that's running this script
+            cmd = [sys.executable, '-m', 'pip', 'install', 'selenium', 'webdriver-manager']
+
+            result = subprocess.run(cmd, capture_output=True, text=True)
+
+            if result.returncode == 0:
+                self.logger.ok("Successfully installed selenium and webdriver-manager")
+                return True
+            else:
+                self.logger.error(f"Installation failed: {result.stderr}")
+                return False
+
+        except KeyboardInterrupt:
+            print("\n\nInstallation cancelled by user")
+            return False
+        except Exception as e:
+            self.logger.error(f"Failed to install selenium: {e}")
+            return False
+
     def _extract_with_selenium(self):
         """
         Extract cookies using Selenium WebDriver.
@@ -1859,8 +1897,24 @@ class CookieManager:
             from selenium.webdriver.support import expected_conditions as EC
             from selenium.common.exceptions import TimeoutException, WebDriverException
         except ImportError:
-            self.logger.error("Selenium not installed. Install with: pip install selenium webdriver-manager")
-            return None
+            self.logger.error("Selenium not installed")
+
+            # Offer to install it
+            if self._install_selenium():
+                # Try importing again after installation
+                try:
+                    from selenium import webdriver
+                    from selenium.webdriver.common.by import By
+                    from selenium.webdriver.support.ui import WebDriverWait
+                    from selenium.webdriver.support import expected_conditions as EC
+                    from selenium.common.exceptions import TimeoutException, WebDriverException
+                    self.logger.ok("Selenium loaded successfully")
+                except ImportError as e:
+                    self.logger.error(f"Still cannot import selenium: {e}")
+                    return None
+            else:
+                self.logger.info("Manual installation: pip install selenium webdriver-manager")
+                return None
 
         # Detect browsers
         default_browser = self._detect_default_browser()
