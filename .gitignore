@@ -1,0 +1,7 @@
+cookies.txt
+__pycache__/
+export/
+gamdl_temp_*/
+logs/
+music/
+.DS_Store
