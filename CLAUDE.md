@@ -303,6 +303,7 @@ VERSION = "1.1.0"
 **When merging to main:**
 - Update to clean release version (remove branch name)
 - Increment version number according to semantic versioning
+- **Create a git tag** for the new version: `git tag v1.2.0`
 - Examples:
   - `1.1.0-cookie-management` → `1.2.0` (new feature)
   - `1.1.1-bugfix-tag-restoration` → `1.1.1` (bug fix)
@@ -315,7 +316,7 @@ VERSION = "1.1.0"
   - "Current version is 1.2.1. Should I bump to 1.2.2 for this bug fix? [Y/n]"
   - "Current version is 1.2.0. Should I bump to 1.3.0 for this new feature? [Y/n]"
   - "Current version is 1.2.0. This is just documentation. Skip version bump? [Y/n]"
-- After user confirms, update VERSION and commit
+- After user confirms, update VERSION, commit, and **create a git tag** for the new version
 - Never assume - always ask!
 
 **Semantic Versioning (MAJOR.MINOR.PATCH):**
@@ -344,6 +345,9 @@ git merge feature/cookie-management
 # In apple-to-ride-command line 44:
 VERSION = "1.2.0"  # MINOR bump for new feature
 git commit -m "Bump version to 1.2.0 for cookie management feature"
+
+# Tag the release
+git tag v1.2.0
 ```
 
 **Benefits:**
