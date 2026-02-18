@@ -198,24 +198,49 @@ class DependencyChecker:
             self.logger.warn("No virtual environment detected")
             self.venv_python = sys.executable
 
-    def check_mutagen(self):
-        """Check if mutagen is installed, install if needed."""
+    def check_python_packages(self):
+        """Check if Python packages are installed, install from requirements.txt if needed."""
+        # Check if mutagen is available
         try:
             import mutagen
             self.logger.info(f"mutagen {mutagen.version_string} already installed")
-            return True
+            mutagen_installed = True
         except ImportError:
-            self.logger.info("mutagen not found. Installing...")
-            try:
-                subprocess.check_call([
-                    self.venv_python, "-m", "pip", "install", "mutagen"
-                ])
-                self.logger.ok("mutagen installed successfully")
-                return True
-            except subprocess.CalledProcessError as e:
-                self.logger.error(f"Failed to install mutagen: {e}")
-                self.logger.error("Try running: pip3 install mutagen")
+            mutagen_installed = False
+
+        # Check if gamdl is available
+        try:
+            result = subprocess.run(
+                [self.venv_python, "-m", "gamdl", "--version"],
+                capture_output=True,
+                check=True
+            )
+            self.logger.info("gamdl is already installed")
+            gamdl_installed = True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            gamdl_installed = False
+
+        # If any packages are missing, try to install from requirements.txt
+        if not mutagen_installed or not gamdl_installed:
+            requirements_path = Path("requirements.txt")
+            if requirements_path.exists():
+                self.logger.info("Python packages missing. Installing from requirements.txt...")
+                try:
+                    subprocess.check_call([
+                        self.venv_python, "-m", "pip", "install", "-r", "requirements.txt"
+                    ])
+                    self.logger.ok("Python packages installed successfully from requirements.txt")
+                    return True
+                except subprocess.CalledProcessError as e:
+                    self.logger.error(f"Failed to install from requirements.txt: {e}")
+                    self.logger.error("Try running: pip install -r requirements.txt")
+                    return False
+            else:
+                self.logger.error("requirements.txt not found")
+                self.logger.error("Try running: pip install gamdl mutagen")
                 return False
+
+        return True
 
     def check_ffmpeg(self):
         """Check if ffmpeg is available."""
@@ -243,21 +268,23 @@ class DependencyChecker:
             self.logger.info("gamdl is available")
             return True
         except (subprocess.CalledProcessError, FileNotFoundError):
-            self.logger.error("gamdl is not installed")
-            self.logger.error("Install it via: pip install gamdl")
             return False
 
     def check_all(self, require_ffmpeg=True, require_gamdl=True):
         """Check all dependencies."""
         all_ok = True
 
-        if not self.check_mutagen():
+        # Check and install Python packages from requirements.txt
+        if not self.check_python_packages():
             all_ok = False
 
         if require_ffmpeg and not self.check_ffmpeg():
             all_ok = False
 
+        # Verify gamdl is available after installation
         if require_gamdl and not self.check_gamdl():
+            self.logger.error("gamdl is not available after installation")
+            self.logger.error("Try running: source .venv/bin/activate && pip install -r requirements.txt")
             all_ok = False
 
         return all_ok
