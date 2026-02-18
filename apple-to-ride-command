@@ -565,7 +565,7 @@ def read_m4a_tags(input_file):
     return title, artist, album
 
 
-def update_title_tag(tags, cleanup_options, logger=None, dry_run=False, verbose=False):
+def update_title_tag(tags, logger=None, dry_run=False, verbose=False):
     """
     Update the TIT2 (Title) tag to 'Artist - Title' format.
     Prefers TXXX:OriginalArtist and TXXX:OriginalTitle as source
@@ -646,7 +646,6 @@ def _apply_cleanup(tags, filepath, cleanup_options):
 
     # ── Remove duplicate frames ────────────────────────────────────
     if cleanup_options.get("remove_duplicates"):
-        from mutagen.id3 import TXXX
         seen = {}
         for key in list(tags.keys()):
             frame = tags[key]
@@ -724,13 +723,11 @@ class TaggerManager:
         self.logger.info(f"New Artist: {new_artist or '—'}")
 
         start_time = time.time()
-        count = 0
         updated = 0
         skipped = 0
         errors = 0
 
         for filepath in mp3_files:
-            count += 1
             filename = filepath.relative_to(directory)
 
             try:
@@ -756,15 +753,14 @@ class TaggerManager:
                         self.logger.dry_run(f"Album:  '{current_album}' → '{new_album}'")
                     if new_artist:
                         self.logger.dry_run(f"Artist: '{current_artist}' → '{new_artist}'")
-                    update_title_tag(tags, self.cleanup_options,
-                                   self.logger, dry_run=True, verbose=verbose)
+                    update_title_tag(tags, self.logger, dry_run=True, verbose=verbose)
                     continue
 
                 # ── Store ALL originals BEFORE any tag is modified ──
                 file_changed = False
 
                 if new_album:
-                    r, was_stored = save_original_tag(
+                    _, was_stored = save_original_tag(
                         tags, "TXXX:OriginalAlbum", TXXX_ORIGINAL_ALBUM,
                         current_album, "album", self.logger)
                     if was_stored:
@@ -773,7 +769,7 @@ class TaggerManager:
                         self.stats.album_protected += 1
 
                 if new_artist:
-                    r, was_stored = save_original_tag(
+                    _, was_stored = save_original_tag(
                         tags, "TXXX:OriginalArtist", TXXX_ORIGINAL_ARTIST,
                         current_artist, "artist", self.logger)
                     if was_stored:
@@ -784,7 +780,7 @@ class TaggerManager:
                 # ── Store OriginalTitle BEFORE update_title_tag() runs ──
                 source_artist = _get_txxx(tags, TXXX_ORIGINAL_ARTIST) or current_artist
                 clean_title   = _strip_artist_prefix(current_title, source_artist)
-                r, was_stored = save_original_tag(
+                _, was_stored = save_original_tag(
                     tags, "TXXX:OriginalTitle", TXXX_ORIGINAL_TITLE,
                     clean_title, "title", self.logger)
                 if was_stored:
@@ -806,8 +802,7 @@ class TaggerManager:
                     tags["TPE1"] = TPE1(encoding=3, text=new_artist)
 
                 # ── Refresh Title to 'Artist - Title' format ──────────
-                if update_title_tag(tags, self.cleanup_options,
-                                  self.logger, dry_run=dry_run, verbose=verbose):
+                if update_title_tag(tags, self.logger, dry_run=dry_run, verbose=verbose):
                     self.stats.title_updated += 1
                     file_changed = True
 
@@ -1136,8 +1131,7 @@ class TaggerManager:
                                 album, "album", self.logger)
 
                 # ── Refresh Title to 'Artist - Title' format ──────────
-                update_title_tag(tags, self.cleanup_options,
-                               self.logger, dry_run=dry_run, verbose=verbose)
+                update_title_tag(tags, self.logger, dry_run=dry_run, verbose=verbose)
 
                 _apply_cleanup(tags, str(mp3_path), self.cleanup_options)
 
@@ -1233,9 +1227,8 @@ class USBSyncStatistics:
 class Converter:
     """Manages M4A to MP3 conversion with tag preservation."""
 
-    def __init__(self, logger=None, cleanup_options=None, quality_preset='lossless'):
+    def __init__(self, logger=None, quality_preset='lossless'):
         self.logger = logger or Logger()
-        self.cleanup_options = cleanup_options or DEFAULT_CLEANUP_OPTIONS
         self.stats = ConversionStatistics()
         self.quality_preset = quality_preset
         self.quality_settings = self._get_quality_settings(quality_preset)
@@ -1491,7 +1484,6 @@ class Downloader:
         if not os.path.exists(directory):
             return 0
 
-        from pathlib import Path
         path = Path(directory)
         m4a_files = [
             f for f in path.rglob("*.m4a")
@@ -1613,7 +1605,6 @@ class Downloader:
         ]
 
         stats = DownloadStatistics()
-        last_downloading = None  # Track which song was last "Downloading"
 
         # Count files BEFORE download
         files_before = self._count_m4a_files(output_path)
@@ -1659,7 +1650,6 @@ class Downloader:
                             track_name = match.group(1)
                             # Display message (counts will be calculated from filesystem after download)
                             self.logger.info(f"Downloading: {track_name}")
-                        last_downloading = cleaned
 
                     # Track skips and show feedback
                     elif '[WARNING' in cleaned and 'Skipping "' in cleaned and 'Media file already exists' in cleaned:
@@ -1669,7 +1659,6 @@ class Downloader:
                             track_name = match.group(1)
                             # Display message (counts will be calculated from filesystem after download)
                             self.logger.info(f"Skipping (already exists): {track_name}")
-                        last_downloading = None
 
                     # Track errors
                     elif 'Finished with' in cleaned and 'error' in cleaned:
@@ -1820,7 +1809,6 @@ class CookieManager:
         Detect the OS default browser.
         Returns browser name: 'chrome', 'firefox', 'safari', 'edge', or None
         """
-        import subprocess
 
         try:
             if IS_MACOS:
@@ -1884,8 +1872,6 @@ class CookieManager:
         Detect which browsers are installed on the system.
         Returns list of browser names: ['chrome', 'firefox', 'safari', 'edge']
         """
-        import subprocess
-        import shutil
 
         browsers = []
 
@@ -2001,8 +1987,6 @@ class CookieManager:
         Attempt to install selenium and webdriver-manager.
         Returns True if successful, False otherwise.
         """
-        import subprocess
-        import sys
 
         self.logger.info("Selenium is required for automatic cookie refresh")
         self.logger.info("This will install: selenium, webdriver-manager")
@@ -2334,7 +2318,6 @@ class CookieManager:
         # Create backup if requested and file exists
         if backup and self.cookie_path.exists():
             backup_path = Path(str(self.cookie_path) + '.backup')
-            import shutil
             shutil.copy2(self.cookie_path, backup_path)
             self.logger.ok(f"Backup created: {backup_path}")
 
