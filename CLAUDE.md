@@ -237,9 +237,21 @@ The conversion system supports configurable quality presets to balance file size
 
 ## Development Setup
 
+### Platform Support
+The tool supports **macOS**, **Linux**, and **Windows**. Platform is auto-detected at startup.
+
+| Platform | USB Detection | Eject Method | FFmpeg Install |
+|----------|--------------|--------------|----------------|
+| macOS | `/Volumes/` | `diskutil eject` | `brew install ffmpeg` |
+| Linux | `/media/$USER/`, `/mnt/` | `udisksctl`, `umount` | `apt-get`, `dnf`, `pacman` |
+| Windows | Drive letters (C:, D:, etc.) | Manual (Explorer) | Chocolatey or direct download |
+
 ### Prerequisites
 - Python 3.8+ (uses Python virtual environment)
 - ffmpeg (for audio conversion, system binary required)
+  - **macOS:** `brew install ffmpeg`
+  - **Linux:** `sudo apt-get install ffmpeg` (Ubuntu/Debian), `sudo dnf install ffmpeg` (Fedora/RHEL), `sudo pacman -S ffmpeg` (Arch)
+  - **Windows:** `choco install ffmpeg` or download from https://ffmpeg.org/download.html
 - gamdl (Apple Music downloader, installed via pip in venv)
 - mutagen (Python ID3 tag library, auto-installed by scripts)
 - ffmpeg-python (Python wrapper for FFmpeg, auto-installed by scripts)
@@ -250,7 +262,10 @@ The conversion system supports configurable quality presets to balance file size
 python3 -m venv .venv
 
 # Activate virtual environment
+# macOS/Linux:
 source .venv/bin/activate
+# Windows:
+.venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
@@ -274,7 +289,9 @@ pip install -r requirements.txt
 - gamdl will fail without valid authentication
 
 **Virtual Environment:**
-- Must activate venv before running: `source .venv/bin/activate`
+- Must activate venv before running
+  - **macOS/Linux:** `source .venv/bin/activate`
+  - **Windows:** `.venv\Scripts\activate`
 - Dependencies (gamdl, mutagen) only available inside venv
 - Deactivate with `deactivate` command
 
@@ -284,9 +301,19 @@ pip install -r requirements.txt
 - Not tracked in git (.gitignore)
 
 **USB Drive Detection:**
-- Tool auto-detects mounted volumes in `/Volumes/`
-- System drives (Macintosh HD) are automatically excluded
-- If USB not detected, check mount status: `ls /Volumes/`
+- Tool auto-detects mounted volumes based on platform:
+  - **macOS:** `/Volumes/` (excludes "Macintosh HD", "Macintosh HD - Data")
+  - **Linux:** `/media/$USER/` and `/mnt/` (excludes "boot", "root")
+  - **Windows:** Drive letters A:-Z: (excludes C:)
+- If USB not detected, check mount status:
+  - **macOS:** `ls /Volumes/`
+  - **Linux:** `ls /media/$USER/` or `ls /mnt/`
+  - **Windows:** Check File Explorer for removable drives
+
+**USB Ejection:**
+- **macOS:** Automatic via `diskutil eject`
+- **Linux:** Automatic via `udisksctl` or `umount`
+- **Windows:** Manual via Windows Explorer (automatic eject not implemented)
 
 ## Directory Structure
 

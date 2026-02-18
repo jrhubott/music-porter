@@ -14,6 +14,27 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 import ffmpeg
+import platform
+
+
+# ══════════════════════════════════════════════════════════════════
+# Section 0: Platform Detection
+# ══════════════════════════════════════════════════════════════════
+
+# OS Detection - determine at module load time
+CURRENT_OS = platform.system()  # Returns: 'Darwin' (macOS), 'Linux', 'Windows'
+IS_MACOS = CURRENT_OS == 'Darwin'
+IS_LINUX = CURRENT_OS == 'Linux'
+IS_WINDOWS = CURRENT_OS == 'Windows'
+
+def get_os_display_name():
+    """Return user-friendly OS name."""
+    os_names = {
+        'Darwin': 'macOS',
+        'Linux': 'Linux',
+        'Windows': 'Windows'
+    }
+    return os_names.get(CURRENT_OS, CURRENT_OS)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -28,10 +49,21 @@ DEFAULT_LOG_DIR = "logs"
 DEFAULT_PLAYLISTS_CONF = "playlists.conf"
 DEFAULT_USB_DIR = "RZR/Music"
 
-EXCLUDED_USB_VOLUMES = [
-    "Macintosh HD",
-    "Macintosh HD - Data",
-]
+# Excluded USB volumes by OS
+if IS_MACOS:
+    EXCLUDED_USB_VOLUMES = [
+        "Macintosh HD",
+        "Macintosh HD - Data",
+    ]
+elif IS_WINDOWS:
+    EXCLUDED_USB_VOLUMES = [
+        "C:",  # System drive
+    ]
+else:  # Linux
+    EXCLUDED_USB_VOLUMES = [
+        "boot",
+        "root",
+    ]
 
 # Quality presets for MP3 conversion
 QUALITY_PRESETS = {
@@ -201,8 +233,12 @@ class DependencyChecker:
             self.logger.info(f"Using active venv: {os.environ['VIRTUAL_ENV']}")
             return
 
-        # Check for .venv directory
-        venv_path = Path('.venv/bin/python')
+        # Check for .venv directory with OS-appropriate path
+        if IS_WINDOWS:
+            venv_path = Path('.venv/Scripts/python.exe')
+        else:  # Unix (macOS, Linux)
+            venv_path = Path('.venv/bin/python')
+
         if venv_path.exists():
             self.venv_python = str(venv_path.absolute())
             self.logger.info(f"Found venv at: {venv_path}")
@@ -253,11 +289,11 @@ class DependencyChecker:
                     return True
                 except subprocess.CalledProcessError as e:
                     self.logger.error(f"Failed to install from requirements.txt: {e}")
-                    self.logger.error("Try running: pip install -r requirements.txt")
+                    self._show_package_install_help()
                     return False
             else:
                 self.logger.error("requirements.txt not found")
-                self.logger.error("Try running: pip install gamdl mutagen ffmpeg-python")
+                self._show_package_install_help()
                 return False
 
         return True
@@ -274,8 +310,43 @@ class DependencyChecker:
             return True
         except (subprocess.CalledProcessError, FileNotFoundError):
             self.logger.error("ffmpeg is not installed or not in PATH")
-            self.logger.error("Install it via: brew install ffmpeg")
+            self._show_ffmpeg_install_help()
             return False
+
+    def _show_ffmpeg_install_help(self):
+        """Show OS-specific ffmpeg installation instructions."""
+        self.logger.error("\n=== FFmpeg Installation Required ===")
+
+        if IS_MACOS:
+            self.logger.error("Install via Homebrew:")
+            self.logger.error("  brew install ffmpeg")
+        elif IS_LINUX:
+            self.logger.error("Install via package manager:")
+            self.logger.error("  Ubuntu/Debian:  sudo apt-get install ffmpeg")
+            self.logger.error("  Fedora/RHEL:    sudo dnf install ffmpeg")
+            self.logger.error("  Arch:           sudo pacman -S ffmpeg")
+        elif IS_WINDOWS:
+            self.logger.error("Install options:")
+            self.logger.error("  1. Chocolatey:  choco install ffmpeg")
+            self.logger.error("  2. Download from: https://ffmpeg.org/download.html")
+            self.logger.error("     Extract and add to PATH")
+
+        self.logger.error("\nFFmpeg is a system dependency and cannot be auto-installed.")
+        self.logger.error("Please install it manually and restart the tool.")
+
+    def _show_package_install_help(self):
+        """Show OS-specific Python package installation instructions."""
+        self.logger.error("\n=== Python Package Installation Required ===")
+
+        if IS_WINDOWS:
+            self.logger.error("Activate virtual environment:")
+            self.logger.error("  .venv\\Scripts\\activate")
+            self.logger.error("Then install packages:")
+            self.logger.error("  pip install -r requirements.txt")
+        else:  # Unix (macOS, Linux)
+            self.logger.error("Activate virtual environment and install:")
+            self.logger.error("  source .venv/bin/activate")
+            self.logger.error("  pip install -r requirements.txt")
 
     def check_gamdl(self):
         """Check if gamdl is available."""
@@ -304,7 +375,7 @@ class DependencyChecker:
         # Verify gamdl is available after installation
         if require_gamdl and not self.check_gamdl():
             self.logger.error("gamdl is not available after installation")
-            self.logger.error("Try running: source .venv/bin/activate && pip install -r requirements.txt")
+            self._show_package_install_help()
             all_ok = False
 
         return all_ok
@@ -1496,24 +1567,96 @@ class USBManager:
 
     def find_usb_drives(self):
         """
-        Find available USB drives in /Volumes/, excluding system volumes.
-        Returns list of volume names.
+        Find available USB drives on current platform.
+        Returns list of volume names/mount points.
         """
+        if IS_MACOS:
+            return self._find_usb_drives_macos()
+        elif IS_LINUX:
+            return self._find_usb_drives_linux()
+        elif IS_WINDOWS:
+            return self._find_usb_drives_windows()
+        else:
+            self.logger.error(f"Unsupported operating system: {CURRENT_OS}")
+            return []
+
+    def _find_usb_drives_macos(self):
+        """Find USB drives on macOS using /Volumes/."""
         volumes_path = Path('/Volumes')
 
         if not volumes_path.exists():
-            self.logger.error("/Volumes directory not found (non-macOS system?)")
+            self.logger.error("/Volumes directory not found")
             return []
 
-        all_volumes = [v.name for v in volumes_path.iterdir() if v.is_dir()]
-
-        # Filter out excluded volumes
+        # Get all volumes, excluding system volumes
         volumes = [
-            v for v in all_volumes
-            if v not in self.excluded_volumes
+            v.name for v in volumes_path.iterdir()
+            if v.is_dir() and v.name not in self.excluded_volumes
         ]
 
         return volumes
+
+    def _find_usb_drives_linux(self):
+        """Find USB drives on Linux using /media/ and /mnt/."""
+        drives = []
+
+        # Check /media/$USER/ (common for desktop environments)
+        if 'USER' in os.environ:
+            media_user_path = Path(f"/media/{os.environ['USER']}")
+            if media_user_path.exists():
+                drives.extend([
+                    d.name for d in media_user_path.iterdir()
+                    if d.is_dir() and d.name not in self.excluded_volumes
+                ])
+
+        # Check /mnt/ (common for manual mounts)
+        mnt_path = Path('/mnt')
+        if mnt_path.exists():
+            drives.extend([
+                d.name for d in mnt_path.iterdir()
+                if d.is_dir() and d.name not in self.excluded_volumes
+            ])
+
+        if not drives:
+            self.logger.warn("No USB drives found in /media/ or /mnt/")
+
+        return list(set(drives))  # Remove duplicates
+
+    def _find_usb_drives_windows(self):
+        """Find USB drives on Windows using drive letters."""
+        import string
+
+        drives = []
+        # Check all drive letters
+        for letter in string.ascii_uppercase:
+            drive = f"{letter}:"
+            drive_path = Path(drive + "\\")
+
+            # Check if drive exists and is not in excluded list
+            if drive_path.exists() and drive not in self.excluded_volumes:
+                drives.append(drive)
+
+        if not drives:
+            self.logger.warn("No removable drives found")
+
+        return drives
+
+    def _get_usb_base_path(self, volume):
+        """Get the full path to a USB volume based on OS."""
+        if IS_MACOS:
+            return Path('/Volumes') / volume
+        elif IS_LINUX:
+            # Try /media/$USER/ first, then /mnt/
+            if 'USER' in os.environ:
+                media_path = Path(f"/media/{os.environ['USER']}") / volume
+                if media_path.exists():
+                    return media_path
+            return Path('/mnt') / volume
+        elif IS_WINDOWS:
+            # volume is already the drive letter (e.g., "D:")
+            return Path(volume + "\\")
+        else:
+            return Path(volume)
 
     def select_usb_drive(self):
         """
@@ -1614,7 +1757,7 @@ class USBManager:
         if not volume:
             return False, stats
 
-        dest = Path('/Volumes') / volume / usb_dir
+        dest = self._get_usb_base_path(volume) / usb_dir
 
         self.logger.info(f"Syncing {source_path} to {dest}")
 
@@ -1732,14 +1875,17 @@ class USBManager:
                 self.logger.info("Skipping USB eject")
                 return True
 
-            # Execute eject using diskutil (macOS standard tool)
-            volume_path = f"/Volumes/{volume_name}"
-            cmd = ["diskutil", "eject", volume_path]
-
             self.logger.info(f"Ejecting USB drive: {volume_name}")
-            subprocess.run(cmd, check=True, capture_output=True, text=True)
-            self.logger.ok(f"USB drive '{volume_name}' ejected successfully")
-            return True
+
+            if IS_MACOS:
+                return self._eject_macos(volume_name)
+            elif IS_LINUX:
+                return self._eject_linux(volume_name)
+            elif IS_WINDOWS:
+                return self._eject_windows(volume_name)
+            else:
+                self.logger.warn(f"USB eject not supported on {CURRENT_OS}")
+                return True
 
         except KeyboardInterrupt:
             # User pressed Ctrl+C during prompt
@@ -1747,16 +1893,59 @@ class USBManager:
             self.logger.info("Eject cancelled by user")
             return True
 
+    def _eject_macos(self, volume_name):
+        """Eject USB on macOS using diskutil."""
+        volume_path = f"/Volumes/{volume_name}"
+        cmd = ["diskutil", "eject", volume_path]
+
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            self.logger.ok(f"USB drive '{volume_name}' ejected successfully")
+            return True
+        except FileNotFoundError:
+            self.logger.error("diskutil command not found")
+            return False
         except subprocess.CalledProcessError as e:
-            # Eject command failed (drive busy, already ejected, etc.)
-            self.logger.error(f"Failed to eject USB drive: {e.stderr.strip() if e.stderr else str(e)}")
+            self.logger.error(f"Failed to eject USB: {e.stderr.strip() if e.stderr else str(e)}")
             self.logger.error("You may need to eject manually from Finder")
             return False
 
-        except FileNotFoundError:
-            # diskutil command not found (shouldn't happen on macOS)
-            self.logger.error("diskutil command not found (non-macOS system?)")
-            return False
+    def _eject_linux(self, volume_name):
+        """Eject USB on Linux using udisksctl or umount."""
+        # Try udisksctl first (modern systems)
+        mount_paths = []
+        if 'USER' in os.environ:
+            mount_paths.append(f"/media/{os.environ['USER']}/{volume_name}")
+        mount_paths.append(f"/mnt/{volume_name}")
+
+        for mount_path in mount_paths:
+            if Path(mount_path).exists():
+                # Try udisksctl first
+                try:
+                    cmd = ["udisksctl", "unmount", "-b", mount_path]
+                    subprocess.run(cmd, check=True, stderr=subprocess.DEVNULL)
+                    self.logger.ok(f"USB drive '{volume_name}' unmounted successfully")
+                    return True
+                except (FileNotFoundError, subprocess.CalledProcessError):
+                    pass
+
+                # Fallback to umount
+                try:
+                    cmd = ["umount", mount_path]
+                    subprocess.run(cmd, check=True)
+                    self.logger.ok(f"USB drive '{volume_name}' unmounted successfully")
+                    return True
+                except (FileNotFoundError, subprocess.CalledProcessError):
+                    pass
+
+        self.logger.warn("Could not eject USB - please unmount manually")
+        return True
+
+    def _eject_windows(self, volume_name):
+        """Eject USB on Windows (manual instruction)."""
+        self.logger.info(f"Please safely eject drive '{volume_name}' using Windows Explorer")
+        self.logger.info("(Automatic eject not implemented on Windows)")
+        return True
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -3069,7 +3258,9 @@ def main():
     # Initialize logger
     logger = Logger(verbose=args.verbose)
 
+    # Display startup information including OS
     logger.info(f"apple-to-ride-command v{VERSION}")
+    logger.info(f"Platform: {get_os_display_name()} ({CURRENT_OS})")
     logger.info(f"Command: {args.command or 'interactive'}")
 
     if args.dry_run:

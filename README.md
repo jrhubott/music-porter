@@ -13,6 +13,40 @@ A powerful music playlist management and conversion tool that downloads Apple Mu
 - **Comprehensive statistics** and detailed logging
 - **Tag management** with update, restore, and reset operations
 - **Dry-run mode** for safe preview of all operations
+- **Cross-platform support** for macOS, Linux, and Windows
+
+## Platform Support
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| **macOS** | ✅ Fully Supported | Primary development platform |
+| **Linux** | ✅ Supported | USB detection via /media/ and /mnt/ |
+| **Windows** | ✅ Supported | USB detection via drive letters |
+
+### Platform-Specific Notes
+
+**macOS:**
+- USB drives detected in `/Volumes/`
+- Automatic eject via `diskutil`
+- Install ffmpeg: `brew install ffmpeg`
+- Activate venv: `source .venv/bin/activate`
+
+**Linux:**
+- USB drives detected in `/media/$USER/` and `/mnt/`
+- Automatic unmount via `udisksctl` or `umount`
+- Install ffmpeg via package manager:
+  - Ubuntu/Debian: `sudo apt-get install ffmpeg`
+  - Fedora/RHEL: `sudo dnf install ffmpeg`
+  - Arch: `sudo pacman -S ffmpeg`
+- Activate venv: `source .venv/bin/activate`
+
+**Windows:**
+- USB drives detected as drive letters (D:, E:, etc.)
+- Manual eject via Windows Explorer (automatic eject not implemented)
+- Install ffmpeg:
+  - Via Chocolatey: `choco install ffmpeg`
+  - Or download from: https://ffmpeg.org/download.html (extract and add to PATH)
+- Activate venv: `.venv\Scripts\activate`
 
 ## Quick Start
 

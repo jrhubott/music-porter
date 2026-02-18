@@ -4,7 +4,34 @@ The unified Apple Music to Ride Command MP3 converter combines download, convers
 
 ## Technical Notes
 
-The tool uses the ffmpeg-python library for audio conversion, which provides a Pythonic API around the system ffmpeg binary. The ffmpeg binary must be installed on your system (typically via `brew install ffmpeg` on macOS). The Python library is automatically installed when running the tool for the first time.
+The tool uses the ffmpeg-python library for audio conversion, which provides a Pythonic API around the system ffmpeg binary. The ffmpeg binary must be installed on your system. The Python library is automatically installed when running the tool for the first time.
+
+## Platform Support
+
+The tool runs on **macOS**, **Linux**, and **Windows** with automatic platform detection.
+
+| Feature | macOS | Linux | Windows |
+|---------|-------|-------|---------|
+| MP3 Conversion | ✅ | ✅ | ✅ |
+| Tag Management | ✅ | ✅ | ✅ |
+| USB Detection | ✅ Auto (`/Volumes/`) | ✅ Auto (`/media/`, `/mnt/`) | ✅ Auto (Drive letters) |
+| USB Eject | ✅ Auto (`diskutil`) | ✅ Auto (`udisksctl`/`umount`) | ⚠️ Manual (Explorer) |
+
+### Platform-Specific Setup
+
+**FFmpeg Installation:**
+- **macOS:** `brew install ffmpeg`
+- **Linux:** `sudo apt-get install ffmpeg` (Ubuntu/Debian), `sudo dnf install ffmpeg` (Fedora/RHEL), `sudo pacman -S ffmpeg` (Arch)
+- **Windows:** `choco install ffmpeg` or download from https://ffmpeg.org/download.html
+
+**Virtual Environment Activation:**
+- **macOS/Linux:** `source .venv/bin/activate`
+- **Windows:** `.venv\Scripts\activate`
+
+**USB Drive Locations:**
+- **macOS:** `/Volumes/{drive-name}` (excludes system volumes)
+- **Linux:** `/media/$USER/{drive-name}` or `/mnt/{drive-name}` (excludes boot, root)
+- **Windows:** `{letter}:\` e.g., `D:\`, `E:\` (excludes C:)
 
 ## Quick Start
 
