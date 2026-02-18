@@ -1229,7 +1229,7 @@ class Converter:
 
                 if already_exists and not force:
                     self.stats.skipped += 1
-                    self.logger.info(f"[{self.stats.skipped}/{self.stats.total_found}] Skipping (already exists): {output_filename}")
+                    self.logger.info(f"[{count}/{self.stats.total_found}] Skipping (already exists): {output_filename}")
                     continue
 
                 if verbose:
@@ -1302,10 +1302,10 @@ class Converter:
 
                 if already_exists and force:
                     self.stats.overwritten += 1
-                    self.logger.info(f"[{self.stats.overwritten}/{self.stats.total_found}] Overwritten: {output_filename}")
+                    self.logger.info(f"[{count}/{self.stats.total_found}] Overwritten: {output_filename}")
                 else:
                     self.stats.converted += 1
-                    self.logger.info(f"[{self.stats.converted}/{self.stats.total_found}] Converted: {output_filename}")
+                    self.logger.info(f"[{count}/{self.stats.total_found}] Converted: {output_filename}")
 
             except Exception as e:
                 self.logger.error(f"Failed to convert '{display_name}': {e}")
