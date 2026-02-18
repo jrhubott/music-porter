@@ -1204,26 +1204,6 @@ class ConversionStatistics:
         self.errors = 0
 
 
-class DownloadStatistics:
-    """Tracks download operation statistics."""
-
-    def __init__(self):
-        self.playlist_total = 0      # Total tracks in playlist
-        self.downloaded = 0          # Newly downloaded tracks
-        self.skipped = 0             # Already existed
-        self.failed = 0              # Failed downloads
-
-
-class USBSyncStatistics:
-    """Tracks USB sync operation statistics."""
-
-    def __init__(self):
-        self.files_found = 0         # Total files to copy
-        self.files_copied = 0        # Successfully copied
-        self.files_skipped = 0       # Files skipped (unchanged)
-        self.files_failed = 0        # Copy failures
-
-
 class Converter:
     """Manages M4A to MP3 conversion with tag preservation."""
 
@@ -1443,6 +1423,16 @@ class Converter:
 # ══════════════════════════════════════════════════════════════════
 # Section 7: Download Module
 # ══════════════════════════════════════════════════════════════════
+
+class DownloadStatistics:
+    """Tracks download operation statistics."""
+
+    def __init__(self):
+        self.playlist_total = 0      # Total tracks in playlist
+        self.downloaded = 0          # Newly downloaded tracks
+        self.skipped = 0             # Already existed
+        self.failed = 0              # Failed downloads
+
 
 class Downloader:
     """Manages downloads from Apple Music using gamdl."""
@@ -2343,6 +2333,16 @@ class CookieManager:
 # ══════════════════════════════════════════════════════════════════
 # Section 8: USB Sync Module
 # ══════════════════════════════════════════════════════════════════
+
+class USBSyncStatistics:
+    """Tracks USB sync operation statistics."""
+
+    def __init__(self):
+        self.files_found = 0         # Total files to copy
+        self.files_copied = 0        # Successfully copied
+        self.files_skipped = 0       # Files skipped (unchanged)
+        self.files_failed = 0        # Copy failures
+
 
 class USBManager:
     """Manages USB drive detection and file copying."""
@@ -3335,7 +3335,13 @@ class PipelineOrchestrator:
                 self.stats.stages_completed.append("usb-sync")
                 self.stats.usb_stats = usb_stats
                 self.stats.usb_success = True
-                self.stats.usb_destination = f"/Volumes/[drive]/{usb_dir}"
+                if IS_MACOS:
+                    usb_placeholder = f"/Volumes/[drive]/{usb_dir}"
+                elif IS_LINUX:
+                    usb_placeholder = f"/media/$USER/[drive]/{usb_dir}"
+                else:
+                    usb_placeholder = f"[drive]:/{usb_dir}"
+                self.stats.usb_destination = usb_placeholder
             else:
                 self.stats.stages_failed.append("usb-sync")
                 self.logger.error("USB sync stage failed")
@@ -3566,7 +3572,7 @@ class PipelineOrchestrator:
             print(f"  Failed stages:           {', '.join(self.stats.stages_failed)}")
         print(f"{'=' * 70}")
 
-    def _print_aggregate_summary(self, aggregate_stats):
+    def print_aggregate_summary(self, aggregate_stats):
         """Print comprehensive summary for multiple playlists."""
         aggregate_stats.end_time = time.time()
         duration = aggregate_stats.end_time - aggregate_stats.start_time
@@ -3861,7 +3867,7 @@ class InteractiveMenu:
 
         # Print aggregate summary (only for multiple playlists)
         if len(self.config.playlists) > 1:
-            orchestrator._print_aggregate_summary(aggregate_stats)
+            orchestrator.print_aggregate_summary(aggregate_stats)
 
         return aggregate_stats.failed_playlists == 0
 
@@ -4416,7 +4422,7 @@ def main():
 
             # Print aggregate summary (only for multiple playlists)
             if len(config.playlists) > 1:
-                orchestrator._print_aggregate_summary(aggregate_stats)
+                orchestrator.print_aggregate_summary(aggregate_stats)
 
             sys.exit(0 if aggregate_stats.failed_playlists == 0 else 1)
 
