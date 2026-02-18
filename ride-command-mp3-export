@@ -114,6 +114,12 @@ def save_original_tag(tags, tag_key, tag_name, current_value, label):
     exist. Uses _txxx_exists() as a hard gate — if the tag is already
     present it will never be written to again regardless of its value.
     This ensures the true original is permanently protected. [1]
+
+    Returns:
+        tuple: (value, was_newly_stored)
+            - value: The tag value (existing or newly stored)
+            - was_newly_stored: True if a new TXXX frame was created,
+                                False if frame already existed or was skipped
     """
     from mutagen.id3 import TXXX
 
@@ -122,18 +128,18 @@ def save_original_tag(tags, tag_key, tag_name, current_value, label):
         existing = _get_txxx(tags, tag_name)
         print(f"  [PROTECT] Original {label} already saved: "
               f"'{existing}'. Not overwriting.")
-        return existing
+        return (existing, False)
 
     # Not found — safe to store for the first time
     if current_value:
         tags.add(TXXX(encoding=3, desc=tag_name, text=current_value))
         print(f"  [INFO] Stored original {label} '{current_value}' "
               f"in '{tag_name}' tag.")
-        return current_value
+        return (current_value, True)
     else:
         print(f"  [INFO] No existing {label} tag found. "
               f"Skipping original {label} save.")
-        return ""
+        return ("", False)
 
 
 def _strip_artist_prefix(title, artist):
@@ -416,22 +422,22 @@ def convert_m4a_to_mp3(input_dir, output_dir,
                 tags.add(TXXX(encoding=3, desc='OriginalAlbum', text=preserved_txxx['OriginalAlbum']))
 
             # ── Store originals FIRST — hard gate prevents overwrite ──
-            r_title = save_original_tag(
+            r_title, title_was_stored = save_original_tag(
                 tags, "TXXX:OriginalTitle",  "OriginalTitle",
                 title,  "title")
-            r_artist = save_original_tag(
+            r_artist, artist_was_stored = save_original_tag(
                 tags, "TXXX:OriginalArtist", "OriginalArtist",
                 artist, "artist")
-            r_album = save_original_tag(
+            r_album, album_was_stored = save_original_tag(
                 tags, "TXXX:OriginalAlbum",  "OriginalAlbum",
                 album,  "album")
 
-            if r_title  == title:  tags_title_stored    += 1
-            else:                  tags_title_protected += 1
-            if r_artist == artist: tags_artist_stored   += 1
-            else:                  tags_artist_protected+= 1
-            if r_album  == album:  tags_album_stored    += 1
-            else:                  tags_album_protected += 1
+            if title_was_stored:  tags_title_stored    += 1
+            else:                 tags_title_protected += 1
+            if artist_was_stored: tags_artist_stored   += 1
+            else:                 tags_artist_protected+= 1
+            if album_was_stored:  tags_album_stored    += 1
+            else:                 tags_album_protected += 1
 
             # ── Update Title AFTER originals are safely stored ────
             if update_title_tag(tags, cleanup_options,
@@ -611,27 +617,27 @@ def update_tags(directory, new_album=None, new_artist=None,
 
             # ── Store ALL originals BEFORE any tag is modified [1] ──
             if new_album:
-                r = save_original_tag(
+                r, was_stored = save_original_tag(
                     tags, "TXXX:OriginalAlbum", "OriginalAlbum",
                     current_album, "album")
-                if r == current_album: tags_album_stored    += 1
-                else:                  tags_album_protected += 1
+                if was_stored: tags_album_stored    += 1
+                else:          tags_album_protected += 1
 
             if new_artist:
-                r = save_original_tag(
+                r, was_stored = save_original_tag(
                     tags, "TXXX:OriginalArtist", "OriginalArtist",
                     current_artist, "artist")
-                if r == current_artist: tags_artist_stored    += 1
-                else:                   tags_artist_protected += 1
+                if was_stored: tags_artist_stored    += 1
+                else:          tags_artist_protected += 1
 
             # ── Store OriginalTitle BEFORE update_title_tag() runs ──
             source_artist = _get_txxx(tags, "OriginalArtist") or current_artist
             clean_title   = _strip_artist_prefix(current_title, source_artist)
-            r = save_original_tag(
+            r, was_stored = save_original_tag(
                 tags, "TXXX:OriginalTitle", "OriginalTitle",
                 clean_title, "title")
-            if r == clean_title: tags_title_stored    += 1
-            else:                tags_title_protected += 1
+            if was_stored: tags_title_stored    += 1
+            else:          tags_title_protected += 1
 
             # ── Now apply new tag values ───────────────────────────
             if new_album:
