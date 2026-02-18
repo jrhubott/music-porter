@@ -1842,6 +1842,72 @@ class CookieManager:
 
         return browsers
 
+    def _prompt_browser_selection(self, available_browsers, default_browser):
+        """
+        Prompt user to select which browser to use.
+        Returns list of browsers to try (in order), or None if cancelled.
+        """
+        if len(available_browsers) == 1:
+            # Only one browser available, use it automatically
+            return available_browsers
+
+        try:
+            print("\n" + "=" * 60)
+            print("Select Browser for Cookie Extraction")
+            print("=" * 60)
+            print("\nDetected browsers:\n")
+
+            for i, browser in enumerate(available_browsers, 1):
+                default_marker = " (default)" if browser == default_browser else ""
+                print(f"  {i}. {browser.capitalize()}{default_marker}")
+
+            print(f"\n  A. Try all browsers (recommended if issues occur)")
+            print(f"  X. Cancel\n")
+
+            response = input("Select browser [1] or press Enter for default: ").strip()
+
+            # Empty = use default browser only
+            if response == "":
+                if default_browser:
+                    self.logger.info(f"Using default browser: {default_browser.capitalize()}")
+                    return [default_browser]
+                else:
+                    # No default, use first available
+                    self.logger.info(f"Using: {available_browsers[0].capitalize()}")
+                    return [available_browsers[0]]
+
+            # X = cancel
+            if response.upper() == 'X':
+                return None
+
+            # A = try all browsers
+            if response.upper() == 'A':
+                self.logger.info("Will try all browsers if needed")
+                return available_browsers
+
+            # Number = specific browser
+            if response.isdigit():
+                idx = int(response) - 1
+                if 0 <= idx < len(available_browsers):
+                    selected = available_browsers[idx]
+                    self.logger.info(f"Using: {selected.capitalize()}")
+                    return [selected]
+                else:
+                    self.logger.error(f"Invalid selection: {response}")
+                    return self._prompt_browser_selection(available_browsers, default_browser)
+
+            # Invalid input
+            self.logger.error(f"Invalid selection: {response}")
+            return self._prompt_browser_selection(available_browsers, default_browser)
+
+        except KeyboardInterrupt:
+            print("\n\nCancelled by user")
+            return None
+        except Exception as e:
+            self.logger.error(f"Error in browser selection: {e}")
+            # Fallback to all browsers
+            return available_browsers
+
     def _install_selenium(self):
         """
         Attempt to install selenium and webdriver-manager.
@@ -1934,10 +2000,14 @@ class CookieManager:
             self.logger.error("No supported browsers found (Chrome, Firefox, Safari, or Edge)")
             return None
 
-        self.logger.info(f"Available browsers: {', '.join([b.capitalize() for b in browser_priority])}")
+        # Let user select browser
+        selected_browsers = self._prompt_browser_selection(browser_priority, default_browser)
+        if not selected_browsers:
+            self.logger.info("Browser selection cancelled")
+            return None
 
-        # Try each browser in priority order
-        for browser_name in browser_priority:
+        # Try each selected browser
+        for browser_name in selected_browsers:
             self.logger.info(f"Attempting to use {browser_name.capitalize()}...")
 
             try:
