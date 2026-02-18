@@ -1445,10 +1445,19 @@ class Downloader:
 
                 # Try auto-refresh if requested
                 if auto_refresh:
-                    self.logger.info("Attempting automatic cookie refresh...")
-                    self.logger.error("Auto-refresh not yet implemented - use manual refresh")
-                    self.cookie_manager.show_manual_instructions()
-                    return False, None, None, None
+                    if self.cookie_manager.auto_refresh():
+                        # Refresh succeeded, re-validate
+                        status = self.cookie_manager.validate()
+                        if status.valid:
+                            self.logger.ok("Cookie refresh successful, continuing with download")
+                        else:
+                            self.logger.error("Cookies still invalid after refresh")
+                            self.cookie_manager.show_manual_instructions()
+                            return False, None, None, None
+                    else:
+                        self.logger.error("Automatic cookie refresh failed")
+                        self.cookie_manager.show_manual_instructions()
+                        return False, None, None, None
                 else:
                     self.cookie_manager.show_manual_instructions()
 
@@ -1693,6 +1702,423 @@ class CookieManager:
         self.logger.info("Alternative: Try automatic refresh with --auto-refresh-cookies flag")
         self.logger.info("(opens browser automatically, no password prompts required)")
         self.logger.info("=" * 60 + "\n")
+
+    def _detect_default_browser(self):
+        """
+        Detect the OS default browser.
+        Returns browser name: 'chrome', 'firefox', 'safari', 'edge', or None
+        """
+        import subprocess
+
+        try:
+            if IS_MACOS:
+                # macOS: Use LaunchServices to get default browser
+                result = subprocess.run(
+                    ['defaults', 'read', 'com.apple.LaunchServices/com.apple.launchservices.secure', 'LSHandlers'],
+                    capture_output=True, text=True, timeout=5
+                )
+                output = result.stdout.lower()
+
+                # Check for browser identifiers in output
+                if 'chrome' in output or 'google' in output:
+                    return 'chrome'
+                elif 'firefox' in output:
+                    return 'firefox'
+                elif 'safari' in output or 'webkit' in output:
+                    return 'safari'
+                elif 'edge' in output or 'msedge' in output:
+                    return 'edge'
+
+            elif IS_LINUX:
+                # Linux: Check xdg-settings
+                result = subprocess.run(
+                    ['xdg-settings', 'get', 'default-web-browser'],
+                    capture_output=True, text=True, timeout=5
+                )
+                output = result.stdout.lower()
+
+                if 'chrome' in output or 'chromium' in output:
+                    return 'chrome'
+                elif 'firefox' in output:
+                    return 'firefox'
+                elif 'edge' in output:
+                    return 'edge'
+
+            elif IS_WINDOWS:
+                # Windows: Check registry
+                import winreg
+                try:
+                    key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                        r'Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice')
+                    prog_id = winreg.QueryValueEx(key, 'ProgId')[0].lower()
+                    winreg.CloseKey(key)
+
+                    if 'chrome' in prog_id:
+                        return 'chrome'
+                    elif 'firefox' in prog_id:
+                        return 'firefox'
+                    elif 'edge' in prog_id or 'msedge' in prog_id:
+                        return 'edge'
+                except:
+                    pass
+
+        except Exception as e:
+            self.logger.info(f"Could not detect default browser: {e}")
+
+        return None
+
+    def _detect_installed_browsers(self):
+        """
+        Detect which browsers are installed on the system.
+        Returns list of browser names: ['chrome', 'firefox', 'safari', 'edge']
+        """
+        import subprocess
+        import shutil
+
+        browsers = []
+
+        if IS_MACOS:
+            # Check for browser apps in /Applications
+            browser_paths = {
+                'chrome': '/Applications/Google Chrome.app',
+                'firefox': '/Applications/Firefox.app',
+                'safari': '/Applications/Safari.app',
+                'edge': '/Applications/Microsoft Edge.app'
+            }
+
+            for name, path in browser_paths.items():
+                if Path(path).exists():
+                    browsers.append(name)
+
+        elif IS_LINUX:
+            # Check for browser binaries
+            browser_cmds = ['google-chrome', 'chromium', 'firefox', 'microsoft-edge']
+
+            for cmd in browser_cmds:
+                if shutil.which(cmd):
+                    if 'chrome' in cmd or 'chromium' in cmd:
+                        if 'chrome' not in browsers:
+                            browsers.append('chrome')
+                    elif 'firefox' in cmd:
+                        browsers.append('firefox')
+                    elif 'edge' in cmd:
+                        browsers.append('edge')
+
+        elif IS_WINDOWS:
+            # Check for browser executables
+            browser_paths = {
+                'chrome': r'C:\Program Files\Google\Chrome\Application\chrome.exe',
+                'firefox': r'C:\Program Files\Mozilla Firefox\firefox.exe',
+                'edge': r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
+            }
+
+            for name, path in browser_paths.items():
+                if Path(path).exists():
+                    browsers.append(name)
+
+        return browsers
+
+    def _extract_with_selenium(self):
+        """
+        Extract cookies using Selenium WebDriver.
+        Tries default browser first, then falls back to others.
+        Returns cookie_jar on success, None on failure.
+        """
+        import http.cookiejar
+        import time
+
+        # Check if selenium is installed
+        try:
+            from selenium import webdriver
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+            from selenium.common.exceptions import TimeoutException, WebDriverException
+        except ImportError:
+            self.logger.error("Selenium not installed. Install with: pip install selenium webdriver-manager")
+            return None
+
+        # Detect browsers
+        default_browser = self._detect_default_browser()
+        installed_browsers = self._detect_installed_browsers()
+
+        # Build priority list: default first, then others
+        browser_priority = []
+        if default_browser and default_browser in installed_browsers:
+            browser_priority.append(default_browser)
+            self.logger.info(f"Detected default browser: {default_browser.capitalize()}")
+
+        for browser in installed_browsers:
+            if browser not in browser_priority:
+                browser_priority.append(browser)
+
+        if not browser_priority:
+            self.logger.error("No supported browsers found (Chrome, Firefox, Safari, or Edge)")
+            return None
+
+        self.logger.info(f"Available browsers: {', '.join([b.capitalize() for b in browser_priority])}")
+
+        # Try each browser in priority order
+        for browser_name in browser_priority:
+            self.logger.info(f"Attempting to use {browser_name.capitalize()}...")
+
+            try:
+                driver = self._launch_browser(browser_name, headless=True)
+                if driver:
+                    cookies = self._extract_cookies_from_driver(driver, browser_name)
+                    if cookies:
+                        return cookies
+
+            except Exception as e:
+                self.logger.info(f"{browser_name.capitalize()} failed: {e}")
+                continue
+
+        self.logger.error("All browsers failed. Please ensure browser is up to date.")
+        return None
+
+    def _launch_browser(self, browser_name, headless=True):
+        """Launch browser with Selenium. Returns driver or None."""
+        from selenium import webdriver
+        from selenium.webdriver.chrome.service import Service as ChromeService
+        from selenium.webdriver.firefox.service import Service as FirefoxService
+        from selenium.webdriver.edge.service import Service as EdgeService
+        from selenium.webdriver.safari.service import Service as SafariService
+        from selenium.common.exceptions import WebDriverException
+        import time
+
+        try:
+            # Try to import webdriver-manager
+            try:
+                from webdriver_manager.chrome import ChromeDriverManager
+                from webdriver_manager.firefox import GeckoDriverManager
+                from webdriver_manager.microsoft import EdgeChromiumDriverManager
+                use_manager = True
+            except ImportError:
+                self.logger.info("webdriver-manager not installed, using system drivers")
+                use_manager = False
+
+            driver = None
+
+            if browser_name == 'chrome':
+                from selenium.webdriver.chrome.options import Options
+                options = Options()
+                if headless:
+                    options.add_argument("--headless=new")
+                options.add_argument("--no-sandbox")
+                options.add_argument("--disable-dev-shm-usage")
+                options.add_argument("--disable-gpu")
+
+                if use_manager:
+                    service = ChromeService(ChromeDriverManager().install())
+                    driver = webdriver.Chrome(service=service, options=options)
+                else:
+                    driver = webdriver.Chrome(options=options)
+
+            elif browser_name == 'firefox':
+                from selenium.webdriver.firefox.options import Options
+                options = Options()
+                if headless:
+                    options.add_argument("--headless")
+
+                if use_manager:
+                    service = FirefoxService(GeckoDriverManager().install())
+                    driver = webdriver.Firefox(service=service, options=options)
+                else:
+                    driver = webdriver.Firefox(options=options)
+
+            elif browser_name == 'edge':
+                from selenium.webdriver.edge.options import Options
+                options = Options()
+                if headless:
+                    options.add_argument("--headless=new")
+                options.add_argument("--no-sandbox")
+                options.add_argument("--disable-dev-shm-usage")
+
+                if use_manager:
+                    service = EdgeService(EdgeChromiumDriverManager().install())
+                    driver = webdriver.Edge(service=service, options=options)
+                else:
+                    driver = webdriver.Edge(options=options)
+
+            elif browser_name == 'safari':
+                # Safari doesn't support headless mode and doesn't need webdriver-manager
+                if headless:
+                    self.logger.info("Safari doesn't support headless mode, launching visible browser")
+                driver = webdriver.Safari()
+
+            return driver
+
+        except WebDriverException as e:
+            self.logger.info(f"Failed to launch {browser_name}: {e}")
+            return None
+        except Exception as e:
+            self.logger.info(f"Unexpected error launching {browser_name}: {e}")
+            return None
+
+    def _extract_cookies_from_driver(self, driver, browser_name):
+        """Extract cookies from Selenium driver. Returns cookie_jar or None."""
+        import http.cookiejar
+        import time
+        from selenium.webdriver.common.by import By
+        from selenium.common.exceptions import TimeoutException
+
+        try:
+            # Navigate to Apple Music
+            self.logger.info("Navigating to music.apple.com...")
+            driver.get("https://music.apple.com")
+            time.sleep(3)  # Wait for page load
+
+            # Check if logged in
+            is_logged_in = self._check_login_status(driver)
+
+            if not is_logged_in:
+                self.logger.warn("Not logged in to Apple Music")
+                driver.quit()
+
+                # Relaunch in visible mode
+                self.logger.info(f"Launching visible {browser_name.capitalize()} for login...")
+                driver = self._launch_browser(browser_name, headless=False)
+                if not driver:
+                    return None
+
+                driver.get("https://music.apple.com")
+
+                self.logger.info("\n" + "=" * 60)
+                self.logger.info("Please log in to Apple Music")
+                self.logger.info("=" * 60)
+                self.logger.info(f"1. A {browser_name.capitalize()} window has opened")
+                self.logger.info("2. Log in to your Apple Music account")
+                self.logger.info("3. Once logged in, press Enter here to continue")
+                self.logger.info("=" * 60 + "\n")
+
+                input("Press Enter after logging in...")
+                time.sleep(2)  # Let cookies settle
+
+            # Extract cookies
+            selenium_cookies = driver.get_cookies()
+            self.logger.info(f"Extracted {len(selenium_cookies)} cookies from {browser_name.capitalize()}")
+
+            # Convert to http.cookiejar format
+            cookie_jar = http.cookiejar.MozillaCookieJar(str(self.cookie_path))
+            target_cookie_found = False
+
+            for sc in selenium_cookies:
+                # Only process cookies for music.apple.com domain
+                domain = sc.get('domain', '')
+                if 'music.apple.com' not in domain:
+                    continue
+
+                # Create http.cookiejar.Cookie object
+                cookie = http.cookiejar.Cookie(
+                    version=0,
+                    name=sc['name'],
+                    value=sc['value'],
+                    port=None,
+                    port_specified=False,
+                    domain=domain,
+                    domain_specified=True,
+                    domain_initial_dot=domain.startswith('.'),
+                    path=sc.get('path', '/'),
+                    path_specified=True,
+                    secure=sc.get('secure', False),
+                    expires=sc.get('expiry'),  # Unix timestamp or None
+                    discard=False,
+                    comment=None,
+                    comment_url=None,
+                    rest={},
+                    rfc2109=False
+                )
+                cookie_jar.set_cookie(cookie)
+
+                if sc['name'] == self.required_cookie_name:
+                    target_cookie_found = True
+
+            driver.quit()
+
+            if not target_cookie_found:
+                self.logger.error(f"Cookie '{self.required_cookie_name}' not found after extraction")
+                return None
+
+            music_cookies = [c for c in cookie_jar if 'music.apple.com' in c.domain]
+            self.logger.ok(f"Successfully extracted {len(music_cookies)} Apple Music cookies")
+            return cookie_jar
+
+        except Exception as e:
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
+            self.logger.error(f"Cookie extraction failed: {e}")
+            return None
+
+    def _check_login_status(self, driver):
+        """Check if user is logged in to Apple Music. Returns True if logged in."""
+        from selenium.webdriver.common.by import By
+        from selenium.common.exceptions import NoSuchElementException
+
+        try:
+            # Strategy: Look for sign-in button. If found, user is NOT logged in.
+            # This is more reliable than looking for profile elements which vary
+            sign_in_buttons = driver.find_elements(By.XPATH,
+                "//a[contains(@href, 'signin') or contains(@href, 'sign-in') or contains(text(), 'Sign In')]")
+
+            if sign_in_buttons:
+                return False  # Sign-in button found = not logged in
+
+            # Additional check: Look for account/profile indicators
+            account_indicators = driver.find_elements(By.XPATH,
+                "//button[contains(@aria-label, 'Account') or contains(@aria-label, 'account')]")
+
+            if account_indicators:
+                return True  # Account button found = logged in
+
+            # Default: assume not logged in to be safe
+            return False
+
+        except Exception as e:
+            self.logger.info(f"Login check uncertain: {e}")
+            return False  # Assume not logged in on error
+
+    def auto_refresh(self, backup=True):
+        """
+        Automatically refresh cookies using Selenium.
+        Creates backup before overwriting if backup=True.
+        Returns True if successful, False otherwise.
+        """
+        self.logger.info("Attempting automatic cookie refresh...")
+
+        # Extract cookies using Selenium
+        cookie_jar = self._extract_with_selenium()
+
+        if not cookie_jar:
+            self.logger.error("Automatic cookie refresh failed")
+            return False
+
+        # Create backup if requested and file exists
+        if backup and self.cookie_path.exists():
+            backup_path = Path(str(self.cookie_path) + '.backup')
+            import shutil
+            shutil.copy2(self.cookie_path, backup_path)
+            self.logger.ok(f"Backup created: {backup_path}")
+
+        # Save cookies in Netscape format
+        try:
+            cookie_jar.save(ignore_discard=True, ignore_expires=False)
+            self.logger.ok(f"Cookies saved to {self.cookie_path}")
+
+            # Validate the new cookies
+            status = self.validate()
+            if status.valid:
+                self.logger.ok(status.reason)
+                return True
+            else:
+                self.logger.error(f"Saved cookies are not valid: {status.reason}")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"Failed to save cookies: {e}")
+            return False
 
 
 # ══════════════════════════════════════════════════════════════════
