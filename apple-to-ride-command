@@ -1366,9 +1366,10 @@ class Converter:
 class Downloader:
     """Manages downloads from Apple Music using gamdl."""
 
-    def __init__(self, logger=None, venv_python=None):
+    def __init__(self, logger=None, venv_python=None, cookie_path='cookies.txt'):
         self.logger = logger or Logger()
         self.venv_python = venv_python or sys.executable
+        self.cookie_manager = CookieManager(cookie_path, logger=self.logger)
 
     def extract_url_info(self, url):
         """
@@ -1410,7 +1411,8 @@ class Downloader:
         ]
         return len(m4a_files)
 
-    def download(self, url, output_dir, key=None, confirm=True, dry_run=False):
+    def download(self, url, output_dir, key=None, confirm=True, dry_run=False,
+                 validate_cookies=True, auto_refresh=False):
         """
         Download playlist from Apple Music using gamdl.
         Returns (success, key, album_name, download_stats)
@@ -1431,6 +1433,31 @@ class Downloader:
         self.logger.info(f"Downloading playlist: {key}")
         self.logger.info(f"  Album name: {album_name}")
         self.logger.info(f"  Output: {output_path}")
+
+        # Validate cookies before download
+        if validate_cookies and not dry_run:
+            status = self.cookie_manager.validate()
+
+            if status.valid:
+                self.logger.ok(status.reason)
+            else:
+                self.logger.error(status.reason)
+
+                # Try auto-refresh if requested
+                if auto_refresh:
+                    self.logger.info("Attempting automatic cookie refresh...")
+                    self.logger.error("Auto-refresh not yet implemented - use manual refresh")
+                    self.cookie_manager.show_manual_instructions()
+                    return False, None, None, None
+                else:
+                    self.cookie_manager.show_manual_instructions()
+
+                    # Ask to continue anyway
+                    if confirm:
+                        response = input("Continue without valid cookies? [y/N] ").strip().lower()
+                        if response != 'y':
+                            self.logger.info("Aborted")
+                            return False, None, None, None
 
         # Confirmation prompt (unless auto mode)
         if confirm:
@@ -1552,6 +1579,120 @@ class Downloader:
         except Exception as e:
             self.logger.error(f"Failed to download {key}: {e}")
             return False, key, album_name, stats
+
+
+# ══════════════════════════════════════════════════════════════════
+# Section 7.5: Cookie Management Module
+# ══════════════════════════════════════════════════════════════════
+
+class CookieStatus:
+    """Cookie validation result."""
+    def __init__(self):
+        self.valid = False
+        self.exists = False
+        self.has_required_cookie = False
+        self.expiration_timestamp = None
+        self.expiration_date = None
+        self.days_until_expiration = None
+        self.reason = ""  # Human-readable message
+
+
+class CookieManager:
+    """Manages Apple Music cookie validation and refresh."""
+
+    def __init__(self, cookie_path='cookies.txt', logger=None):
+        self.cookie_path = Path(cookie_path)
+        self.logger = logger or Logger()
+        self.required_domain = '.music.apple.com'
+        self.required_cookie_name = 'media-user-token'
+
+    def validate(self):
+        """Validate cookies.txt and check expiration.
+
+        Returns:
+            CookieStatus: Validation result with detailed information
+        """
+        import http.cookiejar
+        from datetime import datetime, timezone
+
+        status = CookieStatus()
+
+        # Check if file exists
+        if not self.cookie_path.exists():
+            status.reason = f"Cookie file not found: {self.cookie_path}"
+            return status
+
+        status.exists = True
+
+        try:
+            # Load cookies using MozillaCookieJar (Netscape format)
+            cookie_jar = http.cookiejar.MozillaCookieJar(str(self.cookie_path))
+            cookie_jar.load(ignore_discard=True, ignore_expires=True)
+
+            # Find the required cookie
+            target_cookie = None
+            for cookie in cookie_jar:
+                if (cookie.domain == self.required_domain and
+                    cookie.name == self.required_cookie_name):
+                    target_cookie = cookie
+                    break
+
+            if not target_cookie:
+                status.reason = f"Required cookie '{self.required_cookie_name}' not found for domain '{self.required_domain}'"
+                return status
+
+            status.has_required_cookie = True
+
+            # Check expiration
+            if target_cookie.expires is None:
+                # Session cookie - no expiration
+                status.valid = True
+                status.reason = "Cookie is valid (session cookie, no expiration)"
+                return status
+
+            status.expiration_timestamp = target_cookie.expires
+            status.expiration_date = datetime.fromtimestamp(target_cookie.expires, tz=timezone.utc)
+
+            # Compare with current time
+            now = datetime.now(timezone.utc)
+            time_diff = status.expiration_date - now
+            status.days_until_expiration = time_diff.total_seconds() / 86400
+
+            if time_diff.total_seconds() > 0:
+                # Cookie is valid
+                status.valid = True
+                days = int(status.days_until_expiration)
+                date_str = status.expiration_date.strftime('%Y-%m-%d')
+                status.reason = f"Cookies valid until {date_str} ({days} days remaining)"
+            else:
+                # Cookie expired
+                days_ago = int(-status.days_until_expiration)
+                date_str = status.expiration_date.strftime('%Y-%m-%d')
+                status.reason = f"Cookies expired on {date_str} ({days_ago} days ago)"
+
+            return status
+
+        except Exception as e:
+            status.reason = f"Failed to validate cookies: {e}"
+            return status
+
+    def show_manual_instructions(self):
+        """Display step-by-step manual cookie refresh guide."""
+        self.logger.info("\n" + "=" * 60)
+        self.logger.info("Apple Music Cookie Refresh Required")
+        self.logger.info("=" * 60)
+        self.logger.info("\nYour Apple Music authentication has expired. Follow these steps:\n")
+        self.logger.info("1. Open Chrome/Firefox and go to: https://music.apple.com")
+        self.logger.info("2. Log in to your Apple Music account")
+        self.logger.info("3. Install browser extension:")
+        self.logger.info("   - Chrome: 'Get cookies.txt LOCALLY' extension")
+        self.logger.info("   - Firefox: 'cookies.txt' extension")
+        self.logger.info("4. Click extension icon → Export cookies.txt")
+        self.logger.info(f"5. Save as: {self.cookie_path.absolute()}")
+        self.logger.info("6. Re-run this command\n")
+        self.logger.info("Alternative: Try automatic refresh with --auto-refresh-cookies flag")
+        self.logger.info("(opens browser automatically, no password prompts required)")
+        self.logger.info("=" * 60 + "\n")
 
 
 # ══════════════════════════════════════════════════════════════════
