@@ -97,8 +97,23 @@ Downloading playlist: Rocking_It
 [ERROR] Cookies expired on 2026-02-15 (3 days ago)
 
 Attempting automatic cookie refresh...
-Detected default browser: Chrome
-Available browsers: Chrome, Safari, Edge
+
+============================================================
+Select Browser for Cookie Extraction
+============================================================
+
+Detected browsers:
+
+  1. Chrome (default)
+  2. Safari
+  3. Edge
+
+  A. Try all browsers (recommended if issues occur)
+  X. Cancel
+
+Select browser [1] or press Enter for default: ↵
+
+Using default browser: Chrome
 Attempting to use Chrome...
 Navigating to music.apple.com...
 Extracted 42 cookies from Chrome
@@ -122,8 +137,23 @@ $ ./apple-to-ride-command download --playlist 1 --auto-refresh-cookies
 [... startup info ...]
 
 Attempting automatic cookie refresh...
-Detected default browser: Chrome
-Available browsers: Chrome, Safari, Edge
+
+============================================================
+Select Browser for Cookie Extraction
+============================================================
+
+Detected browsers:
+
+  1. Chrome (default)
+  2. Safari
+  3. Edge
+
+  A. Try all browsers (recommended if issues occur)
+  X. Cancel
+
+Select browser [1] or press Enter for default: ↵
+
+Using default browser: Chrome
 Attempting to use Chrome...
 Navigating to music.apple.com...
 Not logged in to Apple Music
@@ -163,20 +193,46 @@ The tool automatically detects and uses browsers in this priority:
 | Safari | ✅ | ❌ | ❌ | macOS only, no headless mode |
 | Edge | ✅ | ✅ | ✅ | Chromium-based, fully supported |
 
-### Browser Detection
+### Browser Selection
 
-The tool detects:
+When multiple browsers are detected, you'll be prompted to choose:
+
+```
+============================================================
+Select Browser for Cookie Extraction
+============================================================
+
+Detected browsers:
+
+  1. Chrome (default)
+  2. Safari
+  3. Edge
+
+  A. Try all browsers (recommended if issues occur)
+  X. Cancel
+
+Select browser [1] or press Enter for default:
+```
+
+**Selection Options:**
+- **Press Enter** - Use default browser (fastest, recommended)
+- **1-N** - Select specific browser by number
+- **A** - Try all browsers in sequence until one succeeds
+- **X** - Cancel cookie refresh operation
+
+**Single Browser Detected:**
+If only one browser is found, selection is skipped and that browser is used automatically.
+
+**Browser Detection:**
+The tool automatically detects:
 - **Your default browser** (e.g., Chrome set as default in System Settings)
 - **All installed browsers** (e.g., Chrome, Safari, Edge in /Applications)
 
-Output example:
-```
-Detected default browser: Chrome
-Available browsers: Chrome, Safari, Edge
-Attempting to use Chrome...
-```
-
-If the default browser fails, it automatically tries the next available browser.
+**Use Cases:**
+- **Default (Enter)**: Best for most users, uses your preferred browser
+- **Specific browser (1-3)**: When you're already logged in to Apple Music in a particular browser
+- **Try all (A)**: Troubleshooting option if your default browser isn't working
+- **Cancel (X)**: Abort and use manual refresh instead
 
 ## Flags
 
