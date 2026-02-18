@@ -53,11 +53,14 @@ class Logger:
     def _write(self, level, message):
         """Write message to both console and log file."""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        formatted = f"[{timestamp}] [{level}] {message}"
+        formatted_with_prefix = f"[{timestamp}] [{level}] {message}"
 
-        print(formatted)
+        # Console: just the message (no timestamp/level)
+        print(message)
+
+        # File: full format with timestamp and level
         with open(self.log_file, 'a') as f:
-            f.write(formatted + '\n')
+            f.write(formatted_with_prefix + '\n')
 
     def info(self, message):
         """Log informational message."""
@@ -1313,7 +1316,7 @@ class Downloader:
 
         cmd = [
             self.venv_python, "-m", "gamdl",
-            "--log-level", "WARNING",  # Suppress DEBUG and INFO messages
+            "--log-level", "INFO",  # Show download progress, suppress DEBUG
             "-o", str(output_path) + "/",
             url
         ]
