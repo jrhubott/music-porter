@@ -41,7 +41,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "1.2.1"
+VERSION = "1.2.1-code-cleanup"
 
 DEFAULT_MUSIC_DIR = "music"
 DEFAULT_EXPORT_DIR = "export"
@@ -1660,8 +1660,8 @@ class Downloader:
                             stats.failed = int(error_match.group(1))
 
                 except Exception as parse_error:
-                    # If parsing fails for a line, continue without crashing
-                    pass
+                    # If parsing fails for a line, log and continue without crashing
+                    self.logger.file_info(f"Output parse error: {parse_error}")
 
             process.wait()
 
@@ -1853,7 +1853,7 @@ class CookieManager:
                         return 'firefox'
                     elif 'edge' in prog_id or 'msedge' in prog_id:
                         return 'edge'
-                except:
+                except Exception:
                     pass
 
         except Exception as e:
@@ -2265,7 +2265,7 @@ class CookieManager:
             if driver:
                 try:
                     driver.quit()
-                except:
+                except Exception:
                     pass
             self.logger.error(f"Cookie extraction failed: {e}")
             return None
@@ -2869,9 +2869,9 @@ class SummaryManager:
                 if item.is_dir() and not item.name.startswith('.'):
                     playlist_dirs.append(item)
         except PermissionError as e:
-            self.logger.warning(f"Permission denied accessing export directory: {e}")
+            self.logger.warn(f"Permission denied accessing export directory: {e}")
         except Exception as e:
-            self.logger.warning(f"Error scanning export directory: {e}")
+            self.logger.warn(f"Error scanning export directory: {e}")
 
         # Sort by name for consistent output
         return sorted(playlist_dirs, key=lambda p: p.name)
@@ -2910,10 +2910,10 @@ class SummaryManager:
             return summary
 
         except PermissionError as e:
-            self.logger.warning(f"Permission denied accessing playlist '{playlist_dir.name}': {e}")
+            self.logger.warn(f"Permission denied accessing playlist '{playlist_dir.name}': {e}")
             return None
         except Exception as e:
-            self.logger.warning(f"Error analyzing playlist '{playlist_dir.name}': {e}")
+            self.logger.warn(f"Error analyzing playlist '{playlist_dir.name}': {e}")
             return None
 
     def _check_tag_integrity(self):
