@@ -308,6 +308,16 @@ VERSION = "1.1.0"
   - `1.1.1-bugfix-tag-restoration` → `1.1.1` (bug fix)
   - `2.0.0-breaking-cli-refactor` → `2.0.0` (breaking change)
 
+**When committing directly to main:**
+- **ALWAYS ask the user if the version should be bumped** before committing
+- Present the current version and suggest appropriate bump level based on changes
+- Examples of prompts:
+  - "Current version is 1.2.1. Should I bump to 1.2.2 for this bug fix? [Y/n]"
+  - "Current version is 1.2.0. Should I bump to 1.3.0 for this new feature? [Y/n]"
+  - "Current version is 1.2.0. This is just documentation. Skip version bump? [Y/n]"
+- After user confirms, update VERSION and commit
+- Never assume - always ask!
+
 **Semantic Versioning (MAJOR.MINOR.PATCH):**
 - **PATCH** (1.1.0 → 1.1.1): Bug fixes, documentation updates, minor improvements
 - **MINOR** (1.1.0 → 1.2.0): New features, non-breaking changes
