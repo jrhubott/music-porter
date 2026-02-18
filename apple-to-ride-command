@@ -487,6 +487,8 @@ class TagStatistics:
 
     def __init__(self):
         self.title_updated = 0
+        self.album_updated = 0      # NEW: Track album tag updates
+        self.artist_updated = 0     # NEW: Track artist tag updates
         self.title_stored = 0
         self.artist_stored = 0
         self.album_stored = 0
