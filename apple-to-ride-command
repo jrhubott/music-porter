@@ -2597,16 +2597,19 @@ class AggregateStatistics:
 class PipelineOrchestrator:
     """Coordinates multi-stage workflows: download → convert → tag → USB sync."""
 
-    def __init__(self, logger=None, deps=None, config=None, quality_preset='lossless'):
+    def __init__(self, logger=None, deps=None, config=None, quality_preset='lossless',
+                 cookie_path='cookies.txt'):
         self.logger = logger or Logger()
         self.deps = deps or DependencyChecker(self.logger)
         self.config = config or ConfigManager(logger=self.logger)
         self.stats = PipelineStatistics()
         self.quality_preset = quality_preset
+        self.cookie_path = cookie_path
 
     def run_full_pipeline(self, playlist=None, url=None, auto=False,
                          copy_to_usb=False, usb_dir=DEFAULT_USB_DIR,
-                         dry_run=False, verbose=False, quality_preset=None):
+                         dry_run=False, verbose=False, quality_preset=None,
+                         validate_cookies=True, auto_refresh_cookies=False):
         """
         Execute the complete pipeline: download → convert → tag → USB sync.
         """
@@ -2616,7 +2619,8 @@ class PipelineOrchestrator:
         if url:
             # Direct URL provided
             self.logger.info("=== STAGE 1: Download from URL ===")
-            success = self._download_from_url(url, auto, dry_run, verbose)
+            success = self._download_from_url(url, auto, dry_run, verbose,
+                                             validate_cookies, auto_refresh_cookies)
             if not success:
                 self._print_pipeline_summary()
                 return False
@@ -2624,7 +2628,8 @@ class PipelineOrchestrator:
         elif playlist:
             # Playlist key or index provided
             self.logger.info("=== STAGE 1: Download playlist ===")
-            success = self._download_playlist(playlist, auto, dry_run, verbose)
+            success = self._download_playlist(playlist, auto, dry_run, verbose,
+                                             validate_cookies, auto_refresh_cookies)
             if not success:
                 self._print_pipeline_summary()
                 return False
@@ -2701,9 +2706,10 @@ class PipelineOrchestrator:
 
         return len(self.stats.stages_failed) == 0
 
-    def _download_from_url(self, url, auto, dry_run, verbose):
+    def _download_from_url(self, url, auto, dry_run, verbose,
+                           validate_cookies=True, auto_refresh_cookies=False):
         """Download playlist from URL."""
-        downloader = Downloader(self.logger, self.deps.venv_python)
+        downloader = Downloader(self.logger, self.deps.venv_python, cookie_path=self.cookie_path)
 
         key, album_name = downloader.extract_url_info(url)
         if not key:
@@ -2722,7 +2728,9 @@ class PipelineOrchestrator:
             output_dir,
             key=key,
             confirm=not auto,
-            dry_run=dry_run
+            dry_run=dry_run,
+            validate_cookies=validate_cookies,
+            auto_refresh=auto_refresh_cookies
         )
 
         if success:
@@ -2746,7 +2754,8 @@ class PipelineOrchestrator:
                 self.stats.stages_failed.append("download")
                 return False
 
-    def _download_playlist(self, playlist_arg, auto, dry_run, verbose):
+    def _download_playlist(self, playlist_arg, auto, dry_run, verbose,
+                           validate_cookies=True, auto_refresh_cookies=False):
         """Download playlist from configuration."""
         # Find playlist by name or index
         playlist = None
@@ -2765,13 +2774,15 @@ class PipelineOrchestrator:
 
         output_dir = f"{DEFAULT_MUSIC_DIR}/{playlist.key}"
 
-        downloader = Downloader(self.logger, self.deps.venv_python)
+        downloader = Downloader(self.logger, self.deps.venv_python, cookie_path=self.cookie_path)
         success, _, _, download_stats = downloader.download(
             playlist.url,
             output_dir,
             key=playlist.key,
             confirm=not auto,
-            dry_run=dry_run
+            dry_run=dry_run,
+            validate_cookies=validate_cookies,
+            auto_refresh=auto_refresh_cookies
         )
 
         if success:
@@ -3319,6 +3330,12 @@ def create_parser():
                                 help='Quality preset (default: lossless)')
     pipeline_parser.add_argument('--quality', type=int, metavar='0-9',
                                 help='Custom VBR quality (0=best, 9=worst). Requires --preset custom')
+    pipeline_parser.add_argument('--cookies', default='cookies.txt',
+                                help='Path to cookies.txt file (default: cookies.txt)')
+    pipeline_parser.add_argument('--auto-refresh-cookies', action='store_true',
+                                help='Automatically refresh cookies if expired (requires selenium, opens browser)')
+    pipeline_parser.add_argument('--skip-cookie-validation', action='store_true',
+                                help='Skip cookie validation (not recommended)')
 
     # ── download ──────────────────────────────────────────────────
     download_parser = subparsers.add_parser('download',
@@ -3326,6 +3343,12 @@ def create_parser():
     download_parser.add_argument('--playlist', help='Playlist name or number')
     download_parser.add_argument('--url', required=False, help='Apple Music playlist URL')
     download_parser.add_argument('--output', help='Output directory')
+    download_parser.add_argument('--cookies', default='cookies.txt',
+                                help='Path to cookies.txt file (default: cookies.txt)')
+    download_parser.add_argument('--auto-refresh-cookies', action='store_true',
+                                help='Automatically refresh cookies if expired (requires selenium, opens browser)')
+    download_parser.add_argument('--skip-cookie-validation', action='store_true',
+                                help='Skip cookie validation (not recommended)')
 
     # ── convert ───────────────────────────────────────────────────
     convert_parser = subparsers.add_parser('convert',
@@ -3492,7 +3515,7 @@ def main():
         if not deps.check_gamdl():
             sys.exit(1)
 
-        downloader = Downloader(logger, deps.venv_python)
+        downloader = Downloader(logger, deps.venv_python, cookie_path=args.cookies)
 
         # Handle --playlist or --url
         if args.playlist:
@@ -3514,7 +3537,9 @@ def main():
                 output_dir,
                 key=playlist.key,
                 confirm=not args.dry_run,
-                dry_run=args.dry_run
+                dry_run=args.dry_run,
+                validate_cookies=not args.skip_cookie_validation,
+                auto_refresh=args.auto_refresh_cookies
             )
             sys.exit(0 if success else 1)
 
@@ -3526,7 +3551,9 @@ def main():
                 output_dir,
                 key=key,
                 confirm=not args.dry_run,
-                dry_run=args.dry_run
+                dry_run=args.dry_run,
+                validate_cookies=not args.skip_cookie_validation,
+                auto_refresh=args.auto_refresh_cookies
             )
             sys.exit(0 if success else 1)
 
@@ -3581,7 +3608,9 @@ def main():
             logger.warn("--quality ignored unless --preset custom is specified")
 
         config = ConfigManager(logger=logger)
-        orchestrator = PipelineOrchestrator(logger, deps, config, quality_preset=quality_preset)
+        orchestrator = PipelineOrchestrator(logger, deps, config,
+                                          quality_preset=quality_preset,
+                                          cookie_path=args.cookies)
 
         # Determine what to process
         if args.auto:
@@ -3603,7 +3632,9 @@ def main():
                     usb_dir=args.usb_dir,
                     dry_run=args.dry_run,
                     verbose=args.verbose,
-                    quality_preset=quality_preset
+                    quality_preset=quality_preset,
+                    validate_cookies=not args.skip_cookie_validation,
+                    auto_refresh_cookies=args.auto_refresh_cookies
                 )
 
                 # Collect statistics from this run
@@ -3625,7 +3656,9 @@ def main():
                 usb_dir=args.usb_dir,
                 dry_run=args.dry_run,
                 verbose=args.verbose,
-                quality_preset=quality_preset
+                quality_preset=quality_preset,
+                validate_cookies=not args.skip_cookie_validation,
+                auto_refresh_cookies=args.auto_refresh_cookies
             )
             sys.exit(0 if success else 1)
 
