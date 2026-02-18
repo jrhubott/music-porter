@@ -4007,28 +4007,29 @@ def create_parser():
     """Create the argument parser with subcommands."""
     parser = argparse.ArgumentParser(
         prog='apple-to-ride-command',
-        description='''Apple Music to Ride Command MP3 Converter
+        description='''\033[1;36mApple Music to Ride Command MP3 Converter\033[0m
 
 A comprehensive music playlist management and conversion tool that:
-  • Downloads Apple Music playlists using gamdl
-  • Converts M4A to MP3 with configurable quality presets
-  • Preserves metadata with TXXX frame protection
-  • Manages tags with update, restore, and reset operations
-  • Syncs to USB drives with automatic detection
-  • Validates and auto-refreshes Apple Music cookies
-  • Provides interactive menu and pipeline orchestration
-  • Supports dry-run mode for safe previews
-  • Cross-platform: macOS, Linux, and Windows
+  \033[32m•\033[0m Downloads Apple Music playlists using gamdl
+  \033[32m•\033[0m Converts M4A to MP3 with configurable quality presets
+  \033[32m•\033[0m Preserves metadata with TXXX frame protection
+  \033[32m•\033[0m Manages tags with update, restore, and reset operations
+  \033[32m•\033[0m Syncs to USB drives with automatic detection
+  \033[32m•\033[0m Validates and auto-refreshes Apple Music cookies
+  \033[32m•\033[0m Provides interactive menu and pipeline orchestration
+  \033[32m•\033[0m Supports dry-run mode for safe previews
+  \033[32m•\033[0m Cross-platform: macOS, Linux, and Windows
 ''',
-        epilog=f'''Default Paths:
-  Downloads:  {DEFAULT_MUSIC_DIR}/
-  Exports:    {DEFAULT_EXPORT_DIR}/
-  Logs:       {DEFAULT_LOG_DIR}/
-  Config:     {DEFAULT_PLAYLISTS_CONF}
-  Cookies:    {DEFAULT_COOKIES}
-  USB Target: {DEFAULT_USB_DIR}
+        epilog=f'''
+Default Paths:
+  \033[1mDownloads:\033[0m  \033[36m{DEFAULT_MUSIC_DIR}/\033[0m
+  \033[1mExports:\033[0m    \033[36m{DEFAULT_EXPORT_DIR}/\033[0m
+  \033[1mLogs:\033[0m       \033[36m{DEFAULT_LOG_DIR}/\033[0m
+  \033[1mConfig:\033[0m     \033[36m{DEFAULT_PLAYLISTS_CONF}\033[0m
+  \033[1mCookies:\033[0m    \033[36m{DEFAULT_COOKIES}\033[0m
+  \033[1mUSB Target:\033[0m \033[36m{DEFAULT_USB_DIR}\033[0m
 
-Use 'apple-to-ride-command <command> --help' for command-specific help.
+For command-specific help: \033[36mapple-to-ride-command <command> --help\033[0m
 ''',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
