@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## User Preferences
+
+### Git Commit Preferences
+- **Never include** Co-Authored-By lines in commit messages
+- Commits should be authored solely by the user
+
+### README Future Features
+- When implementing a future feature from the README list, **strikethrough** the item (~~text~~) with a note like "*(implemented in vX.Y.Z)*" instead of removing it
+- Keep the original numbering intact
+
 ## Project Overview
 
 RideCommandMP3Export is a music playlist management and conversion tool that downloads Apple Music playlists, converts them to MP3 format, and optionally copies them to USB drives. The system preserves original tag metadata while allowing customization for device compatibility.
