@@ -1204,6 +1204,8 @@ class Converter:
         print(f"  TAGGING")
         print(f"{'─' * 60}")
         print(f"  Title updated:           {self.tag_stats.title_updated}")
+        print(f"  Album updated:           {self.tag_stats.album_updated}")
+        print(f"  Artist updated:          {self.tag_stats.artist_updated}")
         print(f"  OriginalTitle stored:    {self.tag_stats.title_stored}")
         print(f"  OriginalArtist stored:   {self.tag_stats.artist_stored}")
         print(f"  OriginalAlbum stored:    {self.tag_stats.album_stored}")
