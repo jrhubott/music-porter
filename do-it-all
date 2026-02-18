@@ -168,8 +168,7 @@ process_playlist() {
         fi
     fi
 
-    run ./convert-to-mp3 "music/$key/" --output "export/$key"
-    run ./update_album_tags.py "export/$key" "$album_name"
+    run ./ride-command-mp3-export "music/$key/" --output "export/$key" --new-album "$album_name"
 
     log "Done processing: $key"
 }
@@ -208,8 +207,7 @@ process_url() {
         fi
     fi
 
-    run ./convert-to-mp3 "music/$key/" --output "export/$key"
-    run ./update_album_tags.py "export/$key" "$album_name"
+    run ./ride-command-mp3-export "music/$key/" --output "export/$key" --new-album "$album_name"
 
     log "Done processing: $key"
 }
