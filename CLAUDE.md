@@ -280,6 +280,42 @@ pip install -r requirements.txt
 - Test tag preservation by running updates multiple times
 - Verify TXXX frames with: `./apple-to-ride-command --verbose tag export/PlaylistName`
 
+### Version Management
+
+**IMPORTANT: Update the version number with each commit.**
+
+The version number is defined in `apple-to-ride-command` at line 44:
+```python
+VERSION = "1.0.0"
+```
+
+**Version Update Workflow:**
+1. Make code changes
+2. Update VERSION in apple-to-ride-command (line 44)
+3. Commit changes (version update included in same commit)
+
+**Semantic Versioning (MAJOR.MINOR.PATCH):**
+- **PATCH** (1.0.0 → 1.0.1): Bug fixes, documentation updates, minor improvements
+- **MINOR** (1.0.0 → 1.1.0): New features, non-breaking changes
+- **MAJOR** (1.0.0 → 2.0.0): Breaking changes, major refactors
+
+**Examples:**
+```bash
+# Bug fix or doc update
+VERSION = "1.0.1"
+
+# New feature (cookie management, USB sync, etc.)
+VERSION = "1.1.0"
+
+# Breaking change (CLI interface change, config format change)
+VERSION = "2.0.0"
+```
+
+**Version Display:**
+- Shown in startup banner: `Apple Music to Ride Command MP3 Converter v1.0.0`
+- Shown with `--version` flag
+- Logged to all log files
+
 ### Common Gotchas
 
 **Apple Music Authentication & Cookie Management:**
