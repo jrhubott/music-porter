@@ -192,9 +192,9 @@ def update_title_tag(tags, cleanup_options, dry_run=False, verbose=False):
         print(f"  [DRY-RUN] Would update Title: '{current_title}' → '{new_title}'")
         return False
 
-    # ── Protect original before overwriting — hard gate applies ───
-    save_original_tag(tags, "TXXX:OriginalTitle", "OriginalTitle",
-                      source_title, "title")
+    # Note: Original title is already saved earlier in the flow
+    # (in convert_m4a_to_mp3 or update_tags), so no need to call
+    # save_original_tag() again here to avoid duplicate messages.
 
     tags["TIT2"] = TIT2(encoding=3, text=new_title)
     print(f"  Title updated: '{current_title}' → '{new_title}'")
