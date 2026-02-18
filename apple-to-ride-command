@@ -1286,6 +1286,7 @@ class Downloader:
         # Run gamdl
         cmd = [
             self.venv_python, "-m", "gamdl",
+            "--log-level", "WARNING",  # Suppress DEBUG and INFO messages
             "-o", str(output_path) + "/",
             url
         ]
