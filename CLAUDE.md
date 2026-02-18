@@ -29,7 +29,7 @@ The system follows a two-stage pipeline:
 - Converts M4A → MP3 using ffmpeg with libmp3lame codec (quality: -q:a 2)
 - Implements tag preservation system using TXXX frames (OriginalTitle, OriginalArtist, OriginalAlbum)
 - Can perform conversion and tag updates in a single operation
-- Modes: conversion, tag update, tag restore, rescan from source
+- Modes: conversion, tag update, tag restore, reset tags from source input
 - Output: flat directory structure with "Artist - Title.mp3" naming
 - Sets album/artist tags and formats titles as "Artist - Title"
 - Removes extraneous tags, keeps only: Title, Artist, Album, Length, Date, Album Artist
@@ -97,8 +97,8 @@ The codebase uses a "hard gate" protection system for original metadata:
 ./ride-command-mp3-export converted_mp3/ --restore-album
 ./ride-command-mp3-export converted_mp3/ --restore-title
 
-# Rescan from source M4A files (resets protection tags)
-./ride-command-mp3-export music/Pop_Workout/ --output export/Pop_Workout --rescan
+# Reset tags from source M4A files (resets protection tags)
+./ride-command-mp3-export music/Pop_Workout/ --output export/Pop_Workout --reset-tags-from-input
 ```
 
 ### USB Operations
@@ -150,6 +150,46 @@ pip install gamdl mutagen
 - Use `--verbose` to inspect tag transformations
 - Test tag preservation by running updates multiple times
 - Verify TXXX frames with: `./ride-command-mp3-export --verbose`
+
+### Git Commit Best Practices
+
+When making changes to the codebase, create incremental commits for each logical change:
+
+**Commit Strategy:**
+- One commit per logical change (e.g., one for a bug fix, one for documentation)
+- Write clear, descriptive commit messages that explain the "why" not just the "what"
+- Use the conventional commit format when applicable
+- Include Co-Authored-By line for AI-assisted changes
+
+**Example Workflow:**
+```bash
+# Make a focused change (e.g., fix a bug)
+# ... edit files ...
+git add <files>
+git commit -m "Fix TXXX frame deletion bug in _apply_cleanup()
+
+The duplicate removal logic was incorrectly treating all TXXX frames as
+duplicates because it only checked the base key ('TXXX') rather than the
+frame's description attribute.
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
+
+# Make another logical change (e.g., remove redundant code)
+# ... edit files ...
+git add <files>
+git commit -m "Remove duplicate save_original_tag() call
+
+The original title was already being saved earlier in the execution flow.
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
+```
+
+**Benefits:**
+- Each commit represents a single, reviewable change
+- Easy to understand what changed and why
+- Simplifies debugging (git bisect, git blame)
+- Enables selective reverting if needed
+- Creates clear project history
 
 ## Directory Structure
 
