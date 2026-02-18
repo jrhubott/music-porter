@@ -539,6 +539,7 @@ class TaggerManager:
         self.logger.info(f"New Album:  {new_album or '—'}")
         self.logger.info(f"New Artist: {new_artist or '—'}")
 
+        start_time = time.time()
         count = 0
         updated = 0
         skipped = 0
@@ -547,8 +548,6 @@ class TaggerManager:
         for filepath in mp3_files:
             count += 1
             filename = filepath.relative_to(directory)
-
-            self.logger.info(f"[{count}/{len(mp3_files)}] Processing: {filename}")
 
             try:
                 try:
@@ -631,18 +630,58 @@ class TaggerManager:
                 _apply_cleanup(tags, str(filepath), self.cleanup_options)
 
                 if file_changed:
-                    self.logger.ok("Tags updated")
                     updated += 1
+                    self.logger.info(f"[{updated}/{len(mp3_files)}] Tags updated: {filename}")
                 else:
-                    self.logger.skip("No changes needed")
                     skipped += 1
+                    self.logger.info(f"[{skipped}/{len(mp3_files)}] Skipping (no changes): {filename}")
 
             except Exception as e:
                 self.logger.error(f"Failed to update '{filename}': {e}")
                 errors += 1
 
-        self.logger.info(f"Updated: {updated}, Skipped: {skipped}, Errors: {errors}")
+        duration = time.time() - start_time
+        self._print_update_summary(directory, duration, updated, skipped, errors)
         return errors == 0
+
+    def _print_update_summary(self, directory, duration, updated, skipped, errors):
+        """Print formatted summary after tag updates."""
+        total_tag_updates = self.stats.title_updated + self.stats.album_updated + self.stats.artist_updated
+        total_stored = self.stats.title_stored + self.stats.artist_stored + self.stats.album_stored
+
+        print()
+        print("=" * 60)
+        print("  TAG UPDATE SUMMARY")
+        print("=" * 60)
+        print(f"  Run date:                {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"  Directory:               '{directory}'")
+        print(f"  Duration:                {duration:.1f}s")
+        print("─" * 60)
+        print("  FILES")
+        print("─" * 60)
+        print(f"  Files processed:         {updated + skipped}")
+        print(f"  Files updated:           {updated}")
+        print(f"  Files skipped:           {skipped}")
+        print(f"  Errors:                  {errors}")
+        print("─" * 60)
+        print("  TAG UPDATES")
+        print("─" * 60)
+        print(f"  Title updated:           {self.stats.title_updated}")
+        print(f"  Album updated:           {self.stats.album_updated}")
+        print(f"  Artist updated:          {self.stats.artist_updated}")
+        print(f"  Total tag updates:       {total_tag_updates}")
+        print("─" * 60)
+        print("  ORIGINAL TAG PROTECTION")
+        print("─" * 60)
+        print(f"  OriginalTitle stored:    {self.stats.title_stored}")
+        print(f"  OriginalArtist stored:   {self.stats.artist_stored}")
+        print(f"  OriginalAlbum stored:    {self.stats.album_stored}")
+        print(f"  Total stored:            {total_stored}")
+        print("─" * 60)
+        status_emoji = "✅" if errors == 0 else "❌"
+        status_text = "Completed successfully" if errors == 0 else "Completed with errors"
+        print(f"  Status:                  {status_emoji} {status_text}")
+        print("=" * 60)
 
     def restore_tags(self, directory, restore_album=False, restore_title=False,
                     restore_artist=False, dry_run=False, verbose=False):
@@ -669,6 +708,7 @@ class TaggerManager:
         self.logger.info(f"Restoring Title:  {restore_title}")
         self.logger.info(f"Restoring Artist: {restore_artist}")
 
+        start_time = time.time()
         count = 0
         restored = 0
         skipped = 0
@@ -677,8 +717,6 @@ class TaggerManager:
         for filepath in mp3_files:
             count += 1
             filename = filepath.relative_to(directory)
-
-            self.logger.info(f"[{count}/{len(mp3_files)}] Processing: {filename}")
 
             try:
                 try:
@@ -741,18 +779,50 @@ class TaggerManager:
 
                 if not dry_run and file_restored:
                     _apply_cleanup(tags, str(filepath), self.cleanup_options)
-                    self.logger.ok("Tags restored")
                     restored += 1
+                    self.logger.info(f"[{restored}/{len(mp3_files)}] Tags restored: {filename}")
                 elif not file_restored:
-                    self.logger.skip(f"Nothing to restore for '{filename}'")
                     skipped += 1
+                    self.logger.info(f"[{skipped}/{len(mp3_files)}] Skipping (nothing to restore): {filename}")
 
             except Exception as e:
                 self.logger.error(f"Failed to restore '{filename}': {e}")
                 errors += 1
 
-        self.logger.info(f"Restored: {restored}, Skipped: {skipped}, Errors: {errors}")
+        duration = time.time() - start_time
+        self._print_restore_summary(directory, duration, restored, skipped, errors)
         return errors == 0
+
+    def _print_restore_summary(self, directory, duration, restored, skipped, errors):
+        """Print formatted summary after tag restoration."""
+        total_restored = self.stats.title_restored + self.stats.album_restored + self.stats.artist_restored
+
+        print()
+        print("=" * 60)
+        print("  TAG RESTORATION SUMMARY")
+        print("=" * 60)
+        print(f"  Run date:                {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"  Directory:               '{directory}'")
+        print(f"  Duration:                {duration:.1f}s")
+        print("─" * 60)
+        print("  FILES")
+        print("─" * 60)
+        print(f"  Files processed:         {restored + skipped}")
+        print(f"  Files restored:          {restored}")
+        print(f"  Files skipped:           {skipped}")
+        print(f"  Errors:                  {errors}")
+        print("─" * 60)
+        print("  TAG RESTORATIONS")
+        print("─" * 60)
+        print(f"  Title restored:          {self.stats.title_restored}")
+        print(f"  Artist restored:         {self.stats.artist_restored}")
+        print(f"  Album restored:          {self.stats.album_restored}")
+        print(f"  Total restored:          {total_restored}")
+        print("─" * 60)
+        status_emoji = "✅" if errors == 0 else "❌"
+        status_text = "Completed successfully" if errors == 0 else "Completed with errors"
+        print(f"  Status:                  {status_emoji} {status_text}")
+        print("=" * 60)
 
     def reset_tags_from_source(self, input_dir, output_dir, dry_run=False, verbose=False):
         """
@@ -971,6 +1041,15 @@ class DownloadStatistics:
         self.failed = 0              # Failed downloads
 
 
+class USBSyncStatistics:
+    """Tracks USB sync operation statistics."""
+
+    def __init__(self):
+        self.files_found = 0         # Total files to copy
+        self.files_copied = 0        # Successfully copied
+        self.files_failed = 0        # Copy failures
+
+
 class Converter:
     """Manages M4A to MP3 conversion with tag preservation."""
 
@@ -1031,8 +1110,6 @@ class Converter:
             count += 1
             display_name = input_file.relative_to(input_path)
 
-            self.logger.info(f"[{count}/{self.stats.total_found}] Processing: {display_name}")
-
             try:
                 # Read M4A tags
                 m4a = MP4(str(input_file))
@@ -1048,8 +1125,8 @@ class Converter:
                 already_exists = output_file.exists()
 
                 if already_exists and not force:
-                    self.logger.skip(f"Already exists: '{output_filename}'")
                     self.stats.skipped += 1
+                    self.logger.info(f"[{self.stats.skipped}/{self.stats.total_found}] Skipping (already exists): {output_filename}")
                     continue
 
                 if verbose:
@@ -1107,11 +1184,11 @@ class Converter:
                     self.logger.debug(f"Output size: {output_file.stat().st_size / 1024:.1f} KB")
 
                 if already_exists and force:
-                    self.logger.ok(f"Overwritten → '{output_filename}'")
                     self.stats.overwritten += 1
+                    self.logger.info(f"[{self.stats.overwritten}/{self.stats.total_found}] Overwritten: {output_filename}")
                 else:
-                    self.logger.ok(f"Converted → '{output_filename}'")
                     self.stats.converted += 1
+                    self.logger.info(f"[{self.stats.converted}/{self.stats.total_found}] Converted: {output_filename}")
 
             except Exception as e:
                 self.logger.error(f"Failed to convert '{display_name}': {e}")
@@ -1400,18 +1477,30 @@ class USBManager:
     def sync_to_usb(self, source_dir, usb_dir=DEFAULT_USB_DIR, dry_run=False):
         """
         Copy files from source_dir to USB drive using rsync.
-        Returns success boolean.
+        Returns (success boolean, USBSyncStatistics).
         """
+        start_time = time.time()
+        stats = USBSyncStatistics()
         source_path = Path(source_dir)
 
         if not source_path.exists():
             self.logger.error(f"Source directory does not exist: {source_path}")
-            return False
+            return False, stats
+
+        # Count files to copy
+        if source_path.is_file():
+            if source_path.suffix == '.mp3':
+                stats.files_found = 1
+        else:
+            for root, dirs, files in os.walk(source_path):
+                stats.files_found += len([f for f in files if f.endswith('.mp3')])
+
+        self.logger.info(f"Files to copy: {stats.files_found}")
 
         # Select USB drive
         volume = self.select_usb_drive()
         if not volume:
-            return False
+            return False, stats
 
         dest = Path('/Volumes') / volume / usb_dir
 
@@ -1420,14 +1509,20 @@ class USBManager:
         if dry_run:
             self.logger.dry_run(f"Would create directory: {dest}")
             self.logger.dry_run(f"Would rsync: {source_path}/ → {dest}/")
-            return True
+            stats.files_copied = stats.files_found
+            duration = time.time() - start_time
+            self._print_usb_summary(str(source_path), str(dest), stats, duration)
+            return True, stats
 
         # Create destination directory
         try:
             dest.mkdir(parents=True, exist_ok=True)
         except Exception as e:
             self.logger.error(f"Failed to create destination directory: {e}")
-            return False
+            stats.files_failed = stats.files_found
+            duration = time.time() - start_time
+            self._print_usb_summary(str(source_path), str(dest), stats, duration)
+            return False, stats
 
         # Run rsync
         cmd = [
@@ -1440,10 +1535,38 @@ class USBManager:
             self.logger.info(f"Running: {' '.join(cmd)}")
             result = subprocess.run(cmd, check=True)
             self.logger.ok("Copy complete")
-            return True
+            stats.files_copied = stats.files_found
+            duration = time.time() - start_time
+            self._print_usb_summary(str(source_path), str(dest), stats, duration)
+            return True, stats
         except subprocess.CalledProcessError as e:
             self.logger.error(f"rsync failed: {e}")
-            return False
+            stats.files_failed = stats.files_found
+            duration = time.time() - start_time
+            self._print_usb_summary(str(source_path), str(dest), stats, duration)
+            return False, stats
+
+    def _print_usb_summary(self, source, destination, stats, duration):
+        """Print formatted summary after USB sync."""
+        print()
+        print("=" * 60)
+        print("  USB SYNC SUMMARY")
+        print("=" * 60)
+        print(f"  Run date:                {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"  Source:                  '{source}'")
+        print(f"  Destination:             '{destination}'")
+        print(f"  Duration:                {duration:.1f}s")
+        print("─" * 60)
+        print("  FILES")
+        print("─" * 60)
+        print(f"  Files found:             {stats.files_found}")
+        print(f"  Files copied:            {stats.files_copied}")
+        print(f"  Files failed:            {stats.files_failed}")
+        print("─" * 60)
+        status_emoji = "✅" if stats.files_failed == 0 else "❌"
+        status_text = "Completed successfully" if stats.files_failed == 0 else "Completed with errors"
+        print(f"  Status:                  {status_emoji} {status_text}")
+        print("=" * 60)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1471,6 +1594,7 @@ class PipelineStatistics:
         # USB sync stats
         self.usb_success = False
         self.usb_destination = None
+        self.usb_stats = None  # USBSyncStatistics object
 
         # Overall
         self.start_time = time.time()
@@ -1661,7 +1785,7 @@ class PipelineOrchestrator:
         if copy_to_usb:
             self.logger.info("\n=== STAGE 4: Copy to USB ===")
             usb_manager = USBManager(self.logger)
-            success = usb_manager.sync_to_usb(
+            success, usb_stats = usb_manager.sync_to_usb(
                 export_dir,
                 usb_dir=usb_dir,
                 dry_run=dry_run
@@ -1669,6 +1793,7 @@ class PipelineOrchestrator:
 
             if success:
                 self.stats.stages_completed.append("usb-sync")
+                self.stats.usb_stats = usb_stats
                 self.stats.usb_success = True
                 self.stats.usb_destination = f"/Volumes/[drive]/{usb_dir}"
             else:
@@ -2196,11 +2321,12 @@ class InteractiveMenu:
         self.logger.info("Copying existing files to USB...")
 
         usb_manager = USBManager(self.logger)
-        return usb_manager.sync_to_usb(
+        success, _ = usb_manager.sync_to_usb(
             DEFAULT_EXPORT_DIR,
             usb_dir=DEFAULT_USB_DIR,
             dry_run=dry_run
         )
+        return success
 
     def _ask_copy_to_usb(self, source_dir, dry_run):
         """Ask user if they want to copy to USB."""
@@ -2208,7 +2334,7 @@ class InteractiveMenu:
             response = input("\nCopy files to USB? [y/N] ").strip().lower()
             if response == 'y':
                 usb_manager = USBManager(self.logger)
-                usb_manager.sync_to_usb(
+                success, _ = usb_manager.sync_to_usb(
                     source_dir,
                     usb_dir=DEFAULT_USB_DIR,
                     dry_run=dry_run
@@ -2341,7 +2467,7 @@ def main():
     elif args.command == 'tag':
         # Update tags on existing MP3s
         deps = DependencyChecker(logger)
-        if not deps.check_mutagen():
+        if not deps.check_python_packages():
             sys.exit(1)
 
         tagger = TaggerManager(logger)
@@ -2357,7 +2483,7 @@ def main():
     elif args.command == 'restore':
         # Restore original tags from TXXX frames
         deps = DependencyChecker(logger)
-        if not deps.check_mutagen():
+        if not deps.check_python_packages():
             sys.exit(1)
 
         tagger = TaggerManager(logger)
@@ -2374,7 +2500,7 @@ def main():
     elif args.command == 'reset':
         # Reset tags from source M4A files
         deps = DependencyChecker(logger)
-        if not deps.check_mutagen():
+        if not deps.check_python_packages():
             sys.exit(1)
 
         tagger = TaggerManager(logger)
@@ -2437,7 +2563,7 @@ def main():
     elif args.command == 'sync-usb':
         # Copy files to USB drive
         usb_manager = USBManager(logger)
-        success = usb_manager.sync_to_usb(
+        success, _ = usb_manager.sync_to_usb(
             args.source_dir,
             usb_dir=args.usb_dir,
             dry_run=args.dry_run
