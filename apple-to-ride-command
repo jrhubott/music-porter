@@ -1461,12 +1461,16 @@ class Downloader:
                 else:
                     self.cookie_manager.show_manual_instructions()
 
-                    # Ask to continue anyway
+                    # Ask to continue anyway (only in interactive mode)
                     if confirm:
                         response = input("Continue without valid cookies? [y/N] ").strip().lower()
                         if response != 'y':
                             self.logger.info("Aborted")
                             return False, None, None, None
+                    else:
+                        # In auto/non-interactive mode, fail immediately
+                        self.logger.error("Cannot continue without valid cookies")
+                        return False, None, None, None
 
         # Confirmation prompt (unless auto mode)
         if confirm:
