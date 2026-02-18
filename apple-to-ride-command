@@ -15,6 +15,8 @@ from pathlib import Path
 from datetime import datetime
 import ffmpeg
 import platform
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -41,7 +43,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "1.2.2"
+VERSION = "1.2.2-multi-threaded-conversion"
 
 DEFAULT_MUSIC_DIR = "music"
 DEFAULT_EXPORT_DIR = "export"
@@ -75,6 +77,10 @@ QUALITY_PRESETS = {
 }
 DEFAULT_QUALITY_PRESET = 'lossless'
 
+# Worker pool defaults for parallel conversion
+MAX_DEFAULT_WORKERS = 4
+DEFAULT_WORKERS = min(os.cpu_count() or 1, MAX_DEFAULT_WORKERS)
+
 # Default cleanup options for ID3 tag operations
 DEFAULT_CLEANUP_OPTIONS = {
     "remove_id3v1": True,
@@ -104,30 +110,33 @@ class Logger:
         self.verbose = verbose
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(exist_ok=True)
+        self._lock = threading.Lock()
 
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self.log_file = self.log_dir / f"{timestamp}.log"
 
     def _write(self, level, message):
         """Write message to both console and log file."""
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        formatted_with_prefix = f"[{timestamp}] [{level}] {message}"
+        with self._lock:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            formatted_with_prefix = f"[{timestamp}] [{level}] {message}"
 
-        # Console: just the message (no timestamp/level)
-        print(message)
+            # Console: just the message (no timestamp/level)
+            print(message)
 
-        # File: full format with timestamp and level
-        with open(self.log_file, 'a') as f:
-            f.write(formatted_with_prefix + '\n')
+            # File: full format with timestamp and level
+            with open(self.log_file, 'a') as f:
+                f.write(formatted_with_prefix + '\n')
 
     def _write_file_only(self, level, message):
         """Write message to log file only (no console output)."""
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        formatted_with_prefix = f"[{timestamp}] [{level}] {message}"
+        with self._lock:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            formatted_with_prefix = f"[{timestamp}] [{level}] {message}"
 
-        # File only: full format with timestamp and level
-        with open(self.log_file, 'a') as f:
-            f.write(formatted_with_prefix + '\n')
+            # File only: full format with timestamp and level
+            with open(self.log_file, 'a') as f:
+                f.write(formatted_with_prefix + '\n')
 
     def info(self, message):
         """Log informational message."""
@@ -1194,7 +1203,7 @@ class TaggerManager:
 # ══════════════════════════════════════════════════════════════════
 
 class ConversionStatistics:
-    """Tracks conversion operation statistics."""
+    """Tracks conversion operation statistics (thread-safe)."""
 
     def __init__(self):
         self.total_found = 0
@@ -1202,16 +1211,30 @@ class ConversionStatistics:
         self.overwritten = 0
         self.skipped = 0
         self.errors = 0
+        self._lock = threading.Lock()
+        self._progress_counter = 0
+
+    def increment(self, field):
+        """Thread-safe increment of a statistics field."""
+        with self._lock:
+            setattr(self, field, getattr(self, field) + 1)
+
+    def next_progress(self):
+        """Return the next 1-based progress number atomically."""
+        with self._lock:
+            self._progress_counter += 1
+            return self._progress_counter
 
 
 class Converter:
     """Manages M4A to MP3 conversion with tag preservation."""
 
-    def __init__(self, logger=None, quality_preset='lossless'):
+    def __init__(self, logger=None, quality_preset='lossless', workers=None):
         self.logger = logger or Logger()
         self.stats = ConversionStatistics()
         self.quality_preset = quality_preset
         self.quality_settings = self._get_quality_settings(quality_preset)
+        self.workers = workers if workers is not None else DEFAULT_WORKERS
 
     def _get_quality_settings(self, preset):
         """Resolve quality preset to FFmpeg parameters."""
@@ -1235,14 +1258,114 @@ class Converter:
         """Remove invalid filename characters."""
         return sanitize_filename(name)
 
+    def _convert_single_file(self, input_file, input_path, output_path, force, dry_run, verbose):
+        """Convert a single M4A file to MP3. Thread-safe for parallel execution."""
+        from mutagen.id3 import ID3, TIT2, TPE1, TALB, ID3NoHeaderError
+
+        display_name = input_file.relative_to(input_path)
+        count = self.stats.next_progress()
+
+        try:
+            # Read M4A tags
+            title, artist, album = read_m4a_tags(input_file)
+
+            # Create output filename
+            safe_title = self._sanitize_filename(title)
+            safe_artist = self._sanitize_filename(artist)
+            output_filename = f"{safe_artist} - {safe_title}.mp3"
+            output_file = output_path / output_filename
+            already_exists = output_file.exists()
+
+            if already_exists and not force:
+                self.stats.increment('skipped')
+                self.logger.info(f"[{count}/{self.stats.total_found}] Skipping (already exists): {output_filename}")
+                return
+
+            if verbose:
+                self.logger.debug(f"Source file:  '{input_file}'")
+                self.logger.debug(f"File size:    {input_file.stat().st_size / 1024:.1f} KB")
+                if already_exists and force:
+                    self.logger.debug(f"Force flag set — overwriting: '{output_filename}'")
+                # Display quality settings
+                quality_desc = f"{self.quality_settings['mode'].upper()}"
+                if self.quality_settings['mode'] == 'vbr':
+                    quality_desc += f" quality {self.quality_settings['value']}"
+                else:
+                    quality_desc += f" {self.quality_settings['value']}kbps"
+                self.logger.debug(f"Quality:      {quality_desc} (preset: {self.quality_preset})")
+                self.logger.debug(f"Source tags:")
+                self.logger.debug(f"  → Title:  '{title}'")
+                self.logger.debug(f"  → Artist: '{artist}'")
+                self.logger.debug(f"  → Album:  '{album}'")
+
+            if dry_run:
+                if already_exists and force:
+                    self.logger.dry_run(f"Would overwrite: '{output_filename}'")
+                else:
+                    self.logger.dry_run(f"Would convert:   '{display_name}'")
+                self.logger.dry_run(f"  → Output:     '{output_filename}'")
+                self.logger.dry_run(f"  → Title:      '{title}'")
+                self.logger.dry_run(f"  → Artist:     '{artist}'")
+                self.logger.dry_run(f"  → Album:      '{album}'")
+                return
+
+            # Run ffmpeg conversion
+            try:
+                # Build FFmpeg parameters based on quality mode
+                ffmpeg_params = {'acodec': 'libmp3lame'}
+                if self.quality_settings['mode'] == 'vbr':
+                    ffmpeg_params['q:a'] = self.quality_settings['value']
+                else:  # cbr for lossless
+                    ffmpeg_params['b:a'] = self.quality_settings['value'] + 'k'
+
+                (
+                    ffmpeg
+                    .input(str(input_file))
+                    .output(str(output_file), **ffmpeg_params)
+                    .run(overwrite_output=True, quiet=True)
+                )
+            except ffmpeg.Error as e:
+                # Re-raise as generic exception to be caught by outer try/except
+                error_msg = e.stderr.decode('utf-8') if e.stderr else str(e)
+                raise Exception(f"FFmpeg conversion failed: {error_msg}")
+
+            # Write basic ID3 tags from source M4A (no modifications)
+            try:
+                tags = ID3(str(output_file))
+            except ID3NoHeaderError:
+                tags = ID3()
+
+            tags["TIT2"] = TIT2(encoding=3, text=title)
+            tags["TPE1"] = TPE1(encoding=3, text=artist)
+            tags["TALB"] = TALB(encoding=3, text=album)
+
+            # Save with ID3v2.3 for compatibility, remove ID3v1
+            tags.save(str(output_file), v2_version=3, v1=0)
+
+            if verbose:
+                self.logger.debug(f"Tags AFTER conversion (copied from source):")
+                self.logger.debug(f"  → Title:  '{title}'")
+                self.logger.debug(f"  → Artist: '{artist}'")
+                self.logger.debug(f"  → Album:  '{album}'")
+                self.logger.debug(f"Output size: {output_file.stat().st_size / 1024:.1f} KB")
+
+            if already_exists and force:
+                self.stats.increment('overwritten')
+                self.logger.info(f"[{count}/{self.stats.total_found}] Overwritten: {output_filename}")
+            else:
+                self.stats.increment('converted')
+                self.logger.info(f"[{count}/{self.stats.total_found}] Converted: {output_filename}")
+
+        except Exception as e:
+            self.logger.error(f"Failed to convert '{display_name}': {e}")
+            self.stats.increment('errors')
+
     def convert(self, input_dir, output_dir, force=False, dry_run=False, verbose=False):
         """
         Recursively scan input_dir for .m4a files, convert them to MP3
         using ffmpeg, and save all output files flat into output_dir.
         Tags are written immediately after each conversion.
         """
-        from mutagen.id3 import ID3, TIT2, TPE1, TALB, ID3NoHeaderError
-
         start_time = time.time()
 
         input_path = Path(input_dir)
@@ -1272,105 +1395,37 @@ class Converter:
         if not dry_run:
             output_path.mkdir(parents=True, exist_ok=True)
 
-        count = 0
-        for input_file in m4a_files:
-            count += 1
-            display_name = input_file.relative_to(input_path)
+        # Determine effective worker count
+        effective_workers = min(self.workers, self.stats.total_found)
 
-            try:
-                # Read M4A tags
-                title, artist, album = read_m4a_tags(input_file)
+        if effective_workers > 1:
+            self.logger.info(f"Using {effective_workers} parallel workers")
 
-                # Create output filename
-                safe_title = self._sanitize_filename(title)
-                safe_artist = self._sanitize_filename(artist)
-                output_filename = f"{safe_artist} - {safe_title}.mp3"
-                output_file = output_path / output_filename
-                already_exists = output_file.exists()
+            with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+                futures = {
+                    executor.submit(
+                        self._convert_single_file,
+                        input_file, input_path, output_path,
+                        force, dry_run, verbose
+                    ): input_file
+                    for input_file in m4a_files
+                }
 
-                if already_exists and not force:
-                    self.stats.skipped += 1
-                    self.logger.info(f"[{count}/{self.stats.total_found}] Skipping (already exists): {output_filename}")
-                    continue
-
-                if verbose:
-                    self.logger.debug(f"Source file:  '{input_file}'")
-                    self.logger.debug(f"File size:    {input_file.stat().st_size / 1024:.1f} KB")
-                    if already_exists and force:
-                        self.logger.debug(f"Force flag set — overwriting: '{output_filename}'")
-                    # Display quality settings
-                    quality_desc = f"{self.quality_settings['mode'].upper()}"
-                    if self.quality_settings['mode'] == 'vbr':
-                        quality_desc += f" quality {self.quality_settings['value']}"
-                    else:
-                        quality_desc += f" {self.quality_settings['value']}kbps"
-                    self.logger.debug(f"Quality:      {quality_desc} (preset: {self.quality_preset})")
-                    self.logger.debug(f"Source tags:")
-                    self.logger.debug(f"  → Title:  '{title}'")
-                    self.logger.debug(f"  → Artist: '{artist}'")
-                    self.logger.debug(f"  → Album:  '{album}'")
-
-                if dry_run:
-                    if already_exists and force:
-                        self.logger.dry_run(f"Would overwrite: '{output_filename}'")
-                    else:
-                        self.logger.dry_run(f"Would convert:   '{display_name}'")
-                    self.logger.dry_run(f"  → Output:     '{output_filename}'")
-                    self.logger.dry_run(f"  → Title:      '{title}'")
-                    self.logger.dry_run(f"  → Artist:     '{artist}'")
-                    self.logger.dry_run(f"  → Album:      '{album}'")
-                    continue
-
-                # Run ffmpeg conversion
-                try:
-                    # Build FFmpeg parameters based on quality mode
-                    ffmpeg_params = {'acodec': 'libmp3lame'}
-                    if self.quality_settings['mode'] == 'vbr':
-                        ffmpeg_params['q:a'] = self.quality_settings['value']
-                    else:  # cbr for lossless
-                        ffmpeg_params['b:a'] = self.quality_settings['value'] + 'k'
-
-                    (
-                        ffmpeg
-                        .input(str(input_file))
-                        .output(str(output_file), **ffmpeg_params)
-                        .run(overwrite_output=True, quiet=True)
-                    )
-                except ffmpeg.Error as e:
-                    # Re-raise as generic exception to be caught by outer try/except
-                    error_msg = e.stderr.decode('utf-8') if e.stderr else str(e)
-                    raise Exception(f"FFmpeg conversion failed: {error_msg}")
-
-                # Write basic ID3 tags from source M4A (no modifications)
-                try:
-                    tags = ID3(str(output_file))
-                except ID3NoHeaderError:
-                    tags = ID3()
-
-                tags["TIT2"] = TIT2(encoding=3, text=title)
-                tags["TPE1"] = TPE1(encoding=3, text=artist)
-                tags["TALB"] = TALB(encoding=3, text=album)
-
-                # Save with ID3v2.3 for compatibility, remove ID3v1
-                tags.save(str(output_file), v2_version=3, v1=0)
-
-                if verbose:
-                    self.logger.debug(f"Tags AFTER conversion (copied from source):")
-                    self.logger.debug(f"  → Title:  '{title}'")
-                    self.logger.debug(f"  → Artist: '{artist}'")
-                    self.logger.debug(f"  → Album:  '{album}'")
-                    self.logger.debug(f"Output size: {output_file.stat().st_size / 1024:.1f} KB")
-
-                if already_exists and force:
-                    self.stats.overwritten += 1
-                    self.logger.info(f"[{count}/{self.stats.total_found}] Overwritten: {output_filename}")
-                else:
-                    self.stats.converted += 1
-                    self.logger.info(f"[{count}/{self.stats.total_found}] Converted: {output_filename}")
-
-            except Exception as e:
-                self.logger.error(f"Failed to convert '{display_name}': {e}")
-                self.stats.errors += 1
+                for future in as_completed(futures):
+                    # Exceptions are already handled inside _convert_single_file,
+                    # but catch any unexpected errors from the future itself
+                    try:
+                        future.result()
+                    except Exception as e:
+                        input_file = futures[future]
+                        self.logger.error(f"Unexpected error processing '{input_file.name}': {e}")
+                        self.stats.increment('errors')
+        else:
+            for input_file in m4a_files:
+                self._convert_single_file(
+                    input_file, input_path, output_path,
+                    force, dry_run, verbose
+                )
 
         duration = time.time() - start_time
         self._print_summary(input_dir, output_dir, duration)
@@ -1393,6 +1448,8 @@ class Converter:
         print(f"  Input directory:         '{input_dir}'")
         print(f"  Output directory:        '{output_dir}'")
         print(f"  Duration:                {duration:.1f}s")
+        if self.workers > 1:
+            print(f"  Workers:                 {self.workers}")
         print(f"{'─' * 60}")
         print(f"  QUALITY SETTINGS")
         print(f"{'─' * 60}")
@@ -3237,13 +3294,14 @@ class PipelineOrchestrator:
     """Coordinates multi-stage workflows: download → convert → tag → USB sync."""
 
     def __init__(self, logger=None, deps=None, config=None, quality_preset='lossless',
-                 cookie_path='cookies.txt'):
+                 cookie_path='cookies.txt', workers=None):
         self.logger = logger or Logger()
         self.deps = deps or DependencyChecker(self.logger)
         self.config = config or ConfigManager(logger=self.logger)
         self.stats = PipelineStatistics()
         self.quality_preset = quality_preset
         self.cookie_path = cookie_path
+        self.workers = workers
 
     def run_full_pipeline(self, playlist=None, url=None, auto=False,
                          copy_to_usb=False, usb_dir=DEFAULT_USB_DIR,
@@ -3284,7 +3342,7 @@ class PipelineOrchestrator:
 
         # Use quality_preset parameter if provided, otherwise use instance default
         preset = quality_preset if quality_preset is not None else self.quality_preset
-        converter = Converter(self.logger, quality_preset=preset)
+        converter = Converter(self.logger, quality_preset=preset, workers=self.workers)
         success = converter.convert(
             music_dir,
             export_dir,
@@ -3701,10 +3759,11 @@ class PipelineOrchestrator:
 class InteractiveMenu:
     """Provides interactive menu for playlist selection and operations."""
 
-    def __init__(self, logger=None, config=None, deps=None):
+    def __init__(self, logger=None, config=None, deps=None, workers=None):
         self.logger = logger or Logger()
         self.config = config or ConfigManager(logger=self.logger)
         self.deps = deps or DependencyChecker(self.logger)
+        self.workers = workers
 
     def show(self, dry_run=False, verbose=False):
         """Display interactive menu and handle user selection."""
@@ -3808,7 +3867,7 @@ class InteractiveMenu:
                 return False
 
         # Run pipeline for this playlist
-        orchestrator = PipelineOrchestrator(self.logger, self.deps, self.config)
+        orchestrator = PipelineOrchestrator(self.logger, self.deps, self.config, workers=self.workers)
 
         success = orchestrator.run_full_pipeline(
             playlist=str(index + 1),
@@ -3846,7 +3905,7 @@ class InteractiveMenu:
             self.logger.info(f"Processing playlist {i+1}/{len(self.config.playlists)}: {playlist.name}")
             self.logger.info(f"{'=' * 70}")
 
-            orchestrator = PipelineOrchestrator(self.logger, self.deps, self.config)
+            orchestrator = PipelineOrchestrator(self.logger, self.deps, self.config, workers=self.workers)
             success = orchestrator.run_full_pipeline(
                 playlist=str(i + 1),
                 auto=True,
@@ -3888,7 +3947,7 @@ class InteractiveMenu:
                     return False
 
             # Run pipeline for this URL
-            orchestrator = PipelineOrchestrator(self.logger, self.deps, self.config)
+            orchestrator = PipelineOrchestrator(self.logger, self.deps, self.config, workers=self.workers)
             success = orchestrator.run_full_pipeline(
                 url=url,
                 auto=False,
@@ -4055,6 +4114,17 @@ def _create_usb_args_parser():
     return parser
 
 
+def positive_int(value):
+    """Argparse type for positive integers (1+)."""
+    try:
+        ivalue = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"'{value}' is not a valid integer")
+    if ivalue < 1:
+        raise argparse.ArgumentTypeError(f"'{value}' is not a positive integer (must be >= 1)")
+    return ivalue
+
+
 def create_parser():
     """Create the argument parser with subcommands."""
     parser = argparse.ArgumentParser(
@@ -4091,6 +4161,9 @@ For command-specific help: \033[36mapple-to-ride-command <command> --help\033[0m
                        help='Enable verbose output')
     parser.add_argument('--dry-run', action='store_true',
                        help='Preview changes without modifying files')
+    parser.add_argument('--workers', type=positive_int, default=DEFAULT_WORKERS,
+                       metavar='N',
+                       help=f'Parallel conversion workers (default: {DEFAULT_WORKERS})')
 
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
 
@@ -4208,6 +4281,12 @@ def main():
     logger.file_info(f"Platform: {platform_str}")
     logger.file_info(f"Command: {command_str}")
 
+    if args.workers > 1:
+        print(f"  Workers:  {args.workers} (parallel conversion)")
+    else:
+        print(f"  Workers:  1 (sequential)")
+    logger.file_info(f"Workers: {args.workers}")
+
     if args.dry_run:
         print(f"  Mode:     DRY-RUN (no files will be modified)")
         logger.file_info("Mode: DRY-RUN")
@@ -4259,7 +4338,7 @@ def main():
         quality_preset = resolve_quality_preset(args, logger)
 
         output_dir = args.output or DEFAULT_EXPORT_DIR
-        converter = Converter(logger, quality_preset=quality_preset)
+        converter = Converter(logger, quality_preset=quality_preset, workers=args.workers)
         success = converter.convert(
             args.input_dir,
             output_dir,
@@ -4407,7 +4486,8 @@ def main():
         config = ConfigManager(logger=logger)
         orchestrator = PipelineOrchestrator(logger, deps, config,
                                           quality_preset=quality_preset,
-                                          cookie_path=args.cookies)
+                                          cookie_path=args.cookies,
+                                          workers=args.workers)
 
         # Determine what to process
         if args.auto:
@@ -4474,7 +4554,7 @@ def main():
         # Display dependency summary
         deps.display_summary(config)
 
-        menu = InteractiveMenu(logger, config, deps)
+        menu = InteractiveMenu(logger, config, deps, workers=args.workers)
 
         success = menu.show(dry_run=args.dry_run, verbose=args.verbose)
         sys.exit(0 if success else 1)

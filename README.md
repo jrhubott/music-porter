@@ -6,6 +6,7 @@ A powerful music playlist management and conversion tool that downloads Apple Mu
 
 - **Download playlists** from Apple Music using gamdl
 - **Convert to MP3** with configurable quality presets (lossless, high, medium, low, custom)
+- **Multi-threaded conversion** with configurable parallel workers (`--workers N`)
 - **Preserve metadata** with TXXX frame protection for original tags
 - **USB sync** with automatic drive detection and intelligent copying
 - **Pipeline orchestration** for automated multi-stage workflows
@@ -143,6 +144,8 @@ MP3 conversion supports configurable quality presets to balance file size and au
 ```bash
 ./apple-to-ride-command convert music/Pop_Workout --output export/Pop_Workout
 ./apple-to-ride-command convert music/Pop_Workout --preset high --force
+./apple-to-ride-command convert music/Pop_Workout --workers 4    # Parallel conversion
+./apple-to-ride-command convert music/Pop_Workout --workers 1    # Sequential (single-threaded)
 ```
 
 **Tag** - Update MP3 tags
@@ -180,6 +183,7 @@ MP3 conversion supports configurable quality presets to balance file size and au
 ```bash
 --verbose, -v     Enable verbose output
 --dry-run         Preview changes without modifying files
+--workers N       Parallel conversion workers (default: min(cpu_count, 4))
 --version         Show version information
 ```
 
@@ -347,6 +351,7 @@ The tool uses a "hard gate" protection system for original metadata:
 - Requires system ffmpeg binary (wrapper, not replacement)
 - Lossless: 320kbps CBR with libmp3lame
 - VBR: Quality levels 0-9 (0=best, 9=worst)
+- Multi-threaded: parallel ffmpeg workers via `--workers N` (default: min(cpu_count, 4))
 - Error handling: continues processing on individual failures
 
 ## Future Features
@@ -354,7 +359,7 @@ The tool uses a "hard gate" protection system for original metadata:
 ### High Priority
 1. **Playlist sync detection** - Compare local library to Apple Music, download only new/changed tracks
 2. **Incremental updates** - Smart detection of changed tracks without full re-download
-3. **Multi-threaded conversion** - Parallel processing for faster batch conversions
+3. ~~**Multi-threaded conversion** - Parallel processing for faster batch conversions~~ *(implemented in v1.3.0)*
 4. **Batch tag operations** - Apply tag changes to multiple playlists at once
 5. **Configuration presets** - Save and load common conversion/tagging configurations
 
