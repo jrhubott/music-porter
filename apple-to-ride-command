@@ -12,6 +12,7 @@ import argparse
 import time
 from pathlib import Path
 from datetime import datetime
+import ffmpeg
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -220,8 +221,16 @@ class DependencyChecker:
         except (subprocess.CalledProcessError, FileNotFoundError):
             gamdl_installed = False
 
+        # Check if ffmpeg-python is available
+        try:
+            import ffmpeg
+            self.logger.info("ffmpeg-python is already installed")
+            ffmpeg_python_installed = True
+        except ImportError:
+            ffmpeg_python_installed = False
+
         # If any packages are missing, try to install from requirements.txt
-        if not mutagen_installed or not gamdl_installed:
+        if not mutagen_installed or not gamdl_installed or not ffmpeg_python_installed:
             requirements_path = Path("requirements.txt")
             if requirements_path.exists():
                 self.logger.info("Python packages missing. Installing from requirements.txt...")
@@ -237,7 +246,7 @@ class DependencyChecker:
                     return False
             else:
                 self.logger.error("requirements.txt not found")
-                self.logger.error("Try running: pip install gamdl mutagen")
+                self.logger.error("Try running: pip install gamdl mutagen ffmpeg-python")
                 return False
 
         return True
