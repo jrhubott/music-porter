@@ -1271,6 +1271,19 @@ class Downloader:
         """Remove carriage returns and clean up gamdl output."""
         return line.replace('\r', '').strip()
 
+    def _count_m4a_files(self, directory):
+        """Count M4A files in directory (non-hidden files only)."""
+        if not os.path.exists(directory):
+            return 0
+
+        from pathlib import Path
+        path = Path(directory)
+        m4a_files = [
+            f for f in path.rglob("*.m4a")
+            if not f.name.startswith('._')
+        ]
+        return len(m4a_files)
+
     def download(self, url, output_dir, key=None, confirm=True, dry_run=False):
         """
         Download playlist from Apple Music using gamdl.
@@ -1303,7 +1316,11 @@ class Downloader:
         if dry_run:
             self.logger.dry_run(f"Would download: {url}")
             self.logger.dry_run(f"  → Output: {output_path}")
-            return True, key, album_name, None
+            stats = DownloadStatistics()
+            stats.playlist_total = 0
+            stats.downloaded = 0
+            stats.skipped = 0
+            return True, key, album_name, stats
 
         # Create output directory
         output_path.mkdir(parents=True, exist_ok=True)
@@ -1323,6 +1340,9 @@ class Downloader:
 
         stats = DownloadStatistics()
         last_downloading = None  # Track which song was last "Downloading"
+
+        # Count files BEFORE download
+        files_before = self._count_m4a_files(output_path)
 
         try:
             self.logger.info(f"Running: {' '.join(cmd)}")
@@ -1363,13 +1383,8 @@ class Downloader:
                         match = re.search(r'Downloading "([^"]+)"', cleaned)
                         if match:
                             track_name = match.group(1)
-                            # Count the download IMMEDIATELY (not delayed)
-                            stats.downloaded += 1
-                            # Show progress to user
-                            if stats.playlist_total > 0:
-                                self.logger.info(f"[{stats.downloaded}/{stats.playlist_total}] Downloading: {track_name}")
-                            else:
-                                self.logger.info(f"Downloading: {track_name}")
+                            # Display message (counts will be calculated from filesystem after download)
+                            self.logger.info(f"Downloading: {track_name}")
                         last_downloading = cleaned
 
                     # Track skips and show feedback
@@ -1378,13 +1393,8 @@ class Downloader:
                         match = re.search(r'Skipping "([^"]+)"', cleaned)
                         if match:
                             track_name = match.group(1)
-                            # Count the skip IMMEDIATELY
-                            stats.skipped += 1
-                            # Show progress to user
-                            if stats.playlist_total > 0:
-                                self.logger.info(f"[{stats.skipped}/{stats.playlist_total}] Skipping (already exists): {track_name}")
-                            else:
-                                self.logger.info(f"Skipping (already exists): {track_name}")
+                            # Display message (counts will be calculated from filesystem after download)
+                            self.logger.info(f"Skipping (already exists): {track_name}")
                         last_downloading = None
 
                     # Track errors
@@ -1398,6 +1408,13 @@ class Downloader:
                     pass
 
             process.wait()
+
+            # Count files AFTER download
+            files_after = self._count_m4a_files(output_path)
+
+            # Calculate accurate statistics from filesystem
+            stats.downloaded = files_after - files_before  # New files
+            stats.skipped = files_before  # Existing files
 
             if process.returncode == 0:
                 self.logger.ok(f"Download complete: {key}")
@@ -1512,6 +1529,7 @@ class USBManager:
         if dry_run:
             self.logger.dry_run(f"Would create directory: {dest}")
             self.logger.dry_run(f"Would rsync: {source_path}/ → {dest}/")
+            self.logger.dry_run("Would prompt to eject USB drive after copy")
             stats.files_copied = stats.files_found
             duration = time.time() - start_time
             self._print_usb_summary(str(source_path), str(dest), stats, duration)
@@ -1541,6 +1559,12 @@ class USBManager:
             stats.files_copied = stats.files_found
             duration = time.time() - start_time
             self._print_usb_summary(str(source_path), str(dest), stats, duration)
+
+            # Prompt to eject USB drive after successful copy
+            if not dry_run:
+                self._prompt_and_eject_usb(volume)
+                # Note: eject operation is non-critical, doesn't affect return status
+
             return True, stats
         except subprocess.CalledProcessError as e:
             self.logger.error(f"rsync failed: {e}")
@@ -1570,6 +1594,51 @@ class USBManager:
         status_text = "Completed successfully" if stats.files_failed == 0 else "Completed with errors"
         print(f"  Status:                  {status_emoji} {status_text}")
         print("=" * 60)
+
+    def _prompt_and_eject_usb(self, volume_name):
+        """
+        Prompt user to eject USB drive and execute eject if confirmed.
+
+        Args:
+            volume_name: Name of the volume to eject (e.g., "MY_USB")
+
+        Returns:
+            bool: True if eject succeeded or was skipped, False if failed
+        """
+        print()  # Spacing before prompt
+
+        try:
+            response = input(f"Eject USB drive '{volume_name}'? [y/N] ").strip().lower()
+
+            if response != 'y':
+                self.logger.info("Skipping USB eject")
+                return True
+
+            # Execute eject using diskutil (macOS standard tool)
+            volume_path = f"/Volumes/{volume_name}"
+            cmd = ["diskutil", "eject", volume_path]
+
+            self.logger.info(f"Ejecting USB drive: {volume_name}")
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            self.logger.ok(f"USB drive '{volume_name}' ejected successfully")
+            return True
+
+        except KeyboardInterrupt:
+            # User pressed Ctrl+C during prompt
+            print()
+            self.logger.info("Eject cancelled by user")
+            return True
+
+        except subprocess.CalledProcessError as e:
+            # Eject command failed (drive busy, already ejected, etc.)
+            self.logger.error(f"Failed to eject USB drive: {e.stderr.strip() if e.stderr else str(e)}")
+            self.logger.error("You may need to eject manually from Finder")
+            return False
+
+        except FileNotFoundError:
+            # diskutil command not found (shouldn't happen on macOS)
+            self.logger.error("diskutil command not found (non-macOS system?)")
+            return False
 
 
 # ══════════════════════════════════════════════════════════════════
