@@ -2024,38 +2024,50 @@ class InteractiveMenu:
         for i, playlist in enumerate(self.config.playlists, 1):
             print(f"  {i}. {playlist.name} ({playlist.key})")
 
-        all_option = len(self.config.playlists) + 1
-        url_option = len(self.config.playlists) + 2
-        usb_option = len(self.config.playlists) + 3
-
-        print(f"  {all_option}. All playlists")
-        print(f"  {url_option}. Enter URL")
-        print(f"  {usb_option}. Copy to USB only")
+        print(f"  A. All playlists")
+        print(f"  U. Enter URL")
+        print(f"  C. Copy to USB only")
+        print(f"  X. Exit")
 
         # Get user selection
         try:
-            selection = input("\nEnter number: ").strip()
+            selection = input("\nEnter number or letter: ").strip()
 
-            if not selection.isdigit():
-                self.logger.error("Invalid selection")
+            # Normalize to uppercase for case-insensitive comparison
+            selection_upper = selection.upper()
+
+            # Validate input: must be digit (1-N) or valid letter (A, U, C, X)
+            valid_letters = ['A', 'U', 'C', 'X']
+
+            is_valid_digit = selection.isdigit() and 1 <= int(selection) <= len(self.config.playlists)
+            is_valid_letter = selection_upper in valid_letters
+
+            if not (is_valid_digit or is_valid_letter):
+                self.logger.error(f"Invalid selection: {selection}")
+                self.logger.info(f"Enter a playlist number (1-{len(self.config.playlists)}) or option (A/U/C/X)")
                 return False
 
-            selection = int(selection)
-
             # Handle selection
-            if selection == usb_option:
+            if selection_upper == 'X':
+                print("Exiting...")
+                return False
+
+            elif selection_upper == 'C':
                 return self._handle_usb_only(dry_run)
 
-            elif selection == url_option:
+            elif selection_upper == 'U':
                 return self._handle_url_entry(dry_run, verbose)
 
-            elif selection == all_option:
+            elif selection_upper == 'A':
                 return self._handle_all_playlists(dry_run, verbose)
 
-            elif 1 <= selection <= len(self.config.playlists):
-                return self._handle_playlist_selection(selection - 1, dry_run, verbose)
+            elif selection.isdigit():
+                # Must be valid digit at this point (validated earlier)
+                playlist_num = int(selection)
+                return self._handle_playlist_selection(playlist_num - 1, dry_run, verbose)
 
             else:
+                # This should never be reached due to earlier validation
                 self.logger.error(f"Invalid selection: {selection}")
                 return False
 
