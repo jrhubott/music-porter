@@ -1,0 +1,2133 @@
+#!/usr/bin/env python3
+"""
+apple-to-ride-command - Unified Apple Music to Ride Command MP3 converter
+
+Combines download, conversion, tag management, and USB sync into a single tool.
+"""
+
+import sys
+import subprocess
+import os
+import argparse
+import time
+from pathlib import Path
+from datetime import datetime
+
+
+# ══════════════════════════════════════════════════════════════════
+# Section 1: Constants and Configuration
+# ══════════════════════════════════════════════════════════════════
+
+VERSION = "1.0.0"
+
+DEFAULT_MUSIC_DIR = "music"
+DEFAULT_EXPORT_DIR = "export"
+DEFAULT_LOG_DIR = "logs"
+DEFAULT_PLAYLISTS_CONF = "playlists.conf"
+DEFAULT_USB_DIR = "RZR/Music"
+
+EXCLUDED_USB_VOLUMES = [
+    "Macintosh HD",
+    "Macintosh HD - Data",
+]
+
+FFMPEG_QUALITY = "2"  # -q:a parameter for libmp3lame
+
+
+# ══════════════════════════════════════════════════════════════════
+# Section 2: Logging Infrastructure
+# ══════════════════════════════════════════════════════════════════
+
+class Logger:
+    """Manages logging to both console and timestamped log file."""
+
+    def __init__(self, log_dir=DEFAULT_LOG_DIR, verbose=False):
+        self.verbose = verbose
+        self.log_dir = Path(log_dir)
+        self.log_dir.mkdir(exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        self.log_file = self.log_dir / f"{timestamp}.log"
+
+    def _write(self, level, message):
+        """Write message to both console and log file."""
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        formatted = f"[{timestamp}] [{level}] {message}"
+
+        print(formatted)
+        with open(self.log_file, 'a') as f:
+            f.write(formatted + '\n')
+
+    def info(self, message):
+        """Log informational message."""
+        self._write("INFO", message)
+
+    def warn(self, message):
+        """Log warning message."""
+        self._write("WARN", message)
+
+    def error(self, message):
+        """Log error message."""
+        self._write("ERROR", message)
+
+    def skip(self, message):
+        """Log skip message."""
+        self._write("SKIP", message)
+
+    def ok(self, message):
+        """Log success message."""
+        self._write("OK", message)
+
+    def dry_run(self, message):
+        """Log dry-run message."""
+        self._write("DRY-RUN", message)
+
+    def debug(self, message):
+        """Log debug message (only if verbose enabled)."""
+        if self.verbose:
+            self._write("VERBOSE", message)
+
+
+# ══════════════════════════════════════════════════════════════════
+# Section 3: Configuration Management
+# ══════════════════════════════════════════════════════════════════
+
+class PlaylistConfig:
+    """Represents a single playlist configuration."""
+
+    def __init__(self, key, url, name):
+        self.key = key
+        self.url = url
+        self.name = name
+
+    def __repr__(self):
+        return f"PlaylistConfig(key={self.key}, name={self.name})"
+
+
+class ConfigManager:
+    """Manages playlist configuration from playlists.conf."""
+
+    def __init__(self, conf_path=DEFAULT_PLAYLISTS_CONF, logger=None):
+        self.conf_path = Path(conf_path)
+        self.logger = logger or Logger()
+        self.playlists = []
+
+        if self.conf_path.exists():
+            self._load()
+        else:
+            self.logger.warn(f"Configuration file not found: {self.conf_path}")
+
+    def _load(self):
+        """Load playlists from configuration file."""
+        with open(self.conf_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+
+                # Skip comments and empty lines
+                if not line or line.startswith('#'):
+                    continue
+
+                # Parse pipe-delimited format
+                parts = line.split('|')
+                if len(parts) != 3:
+                    self.logger.warn(f"Invalid config line (expected 3 fields): {line}")
+                    continue
+
+                key, url, name = [p.strip() for p in parts]
+                self.playlists.append(PlaylistConfig(key, url, name))
+
+        self.logger.info(f"Loaded {len(self.playlists)} playlists from {self.conf_path}")
+
+    def get_playlist_by_key(self, key):
+        """Get playlist by key (case-insensitive)."""
+        key_lower = key.lower()
+        for playlist in self.playlists:
+            if playlist.key.lower() == key_lower:
+                return playlist
+        return None
+
+    def get_playlist_by_index(self, index):
+        """Get playlist by index (0-based)."""
+        if 0 <= index < len(self.playlists):
+            return self.playlists[index]
+        return None
+
+    def add_playlist(self, key, url, name):
+        """Add a new playlist to configuration file."""
+        # Check for duplicates
+        if self.get_playlist_by_key(key):
+            self.logger.warn(f"Playlist key '{key}' already exists")
+            return False
+
+        # Append to file
+        with open(self.conf_path, 'a') as f:
+            f.write(f"{key}|{url}|{name}\n")
+
+        # Add to in-memory list
+        self.playlists.append(PlaylistConfig(key, url, name))
+        self.logger.info(f"Added playlist '{name}' to configuration")
+        return True
+
+
+# ══════════════════════════════════════════════════════════════════
+# Section 4: Dependency Checking
+# ══════════════════════════════════════════════════════════════════
+
+class DependencyChecker:
+    """Checks and manages dependencies (mutagen, ffmpeg, gamdl, venv)."""
+
+    def __init__(self, logger=None):
+        self.logger = logger or Logger()
+        self.venv_python = None
+        self._detect_venv()
+
+    def _detect_venv(self):
+        """Detect virtual environment Python interpreter."""
+        # Check if already in venv
+        if os.environ.get('VIRTUAL_ENV'):
+            self.venv_python = sys.executable
+            self.logger.info(f"Using active venv: {os.environ['VIRTUAL_ENV']}")
+            return
+
+        # Check for .venv directory
+        venv_path = Path('.venv/bin/python')
+        if venv_path.exists():
+            self.venv_python = str(venv_path.absolute())
+            self.logger.info(f"Found venv at: {venv_path}")
+        else:
+            self.logger.warn("No virtual environment detected")
+            self.venv_python = sys.executable
+
+    def check_mutagen(self):
+        """Check if mutagen is installed, install if needed."""
+        try:
+            import mutagen
+            self.logger.info(f"mutagen {mutagen.version_string} already installed")
+            return True
+        except ImportError:
+            self.logger.info("mutagen not found. Installing...")
+            try:
+                subprocess.check_call([
+                    self.venv_python, "-m", "pip", "install", "mutagen"
+                ])
+                self.logger.ok("mutagen installed successfully")
+                return True
+            except subprocess.CalledProcessError as e:
+                self.logger.error(f"Failed to install mutagen: {e}")
+                self.logger.error("Try running: pip3 install mutagen")
+                return False
+
+    def check_ffmpeg(self):
+        """Check if ffmpeg is available."""
+        try:
+            subprocess.run(
+                ["ffmpeg", "-version"],
+                capture_output=True,
+                check=True
+            )
+            self.logger.info("ffmpeg is available")
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            self.logger.error("ffmpeg is not installed or not in PATH")
+            self.logger.error("Install it via: brew install ffmpeg")
+            return False
+
+    def check_gamdl(self):
+        """Check if gamdl is available."""
+        try:
+            subprocess.run(
+                [self.venv_python, "-m", "gamdl", "--help"],
+                capture_output=True,
+                check=True
+            )
+            self.logger.info("gamdl is available")
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            self.logger.error("gamdl is not installed")
+            self.logger.error("Install it via: pip install gamdl")
+            return False
+
+    def check_all(self, require_ffmpeg=True, require_gamdl=True):
+        """Check all dependencies."""
+        all_ok = True
+
+        if not self.check_mutagen():
+            all_ok = False
+
+        if require_ffmpeg and not self.check_ffmpeg():
+            all_ok = False
+
+        if require_gamdl and not self.check_gamdl():
+            all_ok = False
+
+        return all_ok
+
+
+# ══════════════════════════════════════════════════════════════════
+# Section 5: Tag Management Module
+# ══════════════════════════════════════════════════════════════════
+
+def _get_txxx(tags, desc_name):
+    """
+    Safely retrieve a TXXX frame value by its desc attribute.
+    Iterates tag values directly by frame type rather than key
+    format to avoid mutagen key indexing inconsistencies after
+    save/reload cycles.
+    """
+    from mutagen.id3 import TXXX
+    for frame in tags.values():
+        if isinstance(frame, TXXX) and frame.desc == desc_name:
+            return str(frame.text[0]) if frame.text else ""
+    return ""
+
+
+def _txxx_exists(tags, desc_name):
+    """
+    Returns True if a TXXX frame with the given desc already exists.
+    Iterates tag values directly by frame type rather than key
+    format to avoid mutagen key indexing inconsistencies after
+    save/reload cycles.
+    """
+    from mutagen.id3 import TXXX
+    for frame in tags.values():
+        if isinstance(frame, TXXX) and frame.desc == desc_name:
+            return True
+    return False
+
+
+def save_original_tag(tags, tag_key, tag_name, current_value, label, logger=None):
+    """
+    Save the original value in a TXXX tag only if one does not already
+    exist. Uses _txxx_exists() as a hard gate — if the tag is already
+    present it will never be written to again regardless of its value.
+    This ensures the true original is permanently protected.
+
+    Returns:
+        tuple: (value, was_newly_stored)
+            - value: The tag value (existing or newly stored)
+            - was_newly_stored: True if a new TXXX frame was created,
+                                False if frame already existed or was skipped
+    """
+    from mutagen.id3 import TXXX
+
+    # ── Hard gate: if it already exists, never write to it again ──
+    if _txxx_exists(tags, tag_name):
+        existing = _get_txxx(tags, tag_name)
+        if logger:
+            logger.debug(f"Original {label} already saved: '{existing}'. Not overwriting.")
+        return (existing, False)
+
+    # Not found — safe to store for the first time
+    if current_value:
+        tags.add(TXXX(encoding=3, desc=tag_name, text=current_value))
+        if logger:
+            logger.info(f"Stored original {label} '{current_value}' in '{tag_name}' tag")
+        return (current_value, True)
+    else:
+        if logger:
+            logger.debug(f"No existing {label} tag found. Skipping original {label} save")
+        return ("", False)
+
+
+def _strip_artist_prefix(title, artist):
+    """
+    If title starts with 'artist - ' strip that prefix and return
+    the clean title. Handles the case where a previous run already
+    compounded the title.
+    """
+    prefix = f"{artist} - "
+    if title.startswith(prefix):
+        return title[len(prefix):]
+    return title
+
+
+def update_title_tag(tags, cleanup_options, logger=None, dry_run=False, verbose=False):
+    """
+    Update the TIT2 (Title) tag to 'Artist - Title' format.
+    Prefers TXXX:OriginalArtist and TXXX:OriginalTitle as source
+    values if they exist, otherwise falls back to current TPE1 / TIT2.
+    Protects the original TIT2 value in TXXX:OriginalTitle before
+    any change is made. Never compounds an already-formatted title.
+
+    Returns True if the title was updated, False otherwise.
+    """
+    from mutagen.id3 import TIT2
+
+    orig_title  = _get_txxx(tags, "OriginalTitle")
+    orig_artist = _get_txxx(tags, "OriginalArtist")
+
+    current_title  = str(tags["TIT2"]) if "TIT2" in tags else ""
+    current_artist = str(tags["TPE1"]) if "TPE1" in tags else ""
+
+    # ── Determine clean source values ─────────────────────────────
+    source_artist = orig_artist if orig_artist else current_artist
+
+    if orig_title:
+        source_title = _strip_artist_prefix(orig_title, source_artist)
+    else:
+        source_title = _strip_artist_prefix(current_title, source_artist)
+
+    new_title = f"{source_artist} - {source_title}"
+
+    # ── Guard: skip if already correct ────────────────────────────
+    if current_title == new_title:
+        if logger:
+            logger.skip(f"Title already correct: '{current_title}'")
+        return False
+
+    if verbose and logger:
+        logger.debug(f"Title source:   '{source_title}' "
+                    f"({'OriginalTitle'  if orig_title  else 'TIT2'})")
+        logger.debug(f"Artist source:  '{source_artist}' "
+                    f"({'OriginalArtist' if orig_artist else 'TPE1'})")
+        logger.debug(f"New Title:      '{new_title}'")
+
+    if dry_run:
+        if logger:
+            logger.dry_run(f"Would update Title: '{current_title}' → '{new_title}'")
+        return False
+
+    tags["TIT2"] = TIT2(encoding=3, text=new_title)
+    if logger:
+        logger.info(f"Title updated: '{current_title}' → '{new_title}'")
+    return True
+
+
+def _apply_cleanup(tags, filepath, cleanup_options):
+    """
+    Strip all non-essential ID3 frames, keeping only Title, Artist,
+    Album, and the three OriginalTitle / OriginalArtist / OriginalAlbum
+    TXXX preservation tags. Uses isinstance() check on frame values
+    rather than key string matching to reliably identify TXXX frames
+    after save/reload cycles.
+    """
+    from mutagen.id3 import TXXX
+
+    v2_version = 3 if cleanup_options.get("use_id3v23") else 4
+    v1         = 0 if cleanup_options.get("remove_id3v1") else 1
+
+    allowed_frames     = {"TIT2", "TPE1", "TALB"}
+    allowed_txxx_descs = {"OriginalTitle", "OriginalArtist", "OriginalAlbum"}
+
+    for key in list(tags.keys()):
+        frame = tags[key]
+        if isinstance(frame, TXXX):
+            if frame.desc in allowed_txxx_descs:
+                continue
+            del tags[key]
+        else:
+            base = key.split(":")[0]
+            if base not in allowed_frames:
+                del tags[key]
+
+    # ── Remove duplicate frames ────────────────────────────────────
+    if cleanup_options.get("remove_duplicates"):
+        from mutagen.id3 import TXXX
+        seen = {}
+        for key in list(tags.keys()):
+            frame = tags[key]
+
+            # Special handling for TXXX frames: track by description, not base key
+            if isinstance(frame, TXXX):
+                # Use full TXXX:desc as the unique identifier
+                unique_key = f"TXXX:{frame.desc}"
+                if unique_key in seen:
+                    del tags[key]
+                else:
+                    seen[unique_key] = True
+            else:
+                # For all other frame types, use base key as before
+                base = key.split(":")[0]
+                if base in seen:
+                    del tags[key]
+                else:
+                    seen[base] = True
+
+    tags.save(filepath, v2_version=v2_version, v1=v1)
+
+
+class TagStatistics:
+    """Tracks tagging operation statistics."""
+
+    def __init__(self):
+        self.title_updated = 0
+        self.title_stored = 0
+        self.artist_stored = 0
+        self.album_stored = 0
+        self.title_protected = 0
+        self.artist_protected = 0
+        self.album_protected = 0
+        self.title_restored = 0
+        self.artist_restored = 0
+        self.album_restored = 0
+        self.title_missing = 0
+        self.artist_missing = 0
+        self.album_missing = 0
+
+
+class TaggerManager:
+    """Manages MP3 tag operations (update, restore, reset)."""
+
+    def __init__(self, logger=None, cleanup_options=None):
+        self.logger = logger or Logger()
+        self.cleanup_options = cleanup_options or {
+            "remove_id3v1": True,
+            "use_id3v23": True,
+            "remove_duplicates": True
+        }
+        self.stats = TagStatistics()
+
+    def update_tags(self, directory, new_album=None, new_artist=None,
+                   dry_run=False, verbose=False):
+        """
+        Recursively update album and/or artist tags for all MP3s under a
+        directory. Originals are stored in TXXX:OriginalAlbum /
+        OriginalArtist / OriginalTitle BEFORE any tag is modified.
+        """
+        from mutagen.id3 import ID3, TALB, TPE1, ID3NoHeaderError
+
+        directory = Path(directory)
+        if not directory.is_dir():
+            self.logger.error(f"Directory not found: {directory}")
+            return False
+
+        mp3_files = list(directory.rglob("*.mp3"))
+
+        if not mp3_files:
+            self.logger.info(f"No MP3 files found in '{directory}'")
+            return True
+
+        self.logger.info(f"Found {len(mp3_files)} MP3 file(s)")
+        self.logger.info(f"New Album:  {new_album or '—'}")
+        self.logger.info(f"New Artist: {new_artist or '—'}")
+
+        count = 0
+        updated = 0
+        skipped = 0
+        errors = 0
+
+        for filepath in mp3_files:
+            count += 1
+            filename = filepath.relative_to(directory)
+
+            self.logger.info(f"[{count}/{len(mp3_files)}] Processing: {filename}")
+
+            try:
+                try:
+                    tags = ID3(str(filepath))
+                except ID3NoHeaderError:
+                    self.logger.warn(f"No ID3 tags found in '{filename}'. Skipping.")
+                    skipped += 1
+                    continue
+
+                current_album  = str(tags["TALB"]) if "TALB" in tags else ""
+                current_artist = str(tags["TPE1"]) if "TPE1" in tags else ""
+                current_title  = str(tags["TIT2"]) if "TIT2" in tags else ""
+
+                if verbose:
+                    self.logger.debug(f"Tags BEFORE update:")
+                    self.logger.debug(f"  → Title:  '{current_title}'")
+                    self.logger.debug(f"  → Artist: '{current_artist}'")
+                    self.logger.debug(f"  → Album:  '{current_album}'")
+
+                if dry_run:
+                    if new_album:
+                        self.logger.dry_run(f"Album:  '{current_album}' → '{new_album}'")
+                    if new_artist:
+                        self.logger.dry_run(f"Artist: '{current_artist}' → '{new_artist}'")
+                    update_title_tag(tags, self.cleanup_options,
+                                   self.logger, dry_run=True, verbose=verbose)
+                    continue
+
+                # ── Store ALL originals BEFORE any tag is modified ──
+                file_changed = False
+
+                if new_album:
+                    r, was_stored = save_original_tag(
+                        tags, "TXXX:OriginalAlbum", "OriginalAlbum",
+                        current_album, "album", self.logger)
+                    if was_stored:
+                        self.stats.album_stored += 1
+                    else:
+                        self.stats.album_protected += 1
+
+                if new_artist:
+                    r, was_stored = save_original_tag(
+                        tags, "TXXX:OriginalArtist", "OriginalArtist",
+                        current_artist, "artist", self.logger)
+                    if was_stored:
+                        self.stats.artist_stored += 1
+                    else:
+                        self.stats.artist_protected += 1
+
+                # ── Store OriginalTitle BEFORE update_title_tag() runs ──
+                source_artist = _get_txxx(tags, "OriginalArtist") or current_artist
+                clean_title   = _strip_artist_prefix(current_title, source_artist)
+                r, was_stored = save_original_tag(
+                    tags, "TXXX:OriginalTitle", "OriginalTitle",
+                    clean_title, "title", self.logger)
+                if was_stored:
+                    self.stats.title_stored += 1
+                else:
+                    self.stats.title_protected += 1
+
+                # ── Now apply new tag values ───────────────────────────
+                if new_album:
+                    if current_album != new_album:
+                        file_changed = True
+                    tags["TALB"] = TALB(encoding=3, text=new_album)
+
+                if new_artist:
+                    if current_artist != new_artist:
+                        file_changed = True
+                    tags["TPE1"] = TPE1(encoding=3, text=new_artist)
+
+                # ── Refresh Title to 'Artist - Title' format ──────────
+                if update_title_tag(tags, self.cleanup_options,
+                                  self.logger, dry_run=dry_run, verbose=verbose):
+                    self.stats.title_updated += 1
+                    file_changed = True
+
+                _apply_cleanup(tags, str(filepath), self.cleanup_options)
+
+                if file_changed:
+                    self.logger.ok("Tags updated")
+                    updated += 1
+                else:
+                    self.logger.skip("No changes needed")
+                    skipped += 1
+
+            except Exception as e:
+                self.logger.error(f"Failed to update '{filename}': {e}")
+                errors += 1
+
+        self.logger.info(f"Updated: {updated}, Skipped: {skipped}, Errors: {errors}")
+        return errors == 0
+
+    def restore_tags(self, directory, restore_album=False, restore_title=False,
+                    restore_artist=False, dry_run=False, verbose=False):
+        """
+        Recursively restore original tags for all MP3s under a directory
+        by reading values from TXXX:OriginalTitle / OriginalArtist /
+        OriginalAlbum tags.
+        """
+        from mutagen.id3 import ID3, TALB, TIT2, TPE1, ID3NoHeaderError
+
+        directory = Path(directory)
+        if not directory.is_dir():
+            self.logger.error(f"Directory not found: {directory}")
+            return False
+
+        mp3_files = list(directory.rglob("*.mp3"))
+
+        if not mp3_files:
+            self.logger.info(f"No MP3 files found in '{directory}'")
+            return True
+
+        self.logger.info(f"Found {len(mp3_files)} MP3 file(s)")
+        self.logger.info(f"Restoring Album:  {restore_album}")
+        self.logger.info(f"Restoring Title:  {restore_title}")
+        self.logger.info(f"Restoring Artist: {restore_artist}")
+
+        count = 0
+        restored = 0
+        skipped = 0
+        errors = 0
+
+        for filepath in mp3_files:
+            count += 1
+            filename = filepath.relative_to(directory)
+
+            self.logger.info(f"[{count}/{len(mp3_files)}] Processing: {filename}")
+
+            try:
+                try:
+                    tags = ID3(str(filepath))
+                except ID3NoHeaderError:
+                    self.logger.warn(f"No ID3 tags found in '{filename}'. Skipping.")
+                    skipped += 1
+                    continue
+
+                orig_title  = _get_txxx(tags, "OriginalTitle")
+                orig_artist = _get_txxx(tags, "OriginalArtist")
+                orig_album  = _get_txxx(tags, "OriginalAlbum")
+
+                if verbose:
+                    self.logger.debug(f"Preserved originals:")
+                    self.logger.debug(f"  → OriginalTitle:  '{orig_title}'")
+                    self.logger.debug(f"  → OriginalArtist: '{orig_artist}'")
+                    self.logger.debug(f"  → OriginalAlbum:  '{orig_album}'")
+
+                file_restored = False
+
+                if restore_title:
+                    if orig_title:
+                        if dry_run:
+                            self.logger.dry_run(f"Would restore Title: → '{orig_title}'")
+                        else:
+                            tags["TIT2"] = TIT2(encoding=3, text=orig_title)
+                            self.logger.info(f"Title restored → '{orig_title}'")
+                            self.stats.title_restored += 1
+                            file_restored = True
+                    else:
+                        self.logger.skip(f"No OriginalTitle for '{filename}'")
+                        self.stats.title_missing += 1
+
+                if restore_artist:
+                    if orig_artist:
+                        if dry_run:
+                            self.logger.dry_run(f"Would restore Artist: → '{orig_artist}'")
+                        else:
+                            tags["TPE1"] = TPE1(encoding=3, text=orig_artist)
+                            self.logger.info(f"Artist restored → '{orig_artist}'")
+                            self.stats.artist_restored += 1
+                            file_restored = True
+                    else:
+                        self.logger.skip(f"No OriginalArtist for '{filename}'")
+                        self.stats.artist_missing += 1
+
+                if restore_album:
+                    if orig_album:
+                        if dry_run:
+                            self.logger.dry_run(f"Would restore Album: → '{orig_album}'")
+                        else:
+                            tags["TALB"] = TALB(encoding=3, text=orig_album)
+                            self.logger.info(f"Album restored → '{orig_album}'")
+                            self.stats.album_restored += 1
+                            file_restored = True
+                    else:
+                        self.logger.skip(f"No OriginalAlbum for '{filename}'")
+                        self.stats.album_missing += 1
+
+                if not dry_run and file_restored:
+                    _apply_cleanup(tags, str(filepath), self.cleanup_options)
+                    self.logger.ok("Tags restored")
+                    restored += 1
+                elif not file_restored:
+                    self.logger.skip(f"Nothing to restore for '{filename}'")
+                    skipped += 1
+
+            except Exception as e:
+                self.logger.error(f"Failed to restore '{filename}': {e}")
+                errors += 1
+
+        self.logger.info(f"Restored: {restored}, Skipped: {skipped}, Errors: {errors}")
+        return errors == 0
+
+    def reset_tags_from_source(self, input_dir, output_dir, dry_run=False, verbose=False):
+        """
+        Recursively walk input_dir for .m4a files. For each one, read the
+        original Title, Artist, and Album tags directly from the source,
+        find the matching MP3 in output_dir, reset all three TXXX:Original*
+        protection tags from the source values, rewrite TIT2/TPE1/TALB,
+        refresh the title to 'Artist - Title' format, and save.
+
+        ⚠️ WARNING: This permanently overwrites TXXX:Original* frames!
+        """
+        from mutagen.mp4 import MP4
+        from mutagen.id3 import ID3, TIT2, TPE1, TALB, TXXX, ID3NoHeaderError
+
+        start_time = time.time()
+
+        input_path = Path(input_dir)
+        output_path = Path(output_dir)
+
+        if not input_path.is_dir():
+            self.logger.error(f"Input directory not found: {input_path}")
+            return False
+
+        if not output_path.is_dir():
+            self.logger.error(f"Output directory not found: {output_path}")
+            return False
+
+        # Find all M4A files
+        m4a_files = [
+            f for f in input_path.rglob("*.m4a")
+            if not f.name.startswith('._')
+        ]
+
+        if not m4a_files:
+            self.logger.info(f"No .m4a files found in '{input_path}'")
+            return True
+
+        total = len(m4a_files)
+        count = 0
+        updated = 0
+        skipped = 0
+        errors = 0
+        tags_reset = 0
+
+        self.logger.info(f"Found {total} .m4a source file(s)")
+
+        # Confirmation prompt (unless dry-run)
+        if not dry_run:
+            self.logger.warn("⚠️  WARNING: --reset-tags will permanently overwrite all")
+            self.logger.warn(f"   TXXX:Original* protection tags in '{output_path}'")
+            self.logger.warn(f"   with values read fresh from '{input_path}'.")
+            self.logger.warn("   This cannot be undone.")
+            print()
+            try:
+                confirm = input("   Type 'yes' to continue, anything else to cancel: ").strip().lower()
+                if confirm != "yes":
+                    self.logger.info("Cancelled. No files were modified.")
+                    return False
+                print()
+            except KeyboardInterrupt:
+                print("\n\nCancelled by user")
+                return False
+
+        for input_file in m4a_files:
+            count += 1
+            display_name = input_file.relative_to(input_path)
+
+            self.logger.info(f"[{count}/{total}] Resetting tags from source: {display_name}")
+
+            try:
+                # Read M4A tags
+                m4a = MP4(str(input_file))
+                title  = str(m4a.tags.get('\xa9nam', ['Unknown Title'])[0])
+                artist = str(m4a.tags.get('\xa9ART', ['Unknown Artist'])[0])
+                album  = str(m4a.tags.get('\xa9alb', ['Unknown Album'])[0])
+
+                # Find matching MP3
+                safe_title = self._sanitize_filename(title)
+                safe_artist = self._sanitize_filename(artist)
+                mp3_filename = f"{safe_artist} - {safe_title}.mp3"
+                mp3_path = output_path / mp3_filename
+
+                if not mp3_path.exists():
+                    self.logger.skip(f"No matching MP3 found: '{mp3_filename}'")
+                    skipped += 1
+                    continue
+
+                if verbose:
+                    self.logger.debug(f"Source .m4a tags:")
+                    self.logger.debug(f"  → Title:  '{title}'")
+                    self.logger.debug(f"  → Artist: '{artist}'")
+                    self.logger.debug(f"  → Album:  '{album}'")
+                    self.logger.debug(f"Matched MP3: '{mp3_path}'")
+
+                if dry_run:
+                    self.logger.dry_run(f"Would reset MP3 tags from source:")
+                    self.logger.dry_run(f"  → TIT2 / OriginalTitle:  '{title}'")
+                    self.logger.dry_run(f"  → TPE1 / OriginalArtist: '{artist}'")
+                    self.logger.dry_run(f"  → TALB / OriginalAlbum:  '{album}'")
+                    self.logger.dry_run(f"  → Title would become:    '{artist} - {title}'")
+                    continue
+
+                # Load MP3 tags
+                try:
+                    tags = ID3(str(mp3_path))
+                except ID3NoHeaderError:
+                    tags = ID3()
+
+                # ── Hard reset: remove existing Original* TXXX frames ──
+                # This clears the hard gate so save_original_tag() can
+                # write fresh values from the source .m4a
+                for key in list(tags.keys()):
+                    frame = tags[key]
+                    if isinstance(frame, TXXX) and frame.desc in {
+                        "OriginalTitle", "OriginalArtist", "OriginalAlbum"
+                    }:
+                        del tags[key]
+                        tags_reset += 1
+
+                # ── Write fresh base tags from source .m4a ────────────
+                tags["TIT2"] = TIT2(encoding=3, text=title)
+                tags["TPE1"] = TPE1(encoding=3, text=artist)
+                tags["TALB"] = TALB(encoding=3, text=album)
+
+                # ── Store fresh originals — gate is clear after reset ──
+                save_original_tag(tags, "TXXX:OriginalTitle", "OriginalTitle",
+                                title, "title", self.logger)
+                save_original_tag(tags, "TXXX:OriginalArtist", "OriginalArtist",
+                                artist, "artist", self.logger)
+                save_original_tag(tags, "TXXX:OriginalAlbum", "OriginalAlbum",
+                                album, "album", self.logger)
+
+                # ── Refresh Title to 'Artist - Title' format ──────────
+                update_title_tag(tags, self.cleanup_options,
+                               self.logger, dry_run=dry_run, verbose=verbose)
+
+                _apply_cleanup(tags, str(mp3_path), self.cleanup_options)
+
+                if verbose:
+                    self.logger.debug(f"Tags AFTER reset:")
+                    self.logger.debug(f"  → Title:          '{str(tags['TIT2'])}'")
+                    self.logger.debug(f"  → Artist:         '{artist}'")
+                    self.logger.debug(f"  → Album:          '{album}'")
+                    self.logger.debug(f"  → OriginalTitle:  '{title}'")
+                    self.logger.debug(f"  → OriginalArtist: '{artist}'")
+                    self.logger.debug(f"  → OriginalAlbum:  '{album}'")
+
+                self.logger.ok(f"Tags reset from source → '{mp3_filename}'")
+                updated += 1
+
+            except Exception as e:
+                self.logger.error(f"Failed to reset tags for '{display_name}': {e}")
+                errors += 1
+
+        duration = time.time() - start_time
+
+        # Print summary
+        print(f"\n{'=' * 60}")
+        print(f"  RESET TAGS SUMMARY")
+        print(f"{'=' * 60}")
+        print(f"  Run date:                {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"  Input directory:         '{input_dir}'")
+        print(f"  Output directory:        '{output_dir}'")
+        print(f"  Duration:                {duration:.1f}s")
+        print(f"{'─' * 60}")
+        print(f"  FILES")
+        print(f"{'─' * 60}")
+        print(f"  Total .m4a found:        {total}")
+        print(f"  MP3s updated:            {updated}")
+        print(f"  Skipped (no MP3 match):  {skipped}")
+        print(f"  Errors:                  {errors}")
+        print(f"{'─' * 60}")
+        print(f"  TAGGING")
+        print(f"{'─' * 60}")
+        print(f"  Original tags reset:     {tags_reset}")
+        print(f"  Original tags rewritten: {updated * 3}")
+        print(f"{'─' * 60}")
+        if errors > 0:
+            print(f"  Status:                  ⚠️  Completed with errors")
+        elif updated == 0:
+            print(f"  Status:                  ℹ️  No MP3s updated")
+        else:
+            print(f"  Status:                  ✅ Completed successfully")
+        print(f"{'=' * 60}")
+
+        return errors == 0
+
+    def _sanitize_filename(self, name):
+        """Remove invalid filename characters."""
+        invalid_chars = r'\/:*?"<>|'
+        return "".join(c for c in name if c not in invalid_chars)
+
+
+# ══════════════════════════════════════════════════════════════════
+# Section 6: Conversion Module
+# ══════════════════════════════════════════════════════════════════
+
+class ConversionStatistics:
+    """Tracks conversion operation statistics."""
+
+    def __init__(self):
+        self.total_found = 0
+        self.converted = 0
+        self.overwritten = 0
+        self.skipped = 0
+        self.errors = 0
+
+
+class Converter:
+    """Manages M4A to MP3 conversion with tag preservation."""
+
+    def __init__(self, logger=None, cleanup_options=None):
+        self.logger = logger or Logger()
+        self.cleanup_options = cleanup_options or {
+            "remove_id3v1": True,
+            "use_id3v23": True,
+            "remove_duplicates": True
+        }
+        self.stats = ConversionStatistics()
+        self.tag_stats = TagStatistics()
+
+    def _sanitize_filename(self, name):
+        """Remove invalid filename characters."""
+        invalid_chars = r'\/:*?"<>|'
+        return "".join(c for c in name if c not in invalid_chars)
+
+    def convert(self, input_dir, output_dir, force=False, dry_run=False, verbose=False):
+        """
+        Recursively scan input_dir for .m4a files, convert them to MP3
+        using ffmpeg, and save all output files flat into output_dir.
+        Tags are written immediately after each conversion.
+        """
+        from mutagen.mp4 import MP4
+        from mutagen.id3 import ID3, TIT2, TPE1, TALB, ID3NoHeaderError
+
+        start_time = time.time()
+
+        input_path = Path(input_dir)
+        output_path = Path(output_dir)
+
+        if input_path.resolve() == output_path.resolve():
+            self.logger.error("Input and output directories cannot be the same")
+            return False
+
+        # Find all M4A files recursively
+        m4a_files = [
+            f for f in input_path.rglob("*.m4a")
+            if not f.name.startswith('._')
+        ]
+
+        if not m4a_files:
+            self.logger.info(f"No .m4a files found in '{input_dir}'")
+            return True
+
+        self.stats.total_found = len(m4a_files)
+        self.logger.info(f"Found {self.stats.total_found} .m4a file(s) (recursive)")
+        self.logger.info(f"Output directory: '{output_dir}' (flat)")
+
+        if force:
+            self.logger.info("Force mode enabled — existing files will be overwritten")
+
+        if not dry_run:
+            output_path.mkdir(parents=True, exist_ok=True)
+
+        count = 0
+        for input_file in m4a_files:
+            count += 1
+            display_name = input_file.relative_to(input_path)
+
+            self.logger.info(f"[{count}/{self.stats.total_found}] Processing: {display_name}")
+
+            try:
+                # Read M4A tags
+                m4a = MP4(str(input_file))
+                title  = str(m4a.tags.get('\xa9nam', ['Unknown Title'])[0])
+                artist = str(m4a.tags.get('\xa9ART', ['Unknown Artist'])[0])
+                album  = str(m4a.tags.get('\xa9alb', ['Unknown Album'])[0])
+
+                # Create output filename
+                safe_title = self._sanitize_filename(title)
+                safe_artist = self._sanitize_filename(artist)
+                output_filename = f"{safe_artist} - {safe_title}.mp3"
+                output_file = output_path / output_filename
+                already_exists = output_file.exists()
+
+                # ── Preserve existing TXXX frames before ffmpeg overwrites file ──
+                preserved_txxx = {}
+                if already_exists and force:
+                    try:
+                        existing_tags = ID3(str(output_file))
+                        preserved_txxx['OriginalTitle'] = _get_txxx(existing_tags, 'OriginalTitle')
+                        preserved_txxx['OriginalArtist'] = _get_txxx(existing_tags, 'OriginalArtist')
+                        preserved_txxx['OriginalAlbum'] = _get_txxx(existing_tags, 'OriginalAlbum')
+                        if any(preserved_txxx.values()):
+                            self.logger.info(f"Preserving existing original tags from '{output_filename}'")
+                    except ID3NoHeaderError:
+                        pass  # No existing tags to preserve
+
+                if already_exists and not force:
+                    self.logger.skip(f"Already exists: '{output_filename}'")
+                    self.stats.skipped += 1
+                    continue
+
+                if verbose:
+                    self.logger.debug(f"Source file:  '{input_file}'")
+                    self.logger.debug(f"File size:    {input_file.stat().st_size / 1024:.1f} KB")
+                    if already_exists and force:
+                        self.logger.debug(f"Force flag set — overwriting: '{output_filename}'")
+                    self.logger.debug(f"Source tags:")
+                    self.logger.debug(f"  → Title:  '{title}'")
+                    self.logger.debug(f"  → Artist: '{artist}'")
+                    self.logger.debug(f"  → Album:  '{album}'")
+
+                if dry_run:
+                    if already_exists and force:
+                        self.logger.dry_run(f"Would overwrite: '{output_filename}'")
+                    else:
+                        self.logger.dry_run(f"Would convert:   '{display_name}'")
+                    self.logger.dry_run(f"  → Output:     '{output_filename}'")
+                    self.logger.dry_run(f"  → Title:      '{artist} - {title}'")
+                    self.logger.dry_run(f"  → Artist:     '{artist}'")
+                    self.logger.dry_run(f"  → Album:      '{album}'")
+                    continue
+
+                # Run ffmpeg conversion
+                cmd = [
+                    "ffmpeg", "-y", "-i", str(input_file),
+                    "-codec:a", "libmp3lame", "-q:a", FFMPEG_QUALITY,
+                    str(output_file)
+                ]
+                subprocess.run(cmd, capture_output=True, check=True)
+
+                # Write ID3 tags
+                try:
+                    tags = ID3(str(output_file))
+                except ID3NoHeaderError:
+                    tags = ID3()
+
+                tags["TIT2"] = TIT2(encoding=3, text=title)
+                tags["TPE1"] = TPE1(encoding=3, text=artist)
+                tags["TALB"] = TALB(encoding=3, text=album)
+
+                # ── Restore preserved TXXX frames BEFORE save_original_tag() runs ──
+                if preserved_txxx.get('OriginalTitle'):
+                    from mutagen.id3 import TXXX
+                    tags.add(TXXX(encoding=3, desc='OriginalTitle', text=preserved_txxx['OriginalTitle']))
+                if preserved_txxx.get('OriginalArtist'):
+                    from mutagen.id3 import TXXX
+                    tags.add(TXXX(encoding=3, desc='OriginalArtist', text=preserved_txxx['OriginalArtist']))
+                if preserved_txxx.get('OriginalAlbum'):
+                    from mutagen.id3 import TXXX
+                    tags.add(TXXX(encoding=3, desc='OriginalAlbum', text=preserved_txxx['OriginalAlbum']))
+
+                # ── Store originals FIRST — hard gate prevents overwrite ──
+                r_title, title_was_stored = save_original_tag(
+                    tags, "TXXX:OriginalTitle", "OriginalTitle",
+                    title, "title", self.logger)
+                r_artist, artist_was_stored = save_original_tag(
+                    tags, "TXXX:OriginalArtist", "OriginalArtist",
+                    artist, "artist", self.logger)
+                r_album, album_was_stored = save_original_tag(
+                    tags, "TXXX:OriginalAlbum", "OriginalAlbum",
+                    album, "album", self.logger)
+
+                if title_was_stored:
+                    self.tag_stats.title_stored += 1
+                else:
+                    self.tag_stats.title_protected += 1
+                if artist_was_stored:
+                    self.tag_stats.artist_stored += 1
+                else:
+                    self.tag_stats.artist_protected += 1
+                if album_was_stored:
+                    self.tag_stats.album_stored += 1
+                else:
+                    self.tag_stats.album_protected += 1
+
+                # ── Update Title AFTER originals are safely stored ────
+                if update_title_tag(tags, self.cleanup_options,
+                                   self.logger, dry_run=dry_run, verbose=verbose):
+                    self.tag_stats.title_updated += 1
+
+                _apply_cleanup(tags, str(output_file), self.cleanup_options)
+
+                if verbose:
+                    final_title = str(tags["TIT2"]) if "TIT2" in tags else ""
+                    self.logger.debug(f"Tags AFTER conversion:")
+                    self.logger.debug(f"  → Title:          '{final_title}'")
+                    self.logger.debug(f"  → Artist:         '{artist}'")
+                    self.logger.debug(f"  → Album:          '{album}'")
+                    self.logger.debug(f"  → OriginalTitle:  '{title}'")
+                    self.logger.debug(f"  → OriginalArtist: '{artist}'")
+                    self.logger.debug(f"  → OriginalAlbum:  '{album}'")
+                    self.logger.debug(f"Output size:  {output_file.stat().st_size / 1024:.1f} KB")
+
+                if already_exists and force:
+                    self.logger.ok(f"Overwritten and tagged → '{output_filename}'")
+                    self.stats.overwritten += 1
+                else:
+                    self.logger.ok(f"Converted and tagged → '{output_filename}'")
+                    self.stats.converted += 1
+
+            except Exception as e:
+                self.logger.error(f"Failed to convert '{display_name}': {e}")
+                self.stats.errors += 1
+
+        duration = time.time() - start_time
+        self._print_summary(input_dir, output_dir, duration)
+
+        return self.stats.errors == 0
+
+    def _print_summary(self, input_dir, output_dir, duration):
+        """Print conversion summary statistics."""
+        print(f"\n{'=' * 60}")
+        print(f"  CONVERSION SUMMARY")
+        print(f"{'=' * 60}")
+        print(f"  Run date:                {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"  Input directory:         '{input_dir}'")
+        print(f"  Output directory:        '{output_dir}'")
+        print(f"  Duration:                {duration:.1f}s")
+        print(f"{'─' * 60}")
+        print(f"  FILES")
+        print(f"{'─' * 60}")
+        print(f"  Total found:             {self.stats.total_found}")
+        print(f"  Converted:               {self.stats.converted}")
+        print(f"  Overwritten:             {self.stats.overwritten}")
+        print(f"  Skipped (exists):        {self.stats.skipped}")
+        print(f"  Errors:                  {self.stats.errors}")
+        print(f"{'─' * 60}")
+        print(f"  TAGGING")
+        print(f"{'─' * 60}")
+        print(f"  Title updated:           {self.tag_stats.title_updated}")
+        print(f"  OriginalTitle stored:    {self.tag_stats.title_stored}")
+        print(f"  OriginalArtist stored:   {self.tag_stats.artist_stored}")
+        print(f"  OriginalAlbum stored:    {self.tag_stats.album_stored}")
+        print(f"  OriginalTitle protected: {self.tag_stats.title_protected}")
+        print(f"  OriginalArtist protected:{self.tag_stats.artist_protected}")
+        print(f"  OriginalAlbum protected: {self.tag_stats.album_protected}")
+        print(f"{'─' * 60}")
+        if self.stats.errors > 0:
+            print(f"  Status:                  ⚠️  Completed with errors")
+        elif self.stats.skipped == self.stats.total_found:
+            print(f"  Status:                  ℹ️  Nothing to do — all files already exist")
+        else:
+            print(f"  Status:                  ✅ Completed successfully")
+        print(f"{'=' * 60}")
+
+
+# ══════════════════════════════════════════════════════════════════
+# Section 7: Download Module
+# ══════════════════════════════════════════════════════════════════
+
+class Downloader:
+    """Manages downloads from Apple Music using gamdl."""
+
+    def __init__(self, logger=None, venv_python=None):
+        self.logger = logger or Logger()
+        self.venv_python = venv_python or sys.executable
+
+    def extract_url_info(self, url):
+        """
+        Extract key and album name from Apple Music URL.
+        Converts 'pop-workout' → ('Pop_Workout', 'Pop Workout')
+        """
+        import re
+
+        # Extract the playlist name from URL
+        match = re.search(r'/playlist/([^/]+)/', url)
+        if not match:
+            return None, None
+
+        raw_name = match.group(1)
+
+        # Convert to key format: pop-workout → Pop_Workout
+        words = raw_name.split('-')
+        key = '_'.join(word.capitalize() for word in words)
+
+        # Convert to album name format: pop-workout → Pop Workout
+        album_name = ' '.join(word.capitalize() for word in words)
+
+        return key, album_name
+
+    def download(self, url, output_dir, key=None, confirm=True, dry_run=False):
+        """
+        Download playlist from Apple Music using gamdl.
+        Returns (success, key, album_name)
+        """
+        # Extract info from URL if key not provided
+        if not key:
+            key, album_name = self.extract_url_info(url)
+            if not key:
+                self.logger.error(f"Could not extract playlist info from URL: {url}")
+                return False, None, None
+        else:
+            _, album_name = self.extract_url_info(url)
+
+        output_path = Path(output_dir)
+
+        self.logger.info(f"Downloading playlist: {key}")
+        self.logger.info(f"  Album name: {album_name}")
+        self.logger.info(f"  Output: {output_path}")
+
+        # Confirmation prompt (unless auto mode)
+        if confirm:
+            response = input(f"Download {key}? [y/N] ").strip().lower()
+            if response != 'y':
+                self.logger.info(f"Skipping download for {key}")
+                return False, key, album_name
+
+        if dry_run:
+            self.logger.dry_run(f"Would download: {url}")
+            self.logger.dry_run(f"  → Output: {output_path}")
+            return True, key, album_name
+
+        # Create output directory
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        # Run gamdl
+        cmd = [
+            self.venv_python, "-m", "gamdl",
+            "-o", str(output_path) + "/",
+            url
+        ]
+
+        try:
+            self.logger.info(f"Running: {' '.join(cmd)}")
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                bufsize=1
+            )
+
+            # Stream output line by line
+            for line in process.stdout:
+                print(line, end='')
+
+            process.wait()
+
+            if process.returncode == 0:
+                self.logger.ok(f"Download complete: {key}")
+                return True, key, album_name
+            else:
+                self.logger.error(f"Download failed with exit code {process.returncode}")
+                return False, key, album_name
+
+        except Exception as e:
+            self.logger.error(f"Failed to download {key}: {e}")
+            return False, key, album_name
+
+
+# ══════════════════════════════════════════════════════════════════
+# Section 8: USB Sync Module
+# ══════════════════════════════════════════════════════════════════
+
+class USBManager:
+    """Manages USB drive detection and file copying."""
+
+    def __init__(self, logger=None, excluded_volumes=None):
+        self.logger = logger or Logger()
+        self.excluded_volumes = excluded_volumes or EXCLUDED_USB_VOLUMES
+
+    def find_usb_drives(self):
+        """
+        Find available USB drives in /Volumes/, excluding system volumes.
+        Returns list of volume names.
+        """
+        volumes_path = Path('/Volumes')
+
+        if not volumes_path.exists():
+            self.logger.error("/Volumes directory not found (non-macOS system?)")
+            return []
+
+        all_volumes = [v.name for v in volumes_path.iterdir() if v.is_dir()]
+
+        # Filter out excluded volumes
+        volumes = [
+            v for v in all_volumes
+            if v not in self.excluded_volumes
+        ]
+
+        return volumes
+
+    def select_usb_drive(self):
+        """
+        Interactively select a USB drive if multiple are available.
+        Returns selected volume name or None.
+        """
+        volumes = self.find_usb_drives()
+
+        if not volumes:
+            self.logger.error("No external drives found")
+            self.logger.error("Make sure your USB drive is connected and mounted")
+            return None
+
+        if len(volumes) == 1:
+            self.logger.info(f"Using USB drive: {volumes[0]}")
+            return volumes[0]
+
+        # Multiple drives found - prompt user
+        print("Multiple drives found:")
+        for i, vol in enumerate(volumes, 1):
+            print(f"  {i}. {vol}")
+
+        try:
+            selection = input("Select drive: ").strip()
+            index = int(selection) - 1
+
+            if 0 <= index < len(volumes):
+                return volumes[index]
+            else:
+                self.logger.error("Invalid selection")
+                return None
+        except (ValueError, KeyboardInterrupt):
+            self.logger.error("Invalid input")
+            return None
+
+    def sync_to_usb(self, source_dir, usb_dir=DEFAULT_USB_DIR, dry_run=False):
+        """
+        Copy files from source_dir to USB drive using rsync.
+        Returns success boolean.
+        """
+        source_path = Path(source_dir)
+
+        if not source_path.exists():
+            self.logger.error(f"Source directory does not exist: {source_path}")
+            return False
+
+        # Select USB drive
+        volume = self.select_usb_drive()
+        if not volume:
+            return False
+
+        dest = Path('/Volumes') / volume / usb_dir
+
+        self.logger.info(f"Copying {source_path} to {dest}")
+
+        if dry_run:
+            self.logger.dry_run(f"Would create directory: {dest}")
+            self.logger.dry_run(f"Would rsync: {source_path}/ → {dest}/")
+            return True
+
+        # Create destination directory
+        try:
+            dest.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            self.logger.error(f"Failed to create destination directory: {e}")
+            return False
+
+        # Run rsync
+        cmd = [
+            "rsync", "-av", "--progress",
+            str(source_path) + "/",
+            str(dest) + "/"
+        ]
+
+        try:
+            self.logger.info(f"Running: {' '.join(cmd)}")
+            result = subprocess.run(cmd, check=True)
+            self.logger.ok("Copy complete")
+            return True
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"rsync failed: {e}")
+            return False
+
+
+# ══════════════════════════════════════════════════════════════════
+# Section 9: Pipeline Orchestration
+# ══════════════════════════════════════════════════════════════════
+
+class PipelineStatistics:
+    """Aggregate statistics across all pipeline stages."""
+
+    def __init__(self):
+        # Download stats
+        self.download_success = False
+        self.playlist_key = None
+        self.playlist_name = None
+        self.tracks_downloaded = 0
+
+        # Conversion stats
+        self.conversion_stats = None
+
+        # Tagging stats
+        self.tagging_stats = None
+
+        # USB sync stats
+        self.usb_success = False
+        self.usb_destination = None
+
+        # Overall
+        self.start_time = time.time()
+        self.stages_completed = []
+        self.stages_failed = []
+
+
+class PipelineOrchestrator:
+    """Coordinates multi-stage workflows: download → convert → tag → USB sync."""
+
+    def __init__(self, logger=None, deps=None, config=None):
+        self.logger = logger or Logger()
+        self.deps = deps or DependencyChecker(self.logger)
+        self.config = config or ConfigManager(logger=self.logger)
+        self.stats = PipelineStatistics()
+
+    def run_full_pipeline(self, playlist=None, url=None, auto=False,
+                         copy_to_usb=False, usb_dir=DEFAULT_USB_DIR,
+                         dry_run=False, verbose=False):
+        """
+        Execute the complete pipeline: download → convert → tag → USB sync.
+        """
+        self.stats.start_time = time.time()
+
+        # ── Stage 1: Determine source ─────────────────────────────────
+        if url:
+            # Direct URL provided
+            self.logger.info("=== STAGE 1: Download from URL ===")
+            success = self._download_from_url(url, auto, dry_run, verbose)
+            if not success:
+                self._print_pipeline_summary()
+                return False
+
+        elif playlist:
+            # Playlist key or index provided
+            self.logger.info("=== STAGE 1: Download playlist ===")
+            success = self._download_playlist(playlist, auto, dry_run, verbose)
+            if not success:
+                self._print_pipeline_summary()
+                return False
+
+        else:
+            self.logger.error("Either --playlist or --url must be specified for pipeline")
+            return False
+
+        # ── Stage 2: Convert M4A → MP3 ────────────────────────────────
+        self.logger.info("\n=== STAGE 2: Convert M4A → MP3 ===")
+        music_dir = f"{DEFAULT_MUSIC_DIR}/{self.stats.playlist_key}"
+        export_dir = f"{DEFAULT_EXPORT_DIR}/{self.stats.playlist_key}"
+
+        converter = Converter(self.logger)
+        success = converter.convert(
+            music_dir,
+            export_dir,
+            force=False,
+            dry_run=dry_run,
+            verbose=verbose
+        )
+
+        if success:
+            self.stats.stages_completed.append("convert")
+            self.stats.conversion_stats = converter.stats
+            self.stats.tracks_downloaded = converter.stats.total_found
+        else:
+            self.stats.stages_failed.append("convert")
+            self.logger.error("Conversion stage failed")
+
+        # ── Stage 3: Update tags ───────────────────────────────────────
+        self.logger.info("\n=== STAGE 3: Update tags ===")
+
+        tagger = TaggerManager(self.logger)
+        success = tagger.update_tags(
+            export_dir,
+            new_album=self.stats.playlist_name,
+            new_artist="Various",
+            dry_run=dry_run,
+            verbose=verbose
+        )
+
+        if success:
+            self.stats.stages_completed.append("tag")
+            self.stats.tagging_stats = tagger.stats
+        else:
+            self.stats.stages_failed.append("tag")
+            self.logger.error("Tagging stage failed")
+
+        # ── Stage 4: USB sync (optional) ───────────────────────────────
+        if copy_to_usb:
+            self.logger.info("\n=== STAGE 4: Copy to USB ===")
+            usb_manager = USBManager(self.logger)
+            success = usb_manager.sync_to_usb(
+                export_dir,
+                usb_dir=usb_dir,
+                dry_run=dry_run
+            )
+
+            if success:
+                self.stats.stages_completed.append("usb-sync")
+                self.stats.usb_success = True
+                self.stats.usb_destination = f"/Volumes/[drive]/{usb_dir}"
+            else:
+                self.stats.stages_failed.append("usb-sync")
+                self.logger.error("USB sync stage failed")
+
+        # ── Print final summary ────────────────────────────────────────
+        self._print_pipeline_summary()
+
+        return len(self.stats.stages_failed) == 0
+
+    def _download_from_url(self, url, auto, dry_run, verbose):
+        """Download playlist from URL."""
+        downloader = Downloader(self.logger, self.deps.venv_python)
+
+        key, album_name = downloader.extract_url_info(url)
+        if not key:
+            self.logger.error(f"Could not extract playlist info from URL: {url}")
+            self.stats.stages_failed.append("download")
+            return False
+
+        output_dir = f"{DEFAULT_MUSIC_DIR}/{key}"
+
+        success, key, album_name = downloader.download(
+            url,
+            output_dir,
+            key=key,
+            confirm=not auto,
+            dry_run=dry_run
+        )
+
+        if success:
+            self.stats.download_success = True
+            self.stats.playlist_key = key
+            self.stats.playlist_name = album_name
+            self.stats.stages_completed.append("download")
+
+            # Ask to save to config (only if not dry-run and not auto)
+            if not dry_run and not auto:
+                self._ask_save_to_config(key, url, album_name)
+
+            return True
+        else:
+            self.stats.stages_failed.append("download")
+            return False
+
+    def _download_playlist(self, playlist_arg, auto, dry_run, verbose):
+        """Download playlist from configuration."""
+        # Find playlist by name or index
+        playlist = None
+        if playlist_arg.isdigit():
+            playlist = self.config.get_playlist_by_index(int(playlist_arg) - 1)
+        else:
+            playlist = self.config.get_playlist_by_key(playlist_arg)
+
+        if not playlist:
+            self.logger.error(f"Playlist not found: {playlist_arg}")
+            self.stats.stages_failed.append("download")
+            return False
+
+        self.stats.playlist_key = playlist.key
+        self.stats.playlist_name = playlist.name
+
+        output_dir = f"{DEFAULT_MUSIC_DIR}/{playlist.key}"
+
+        downloader = Downloader(self.logger, self.deps.venv_python)
+        success, _, _ = downloader.download(
+            playlist.url,
+            output_dir,
+            key=playlist.key,
+            confirm=not auto,
+            dry_run=dry_run
+        )
+
+        if success:
+            self.stats.download_success = True
+            self.stats.stages_completed.append("download")
+            return True
+        else:
+            self.stats.stages_failed.append("download")
+            return False
+
+    def _ask_save_to_config(self, key, url, album_name):
+        """Ask user if they want to save a new playlist to config."""
+        try:
+            response = input(f"\nSave '{album_name}' to {DEFAULT_PLAYLISTS_CONF}? [y/N] ").strip().lower()
+            if response == 'y':
+                self.config.add_playlist(key, url, album_name)
+        except KeyboardInterrupt:
+            print()
+            pass
+
+    def _print_pipeline_summary(self):
+        """Print comprehensive pipeline summary."""
+        duration = time.time() - self.stats.start_time
+
+        print(f"\n{'=' * 70}")
+        print(f"  PIPELINE SUMMARY")
+        print(f"{'=' * 70}")
+        print(f"  Run date:                {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"  Playlist:                {self.stats.playlist_name or '—'} ({self.stats.playlist_key or '—'})")
+        print(f"  Duration:                {duration:.1f}s")
+
+        # Download stage
+        if "download" in self.stats.stages_completed or "download" in self.stats.stages_failed:
+            print(f"{'─' * 70}")
+            print(f"  DOWNLOAD STAGE")
+            print(f"{'─' * 70}")
+            if "download" in self.stats.stages_completed:
+                print(f"  Status:                  ✅ Success")
+                print(f"  Tracks downloaded:       {self.stats.tracks_downloaded}")
+            else:
+                print(f"  Status:                  ❌ Failed")
+
+        # Conversion stage
+        if self.stats.conversion_stats:
+            print(f"{'─' * 70}")
+            print(f"  CONVERSION STAGE")
+            print(f"{'─' * 70}")
+            s = self.stats.conversion_stats
+            print(f"  Files converted:         {s.converted}")
+            print(f"  Files overwritten:       {s.overwritten}")
+            print(f"  Files skipped:           {s.skipped}")
+            print(f"  Conversion errors:       {s.errors}")
+
+        # Tagging stage
+        if self.stats.tagging_stats:
+            print(f"{'─' * 70}")
+            print(f"  TAGGING STAGE")
+            print(f"{'─' * 70}")
+            s = self.stats.tagging_stats
+            print(f"  Title updated:           {s.title_updated}")
+            print(f"  OriginalTitle stored:    {s.title_stored}")
+            print(f"  OriginalArtist stored:   {s.artist_stored}")
+            print(f"  OriginalAlbum stored:    {s.album_stored}")
+
+        # USB sync stage
+        if self.stats.usb_success or "usb-sync" in self.stats.stages_failed:
+            print(f"{'─' * 70}")
+            print(f"  USB SYNC STAGE")
+            print(f"{'─' * 70}")
+            if self.stats.usb_success:
+                print(f"  Status:                  ✅ Success")
+                print(f"  USB destination:         {self.stats.usb_destination}")
+            else:
+                print(f"  Status:                  ❌ Failed")
+
+        # Overall status
+        print(f"{'─' * 70}")
+        if len(self.stats.stages_failed) == 0:
+            print(f"  Status:                  ✅ Completed successfully")
+        else:
+            print(f"  Status:                  ⚠️  Completed with errors")
+            print(f"  Failed stages:           {', '.join(self.stats.stages_failed)}")
+        print(f"{'=' * 70}")
+
+
+# ══════════════════════════════════════════════════════════════════
+# Section 9b: Interactive Menu
+# ══════════════════════════════════════════════════════════════════
+
+class InteractiveMenu:
+    """Provides interactive menu for playlist selection and operations."""
+
+    def __init__(self, logger=None, config=None, deps=None):
+        self.logger = logger or Logger()
+        self.config = config or ConfigManager(logger=self.logger)
+        self.deps = deps or DependencyChecker(self.logger)
+
+    def show(self, dry_run=False, verbose=False):
+        """Display interactive menu and handle user selection."""
+        if not self.config.playlists:
+            self.logger.warn("No playlists configured in playlists.conf")
+            self.logger.info("Use --url to download from a direct URL")
+            return False
+
+        # Display menu
+        print("\n╔══════════════════════════════════════════════════════════════╗")
+        print("║          Apple Music to Ride Command MP3 Converter          ║")
+        print("╚══════════════════════════════════════════════════════════════╝")
+        print("\nAvailable playlists:")
+
+        for i, playlist in enumerate(self.config.playlists, 1):
+            print(f"  {i}. {playlist.name} ({playlist.key})")
+
+        all_option = len(self.config.playlists) + 1
+        url_option = len(self.config.playlists) + 2
+        usb_option = len(self.config.playlists) + 3
+
+        print(f"  {all_option}. All playlists")
+        print(f"  {url_option}. Enter URL")
+        print(f"  {usb_option}. Copy to USB only")
+
+        # Get user selection
+        try:
+            selection = input("\nEnter number: ").strip()
+
+            if not selection.isdigit():
+                self.logger.error("Invalid selection")
+                return False
+
+            selection = int(selection)
+
+            # Handle selection
+            if selection == usb_option:
+                return self._handle_usb_only(dry_run)
+
+            elif selection == url_option:
+                return self._handle_url_entry(dry_run, verbose)
+
+            elif selection == all_option:
+                return self._handle_all_playlists(dry_run, verbose)
+
+            elif 1 <= selection <= len(self.config.playlists):
+                return self._handle_playlist_selection(selection - 1, dry_run, verbose)
+
+            else:
+                self.logger.error(f"Invalid selection: {selection}")
+                return False
+
+        except KeyboardInterrupt:
+            print("\n\nCancelled by user")
+            return False
+
+    def _handle_playlist_selection(self, index, dry_run, verbose):
+        """Handle selection of a single playlist."""
+        playlist = self.config.playlists[index]
+
+        self.logger.info(f"Selected: {playlist.name}")
+
+        # Run pipeline for this playlist
+        orchestrator = PipelineOrchestrator(self.logger, self.deps, self.config)
+
+        success = orchestrator.run_full_pipeline(
+            playlist=str(index + 1),
+            auto=False,
+            copy_to_usb=False,
+            dry_run=dry_run,
+            verbose=verbose
+        )
+
+        # Ask about USB copy
+        if success and not dry_run:
+            self._ask_copy_to_usb(
+                f"{DEFAULT_EXPORT_DIR}/{playlist.key}",
+                dry_run
+            )
+
+        return success
+
+    def _handle_all_playlists(self, dry_run, verbose):
+        """Handle 'All playlists' selection."""
+        self.logger.info("Processing all playlists...")
+
+        all_success = True
+        for i, playlist in enumerate(self.config.playlists):
+            self.logger.info(f"\n{'=' * 70}")
+            self.logger.info(f"Processing playlist {i+1}/{len(self.config.playlists)}: {playlist.name}")
+            self.logger.info(f"{'=' * 70}")
+
+            orchestrator = PipelineOrchestrator(self.logger, self.deps, self.config)
+            success = orchestrator.run_full_pipeline(
+                playlist=str(i + 1),
+                auto=True,
+                copy_to_usb=False,
+                dry_run=dry_run,
+                verbose=verbose
+            )
+
+            if not success:
+                all_success = False
+                self.logger.error(f"Failed to process {playlist.name}")
+
+        # Ask about USB copy after all playlists
+        if not dry_run:
+            self._ask_copy_to_usb(DEFAULT_EXPORT_DIR, dry_run)
+
+        return all_success
+
+    def _handle_url_entry(self, dry_run, verbose):
+        """Handle 'Enter URL' selection."""
+        try:
+            url = input("Enter Apple Music playlist URL: ").strip()
+
+            if not url:
+                self.logger.error("No URL provided")
+                return False
+
+            # Run pipeline for this URL
+            orchestrator = PipelineOrchestrator(self.logger, self.deps, self.config)
+            success = orchestrator.run_full_pipeline(
+                url=url,
+                auto=False,
+                copy_to_usb=False,
+                dry_run=dry_run,
+                verbose=verbose
+            )
+
+            # Ask about USB copy
+            if success and not dry_run:
+                self._ask_copy_to_usb(
+                    f"{DEFAULT_EXPORT_DIR}/{orchestrator.stats.playlist_key}",
+                    dry_run
+                )
+
+            return success
+
+        except KeyboardInterrupt:
+            print("\n\nCancelled by user")
+            return False
+
+    def _handle_usb_only(self, dry_run):
+        """Handle 'Copy to USB only' selection."""
+        self.logger.info("Copying existing files to USB...")
+
+        usb_manager = USBManager(self.logger)
+        return usb_manager.sync_to_usb(
+            DEFAULT_EXPORT_DIR,
+            usb_dir=DEFAULT_USB_DIR,
+            dry_run=dry_run
+        )
+
+    def _ask_copy_to_usb(self, source_dir, dry_run):
+        """Ask user if they want to copy to USB."""
+        try:
+            response = input("\nCopy files to USB? [y/N] ").strip().lower()
+            if response == 'y':
+                usb_manager = USBManager(self.logger)
+                usb_manager.sync_to_usb(
+                    source_dir,
+                    usb_dir=DEFAULT_USB_DIR,
+                    dry_run=dry_run
+                )
+        except KeyboardInterrupt:
+            print()
+            pass
+
+
+# ══════════════════════════════════════════════════════════════════
+# Section 10: CLI Argument Parsing
+# ══════════════════════════════════════════════════════════════════
+
+def create_parser():
+    """Create the argument parser with subcommands."""
+    parser = argparse.ArgumentParser(
+        prog='apple-to-ride-command',
+        description='Unified Apple Music to Ride Command MP3 converter',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+
+    parser.add_argument('--version', action='version', version=f'%(prog)s {VERSION}')
+    parser.add_argument('--verbose', '-v', action='store_true',
+                       help='Enable verbose output')
+    parser.add_argument('--dry-run', action='store_true',
+                       help='Preview changes without modifying files')
+
+    subparsers = parser.add_subparsers(dest='command', help='Available commands')
+
+    # ── pipeline (default) ────────────────────────────────────────
+    pipeline_parser = subparsers.add_parser('pipeline',
+        help='Full download + convert + tag workflow (default)')
+    pipeline_parser.add_argument('--playlist', help='Playlist name or number')
+    pipeline_parser.add_argument('--url', help='Apple Music playlist URL')
+    pipeline_parser.add_argument('--auto', action='store_true',
+                                help='Process all playlists without prompting')
+    pipeline_parser.add_argument('--copy-to-usb', action='store_true',
+                                help='Copy to USB drive after processing')
+    pipeline_parser.add_argument('--usb-dir', default=DEFAULT_USB_DIR,
+                                help=f'USB directory (default: {DEFAULT_USB_DIR})')
+
+    # ── download ──────────────────────────────────────────────────
+    download_parser = subparsers.add_parser('download',
+        help='Download from Apple Music using gamdl')
+    download_parser.add_argument('--playlist', help='Playlist name or number')
+    download_parser.add_argument('--url', required=False, help='Apple Music playlist URL')
+    download_parser.add_argument('--output', help='Output directory')
+
+    # ── convert ───────────────────────────────────────────────────
+    convert_parser = subparsers.add_parser('convert',
+        help='Convert M4A → MP3 with tag preservation')
+    convert_parser.add_argument('input_dir', help='Input directory with M4A files')
+    convert_parser.add_argument('--output', help='Output directory')
+    convert_parser.add_argument('--force', action='store_true',
+                               help='Re-convert existing files')
+
+    # ── tag ───────────────────────────────────────────────────────
+    tag_parser = subparsers.add_parser('tag',
+        help='Update tags on existing MP3s')
+    tag_parser.add_argument('directory', help='Directory with MP3 files')
+    tag_parser.add_argument('--album', help='New album name')
+    tag_parser.add_argument('--artist', help='New artist name')
+
+    # ── restore ───────────────────────────────────────────────────
+    restore_parser = subparsers.add_parser('restore',
+        help='Restore original tags from TXXX frames')
+    restore_parser.add_argument('directory', help='Directory with MP3 files')
+    restore_parser.add_argument('--all', action='store_true',
+                               help='Restore all tags')
+    restore_parser.add_argument('--album', action='store_true',
+                               help='Restore album tag')
+    restore_parser.add_argument('--title', action='store_true',
+                               help='Restore title tag')
+    restore_parser.add_argument('--artist', action='store_true',
+                               help='Restore artist tag')
+
+    # ── reset ─────────────────────────────────────────────────────
+    reset_parser = subparsers.add_parser('reset',
+        help='Reset tags from source M4A files (⚠️ overwrites TXXX frames)')
+    reset_parser.add_argument('input_dir', help='Input directory with M4A files')
+    reset_parser.add_argument('output_dir', help='Output directory with MP3 files')
+
+    # ── sync-usb ──────────────────────────────────────────────────
+    sync_parser = subparsers.add_parser('sync-usb',
+        help='Copy files to USB drive')
+    sync_parser.add_argument('source_dir', nargs='?', default=DEFAULT_EXPORT_DIR,
+                            help='Source directory to copy')
+    sync_parser.add_argument('--usb-dir', default=DEFAULT_USB_DIR,
+                            help=f'USB directory (default: {DEFAULT_USB_DIR})')
+
+    return parser
+
+
+# ══════════════════════════════════════════════════════════════════
+# Section 11: Entry Point (Placeholder)
+# ══════════════════════════════════════════════════════════════════
+
+def main():
+    """Main entry point."""
+    parser = create_parser()
+    args = parser.parse_args()
+
+    # Initialize logger
+    logger = Logger(verbose=args.verbose)
+
+    logger.info(f"apple-to-ride-command v{VERSION}")
+    logger.info(f"Command: {args.command or 'interactive'}")
+
+    if args.dry_run:
+        logger.info("DRY-RUN MODE: No files will be modified")
+
+    # Route to appropriate handlers based on command
+    if args.command == 'convert':
+        # Convert M4A to MP3
+        deps = DependencyChecker(logger)
+        if not deps.check_all(require_ffmpeg=True, require_gamdl=False):
+            sys.exit(1)
+
+        output_dir = args.output or DEFAULT_EXPORT_DIR
+        converter = Converter(logger)
+        success = converter.convert(
+            args.input_dir,
+            output_dir,
+            force=args.force,
+            dry_run=args.dry_run,
+            verbose=args.verbose
+        )
+        sys.exit(0 if success else 1)
+
+    elif args.command == 'tag':
+        # Update tags on existing MP3s
+        deps = DependencyChecker(logger)
+        if not deps.check_mutagen():
+            sys.exit(1)
+
+        tagger = TaggerManager(logger)
+        success = tagger.update_tags(
+            args.directory,
+            new_album=args.album,
+            new_artist=args.artist,
+            dry_run=args.dry_run,
+            verbose=args.verbose
+        )
+        sys.exit(0 if success else 1)
+
+    elif args.command == 'restore':
+        # Restore original tags from TXXX frames
+        deps = DependencyChecker(logger)
+        if not deps.check_mutagen():
+            sys.exit(1)
+
+        tagger = TaggerManager(logger)
+        success = tagger.restore_tags(
+            args.directory,
+            restore_album=args.all or args.album,
+            restore_title=args.all or args.title,
+            restore_artist=args.all or args.artist,
+            dry_run=args.dry_run,
+            verbose=args.verbose
+        )
+        sys.exit(0 if success else 1)
+
+    elif args.command == 'reset':
+        # Reset tags from source M4A files
+        deps = DependencyChecker(logger)
+        if not deps.check_mutagen():
+            sys.exit(1)
+
+        tagger = TaggerManager(logger)
+        success = tagger.reset_tags_from_source(
+            args.input_dir,
+            args.output_dir,
+            dry_run=args.dry_run,
+            verbose=args.verbose
+        )
+        sys.exit(0 if success else 1)
+
+    elif args.command == 'download':
+        # Download from Apple Music
+        deps = DependencyChecker(logger)
+        if not deps.check_gamdl():
+            sys.exit(1)
+
+        downloader = Downloader(logger, deps.venv_python)
+
+        # Handle --playlist or --url
+        if args.playlist:
+            config = ConfigManager(logger=logger)
+            # Try to find playlist by name or index
+            playlist = None
+            if args.playlist.isdigit():
+                playlist = config.get_playlist_by_index(int(args.playlist) - 1)
+            else:
+                playlist = config.get_playlist_by_key(args.playlist)
+
+            if not playlist:
+                logger.error(f"Playlist not found: {args.playlist}")
+                sys.exit(1)
+
+            output_dir = args.output or f"{DEFAULT_MUSIC_DIR}/{playlist.key}"
+            success, _, _ = downloader.download(
+                playlist.url,
+                output_dir,
+                key=playlist.key,
+                confirm=not args.dry_run,
+                dry_run=args.dry_run
+            )
+            sys.exit(0 if success else 1)
+
+        elif args.url:
+            key, album_name = downloader.extract_url_info(args.url)
+            output_dir = args.output or f"{DEFAULT_MUSIC_DIR}/{key}"
+            success, _, _ = downloader.download(
+                args.url,
+                output_dir,
+                key=key,
+                confirm=not args.dry_run,
+                dry_run=args.dry_run
+            )
+            sys.exit(0 if success else 1)
+
+        else:
+            logger.error("Either --playlist or --url must be specified")
+            sys.exit(1)
+
+    elif args.command == 'sync-usb':
+        # Copy files to USB drive
+        usb_manager = USBManager(logger)
+        success = usb_manager.sync_to_usb(
+            args.source_dir,
+            usb_dir=args.usb_dir,
+            dry_run=args.dry_run
+        )
+        sys.exit(0 if success else 1)
+
+    elif args.command == 'pipeline':
+        # Full pipeline workflow
+        deps = DependencyChecker(logger)
+        if not deps.check_all(require_ffmpeg=True, require_gamdl=True):
+            sys.exit(1)
+
+        config = ConfigManager(logger=logger)
+        orchestrator = PipelineOrchestrator(logger, deps, config)
+
+        # Determine what to process
+        if args.auto:
+            # Process all playlists
+            logger.info("Auto mode: processing all playlists")
+            all_success = True
+
+            for i, playlist in enumerate(config.playlists):
+                logger.info(f"\n{'=' * 70}")
+                logger.info(f"Processing playlist {i+1}/{len(config.playlists)}: {playlist.name}")
+                logger.info(f"{'=' * 70}")
+
+                success = orchestrator.run_full_pipeline(
+                    playlist=str(i + 1),
+                    auto=True,
+                    copy_to_usb=args.copy_to_usb,
+                    usb_dir=args.usb_dir,
+                    dry_run=args.dry_run,
+                    verbose=args.verbose
+                )
+
+                if not success:
+                    all_success = False
+
+            sys.exit(0 if all_success else 1)
+
+        elif args.playlist or args.url:
+            # Process specific playlist or URL
+            success = orchestrator.run_full_pipeline(
+                playlist=args.playlist,
+                url=args.url,
+                auto=False,
+                copy_to_usb=args.copy_to_usb,
+                usb_dir=args.usb_dir,
+                dry_run=args.dry_run,
+                verbose=args.verbose
+            )
+            sys.exit(0 if success else 1)
+
+        else:
+            logger.error("For pipeline command, specify --playlist, --url, or --auto")
+            sys.exit(1)
+
+    else:
+        # No command specified - show interactive menu
+        deps = DependencyChecker(logger)
+        if not deps.check_all(require_ffmpeg=True, require_gamdl=True):
+            sys.exit(1)
+
+        config = ConfigManager(logger=logger)
+        menu = InteractiveMenu(logger, config, deps)
+
+        success = menu.show(dry_run=args.dry_run, verbose=args.verbose)
+        sys.exit(0 if success else 1)
+
+
+if __name__ == "__main__":
+    main()

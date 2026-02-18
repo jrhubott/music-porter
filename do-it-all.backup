@@ -1,0 +1,396 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+# Volumes to exclude from USB drive selection
+excluded_volumes=(
+    "Macintosh HD"
+    "Macintosh HD - Data"
+)
+
+# Default USB music directory
+usb_music_dir="RZR/Music"
+
+auto_mode=0
+dry_run=0
+url_arg=""
+playlist_arg=""
+copy_to_usb_arg=0
+extracted_key=""
+extracted_album_name=""
+
+log_dir="logs"
+log_file="$log_dir/$(date +%Y-%m-%d_%H-%M-%S).log"
+mkdir -p "$log_dir"
+
+log() {
+    local msg="[$(date +%Y-%m-%d\ %H:%M:%S)] $*"
+    echo "$msg" | tee -a "$log_file"
+}
+
+run() {
+    if [[ "$dry_run" -eq 1 ]]; then
+        log "[dry-run] $*"
+    else
+        log "Running: $*"
+        stdbuf -oL "$@" 2>&1 | tee -a "$log_file"
+        return "${PIPESTATUS[0]}"
+    fi
+}
+
+venv_dir="$(dirname "$0")/.venv"
+
+if [[ -z "${VIRTUAL_ENV:-}" ]]; then
+    if [[ ! -f "$venv_dir/bin/activate" ]]; then
+        log "Error: no venv found at $venv_dir"
+        cat <<EOF
+
+To set up a virtual environment, run:
+
+    python3 -m venv .venv
+    source .venv/bin/activate
+    pip install gamdl
+
+Then run this script again.
+EOF
+        exit 1
+    fi
+    log "Activating venv: $venv_dir"
+    source "$venv_dir/bin/activate"
+else
+    log "Using active venv: $VIRTUAL_ENV"
+fi
+
+# Load playlist configuration
+playlist_keys=()
+playlist_urls=()
+playlist_names=()
+
+conf_file="$(dirname "$0")/playlists.conf"
+
+if [[ ! -f "$conf_file" ]]; then
+    log "Error: playlist config file not found at $conf_file"
+    exit 1
+fi
+
+while IFS='|' read -r key url name; do
+    [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
+    playlist_keys+=("$key")
+    playlist_urls+=("$url")
+    playlist_names+=("$name")
+done < "$conf_file"
+
+if [[ "${#playlist_keys[@]}" -eq 0 ]]; then
+    log "Error: no playlists found in $conf_file"
+    exit 1
+fi
+
+log "Loaded ${#playlist_keys[@]} playlists from $conf_file"
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [options]
+
+Options:
+  --auto              Download all playlists without prompting
+  --dry-run           Print commands without executing them
+  --url <url>         Process a specific playlist URL directly
+  --playlist <name|number>
+                      Select a predefined playlist by name or number
+  --copy-to-usb       Copy existing exported files to USB without downloading
+  --usb-dir <dir>     Override the base directory on the USB key (default: RZR/Music)
+  --help              Show this help message
+
+Predefined playlists:
+$(for i in "${!playlist_keys[@]}"; do echo "  $((i+1)). ${playlist_keys[$i]}"; done)
+
+Without options, an interactive menu is shown.
+Logs are written to $log_file
+EOF
+    exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --auto)         auto_mode=1 ;;
+        --dry-run)      dry_run=1 ;;
+        --copy-to-usb)  copy_to_usb_arg=1 ;;
+        --help)         usage ;;
+        --url)
+            if [[ -z "${2:-}" ]]; then
+                log "Error: --url requires a URL argument"
+                exit 1
+            fi
+            url_arg="$2"
+            shift
+            ;;
+        --playlist)
+            if [[ -z "${2:-}" ]]; then
+                log "Error: --playlist requires a name or number argument"
+                exit 1
+            fi
+            playlist_arg="$2"
+            shift
+            ;;
+        --usb-dir)
+            if [[ -z "${2:-}" ]]; then
+                log "Error: --usb-dir requires a directory name argument"
+                exit 1
+            fi
+            usb_music_dir="$2"
+            shift
+            ;;
+        *)
+            log "Unknown option: $1"
+            usage
+            ;;
+    esac
+    shift
+done
+
+log "Starting run. Log file: $log_file"
+
+process_playlist() {
+    local index="$1"
+    local key="${playlist_keys[$index]}"
+    local url="${playlist_urls[$index]}"
+    local album_name="${playlist_names[$index]}"
+
+    log "Processing playlist: $key"
+
+    if [[ "$auto_mode" -eq 1 ]]; then
+        run gamdl -o "music/$key/" "$url"
+    else
+        read -rp "Download $key? [y/N] " confirm
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+            run gamdl -o "music/$key/" "$url"
+        else
+            log "Skipping download for $key"
+        fi
+    fi
+
+    run ./ride-command-mp3-export "music/$key/" --output "export/$key" --new-album "$album_name" --new-artist "Various"
+
+    log "Done processing: $key"
+}
+
+extract_url_info() {
+    local url="$1"
+
+    local raw_name
+    raw_name=$(echo "$url" | sed 's|.*/playlist/\([^/]*\)/.*|\1|')
+
+    extracted_key=$(echo "$raw_name" | tr '-' '\n' | awk '{print toupper(substr($0,1,1)) substr($0,2)}' | tr '\n' '_' | sed 's/_$//')
+    extracted_album_name=$(echo "$raw_name" | tr '-' '\n' | awk '{print toupper(substr($0,1,1)) substr($0,2)}' | tr '\n' ' ' | sed 's/ $//')
+}
+
+process_url() {
+    local url="$1"
+
+    if [[ -z "$extracted_key" ]]; then
+        extract_url_info "$url"
+    fi
+
+    local key="$extracted_key"
+    local album_name="$extracted_album_name"
+
+    log "Processing URL: $url"
+    log "Extracted key: $key, album name: $album_name"
+
+    if [[ "$auto_mode" -eq 1 ]]; then
+        run gamdl -o "music/$key/" "$url"
+    else
+        read -rp "Download $key? [y/N] " confirm
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+            run gamdl -o "music/$key/" "$url"
+        else
+            log "Skipping download for $key"
+        fi
+    fi
+
+    run ./ride-command-mp3-export "music/$key/" --output "export/$key" --new-album "$album_name" --new-artist "Various"
+
+    log "Done processing: $key"
+}
+
+ask_save_to_conf() {
+    local key="$1"
+    local url="$2"
+    local album_name="$3"
+
+    read -rp "Save '$album_name' to $conf_file? [y/N] " save_confirm
+    if [[ "$save_confirm" =~ ^[Yy]$ ]]; then
+        echo "$key|$url|$album_name" >> "$conf_file"
+        log "Saved $key to $conf_file"
+    fi
+}
+
+find_playlist_index() {
+    local arg="$1"
+
+    if [[ "$arg" =~ ^[0-9]+$ ]]; then
+        local index=$(( arg-1 ))
+        if [[ "$index" -ge 0 && "$index" -lt "${#playlist_keys[@]}" ]]; then
+            echo "$index"
+            return 0
+        fi
+        log "Error: playlist number $arg is out of range"
+        return 1
+    fi
+
+    for i in "${!playlist_keys[@]}"; do
+        if [[ "${playlist_keys[$i],,}" == "${arg,,}" ]]; then
+            echo "$i"
+            return 0
+        fi
+    done
+
+    log "Error: unknown playlist '$arg'"
+    return 1
+}
+
+find_usb() {
+    local all_volumes=()
+    while IFS= read -r vol; do
+        all_volumes+=("$vol")
+    done < <(ls /Volumes/)
+
+    local volumes=()
+    for vol in "${all_volumes[@]}"; do
+        local excluded=0
+        for excl in "${excluded_volumes[@]}"; do
+            if [[ "$vol" == "$excl" ]]; then
+                excluded=1
+                break
+            fi
+        done
+        if [[ "$excluded" -eq 0 ]]; then
+            volumes+=("$vol")
+        fi
+    done
+
+    if [[ "${#volumes[@]}" -eq 0 ]]; then
+        log "Error: no external drives found"
+        log "Make sure your USB drive is connected and mounted"
+        log "If your drive is being excluded, check the excluded_volumes list at the top of the script"
+        return 1
+    fi
+
+    if [[ "${#volumes[@]}" -eq 1 ]]; then
+        echo "${volumes[0]}" > /tmp/usb_path
+        return 0
+    fi
+
+    echo "Multiple drives found:"
+    for i in "${!volumes[@]}"; do
+        echo "  $((i+1)). ${volumes[$i]}"
+    done
+    read -rp "Select drive: " drive_selection
+    local drive_index=$(( drive_selection-1 ))
+    if [[ "$drive_index" -lt 0 || "$drive_index" -ge "${#volumes[@]}" ]]; then
+        log "Error: invalid selection"
+        return 1
+    fi
+    echo "${volumes[$drive_index]}" > /tmp/usb_path
+}
+
+copy_to_usb() {
+    find_usb || exit 1
+
+    local usb_path
+    usb_path=$(cat /tmp/usb_path)
+    rm -f /tmp/usb_path
+
+    local dest="/Volumes/$usb_path/$usb_music_dir"
+
+    if [[ ! -d "/Volumes/$usb_path" ]]; then
+        log "Error: USB path does not exist: /Volumes/$usb_path"
+        exit 1
+    fi
+
+    if [[ ! -d "export/" ]]; then
+        log "Error: export/ directory does not exist"
+        exit 1
+    fi
+
+    log "Copying export/ to $dest"
+    run mkdir -p "$dest"
+    run rsync -av --progress export/ "$dest/"
+    log "Copy complete"
+}
+
+ask_copy_to_usb() {
+    read -rp "Copy files to USB? [y/N] " usb_confirm
+    if [[ "$usb_confirm" =~ ^[Yy]$ ]]; then
+        copy_to_usb
+    fi
+}
+
+if [[ "$copy_to_usb_arg" -eq 1 ]]; then
+    copy_to_usb
+    log "Run complete"
+    exit 0
+fi
+
+if [[ -n "$url_arg" ]]; then
+    extract_url_info "$url_arg"
+    process_url "$url_arg"
+    ask_save_to_conf "$extracted_key" "$url_arg" "$extracted_album_name"
+    ask_copy_to_usb
+    log "Run complete"
+    exit 0
+fi
+
+if [[ -n "$playlist_arg" ]]; then
+    index=$(find_playlist_index "$playlist_arg")
+    process_playlist "$index"
+    ask_copy_to_usb
+    log "Run complete"
+    exit 0
+fi
+
+if [[ "$auto_mode" -eq 1 ]]; then
+    for i in "${!playlist_keys[@]}"; do
+        process_playlist "$i"
+    done
+    ask_copy_to_usb
+    log "Run complete"
+    exit 0
+fi
+
+echo "Available playlists:"
+for i in "${!playlist_keys[@]}"; do
+    echo "  $((i+1)). ${playlist_keys[$i]}"
+done
+echo "  $((${#playlist_keys[@]}+1)). All"
+echo "  $((${#playlist_keys[@]}+2)). Enter URL"
+echo "  $((${#playlist_keys[@]}+3)). Copy to USB"
+
+read -rp "Enter number: " selection
+
+all_option=$(( ${#playlist_keys[@]}+1 ))
+url_option=$(( ${#playlist_keys[@]}+2 ))
+usb_option=$(( ${#playlist_keys[@]}+3 ))
+
+if [[ "$selection" -eq "$all_option" ]]; then
+    for i in "${!playlist_keys[@]}"; do
+        process_playlist "$i"
+    done
+elif [[ "$selection" -eq "$url_option" ]]; then
+    read -rp "Enter URL: " url
+    extract_url_info "$url"
+    process_url "$url"
+    ask_save_to_conf "$extracted_key" "$url" "$extracted_album_name"
+elif [[ "$selection" -eq "$usb_option" ]]; then
+    copy_to_usb
+    log "Run complete"
+    exit 0
+elif [[ "$selection" -ge 1 && "$selection" -le "${#playlist_keys[@]}" ]]; then
+    process_playlist $(( selection-1 ))
+else
+    log "Invalid selection: $selection"
+    exit 1
+fi
+
+ask_copy_to_usb
+
+log "Run complete"

@@ -1,0 +1,1322 @@
+#!/usr/bin/env python3
+"""
+ride-command-mp3-export.py - Convert M4A files to MP3 and manage MP3 tags.
+
+Usage:
+  # Convert M4A to MP3:
+  ./ride-command-mp3-export.py /path/to/music
+  ./ride-command-mp3-export.py /path/to/music --output /path/to/output
+
+  # Force re-conversion of already converted files:
+  ./ride-command-mp3-export.py /path/to/music --force
+
+  # Update tags on existing MP3s:
+  ./ride-command-mp3-export.py /path/to/music --new-album "New Album Name"
+  ./ride-command-mp3-export.py /path/to/music --new-album "New Album Name" --new-artist "Compilations"
+
+  # Convert and update tags in one step:
+  ./ride-command-mp3-export.py /path/to/music --output /path/to/output --new-album "New Album Name"
+
+  # Reset tags from source .m4a files:
+  ./ride-command-mp3-export.py /path/to/music --output /path/to/output --reset-tags-from-input
+
+  # Restore original tags:
+  ./ride-command-mp3-export.py /path/to/music --restore-all
+  ./ride-command-mp3-export.py /path/to/music --restore-album
+  ./ride-command-mp3-export.py /path/to/music --restore-title
+  ./ride-command-mp3-export.py /path/to/music --restore-artist
+
+  # Preview changes without modifying files:
+  ./ride-command-mp3-export.py /path/to/music --dry-run
+
+  # Show detailed tag information:
+  ./ride-command-mp3-export.py /path/to/music --verbose
+
+  # Override default tag cleanup:
+  ./ride-command-mp3-export.py /path/to/music --new-album "Album" --keep-id3v1
+  ./ride-command-mp3-export.py /path/to/music --new-album "Album" --keep-id3v24
+  ./ride-command-mp3-export.py /path/to/music --new-album "Album" --keep-duplicates
+"""
+
+import sys
+import subprocess
+import os
+import argparse
+import time
+
+
+# ──────────────────────────────────────────────
+# Dependency Management
+# ──────────────────────────────────────────────
+
+def check_and_install_mutagen():
+    """Check if mutagen is installed, and install it if not."""
+    try:
+        import mutagen
+        print(f"[INFO] mutagen {mutagen.version_string} already installed.")
+    except ImportError:
+        print("[INFO] mutagen not found. Installing...")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "mutagen"])
+            print("[INFO] mutagen installed successfully.")
+        except subprocess.CalledProcessError as e:
+            print(f"[ERROR] Failed to install mutagen: {e}")
+            print("[ERROR] Try running: pip3 install mutagen")
+            sys.exit(1)
+
+
+def check_ffmpeg():
+    """Check if ffmpeg is available on the system."""
+    try:
+        subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
+        print("[INFO] ffmpeg is available.")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print("[ERROR] ffmpeg is not installed or not in PATH.")
+        print("        Install it via: brew install ffmpeg  OR  sudo apt install ffmpeg")
+        sys.exit(1)
+
+
+# ──────────────────────────────────────────────
+# Shared Helpers
+# ──────────────────────────────────────────────
+
+def _get_txxx(tags, desc_name):
+    """
+    Safely retrieve a TXXX frame value by its desc attribute.
+    Iterates tag values directly by frame type rather than key
+    format to avoid mutagen key indexing inconsistencies after
+    save/reload cycles. [1]
+    """
+    from mutagen.id3 import TXXX
+    for frame in tags.values():
+        if isinstance(frame, TXXX) and frame.desc == desc_name:
+            return str(frame.text[0]) if frame.text else ""
+    return ""
+
+
+def _txxx_exists(tags, desc_name):
+    """
+    Returns True if a TXXX frame with the given desc already exists.
+    Iterates tag values directly by frame type rather than key
+    format to avoid mutagen key indexing inconsistencies after
+    save/reload cycles. [1]
+    """
+    from mutagen.id3 import TXXX
+    for frame in tags.values():
+        if isinstance(frame, TXXX) and frame.desc == desc_name:
+            return True
+    return False
+
+
+def save_original_tag(tags, tag_key, tag_name, current_value, label):
+    """
+    Save the original value in a TXXX tag only if one does not already
+    exist. Uses _txxx_exists() as a hard gate — if the tag is already
+    present it will never be written to again regardless of its value.
+    This ensures the true original is permanently protected. [1]
+
+    Returns:
+        tuple: (value, was_newly_stored)
+            - value: The tag value (existing or newly stored)
+            - was_newly_stored: True if a new TXXX frame was created,
+                                False if frame already existed or was skipped
+    """
+    from mutagen.id3 import TXXX
+
+    # ── Hard gate: if it already exists, never write to it again ──
+    if _txxx_exists(tags, tag_name):
+        existing = _get_txxx(tags, tag_name)
+        print(f"  [PROTECT] Original {label} already saved: "
+              f"'{existing}'. Not overwriting.")
+        return (existing, False)
+
+    # Not found — safe to store for the first time
+    if current_value:
+        tags.add(TXXX(encoding=3, desc=tag_name, text=current_value))
+        print(f"  [INFO] Stored original {label} '{current_value}' "
+              f"in '{tag_name}' tag.")
+        return (current_value, True)
+    else:
+        print(f"  [INFO] No existing {label} tag found. "
+              f"Skipping original {label} save.")
+        return ("", False)
+
+
+def _strip_artist_prefix(title, artist):
+    """
+    If title starts with 'artist - ' strip that prefix and return
+    the clean title. Handles the case where a previous run already
+    compounded the title. [1]
+    """
+    prefix = f"{artist} - "
+    if title.startswith(prefix):
+        return title[len(prefix):]
+    return title
+
+
+def update_title_tag(tags, cleanup_options, dry_run=False, verbose=False):
+    """
+    Update the TIT2 (Title) tag to 'Artist - Title' format.
+    Prefers TXXX:OriginalArtist and TXXX:OriginalTitle as source
+    values if they exist, otherwise falls back to current TPE1 / TIT2.
+    Protects the original TIT2 value in TXXX:OriginalTitle before
+    any change is made. Never compounds an already-formatted title. [1]
+
+    Returns True if the title was updated, False otherwise.
+    """
+    from mutagen.id3 import TIT2
+
+    orig_title  = _get_txxx(tags, "OriginalTitle")
+    orig_artist = _get_txxx(tags, "OriginalArtist")
+
+    current_title  = str(tags["TIT2"]) if "TIT2" in tags else ""
+    current_artist = str(tags["TPE1"]) if "TPE1" in tags else ""
+
+    # ── Determine clean source values ─────────────────────────────
+    source_artist = orig_artist if orig_artist else current_artist
+
+    if orig_title:
+        source_title = _strip_artist_prefix(orig_title, source_artist)
+    else:
+        source_title = _strip_artist_prefix(current_title, source_artist)
+
+    new_title = f"{source_artist} - {source_title}"
+
+    # ── Guard: skip if already correct ────────────────────────────
+    if current_title == new_title:
+        print(f"  [SKIP] Title already correct: '{current_title}'")
+        return False
+
+    if verbose:
+        print(f"  [VERBOSE] Title source:   '{source_title}' "
+              f"({'OriginalTitle'  if orig_title  else 'TIT2'})")
+        print(f"  [VERBOSE] Artist source:  '{source_artist}' "
+              f"({'OriginalArtist' if orig_artist else 'TPE1'})")
+        print(f"  [VERBOSE] New Title:      '{new_title}'")
+
+    if dry_run:
+        print(f"  [DRY-RUN] Would update Title: '{current_title}' → '{new_title}'")
+        return False
+
+    # Note: Original title is already saved earlier in the flow
+    # (in convert_m4a_to_mp3 or update_tags), so no need to call
+    # save_original_tag() again here to avoid duplicate messages.
+
+    tags["TIT2"] = TIT2(encoding=3, text=new_title)
+    print(f"  Title updated: '{current_title}' → '{new_title}'")
+    return True
+
+
+def _apply_cleanup(tags, filepath, cleanup_options):
+    """
+    Strip all non-essential ID3 frames, keeping only Title, Artist,
+    Album, and the three OriginalTitle / OriginalArtist / OriginalAlbum
+    TXXX preservation tags. Uses isinstance() check on frame values
+    rather than key string matching to reliably identify TXXX frames
+    after save/reload cycles. [1]
+    """
+    from mutagen.id3 import TXXX
+
+    v2_version = 3 if cleanup_options.get("use_id3v23") else 4
+    v1         = 0 if cleanup_options.get("remove_id3v1") else 1
+
+    allowed_frames     = {"TIT2", "TPE1", "TALB"}
+    allowed_txxx_descs = {"OriginalTitle", "OriginalArtist", "OriginalAlbum"}
+
+    for key in list(tags.keys()):
+        frame = tags[key]
+        if isinstance(frame, TXXX):
+            if frame.desc in allowed_txxx_descs:
+                continue
+            del tags[key]
+        else:
+            base = key.split(":")[0]
+            if base not in allowed_frames:
+                del tags[key]
+
+    # ── Remove duplicate frames ────────────────────────────────────
+    if cleanup_options.get("remove_duplicates"):
+        from mutagen.id3 import TXXX
+        seen = {}
+        for key in list(tags.keys()):
+            frame = tags[key]
+
+            # Special handling for TXXX frames: track by description, not base key
+            if isinstance(frame, TXXX):
+                # Use full TXXX:desc as the unique identifier
+                unique_key = f"TXXX:{frame.desc}"
+                if unique_key in seen:
+                    del tags[key]
+                else:
+                    seen[unique_key] = True
+            else:
+                # For all other frame types, use base key as before
+                base = key.split(":")[0]
+                if base in seen:
+                    del tags[key]
+                else:
+                    seen[base] = True
+
+    tags.save(filepath, v2_version=v2_version, v1=v1)
+
+
+# ──────────────────────────────────────────────
+# M4A → MP3 Conversion
+# ──────────────────────────────────────────────
+
+def convert_m4a_to_mp3(input_dir, output_dir,
+                        cleanup_options=None, dry_run=False,
+                        verbose=False, force=False):
+    """
+    Recursively scan input_dir for .m4a files, convert them to MP3
+    using ffmpeg, and save all output files flat into output_dir.
+    Tags are written immediately after each conversion. Title is set
+    to 'Artist - Title' format. Original Title, Artist, and Album
+    values are permanently preserved in TXXX:OriginalTitle /
+    OriginalArtist / OriginalAlbum tags and can never be overwritten
+    once set. [1]
+    Files are named: Artist - Title.mp3
+    """
+    from mutagen.mp4 import MP4
+    from mutagen.id3 import ID3, TIT2, TPE1, TALB, ID3NoHeaderError
+
+    start_time = time.time()
+
+    if cleanup_options is None:
+        cleanup_options = {
+            "remove_id3v1":      True,
+            "use_id3v23":        True,
+            "remove_duplicates": True
+        }
+
+    if os.path.abspath(input_dir) == os.path.abspath(output_dir):
+        print("[ERROR] Input and output directories cannot be the same.")
+        sys.exit(1)
+
+    m4a_files = [
+        os.path.join(root, f)
+        for root, dirs, files in os.walk(input_dir)
+        for f in files
+        if f.lower().endswith('.m4a') and not f.startswith('._')
+    ]
+
+    if not m4a_files:
+        print(f"[INFO] No .m4a files found in '{input_dir}' "
+              f"or its subdirectories.")
+        return
+
+    total = len(m4a_files)
+    print(f"[INFO] Found {total} .m4a file(s) in '{input_dir}' (recursive).")
+    print(f"[INFO] Output directory: '{output_dir}' (flat)")
+    if force:
+        print(f"[INFO] Force mode enabled — existing files will be overwritten.")
+    if dry_run:
+        print("[DRY-RUN] No files will be written.\n")
+
+    if not dry_run:
+        os.makedirs(output_dir, exist_ok=True)
+
+    count        = 0
+    skipped      = 0
+    converted    = 0
+    overwritten  = 0
+    errors       = 0
+
+    tags_title_stored     = 0
+    tags_artist_stored    = 0
+    tags_album_stored     = 0
+    tags_title_protected  = 0
+    tags_artist_protected = 0
+    tags_album_protected  = 0
+    tags_title_updated    = 0
+
+    for input_path in m4a_files:
+        count += 1
+        display_name = os.path.relpath(input_path, input_dir)
+
+        print(f"\n[{count}/{total}] Processing: '{display_name}'")
+
+        try:
+            m4a = MP4(input_path)
+            title  = str(m4a.tags.get('\xa9nam', ['Unknown Title'])[0])
+            artist = str(m4a.tags.get('\xa9ART', ['Unknown Artist'])[0])
+            album  = str(m4a.tags.get('\xa9alb', ['Unknown Album'])[0])
+
+            safe_title      = "".join(c for c in title  if c not in r'\/:*?"<>|')
+            safe_artist     = "".join(c for c in artist if c not in r'\/:*?"<>|')
+            output_filename = f"{safe_artist} - {safe_title}.mp3"
+            output_path     = os.path.join(output_dir, output_filename)
+            already_exists  = os.path.isfile(output_path)
+
+            # ── Preserve existing TXXX frames before ffmpeg overwrites file ──
+            preserved_txxx = {}
+            if already_exists and force:
+                try:
+                    existing_tags = ID3(output_path)
+                    # Extract all Original* TXXX frames to preserve them
+                    preserved_txxx['OriginalTitle'] = _get_txxx(existing_tags, 'OriginalTitle')
+                    preserved_txxx['OriginalArtist'] = _get_txxx(existing_tags, 'OriginalArtist')
+                    preserved_txxx['OriginalAlbum'] = _get_txxx(existing_tags, 'OriginalAlbum')
+                    if any(preserved_txxx.values()):
+                        print(f"  [INFO] Preserving existing original tags from '{output_filename}'")
+                except ID3NoHeaderError:
+                    pass  # No existing tags to preserve
+
+            if already_exists and not force:
+                print(f"  [SKIP] Already exists: '{output_filename}'")
+                skipped += 1
+                continue
+
+            if verbose:
+                print(f"  [VERBOSE] Source file:  '{input_path}'")
+                print(f"  [VERBOSE] File size:    "
+                      f"{os.path.getsize(input_path) / 1024:.1f} KB")
+                if already_exists and force:
+                    print(f"  [VERBOSE] Force flag set — "
+                          f"overwriting: '{output_filename}'")
+                print(f"  [VERBOSE] Source tags:")
+                print(f"            → Title:      '{title}'")
+                print(f"            → Artist:     '{artist}'")
+                print(f"            → Album:      '{album}'")
+
+            if dry_run:
+                if already_exists and force:
+                    print(f"  [DRY-RUN] Would overwrite: '{output_filename}'")
+                else:
+                    print(f"  [DRY-RUN] Would convert:   '{display_name}'")
+                print(f"            → Output:     '{output_filename}'")
+                print(f"            → Title:      '{artist} - {title}'")
+                print(f"            → Artist:     '{artist}'")
+                print(f"            → Album:      '{album}'")
+                print(f"            → Would store OriginalTitle:  '{title}'")
+                print(f"            → Would store OriginalArtist: '{artist}'")
+                print(f"            → Would store OriginalAlbum:  '{album}'")
+                continue
+
+            cmd = [
+                "ffmpeg", "-y", "-i", input_path,
+                "-codec:a", "libmp3lame", "-q:a", "2",
+                output_path
+            ]
+            subprocess.run(cmd, capture_output=True, check=True)
+
+            try:
+                tags = ID3(output_path)
+            except ID3NoHeaderError:
+                tags = ID3()
+
+            tags["TIT2"] = TIT2(encoding=3, text=title)
+            tags["TPE1"] = TPE1(encoding=3, text=artist)
+            tags["TALB"] = TALB(encoding=3, text=album)
+
+            # ── Restore preserved TXXX frames BEFORE save_original_tag() runs ──
+            # This ensures the hard gate protection works correctly on re-runs
+            if preserved_txxx.get('OriginalTitle'):
+                from mutagen.id3 import TXXX
+                tags.add(TXXX(encoding=3, desc='OriginalTitle', text=preserved_txxx['OriginalTitle']))
+            if preserved_txxx.get('OriginalArtist'):
+                from mutagen.id3 import TXXX
+                tags.add(TXXX(encoding=3, desc='OriginalArtist', text=preserved_txxx['OriginalArtist']))
+            if preserved_txxx.get('OriginalAlbum'):
+                from mutagen.id3 import TXXX
+                tags.add(TXXX(encoding=3, desc='OriginalAlbum', text=preserved_txxx['OriginalAlbum']))
+
+            # ── Store originals FIRST — hard gate prevents overwrite ──
+            r_title, title_was_stored = save_original_tag(
+                tags, "TXXX:OriginalTitle",  "OriginalTitle",
+                title,  "title")
+            r_artist, artist_was_stored = save_original_tag(
+                tags, "TXXX:OriginalArtist", "OriginalArtist",
+                artist, "artist")
+            r_album, album_was_stored = save_original_tag(
+                tags, "TXXX:OriginalAlbum",  "OriginalAlbum",
+                album,  "album")
+
+            if title_was_stored:  tags_title_stored    += 1
+            else:                 tags_title_protected += 1
+            if artist_was_stored: tags_artist_stored   += 1
+            else:                 tags_artist_protected+= 1
+            if album_was_stored:  tags_album_stored    += 1
+            else:                 tags_album_protected += 1
+
+            # ── Update Title AFTER originals are safely stored ────
+            if update_title_tag(tags, cleanup_options,
+                                dry_run=dry_run, verbose=verbose):
+                tags_title_updated += 1
+
+            _apply_cleanup(tags, output_path, cleanup_options)
+
+            if verbose:
+                final_title = str(tags["TIT2"]) if "TIT2" in tags else ""
+                print(f"  [VERBOSE] Tags AFTER conversion:")
+                print(f"            → Title:          '{final_title}'")
+                print(f"            → Artist:         '{artist}'")
+                print(f"            → Album:          '{album}'")
+                print(f"            → OriginalTitle:  '{title}'")
+                print(f"            → OriginalArtist: '{artist}'")
+                print(f"            → OriginalAlbum:  '{album}'")
+                print(f"  [VERBOSE] Output size:  "
+                      f"{os.path.getsize(output_path) / 1024:.1f} KB")
+                print(f"  [VERBOSE] ID3 settings: "
+                      f"v2={3 if cleanup_options.get('use_id3v23') else 4}, "
+                      f"v1={0 if cleanup_options.get('remove_id3v1') else 1}")
+
+            if already_exists and force:
+                print(f"  [OK] Overwritten and tagged → '{output_filename}'")
+                overwritten += 1
+            else:
+                print(f"  [OK] Converted and tagged → '{output_filename}'")
+                converted += 1
+
+        except Exception as e:
+            print(f"  [ERROR] Failed to convert '{display_name}': {e}")
+            errors += 1
+
+    duration = time.time() - start_time
+    print(f"\n{'=' * 60}")
+    print(f"  SUMMARY")
+    print(f"{'=' * 60}")
+    print(f"  Run date:                {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"  Input directory:         '{input_dir}'")
+    print(f"  Output directory:        '{output_dir}'")
+    print(f"  Duration:                {duration:.1f}s")
+    print(f"{'─' * 60}")
+    print(f"  FILES")
+    print(f"{'─' * 60}")
+    print(f"  Total found:             {total}")
+    print(f"  Converted:               {converted}")
+    print(f"  Overwritten:             {overwritten}")
+    print(f"  Skipped (exists):        {skipped}")
+    print(f"  Errors:                  {errors}")
+    print(f"{'─' * 60}")
+    print(f"  TAGGING")
+    print(f"{'─' * 60}")
+    print(f"  Title updated:           {tags_title_updated}")
+    print(f"  OriginalTitle stored:    {tags_title_stored}")
+    print(f"  OriginalArtist stored:   {tags_artist_stored}")
+    print(f"  OriginalAlbum stored:    {tags_album_stored}")
+    print(f"  OriginalTitle protected: {tags_title_protected}")
+    print(f"  OriginalArtist protected:{tags_artist_protected}")
+    print(f"  OriginalAlbum protected: {tags_album_protected}")
+    print(f"{'─' * 60}")
+    if errors > 0:
+        print(f"  Status:               ⚠️  Completed with errors")
+    elif skipped == total:
+        print(f"  Status:               ℹ️  Nothing to do — all files already exist")
+    else:
+        print(f"  Status:               ✅ Completed successfully")
+    print(f"{'=' * 60}")
+
+
+# ──────────────────────────────────────────────
+# Tag Update
+# ──────────────────────────────────────────────
+
+def update_tags(directory, new_album=None, new_artist=None,
+                cleanup_options=None, dry_run=False, verbose=False):
+    """
+    Recursively update album and/or artist tags for all MP3s under a
+    directory. Originals are stored in TXXX:OriginalAlbum /
+    OriginalArtist / OriginalTitle BEFORE any tag is modified.
+    The hard gate in save_original_tag() ensures originals are written
+    exactly once and never overwritten on subsequent runs. [1]
+    """
+    from mutagen.id3 import ID3, TALB, TPE1, ID3NoHeaderError
+
+    start_time = time.time()
+
+    if cleanup_options is None:
+        cleanup_options = {
+            "remove_id3v1":      True,
+            "use_id3v23":        True,
+            "remove_duplicates": True
+        }
+
+    if not os.path.isdir(directory):
+        print(f"[ERROR] Directory '{directory}' not found.")
+        return
+
+    mp3_files = [
+        os.path.join(root, f)
+        for root, dirs, files in os.walk(directory)
+        for f in files
+        if f.lower().endswith('.mp3')
+    ]
+
+    if not mp3_files:
+        print(f"[INFO] No MP3 files found in '{directory}' "
+              f"or its subdirectories.")
+        return
+
+    total = len(mp3_files)
+    print(f"[INFO] Found {total} MP3 file(s) in '{directory}' (recursive).")
+    print(f"[INFO] New Album:  {new_album}")
+    print(f"[INFO] New Artist: {new_artist}")
+    if dry_run:
+        print("[DRY-RUN] No files will be modified.\n")
+
+    count    = 0
+    updated  = 0
+    skipped  = 0
+    errors   = 0
+
+    tags_album_stored     = 0
+    tags_artist_stored    = 0
+    tags_title_stored     = 0
+    tags_album_protected  = 0
+    tags_artist_protected = 0
+    tags_title_protected  = 0
+    tags_title_updated    = 0
+
+    for filepath in mp3_files:
+        count += 1
+        filename = os.path.relpath(filepath, directory)
+
+        print(f"\n[{count}/{total}] Processing: '{filename}'")
+
+        try:
+            try:
+                tags = ID3(filepath)
+            except ID3NoHeaderError:
+                print(f"  [WARN] No ID3 tags found in '{filename}'. Skipping.")
+                skipped += 1
+                continue
+
+            current_album  = str(tags["TALB"]) if "TALB" in tags else ""
+            current_artist = str(tags["TPE1"]) if "TPE1" in tags else ""
+            current_title  = str(tags["TIT2"]) if "TIT2" in tags else ""
+
+            if verbose:
+                print(f"  [VERBOSE] Tags BEFORE update:")
+                print(f"            → Title:          '{current_title}'")
+                print(f"            → Artist:         '{current_artist}'")
+                print(f"            → Album:          '{current_album}'")
+                ot = _get_txxx(tags, "OriginalTitle")
+                oa = _get_txxx(tags, "OriginalArtist")
+                ob = _get_txxx(tags, "OriginalAlbum")
+                if ot: print(f"            → OriginalTitle:  '{ot}'")
+                if oa: print(f"            → OriginalArtist: '{oa}'")
+                if ob: print(f"            → OriginalAlbum:  '{ob}'")
+
+            if dry_run:
+                if new_album:
+                    print(f"  [DRY-RUN] Album:  '{current_album}' → '{new_album}'")
+                    if not _txxx_exists(tags, "OriginalAlbum"):
+                        print(f"  [DRY-RUN] Would store OriginalAlbum: '{current_album}'")
+                    else:
+                        print(f"  [DRY-RUN] OriginalAlbum already protected — skipping store")
+                if new_artist:
+                    print(f"  [DRY-RUN] Artist: '{current_artist}' → '{new_artist}'")
+                    if not _txxx_exists(tags, "OriginalArtist"):
+                        print(f"  [DRY-RUN] Would store OriginalArtist: '{current_artist}'")
+                    else:
+                        print(f"  [DRY-RUN] OriginalArtist already protected — skipping store")
+                update_title_tag(tags, cleanup_options,
+                                 dry_run=True, verbose=verbose)
+                continue
+
+            # ── Store ALL originals BEFORE any tag is modified [1] ──
+            if new_album:
+                r, was_stored = save_original_tag(
+                    tags, "TXXX:OriginalAlbum", "OriginalAlbum",
+                    current_album, "album")
+                if was_stored: tags_album_stored    += 1
+                else:          tags_album_protected += 1
+
+            if new_artist:
+                r, was_stored = save_original_tag(
+                    tags, "TXXX:OriginalArtist", "OriginalArtist",
+                    current_artist, "artist")
+                if was_stored: tags_artist_stored    += 1
+                else:          tags_artist_protected += 1
+
+            # ── Store OriginalTitle BEFORE update_title_tag() runs ──
+            source_artist = _get_txxx(tags, "OriginalArtist") or current_artist
+            clean_title   = _strip_artist_prefix(current_title, source_artist)
+            r, was_stored = save_original_tag(
+                tags, "TXXX:OriginalTitle", "OriginalTitle",
+                clean_title, "title")
+            if was_stored: tags_title_stored    += 1
+            else:          tags_title_protected += 1
+
+            # ── Track whether actual changes will be made ──
+            file_changed = False
+
+            # ── Now apply new tag values ───────────────────────────
+            if new_album:
+                from mutagen.id3 import TALB
+                if current_album != new_album:
+                    file_changed = True
+                tags["TALB"] = TALB(encoding=3, text=new_album)
+
+            if new_artist:
+                from mutagen.id3 import TPE1
+                if current_artist != new_artist:
+                    file_changed = True
+                tags["TPE1"] = TPE1(encoding=3, text=new_artist)
+
+            # ── Refresh Title to 'Artist - Title' format ──────────
+            if update_title_tag(tags, cleanup_options,
+                                dry_run=dry_run, verbose=verbose):
+                tags_title_updated += 1
+                file_changed = True
+
+            if verbose:
+                print(f"  [VERBOSE] Tags AFTER update:")
+                print(f"            → Title:          '{str(tags['TIT2'])}'")
+                print(f"            → Album:          '{new_album or current_album}'")
+                print(f"            → Artist:         '{new_artist or current_artist}'")
+                if new_album:
+                    print(f"            → OriginalAlbum:  "
+                          f"'{_get_txxx(tags, 'OriginalAlbum')}'")
+                if new_artist:
+                    print(f"            → OriginalArtist: "
+                          f"'{_get_txxx(tags, 'OriginalArtist')}'")
+                print(f"            → OriginalTitle:  "
+                      f"'{_get_txxx(tags, 'OriginalTitle')}'")
+                print(f"  [VERBOSE] ID3 settings: "
+                      f"v2={3 if cleanup_options.get('use_id3v23') else 4}, "
+                      f"v1={0 if cleanup_options.get('remove_id3v1') else 1}")
+
+            _apply_cleanup(tags, filepath, cleanup_options)
+
+            if file_changed:
+                print(f"  [OK] Tags updated.")
+                updated += 1
+            else:
+                print(f"  [SKIP] No changes needed.")
+                skipped += 1
+
+        except Exception as e:
+            print(f"  [ERROR] Failed to update '{filename}': {e}")
+            errors += 1
+
+    duration = time.time() - start_time
+    print(f"\n{'=' * 60}")
+    print(f"  SUMMARY")
+    print(f"{'=' * 60}")
+    print(f"  Run date:                {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"  Directory:               '{directory}'")
+    print(f"  New Album:               {new_album or '—'}")
+    print(f"  New Artist:              {new_artist or '—'}")
+    print(f"  Duration:                {duration:.1f}s")
+    print(f"{'─' * 60}")
+    print(f"  FILES")
+    print(f"{'─' * 60}")
+    print(f"  Total found:             {total}")
+    print(f"  Updated:                 {updated}")
+    print(f"  Skipped:                 {skipped}")
+    print(f"  Errors:                  {errors}")
+    print(f"{'─' * 60}")
+    print(f"  TAGGING")
+    print(f"{'─' * 60}")
+    print(f"  Title updated:           {tags_title_updated}")
+    print(f"  OriginalTitle stored:    {tags_title_stored}")
+    print(f"  OriginalArtist stored:   {tags_artist_stored}")
+    print(f"  OriginalAlbum stored:    {tags_album_stored}")
+    print(f"  OriginalTitle protected: {tags_title_protected}")
+    print(f"  OriginalArtist protected:{tags_artist_protected}")
+    print(f"  OriginalAlbum protected: {tags_album_protected}")
+    print(f"{'─' * 60}")
+    if errors > 0:
+        print(f"  Status:               ⚠️  Completed with errors")
+    elif updated == 0:
+        print(f"  Status:               ℹ️  Nothing updated")
+    else:
+        print(f"  Status:               ✅ Completed successfully")
+    print(f"{'=' * 60}")
+
+
+# ──────────────────────────────────────────────
+# Tag Restore
+# ──────────────────────────────────────────────
+
+def restore_tags(directory, restore_album=False, restore_title=False,
+                 restore_artist=False, cleanup_options=None,
+                 dry_run=False, verbose=False):
+    """
+    Recursively restore original tags for all MP3s under a directory
+    by reading values from TXXX:OriginalTitle / OriginalArtist /
+    OriginalAlbum tags. [1]
+    """
+    from mutagen.id3 import ID3, TALB, TIT2, TPE1, ID3NoHeaderError
+
+    start_time = time.time()
+
+    if cleanup_options is None:
+        cleanup_options = {
+            "remove_id3v1":      True,
+            "use_id3v23":        True,
+            "remove_duplicates": True
+        }
+
+    if not os.path.isdir(directory):
+        print(f"[ERROR] Directory '{directory}' not found.")
+        return
+
+    mp3_files = [
+        os.path.join(root, f)
+        for root, dirs, files in os.walk(directory)
+        for f in files
+        if f.lower().endswith('.mp3')
+    ]
+
+    if not mp3_files:
+        print(f"[INFO] No MP3 files found in '{directory}' "
+              f"or its subdirectories.")
+        return
+
+    total = len(mp3_files)
+    print(f"[INFO] Found {total} MP3 file(s) in '{directory}' (recursive).")
+    print(f"[INFO] Restoring Album:  {restore_album}")
+    print(f"[INFO] Restoring Title:  {restore_title}")
+    print(f"[INFO] Restoring Artist: {restore_artist}")
+    if dry_run:
+        print("[DRY-RUN] No files will be modified.\n")
+
+    count    = 0
+    restored = 0
+    skipped  = 0
+    errors   = 0
+
+    tags_title_restored  = 0
+    tags_artist_restored = 0
+    tags_album_restored  = 0
+    tags_title_missing   = 0
+    tags_artist_missing  = 0
+    tags_album_missing   = 0
+
+    for filepath in mp3_files:
+        count += 1
+        filename = os.path.relpath(filepath, directory)
+
+        print(f"\n[{count}/{total}] Processing: '{filename}'")
+
+        try:
+            try:
+                tags = ID3(filepath)
+            except ID3NoHeaderError:
+                print(f"  [WARN] No ID3 tags found in '{filename}'. Skipping.")
+                skipped += 1
+                continue
+
+            orig_title  = _get_txxx(tags, "OriginalTitle")
+            orig_artist = _get_txxx(tags, "OriginalArtist")
+            orig_album  = _get_txxx(tags, "OriginalAlbum")
+
+            if verbose:
+                print(f"  [VERBOSE] Preserved originals:")
+                print(f"            → OriginalTitle:  '{orig_title}'")
+                print(f"            → OriginalArtist: '{orig_artist}'")
+                print(f"            → OriginalAlbum:  '{orig_album}'")
+                print(f"  [VERBOSE] Tags BEFORE restore:")
+                print(f"            → Title:  "
+                      f"'{str(tags['TIT2']) if 'TIT2' in tags else ''}'")
+                print(f"            → Artist: "
+                      f"'{str(tags['TPE1']) if 'TPE1' in tags else ''}'")
+                print(f"            → Album:  "
+                      f"'{str(tags['TALB']) if 'TALB' in tags else ''}'")
+
+            file_restored = False
+
+            if restore_title:
+                if orig_title:
+                    if dry_run:
+                        print(f"  [DRY-RUN] Would restore Title:  → '{orig_title}'")
+                    else:
+                        tags["TIT2"] = TIT2(encoding=3, text=orig_title)
+                        print(f"  Title  restored → '{orig_title}'")
+                        tags_title_restored += 1
+                        file_restored = True
+                else:
+                    print(f"  [SKIP] No OriginalTitle for '{filename}'.")
+                    tags_title_missing += 1
+
+            if restore_artist:
+                if orig_artist:
+                    if dry_run:
+                        print(f"  [DRY-RUN] Would restore Artist: → '{orig_artist}'")
+                    else:
+                        tags["TPE1"] = TPE1(encoding=3, text=orig_artist)
+                        print(f"  Artist restored → '{orig_artist}'")
+                        tags_artist_restored += 1
+                        file_restored = True
+                else:
+                    print(f"  [SKIP] No OriginalArtist for '{filename}'.")
+                    tags_artist_missing += 1
+
+            if restore_album:
+                if orig_album:
+                    if dry_run:
+                        print(f"  [DRY-RUN] Would restore Album:  → '{orig_album}'")
+                    else:
+                        tags["TALB"] = TALB(encoding=3, text=orig_album)
+                        print(f"  Album  restored → '{orig_album}'")
+                        tags_album_restored += 1
+                        file_restored = True
+                else:
+                    print(f"  [SKIP] No OriginalAlbum for '{filename}'.")
+                    tags_album_missing += 1
+
+            if not dry_run:
+                if file_restored:
+                    if verbose:
+                        print(f"  [VERBOSE] Tags AFTER restore:")
+                        if restore_title  and orig_title:
+                            print(f"            → Title:  '{orig_title}'")
+                        if restore_artist and orig_artist:
+                            print(f"            → Artist: '{orig_artist}'")
+                        if restore_album  and orig_album:
+                            print(f"            → Album:  '{orig_album}'")
+                    _apply_cleanup(tags, filepath, cleanup_options)
+                    print(f"  [OK] Tags restored.")
+                    restored += 1
+                else:
+                    print(f"  [SKIP] Nothing to restore for '{filename}'.")
+                    skipped += 1
+
+        except Exception as e:
+            print(f"  [ERROR] Failed to restore '{filename}': {e}")
+            errors += 1
+
+    duration = time.time() - start_time
+    print(f"\n{'=' * 60}")
+    print(f"  SUMMARY")
+    print(f"{'=' * 60}")
+    print(f"  Run date:                {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"  Directory:               '{directory}'")
+    print(f"  Restored Album:          {restore_album}")
+    print(f"  Restored Title:          {restore_title}")
+    print(f"  Restored Artist:         {restore_artist}")
+    print(f"  Duration:                {duration:.1f}s")
+    print(f"{'─' * 60}")
+    print(f"  FILES")
+    print(f"{'─' * 60}")
+    print(f"  Total found:             {total}")
+    print(f"  Restored:                {restored}")
+    print(f"  Skipped:                 {skipped}")
+    print(f"  Errors:                  {errors}")
+    print(f"{'─' * 60}")
+    print(f"  TAGGING")
+    print(f"{'─' * 60}")
+    print(f"  Title restored:          {tags_title_restored}")
+    print(f"  Artist restored:         {tags_artist_restored}")
+    print(f"  Album restored:          {tags_album_restored}")
+    print(f"  Title missing:           {tags_title_missing}")
+    print(f"  Artist missing:          {tags_artist_missing}")
+    print(f"  Album missing:           {tags_album_missing}")
+    print(f"{'─' * 60}")
+    if errors > 0:
+        print(f"  Status:               ⚠️  Completed with errors")
+    elif restored == 0:
+        print(f"  Status:               ℹ️  Nothing to restore")
+    else:
+        print(f"  Status:               ✅ Completed successfully")
+    print(f"{'=' * 60}")
+
+
+# ──────────────────────────────────────────────
+# Rescan from Source
+# ──────────────────────────────────────────────
+
+def rescan_from_source(input_dir, output_dir, cleanup_options=None,
+                        dry_run=False, verbose=False):
+    """
+    Recursively walk input_dir for .m4a files. For each one, read the
+    original Title, Artist, and Album tags directly from the source,
+    find the matching MP3 in output_dir, reset all three TXXX:Original*
+    protection tags from the source values, rewrite TIT2/TPE1/TALB,
+    refresh the title to 'Artist - Title' format, and save. [2]
+    """
+    from mutagen.mp4 import MP4
+    from mutagen.id3 import ID3, TIT2, TPE1, TALB, TXXX, ID3NoHeaderError
+
+    start_time = time.time()
+
+    if cleanup_options is None:
+        cleanup_options = {
+            "remove_id3v1":      True,
+            "use_id3v23":        True,
+            "remove_duplicates": True
+        }
+
+    if not os.path.isdir(input_dir):
+        print(f"[ERROR] Input directory not found: '{input_dir}'")
+        return
+
+    if not os.path.isdir(output_dir):
+        print(f"[ERROR] Output directory not found: '{output_dir}'")
+        return
+
+    m4a_files = [
+        os.path.join(root, f)
+        for root, dirs, files in os.walk(input_dir)
+        for f in files
+        if f.lower().endswith('.m4a') and not f.startswith('._')
+    ]
+
+    if not m4a_files:
+        print(f"[INFO] No .m4a files found in '{input_dir}'.")
+        return
+
+    total      = len(m4a_files)
+    count      = 0
+    updated    = 0
+    skipped    = 0
+    errors     = 0
+    tags_reset = 0
+
+    print(f"[INFO] Found {total} .m4a source file(s). Scanning...")
+    if dry_run:
+        print("[DRY-RUN] No files will be modified.\n")
+
+    for input_path in m4a_files:
+        count += 1
+        display_name = os.path.relpath(input_path, input_dir)
+        print(f"\n[{count}/{total}] Resetting tags from source: '{display_name}'")
+
+        try:
+            m4a = MP4(input_path)
+            title  = str(m4a.tags.get('\xa9nam', ['Unknown Title'])[0])
+            artist = str(m4a.tags.get('\xa9ART', ['Unknown Artist'])[0])
+            album  = str(m4a.tags.get('\xa9alb', ['Unknown Album'])[0])
+
+            safe_title   = "".join(c for c in title  if c not in r'\/:*?"<>|')
+            safe_artist  = "".join(c for c in artist if c not in r'\/:*?"<>|')
+            mp3_filename = f"{safe_artist} - {safe_title}.mp3"
+            mp3_path     = os.path.join(output_dir, mp3_filename)
+
+            if not os.path.isfile(mp3_path):
+                print(f"  [SKIP] No matching MP3 found: '{mp3_filename}'")
+                skipped += 1
+                continue
+
+            if verbose:
+                print(f"  [VERBOSE] Source .m4a tags:")
+                print(f"            → Title:  '{title}'")
+                print(f"            → Artist: '{artist}'")
+                print(f"            → Album:  '{album}'")
+                print(f"  [VERBOSE] Matched MP3: '{mp3_path}'")
+
+            if dry_run:
+                print(f"  [DRY-RUN] Would reset MP3 tags from source:")
+                print(f"            → TIT2 / OriginalTitle:  '{title}'")
+                print(f"            → TPE1 / OriginalArtist: '{artist}'")
+                print(f"            → TALB / OriginalAlbum:  '{album}'")
+                print(f"            → Title would become:    '{artist} - {title}'")
+                continue
+
+            try:
+                tags = ID3(mp3_path)
+            except ID3NoHeaderError:
+                tags = ID3()
+
+            # ── Hard reset: remove existing Original* TXXX frames ──
+            # This clears the hard gate so save_original_tag() can
+            # write fresh values from the source .m4a [2]
+            for key in list(tags.keys()):
+                frame = tags[key]
+                if isinstance(frame, TXXX) and frame.desc in {
+                    "OriginalTitle", "OriginalArtist", "OriginalAlbum"
+                }:
+                    del tags[key]
+                    tags_reset += 1
+
+            # ── Write fresh base tags from source .m4a ────────────
+            tags["TIT2"] = TIT2(encoding=3, text=title)
+            tags["TPE1"] = TPE1(encoding=3, text=artist)
+            tags["TALB"] = TALB(encoding=3, text=album)
+
+            # ── Store fresh originals — gate is clear after reset ──
+            save_original_tag(tags, "TXXX:OriginalTitle",  "OriginalTitle",
+                              title,  "title")
+            save_original_tag(tags, "TXXX:OriginalArtist", "OriginalArtist",
+                              artist, "artist")
+            save_original_tag(tags, "TXXX:OriginalAlbum",  "OriginalAlbum",
+                              album,  "album")
+
+            # ── Refresh Title to 'Artist - Title' format ──────────
+            update_title_tag(tags, cleanup_options,
+                             dry_run=dry_run, verbose=verbose)
+
+            _apply_cleanup(tags, mp3_path, cleanup_options)
+
+            if verbose:
+                print(f"  [VERBOSE] Tags AFTER reset:")
+                print(f"            → Title:          '{str(tags['TIT2'])}'")
+                print(f"            → Artist:         '{artist}'")
+                print(f"            → Album:          '{album}'")
+                print(f"            → OriginalTitle:  '{title}'")
+                print(f"            → OriginalArtist: '{artist}'")
+                print(f"            → OriginalAlbum:  '{album}'")
+
+            print(f"  [OK] Tags reset from source → '{mp3_filename}'")
+            updated += 1
+
+        except Exception as e:
+            print(f"  [ERROR] Failed to reset tags for '{display_name}': {e}")
+            errors += 1
+
+    duration = time.time() - start_time
+    print(f"\n{'=' * 60}")
+    print(f"  SUMMARY")
+    print(f"{'=' * 60}")
+    print(f"  Run date:                {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"  Input directory:         '{input_dir}'")
+    print(f"  Output directory:        '{output_dir}'")
+    print(f"  Duration:                {duration:.1f}s")
+    print(f"{'─' * 60}")
+    print(f"  FILES")
+    print(f"{'─' * 60}")
+    print(f"  Total .m4a found:        {total}")
+    print(f"  MP3s updated:            {updated}")
+    print(f"  Skipped (no MP3 match):  {skipped}")
+    print(f"  Errors:                  {errors}")
+    print(f"{'─' * 60}")
+    print(f"  TAGGING")
+    print(f"{'─' * 60}")
+    print(f"  Original tags reset:     {tags_reset}")
+    print(f"  Original tags rewritten: {updated * 3}")
+    print(f"{'─' * 60}")
+    if errors > 0:
+        print(f"  Status:               ⚠️  Completed with errors")
+    elif updated == 0:
+        print(f"  Status:               ℹ️  No MP3s updated")
+    else:
+        print(f"  Status:               ✅ Completed successfully")
+    print(f"{'=' * 60}")
+
+
+def print_help():
+    help_text = """
+╔══════════════════════════════════════════════════════════════════╗
+║              ride-command-mp3-export                             ║
+║      Convert M4A → MP3  |  Update & Restore MP3 Tags            ║
+╚══════════════════════════════════════════════════════════════════╝
+
+USAGE:
+  ./ride-command-mp3-export.py [input_dir] [options]
+
+ARGUMENTS:
+  input_dir                 Directory to scan (default: current directory)
+                            Subdirectories are always scanned recursively.
+                            All output files are written flat (no subdirs).
+                            Already-converted files are skipped automatically.
+
+CONVERSION OPTIONS:
+  --output "path"           Output directory for converted MP3s
+                            (default: ./converted_mp3)
+  --force                   Re-convert and overwrite existing MP3s
+
+TAG UPDATE OPTIONS:
+  --new-album "Name"        Set a new album tag on existing MP3s.
+                            Original saved to TXXX:OriginalAlbum (once only,
+                            never overwritten).
+  --new-artist "Name"       Set a new artist tag on existing MP3s.
+                            Original saved to TXXX:OriginalArtist (once only,
+                            never overwritten).
+
+RESTORE OPTIONS:
+  --restore-all             Restore all original tags from TXXX originals
+  --restore-album           Restore original album from TXXX:OriginalAlbum
+  --restore-title           Restore original title from TXXX:OriginalTitle
+  --restore-artist          Restore original artist from TXXX:OriginalArtist
+
+RESET OPTIONS:
+  --reset-tags-from-input   Re-read tags from source .m4a files and reset
+                            all MP3 tags and TXXX:Original* protection tags.
+                            Requires input_dir and --output.
+                            Prompts for confirmation before running.
+
+TAG CLEANUP OPTIONS:
+  --keep-id3v1              Do not strip ID3v1 tags
+  --keep-id3v24             Keep ID3v2.4 (default saves as ID3v2.3)
+  --keep-duplicates         Do not remove duplicate frames
+
+OUTPUT OPTIONS:
+  --dry-run                 Preview changes without modifying any files
+  --verbose / -v            Show detailed tag information before and after
+
+EXAMPLES:
+  # Convert M4A files to MP3:
+  ./ride-command-mp3-export.py /Users/jason/Music
+  ./ride-command-mp3-export.py /Users/jason/Music --output /Users/jason/MP3s
+
+  # Convert and update tags in one step:
+  ./ride-command-mp3-export.py music/Pop_Workout --output Pop_Workout --new-album "Pop Workout"
+
+  # Reset tags from source files:
+  ./ride-command-mp3-export.py /Users/jason/Music --output /Users/jason/MP3s --reset-tags-from-input
+
+  # Restore original tags:
+  ./ride-command-mp3-export.py --output /Users/jason/MP3s --restore-all
+"""
+    print(help_text)
+
+
+# ──────────────────────────────────────────────
+# Argument Parsing & Entry Point
+# ──────────────────────────────────────────────
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="ride-command-mp3-export: Convert M4A to MP3 and manage tags.",
+        add_help=False
+    )
+    parser.add_argument("input_dir",          nargs="?", default=None)
+    parser.add_argument("--output",           dest="output_dir", default=None)
+    parser.add_argument("--force",            action="store_true")
+    parser.add_argument("--new-album",        dest="new_album",  default=None)
+    parser.add_argument("--new-artist",       dest="new_artist", default=None)
+    parser.add_argument("--restore-all",      action="store_true")
+    parser.add_argument("--restore-album",    action="store_true")
+    parser.add_argument("--restore-title",    action="store_true")
+    parser.add_argument("--restore-artist",   action="store_true")
+    parser.add_argument("--reset-tags-from-input", dest="reset_tags_from_input", action="store_true")
+    parser.add_argument("--keep-id3v1",       action="store_true")
+    parser.add_argument("--keep-id3v24",      action="store_true")
+    parser.add_argument("--keep-duplicates",  action="store_true")
+    parser.add_argument("--dry-run",          action="store_true")
+    parser.add_argument("--verbose", "-v",    action="store_true")
+    parser.add_argument("-h", "--help",       action="store_true")
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+
+    if args.help:
+        print_help()
+        sys.exit(0)
+
+    check_and_install_mutagen()
+
+    dry_run = args.dry_run
+    verbose = args.verbose
+    force   = args.force
+
+    if dry_run:
+        print("[DRY-RUN] No files will be modified.\n")
+    if verbose:
+        print("[VERBOSE] Verbose mode enabled.\n")
+    if force:
+        print("[INFO] Force mode enabled — existing files will be overwritten.\n")
+
+    cleanup_options = {
+        "remove_id3v1":      not args.keep_id3v1,
+        "use_id3v23":        not args.keep_id3v24,
+        "remove_duplicates": not args.keep_duplicates
+    }
+
+    # ── Resolve output_dir early so all modes can use it ──────────
+    output_dir = (
+        os.path.abspath(args.output_dir)
+        if args.output_dir
+        else os.path.join(os.getcwd(), "converted_mp3")
+    )
+
+    # ── Reset tags from input mode ────────────────────────────────
+    if args.reset_tags_from_input:
+        input_dir = (
+            os.path.abspath(args.input_dir)
+            if args.input_dir
+            else os.getcwd()
+        )
+        if not os.path.isdir(input_dir):
+            print(f"[ERROR] Directory not found: '{input_dir}'")
+            sys.exit(1)
+
+        # ── Confirmation prompt (skipped for --dry-run) ───────────
+        if not dry_run:
+            print(f"\n⚠️  WARNING: --reset-tags-from-input will permanently overwrite all")
+            print(f"   TXXX:Original* protection tags in '{output_dir}'")
+            print(f"   with values read fresh from '{input_dir}'.")
+            print(f"   This cannot be undone.\n")
+            confirm = input(
+                "   Type 'yes' to continue, anything else to cancel: "
+            ).strip().lower()
+            if confirm != "yes":
+                print("\n[CANCELLED] Reset aborted. No files were modified.")
+                sys.exit(0)
+            print()
+
+        rescan_from_source(
+            input_dir       = input_dir,
+            output_dir      = output_dir,
+            cleanup_options = cleanup_options,
+            dry_run         = dry_run,
+            verbose         = verbose
+        )
+        return
+
+    # ── Restore mode ──────────────────────────────────────────────
+    restore_any = (
+        args.restore_all or args.restore_album or
+        args.restore_title or args.restore_artist
+    )
+
+    if restore_any:
+        restore_tags(
+            directory      = output_dir,
+            restore_album  = args.restore_all or args.restore_album,
+            restore_title  = args.restore_all or args.restore_title,
+            restore_artist = args.restore_all or args.restore_artist,
+            cleanup_options= cleanup_options,
+            dry_run        = dry_run,
+            verbose        = verbose
+        )
+        return
+
+    # ── Tag update mode ───────────────────────────────────────────
+    if args.new_album or args.new_artist:
+        input_dir = os.path.abspath(args.input_dir) if args.input_dir else None
+
+        if input_dir:
+            if not os.path.isdir(input_dir):
+                print(f"[ERROR] Directory not found: '{input_dir}'")
+                sys.exit(1)
+            check_ffmpeg()
+            convert_m4a_to_mp3(
+                input_dir       = input_dir,
+                output_dir      = output_dir,
+                cleanup_options = cleanup_options,
+                dry_run         = dry_run,
+                verbose         = verbose,
+                force           = force
+            )
+
+        update_tags(
+            directory      = output_dir,
+            new_album      = args.new_album,
+            new_artist     = args.new_artist,
+            cleanup_options= cleanup_options,
+            dry_run        = dry_run,
+            verbose        = verbose
+        )
+        return
+
+    # ── Conversion mode (default) ─────────────────────────────────
+    input_dir = (
+        os.path.abspath(args.input_dir)
+        if args.input_dir
+        else os.getcwd()
+    )
+
+    if not os.path.isdir(input_dir):
+        print(f"[ERROR] Directory not found: '{input_dir}'")
+        sys.exit(1)
+
+    check_ffmpeg()
+
+    convert_m4a_to_mp3(
+        input_dir       = input_dir,
+        output_dir      = output_dir,
+        cleanup_options = cleanup_options,
+        dry_run         = dry_run,
+        verbose         = verbose,
+        force           = force
+    )
+
+
+if __name__ == "__main__":
+    main()
