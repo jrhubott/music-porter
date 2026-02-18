@@ -1510,6 +1510,7 @@ class PipelineStatistics:
         self.start_time = time.time()
         self.stages_completed = []
         self.stages_failed = []
+        self.stages_skipped = []
 
 
 class PlaylistResult:
@@ -1744,8 +1745,17 @@ class PipelineOrchestrator:
 
             return True
         else:
-            self.stats.stages_failed.append("download")
-            return False
+            # Check if user skipped (download_stats is None and we have key/album_name)
+            # In this case, store the info and allow pipeline to continue
+            if download_stats is None and key and album_name:
+                self.stats.playlist_key = key
+                self.stats.playlist_name = album_name
+                self.stats.stages_skipped.append("download")
+                return True  # Continue to next stage
+            else:
+                # Actual failure
+                self.stats.stages_failed.append("download")
+                return False
 
     def _download_playlist(self, playlist_arg, auto, dry_run, verbose):
         """Download playlist from configuration."""
@@ -1781,8 +1791,15 @@ class PipelineOrchestrator:
             self.stats.stages_completed.append("download")
             return True
         else:
-            self.stats.stages_failed.append("download")
-            return False
+            # Check if user skipped (download_stats is None and we have playlist info)
+            # In this case, allow pipeline to continue
+            if download_stats is None and self.stats.playlist_key:
+                self.stats.stages_skipped.append("download")
+                return True  # Continue to next stage
+            else:
+                # Actual failure
+                self.stats.stages_failed.append("download")
+                return False
 
     def _ask_save_to_config(self, key, url, album_name):
         """Ask user if they want to save a new playlist to config."""
@@ -1806,7 +1823,7 @@ class PipelineOrchestrator:
         print(f"  Duration:                {duration:.1f}s")
 
         # Download stage
-        if "download" in self.stats.stages_completed or "download" in self.stats.stages_failed:
+        if "download" in self.stats.stages_completed or "download" in self.stats.stages_failed or "download" in self.stats.stages_skipped:
             print(f"{'─' * 70}")
             print(f"  DOWNLOAD STAGE")
             print(f"{'─' * 70}")
@@ -1821,6 +1838,8 @@ class PipelineOrchestrator:
                 print(f"  Status:                  ✅ Success")
             elif "download" in self.stats.stages_completed:
                 print(f"  Status:                  ✅ Success")
+            elif "download" in self.stats.stages_skipped:
+                print(f"  Status:                  ⏭️  Skipped")
             else:
                 print(f"  Status:                  ❌ Failed")
 
