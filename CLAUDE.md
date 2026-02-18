@@ -410,8 +410,9 @@ The `apple-to-ride-command` script is a modern, unified Python tool (2,458 lines
 
 **Interactive Menu (InteractiveMenu class):**
 - Beautiful formatted menu display
-- Numbered playlist selection
-- "All playlists", "Enter URL", "Copy to USB" options
+- Numbered playlist selection (1-N)
+- Letter-based action options: A (All playlists), U (Enter URL), C (Copy to USB), X (Exit)
+- Case-insensitive input handling
 - Post-processing prompts for USB copy
 - Save new URLs to config
 

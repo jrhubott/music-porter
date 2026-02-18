@@ -7,6 +7,11 @@
 ./apple-to-ride-command
 ```
 Interactive menu - easiest way to get started!
+- **1-N**: Select a playlist by number
+- **A**: Process all playlists
+- **U**: Enter a URL
+- **C**: Copy to USB only
+- **X**: Exit
 
 ### Full Workflow in One Command:
 ```bash

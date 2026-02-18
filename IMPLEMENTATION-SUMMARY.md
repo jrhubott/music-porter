@@ -127,10 +127,13 @@ Successfully created a unified Python script (`apple-to-ride-command`) that comb
 
 #### InteractiveMenu Class
 - Beautiful formatted menu display
-- Numbered playlist selection
-- "All playlists" option
-- "Enter URL" option
-- "Copy to USB only" option
+- Numbered playlist selection (1-N)
+- Letter-based action options:
+  - A: All playlists
+  - U: Enter URL
+  - C: Copy to USB only
+  - X: Exit
+- Case-insensitive input (a/A, u/U, c/C, x/X all work)
 - Automatic config save prompt for new URLs
 - Post-processing USB copy prompt
 - Keyboard interrupt handling
