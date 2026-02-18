@@ -1084,12 +1084,17 @@ class Converter:
                     continue
 
                 # Run ffmpeg conversion
-                cmd = [
-                    "ffmpeg", "-y", "-i", str(input_file),
-                    "-codec:a", "libmp3lame", "-q:a", FFMPEG_QUALITY,
-                    str(output_file)
-                ]
-                subprocess.run(cmd, capture_output=True, check=True)
+                try:
+                    (
+                        ffmpeg
+                        .input(str(input_file))
+                        .output(str(output_file), acodec='libmp3lame', **{'q:a': FFMPEG_QUALITY})
+                        .run(overwrite_output=True, quiet=True)
+                    )
+                except ffmpeg.Error as e:
+                    # Re-raise as generic exception to be caught by outer try/except
+                    error_msg = e.stderr.decode('utf-8') if e.stderr else str(e)
+                    raise Exception(f"FFmpeg conversion failed: {error_msg}")
 
                 # Write ID3 tags
                 try:
