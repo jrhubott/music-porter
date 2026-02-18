@@ -52,19 +52,19 @@ DEFAULT_USB_DIR = "RZR/Music"
 
 # Excluded USB volumes by OS
 if IS_MACOS:
-    EXCLUDED_USB_VOLUMES = [
+    EXCLUDED_USB_VOLUMES = (
         "Macintosh HD",
         "Macintosh HD - Data",
-    ]
+    )
 elif IS_WINDOWS:
-    EXCLUDED_USB_VOLUMES = [
+    EXCLUDED_USB_VOLUMES = (
         "C:",  # System drive
-    ]
+    )
 else:  # Linux
-    EXCLUDED_USB_VOLUMES = [
+    EXCLUDED_USB_VOLUMES = (
         "boot",
         "root",
-    ]
+    )
 
 # Quality presets for MP3 conversion
 QUALITY_PRESETS = {
@@ -74,6 +74,23 @@ QUALITY_PRESETS = {
     'low': {'mode': 'vbr', 'value': '6'},         # ~115-150kbps VBR
 }
 DEFAULT_QUALITY_PRESET = 'lossless'
+
+# Default cleanup options for ID3 tag operations
+DEFAULT_CLEANUP_OPTIONS = {
+    "remove_id3v1": True,
+    "use_id3v23": True,
+    "remove_duplicates": True,
+}
+
+# TXXX frame description constants for original tag preservation
+TXXX_ORIGINAL_TITLE = "OriginalTitle"
+TXXX_ORIGINAL_ARTIST = "OriginalArtist"
+TXXX_ORIGINAL_ALBUM = "OriginalAlbum"
+
+# M4A tag key constants
+M4A_TAG_TITLE = '\xa9nam'
+M4A_TAG_ARTIST = '\xa9ART'
+M4A_TAG_ALBUM = '\xa9alb'
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -541,8 +558,8 @@ def update_title_tag(tags, cleanup_options, logger=None, dry_run=False, verbose=
     """
     from mutagen.id3 import TIT2
 
-    orig_title  = _get_txxx(tags, "OriginalTitle")
-    orig_artist = _get_txxx(tags, "OriginalArtist")
+    orig_title  = _get_txxx(tags, TXXX_ORIGINAL_TITLE)
+    orig_artist = _get_txxx(tags, TXXX_ORIGINAL_ARTIST)
 
     current_title  = str(tags["TIT2"]) if "TIT2" in tags else ""
     current_artist = str(tags["TPE1"]) if "TPE1" in tags else ""
@@ -565,9 +582,9 @@ def update_title_tag(tags, cleanup_options, logger=None, dry_run=False, verbose=
 
     if verbose and logger:
         logger.debug(f"Title source:   '{source_title}' "
-                    f"({'OriginalTitle'  if orig_title  else 'TIT2'})")
+                    f"({TXXX_ORIGINAL_TITLE  if orig_title  else 'TIT2'})")
         logger.debug(f"Artist source:  '{source_artist}' "
-                    f"({'OriginalArtist' if orig_artist else 'TPE1'})")
+                    f"({TXXX_ORIGINAL_ARTIST if orig_artist else 'TPE1'})")
         logger.debug(f"New Title:      '{new_title}'")
 
     if dry_run:
@@ -595,7 +612,7 @@ def _apply_cleanup(tags, filepath, cleanup_options):
     v1         = 0 if cleanup_options.get("remove_id3v1") else 1
 
     allowed_frames     = {"TIT2", "TPE1", "TALB"}
-    allowed_txxx_descs = {"OriginalTitle", "OriginalArtist", "OriginalAlbum"}
+    allowed_txxx_descs = {TXXX_ORIGINAL_TITLE, TXXX_ORIGINAL_ARTIST, TXXX_ORIGINAL_ALBUM}
 
     for key in list(tags.keys()):
         frame = tags[key]
@@ -660,11 +677,7 @@ class TaggerManager:
 
     def __init__(self, logger=None, cleanup_options=None):
         self.logger = logger or Logger()
-        self.cleanup_options = cleanup_options or {
-            "remove_id3v1": True,
-            "use_id3v23": True,
-            "remove_duplicates": True
-        }
+        self.cleanup_options = cleanup_options or DEFAULT_CLEANUP_OPTIONS
         self.stats = TagStatistics()
 
     def update_tags(self, directory, new_album=None, new_artist=None,
@@ -733,7 +746,7 @@ class TaggerManager:
 
                 if new_album:
                     r, was_stored = save_original_tag(
-                        tags, "TXXX:OriginalAlbum", "OriginalAlbum",
+                        tags, "TXXX:OriginalAlbum", TXXX_ORIGINAL_ALBUM,
                         current_album, "album", self.logger)
                     if was_stored:
                         self.stats.album_stored += 1
@@ -742,7 +755,7 @@ class TaggerManager:
 
                 if new_artist:
                     r, was_stored = save_original_tag(
-                        tags, "TXXX:OriginalArtist", "OriginalArtist",
+                        tags, "TXXX:OriginalArtist", TXXX_ORIGINAL_ARTIST,
                         current_artist, "artist", self.logger)
                     if was_stored:
                         self.stats.artist_stored += 1
@@ -750,10 +763,10 @@ class TaggerManager:
                         self.stats.artist_protected += 1
 
                 # ── Store OriginalTitle BEFORE update_title_tag() runs ──
-                source_artist = _get_txxx(tags, "OriginalArtist") or current_artist
+                source_artist = _get_txxx(tags, TXXX_ORIGINAL_ARTIST) or current_artist
                 clean_title   = _strip_artist_prefix(current_title, source_artist)
                 r, was_stored = save_original_tag(
-                    tags, "TXXX:OriginalTitle", "OriginalTitle",
+                    tags, "TXXX:OriginalTitle", TXXX_ORIGINAL_TITLE,
                     clean_title, "title", self.logger)
                 if was_stored:
                     self.stats.title_stored += 1
@@ -878,9 +891,9 @@ class TaggerManager:
                     skipped += 1
                     continue
 
-                orig_title  = _get_txxx(tags, "OriginalTitle")
-                orig_artist = _get_txxx(tags, "OriginalArtist")
-                orig_album  = _get_txxx(tags, "OriginalAlbum")
+                orig_title  = _get_txxx(tags, TXXX_ORIGINAL_TITLE)
+                orig_artist = _get_txxx(tags, TXXX_ORIGINAL_ARTIST)
+                orig_album  = _get_txxx(tags, TXXX_ORIGINAL_ALBUM)
 
                 if verbose:
                     self.logger.debug(f"Preserved originals:")
@@ -1047,9 +1060,9 @@ class TaggerManager:
             try:
                 # Read M4A tags
                 m4a = MP4(str(input_file))
-                title  = str(m4a.tags.get('\xa9nam', ['Unknown Title'])[0])
-                artist = str(m4a.tags.get('\xa9ART', ['Unknown Artist'])[0])
-                album  = str(m4a.tags.get('\xa9alb', ['Unknown Album'])[0])
+                title  = str(m4a.tags.get(M4A_TAG_TITLE, ['Unknown Title'])[0])
+                artist = str(m4a.tags.get(M4A_TAG_ARTIST, ['Unknown Artist'])[0])
+                album  = str(m4a.tags.get(M4A_TAG_ALBUM, ['Unknown Album'])[0])
 
                 # Find matching MP3
                 safe_title = self._sanitize_filename(title)
@@ -1089,7 +1102,7 @@ class TaggerManager:
                 for key in list(tags.keys()):
                     frame = tags[key]
                     if isinstance(frame, TXXX) and frame.desc in {
-                        "OriginalTitle", "OriginalArtist", "OriginalAlbum"
+                        TXXX_ORIGINAL_TITLE, TXXX_ORIGINAL_ARTIST, TXXX_ORIGINAL_ALBUM
                     }:
                         del tags[key]
                         tags_reset += 1
@@ -1100,11 +1113,11 @@ class TaggerManager:
                 tags["TALB"] = TALB(encoding=3, text=album)
 
                 # ── Store fresh originals — gate is clear after reset ──
-                save_original_tag(tags, "TXXX:OriginalTitle", "OriginalTitle",
+                save_original_tag(tags, "TXXX:OriginalTitle", TXXX_ORIGINAL_TITLE,
                                 title, "title", self.logger)
-                save_original_tag(tags, "TXXX:OriginalArtist", "OriginalArtist",
+                save_original_tag(tags, "TXXX:OriginalArtist", TXXX_ORIGINAL_ARTIST,
                                 artist, "artist", self.logger)
-                save_original_tag(tags, "TXXX:OriginalAlbum", "OriginalAlbum",
+                save_original_tag(tags, "TXXX:OriginalAlbum", TXXX_ORIGINAL_ALBUM,
                                 album, "album", self.logger)
 
                 # ── Refresh Title to 'Artist - Title' format ──────────
@@ -1208,11 +1221,7 @@ class Converter:
 
     def __init__(self, logger=None, cleanup_options=None, quality_preset='lossless'):
         self.logger = logger or Logger()
-        self.cleanup_options = cleanup_options or {
-            "remove_id3v1": True,
-            "use_id3v23": True,
-            "remove_duplicates": True
-        }
+        self.cleanup_options = cleanup_options or DEFAULT_CLEANUP_OPTIONS
         self.stats = ConversionStatistics()
         self.quality_preset = quality_preset
         self.quality_settings = self._get_quality_settings(quality_preset)
@@ -1286,9 +1295,9 @@ class Converter:
             try:
                 # Read M4A tags
                 m4a = MP4(str(input_file))
-                title  = str(m4a.tags.get('\xa9nam', ['Unknown Title'])[0])
-                artist = str(m4a.tags.get('\xa9ART', ['Unknown Artist'])[0])
-                album  = str(m4a.tags.get('\xa9alb', ['Unknown Album'])[0])
+                title  = str(m4a.tags.get(M4A_TAG_TITLE, ['Unknown Title'])[0])
+                artist = str(m4a.tags.get(M4A_TAG_ARTIST, ['Unknown Artist'])[0])
+                album  = str(m4a.tags.get(M4A_TAG_ALBUM, ['Unknown Album'])[0])
 
                 # Create output filename
                 safe_title = self._sanitize_filename(title)
@@ -2932,9 +2941,9 @@ class SummaryManager:
                     tags = ID3(mp3_file)
 
                     # Check for TXXX protection frames
-                    has_original_title = self._txxx_exists(tags, 'OriginalTitle', TXXX)
-                    has_original_artist = self._txxx_exists(tags, 'OriginalArtist', TXXX)
-                    has_original_album = self._txxx_exists(tags, 'OriginalAlbum', TXXX)
+                    has_original_title = self._txxx_exists(tags, TXXX_ORIGINAL_TITLE, TXXX)
+                    has_original_artist = self._txxx_exists(tags, TXXX_ORIGINAL_ARTIST, TXXX)
+                    has_original_album = self._txxx_exists(tags, TXXX_ORIGINAL_ALBUM, TXXX)
 
                     if has_original_title and has_original_artist and has_original_album:
                         playlist.sample_files_with_tags += 1
