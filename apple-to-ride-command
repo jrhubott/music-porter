@@ -1842,6 +1842,8 @@ class PipelineOrchestrator:
             print(f"{'─' * 70}")
             s = self.stats.tagging_stats
             print(f"  Title updated:           {s.title_updated}")
+            print(f"  Album updated:           {s.album_updated}")
+            print(f"  Artist updated:          {s.artist_updated}")
             print(f"  OriginalTitle stored:    {s.title_stored}")
             print(f"  OriginalArtist stored:   {s.artist_stored}")
             print(f"  OriginalAlbum stored:    {s.album_stored}")
