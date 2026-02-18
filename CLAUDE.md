@@ -282,37 +282,69 @@ pip install -r requirements.txt
 
 ### Version Management
 
-**IMPORTANT: Update the version number with each commit.**
+**IMPORTANT: Version number strategy depends on branch context.**
 
 The version number is defined in `apple-to-ride-command` at line 44:
 ```python
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 ```
 
-**Version Update Workflow:**
-1. Make code changes
-2. Update VERSION in apple-to-ride-command (line 44)
-3. Commit changes (version update included in same commit)
+**Branch-Based Version Workflow:**
+
+**While working on a feature branch:**
+- Include branch name in version: `VERSION = "1.1.0-feature-name"`
+- Format: `MAJOR.MINOR.PATCH-branch-name`
+- Use lowercase with hyphens (no underscores or slashes)
+- Examples:
+  - `VERSION = "1.1.0-cookie-management"`
+  - `VERSION = "1.2.0-usb-sync-improvements"`
+  - `VERSION = "1.1.1-bugfix-tag-restoration"`
+
+**When merging to main:**
+- Update to clean release version (remove branch name)
+- Increment version number according to semantic versioning
+- Examples:
+  - `1.1.0-cookie-management` → `1.2.0` (new feature)
+  - `1.1.1-bugfix-tag-restoration` → `1.1.1` (bug fix)
+  - `2.0.0-breaking-cli-refactor` → `2.0.0` (breaking change)
 
 **Semantic Versioning (MAJOR.MINOR.PATCH):**
-- **PATCH** (1.0.0 → 1.0.1): Bug fixes, documentation updates, minor improvements
-- **MINOR** (1.0.0 → 1.1.0): New features, non-breaking changes
-- **MAJOR** (1.0.0 → 2.0.0): Breaking changes, major refactors
+- **PATCH** (1.1.0 → 1.1.1): Bug fixes, documentation updates, minor improvements
+- **MINOR** (1.1.0 → 1.2.0): New features, non-breaking changes
+- **MAJOR** (1.1.0 → 2.0.0): Breaking changes, major refactors
 
-**Examples:**
+**Complete Workflow Example:**
 ```bash
-# Bug fix or doc update
-VERSION = "1.0.1"
+# Create feature branch
+git checkout -b feature/cookie-management
 
-# New feature (cookie management, USB sync, etc.)
-VERSION = "1.1.0"
+# Update version to include branch name
+# In apple-to-ride-command line 44:
+VERSION = "1.1.0-cookie-management"
+git commit -m "Start cookie management feature"
 
-# Breaking change (CLI interface change, config format change)
-VERSION = "2.0.0"
+# Work on feature... make commits...
+# (version stays "1.1.0-cookie-management" throughout development)
+
+# Ready to merge to main
+git checkout main
+git merge feature/cookie-management
+
+# Update version to clean release number
+# In apple-to-ride-command line 44:
+VERSION = "1.2.0"  # MINOR bump for new feature
+git commit -m "Bump version to 1.2.0 for cookie management feature"
 ```
 
+**Benefits:**
+- Branch versions clearly identify development builds
+- Clean versions on main identify stable releases
+- Easy to see if running development vs release build
+- Version in startup banner shows branch: `v1.2.0-new-feature`
+
 **Version Display:**
-- Shown in startup banner: `Apple Music to Ride Command MP3 Converter v1.0.0`
+- Shown in startup banner: `Apple Music to Ride Command MP3 Converter v1.1.0`
+- With branch: `Apple Music to Ride Command MP3 Converter v1.2.0-new-feature`
 - Shown with `--version` flag
 - Logged to all log files
 
