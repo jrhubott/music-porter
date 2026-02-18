@@ -639,19 +639,27 @@ def update_tags(directory, new_album=None, new_artist=None,
             if was_stored: tags_title_stored    += 1
             else:          tags_title_protected += 1
 
+            # ── Track whether actual changes will be made ──
+            file_changed = False
+
             # ── Now apply new tag values ───────────────────────────
             if new_album:
                 from mutagen.id3 import TALB
+                if current_album != new_album:
+                    file_changed = True
                 tags["TALB"] = TALB(encoding=3, text=new_album)
 
             if new_artist:
                 from mutagen.id3 import TPE1
+                if current_artist != new_artist:
+                    file_changed = True
                 tags["TPE1"] = TPE1(encoding=3, text=new_artist)
 
             # ── Refresh Title to 'Artist - Title' format ──────────
             if update_title_tag(tags, cleanup_options,
                                 dry_run=dry_run, verbose=verbose):
                 tags_title_updated += 1
+                file_changed = True
 
             if verbose:
                 print(f"  [VERBOSE] Tags AFTER update:")
@@ -671,8 +679,13 @@ def update_tags(directory, new_album=None, new_artist=None,
                       f"v1={0 if cleanup_options.get('remove_id3v1') else 1}")
 
             _apply_cleanup(tags, filepath, cleanup_options)
-            print(f"  [OK] Tags updated.")
-            updated += 1
+
+            if file_changed:
+                print(f"  [OK] Tags updated.")
+                updated += 1
+            else:
+                print(f"  [SKIP] No changes needed.")
+                skipped += 1
 
         except Exception as e:
             print(f"  [ERROR] Failed to update '{filename}': {e}")
