@@ -25,8 +25,8 @@ The system follows an integrated pipeline:
 - Interactive menu for easy operation
 - Comprehensive error handling and statistics
 - Full pipeline orchestration (download → convert → tag → USB)
-- Modular design with 13 classes
-- 1,921 lines of production-ready Python code
+- Modular design with 15 classes
+- 2,458 lines of production-ready Python code
 - See `APPLE-TO-RIDE-COMMAND-GUIDE.md` for complete documentation
 
 **do-it-all** (bash) - **DEPRECATED**
@@ -193,7 +193,7 @@ The codebase uses a "hard gate" protection system for original metadata:
 ## Development Setup
 
 ### Prerequisites
-- Python 3.14+ (uses Python virtual environment)
+- Python 3.8+ (uses Python virtual environment)
 - ffmpeg (for audio conversion)
 - gamdl (Apple Music downloader, installed via pip in venv)
 - mutagen (Python ID3 tag library, auto-installed by scripts)
@@ -217,47 +217,30 @@ pip install gamdl mutagen
 - Use `--dry-run` flag extensively to preview behavior
 - Use `--verbose` to inspect tag transformations
 - Test tag preservation by running updates multiple times
-- Verify TXXX frames with: `./ride-command-mp3-export --verbose`
+- Verify TXXX frames with: `./apple-to-ride-command --verbose tag export/PlaylistName`
 
-### Git Commit Best Practices
+### Common Gotchas
 
-When making changes to the codebase, create incremental commits for each logical change:
+**Apple Music Authentication:**
+- Requires `cookies.txt` file with Apple Music session cookies
+- Get cookies from browser after logging into music.apple.com
+- Cookie file expires periodically and needs refresh
+- gamdl will fail without valid authentication
 
-**Commit Strategy:**
-- One commit per logical change (e.g., one for a bug fix, one for documentation)
-- Write clear, descriptive commit messages that explain the "why" not just the "what"
-- Use the conventional commit format when applicable
-- Include Co-Authored-By line for AI-assisted changes
+**Virtual Environment:**
+- Must activate venv before running: `source .venv/bin/activate`
+- Dependencies (gamdl, mutagen) only available inside venv
+- Deactivate with `deactivate` command
 
-**Example Workflow:**
-```bash
-# Make a focused change (e.g., fix a bug)
-# ... edit files ...
-git add <files>
-git commit -m "Fix TXXX frame deletion bug in _apply_cleanup()
+**Temporary Directories:**
+- gamdl creates `gamdl_temp_*` directories during downloads
+- Safe to delete after successful downloads
+- Not tracked in git (.gitignore)
 
-The duplicate removal logic was incorrectly treating all TXXX frames as
-duplicates because it only checked the base key ('TXXX') rather than the
-frame's description attribute.
-
-Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
-
-# Make another logical change (e.g., remove redundant code)
-# ... edit files ...
-git add <files>
-git commit -m "Remove duplicate save_original_tag() call
-
-The original title was already being saved earlier in the execution flow.
-
-Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
-```
-
-**Benefits:**
-- Each commit represents a single, reviewable change
-- Easy to understand what changed and why
-- Simplifies debugging (git bisect, git blame)
-- Enables selective reverting if needed
-- Creates clear project history
+**USB Drive Detection:**
+- Tool auto-detects mounted volumes in `/Volumes/`
+- System drives (Macintosh HD) are automatically excluded
+- If USB not detected, check mount status: `ls /Volumes/`
 
 ## Directory Structure
 
@@ -332,11 +315,11 @@ EXCLUDED_USB_VOLUMES = [
 
 ### Overview
 
-The `apple-to-ride-command` script is a modern, unified Python tool (1,921 lines) that replaces both legacy scripts with a professional subcommand architecture.
+The `apple-to-ride-command` script is a modern, unified Python tool (2,458 lines) that replaces both legacy scripts with a professional subcommand architecture.
 
 ### Key Components
 
-**13 Classes:**
+**15 Classes:**
 1. `Logger` - Timestamped logging to console and file
 2. `PlaylistConfig` - Playlist configuration representation
 3. `ConfigManager` - Loads and manages playlists.conf
@@ -350,6 +333,8 @@ The `apple-to-ride-command` script is a modern, unified Python tool (1,921 lines
 11. `PipelineStatistics` - Aggregates statistics across stages
 12. `PipelineOrchestrator` - Coordinates multi-stage workflows
 13. `InteractiveMenu` - Interactive user interface
+14. `PlaylistResult` - Results for single playlist in batch processing
+15. `AggregateStatistics` - Cumulative statistics across multiple playlists
 
 **Subcommands:**
 - `pipeline` - Full download + convert + tag workflow (default)
@@ -398,7 +383,7 @@ The `apple-to-ride-command` script is a modern, unified Python tool (1,921 lines
 4. **Better error handling** - Continues on failures, detailed reporting
 5. **Comprehensive statistics** - Aggregated across pipeline stages
 6. **Pure Python** - No bash subprocess overhead
-7. **Modular design** - 13 classes, easy to extend
+7. **Modular design** - 15 classes, easy to extend
 8. **Interactive menu** - User-friendly for occasional use
 9. **Complete documentation** - 3 comprehensive guides
 
