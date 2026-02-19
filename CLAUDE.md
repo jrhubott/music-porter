@@ -148,8 +148,8 @@ The conversion system supports configurable quality presets to balance file size
 # Convert M4A files to MP3 (default: lossless 320kbps)
 ./music-porter convert music/Pop_Workout
 
-# Specify output directory
-./music-porter convert music/Pop_Workout --output export/Pop_Workout
+# Specify output directory (profile-scoped by default)
+./music-porter convert music/Pop_Workout --output export/ride-command/Pop_Workout
 
 # Use quality presets (lossless, high, medium, low)
 ./music-porter convert music/Pop_Workout --preset high
@@ -165,40 +165,40 @@ The conversion system supports configurable quality presets to balance file size
 **Tag Operations:**
 ```bash
 # Update album tag
-./music-porter tag export/Pop_Workout --album "Pop Workout"
+./music-porter tag export/ride-command/Pop_Workout --album "Pop Workout"
 
 # Update album and artist
-./music-porter tag export/Pop_Workout --album "Pop Workout" --artist "Various"
+./music-porter tag export/ride-command/Pop_Workout --album "Pop Workout" --artist "Various"
 ```
 
 **Restore Original Tags:**
 ```bash
 # Restore all original tags
-./music-porter restore export/Pop_Workout --all
+./music-porter restore export/ride-command/Pop_Workout --all
 
 # Restore specific tags
-./music-porter restore export/Pop_Workout --album
-./music-porter restore export/Pop_Workout --title
-./music-porter restore export/Pop_Workout --artist
+./music-porter restore export/ride-command/Pop_Workout --album
+./music-porter restore export/ride-command/Pop_Workout --title
+./music-porter restore export/ride-command/Pop_Workout --artist
 ```
 
 **Reset Tags from Source (⚠️ Overwrites Protection):**
 ```bash
 # Reset all protection tags from source M4A files
-./music-porter reset music/Pop_Workout export/Pop_Workout
+./music-porter reset music/Pop_Workout export/ride-command/Pop_Workout
 # Requires confirmation prompt
 ```
 
 **USB Operations:**
 ```bash
 # Copy to USB drive
-./music-porter sync-usb export/Pop_Workout
+./music-porter sync-usb export/ride-command/Pop_Workout
 
 # Copy entire export directory
 ./music-porter sync-usb
 
 # Custom USB directory
-./music-porter sync-usb export/Pop_Workout --usb-dir "RZR/Music"
+./music-porter sync-usb export/ride-command/Pop_Workout --usb-dir "RZR/Music"
 ```
 
 **Library Summary:**
@@ -220,19 +220,19 @@ The conversion system supports configurable quality presets to balance file size
 **Cover Art Management:**
 ```bash
 # Embed cover art from M4A sources into existing MP3s
-./music-porter cover-art embed export/Pop_Workout
+./music-porter cover-art embed export/ride-command/Pop_Workout
 
 # Embed with explicit source directory
-./music-porter cover-art embed export/Pop_Workout --source music/Pop_Workout
+./music-porter cover-art embed export/ride-command/Pop_Workout --source music/Pop_Workout
 
 # Extract cover art to image files
-./music-porter cover-art extract export/Pop_Workout
+./music-porter cover-art extract export/ride-command/Pop_Workout
 
 # Replace cover art from a single image
-./music-porter cover-art update export/Pop_Workout --image artwork.jpg
+./music-porter cover-art update export/ride-command/Pop_Workout --image artwork.jpg
 
 # Strip cover art to reduce file size
-./music-porter cover-art strip export/Pop_Workout
+./music-porter cover-art strip export/ride-command/Pop_Workout
 
 # Convert without cover art
 ./music-porter convert music/Pop_Workout --no-cover-art
@@ -245,7 +245,7 @@ The conversion system supports configurable quality presets to balance file size
 ./music-porter --dry-run convert music/Pop_Workout
 
 # Verbose output for detailed information
-./music-porter --verbose tag export/Pop_Workout --album "Test"
+./music-porter --verbose tag export/ride-command/Pop_Workout --album "Test"
 
 # Combine flags
 ./music-porter --dry-run --verbose convert music/Pop_Workout
@@ -253,6 +253,23 @@ The conversion system supports configurable quality presets to balance file size
 # Show version
 ./music-porter --version
 ```
+
+### Output Type Profiles
+
+Profiles control conversion behavior, tag handling, artwork, and quality defaults. Use `--output-type` to select.
+
+| Profile | ID3 | Artwork | Quality | Album Tag | Artist Tag | Description |
+|---------|-----|---------|---------|-----------|------------|-------------|
+| `ride-command` | v2.3 | 100px | lossless | playlist name | "Various" | Polaris Ride Command (default) |
+| `basic` | v2.4 | original | lossless | original | original | Standard MP3, original tags & art |
+
+**Profile fields:**
+- `artwork_size`: `>0` = resize to max px, `0` = embed original, `-1` = strip artwork
+- `quality_preset`: Default conversion quality (`lossless`, `high`, `medium`, `low`)
+- `pipeline_album`: `"playlist_name"` or `"original"` — controls album tag in pipeline
+- `pipeline_artist`: `"various"` or `"original"` — controls artist tag in pipeline
+
+**Precedence:** CLI flags override profile defaults (`--no-cover-art` > `artwork_size`, `--preset` > `quality_preset`).
 
 ### Legacy Commands (Deprecated)
 
@@ -289,6 +306,7 @@ The tool supports **macOS**, **Linux**, and **Windows**. Platform is auto-detect
 - selenium (Browser automation for cookie extraction, installed via pip in venv)
 - webdriver-manager (Automatic browser driver management, installed via pip in venv)
 - Pillow (Image processing for cover art resizing, installed via pip in venv)
+- PyYAML (YAML configuration file parsing, installed via pip in venv)
 
 ### Initial Setup
 ```bash
@@ -305,14 +323,14 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 # Configure playlists
-# Edit playlists.conf with format: key|url|name
+# Edit config.yaml (auto-created on first run with defaults)
 ```
 
 ### Testing Changes
 - Use `--dry-run` flag extensively to preview behavior
 - Use `--verbose` to inspect tag transformations
 - Test tag preservation by running updates multiple times
-- Verify TXXX frames with: `./music-porter --verbose tag export/PlaylistName`
+- Verify TXXX frames with: `./music-porter --verbose tag export/ride-command/PlaylistName`
 
 ### Feature Branch Workflow
 
@@ -322,7 +340,7 @@ pip install -r requirements.txt
 |---|---|
 | New features | Single-commit bug fixes |
 | Multi-commit changes | Documentation-only updates |
-| Refactoring | Config changes (playlists.conf) |
+| Refactoring | Config changes (config.yaml) |
 | Experimental or risky changes | Typo corrections |
 
 **Branch naming conventions:**
@@ -514,13 +532,16 @@ git tag v1.2.0
 ├── ride-command-mp3-export          # Legacy wrapper (deprecated)
 ├── do-it-all.backup                 # Original bash script (backup)
 ├── ride-command-mp3-export.backup   # Original Python script (backup)
-├── playlists.conf                   # Playlist configuration
+├── config.yaml                      # Configuration file (playlists + settings)
 ├── cookies.txt                      # Apple Music authentication cookies
 ├── cookies.txt.backup               # Automatic backup before refresh
 ├── music/                           # Downloaded M4A files (organized by playlist)
 │   └── Pop_Workout/                 # Nested: Artist/Album/Track.m4a
-├── export/                          # Converted MP3 files (flat structure)
-│   └── Pop_Workout/                 # Flat: "Artist - Title.mp3"
+├── export/                          # Converted MP3 files (profile-scoped, flat per playlist)
+│   ├── ride-command/                # Profile: ride-command
+│   │   └── Pop_Workout/            # Flat: "Artist - Title.mp3"
+│   └── basic/                       # Profile: basic
+│       └── Pop_Workout/            # Flat: "Artist - Title.mp3"
 ├── logs/                            # Execution logs (timestamped)
 ├── .venv/                           # Python virtual environment
 ├── requirements.txt                 # All Python dependencies
@@ -579,17 +600,41 @@ git tag v1.2.0
 
 ## Configuration
 
-### playlists.conf
-Format: `key|url|album_name`
+### config.yaml
+YAML configuration file containing both playlists and application settings. Auto-created with defaults if missing.
+
+**Format:**
+```yaml
+# Music Porter Configuration
+# CLI flags override these settings when specified.
+
+settings:
+  output_type: ride-command
+  usb_dir: RZR/Music
+  workers: 6
+
+playlists:
+  - key: Pop_Workout
+    url: https://music.apple.com/us/playlist/...
+    name: Pop Workout
+  - key: Thumbs_Up
+    url: https://music.apple.com/us/playlist/...
+    name: Thumbs Up
+```
+
+**Playlist fields:**
 - `key`: Short identifier (used for directory names)
 - `url`: Apple Music playlist URL
-- `album_name`: Display name for the playlist
+- `name`: Display name for the playlist
 
-Example:
-```
-Pop_Workout|https://music.apple.com/us/playlist/...|Pop Workout
-Thumbs_Up|https://music.apple.com/us/playlist/...|Thumbs Up
-```
+**Settings fields:**
+- `output_type`: Default output profile (`ride-command`, `basic`, etc.)
+- `usb_dir`: Default USB subdirectory for sync operations
+- `workers`: Number of parallel workers for batch operations
+
+**Settings precedence:** CLI flag > `config.yaml` settings > hardcoded constant. For example, `--output-type basic` on the CLI overrides `output_type: ride-command` in config.yaml, which overrides the `DEFAULT_OUTPUT_TYPE` constant.
+
+**Migration from playlists.conf:** The old pipe-delimited `playlists.conf` format (`key|url|name`) has been replaced by `config.yaml`. The `ConfigManager` class now reads and writes YAML exclusively.
 
 ### USB Drive Exclusions
 Excluded volumes are configured in `music-porter` (constant: `EXCLUDED_USB_VOLUMES`):
@@ -608,10 +653,10 @@ The `music-porter` script is a modern, unified Python tool (3,065 lines) that re
 
 ### Key Components
 
-**20 Classes:**
+**21 Classes:**
 1. `Logger` - Timestamped logging to console and file
 2. `PlaylistConfig` - Playlist configuration representation
-3. `ConfigManager` - Loads and manages playlists.conf
+3. `ConfigManager` - Loads and manages config.yaml (playlists + settings)
 4. `DependencyChecker` - Checks and installs dependencies
 5. `TagStatistics` - Tracks tagging operation statistics
 6. `TaggerManager` - Manages MP3 tag operations
@@ -669,7 +714,7 @@ The `music-porter` script is a modern, unified Python tool (3,065 lines) that re
 # Old: ride-command-mp3-export
 ./ride-command-mp3-export music/Pop_Workout/ --output export/Pop_Workout
 # New: music-porter
-./music-porter convert music/Pop_Workout --output export/Pop_Workout
+./music-porter convert music/Pop_Workout --output export/ride-command/Pop_Workout
 ```
 
 ### Benefits Over Legacy Scripts
@@ -680,7 +725,7 @@ The `music-porter` script is a modern, unified Python tool (3,065 lines) that re
 4. **Better error handling** - Continues on failures, detailed reporting
 5. **Comprehensive statistics** - Aggregated across pipeline stages
 6. **Pure Python** - No bash subprocess overhead
-7. **Modular design** - 15 classes, easy to extend
+7. **Modular design** - 21 classes, easy to extend
 8. **Interactive menu** - User-friendly for occasional use
 9. **Complete documentation** - 3 comprehensive guides
 
@@ -701,6 +746,21 @@ The `music-porter` script is a modern, unified Python tool (3,065 lines) that re
 - Preserves TXXX frames on force re-conversion
 - Identical filename sanitization and output structure
 
+**Configuration Management (ConfigManager class):**
+- Reads and writes `config.yaml` using PyYAML
+- Auto-creates default `config.yaml` if missing (`_create_default()`)
+- Key methods: `get_setting()`, `update_setting()`, `_save()`, `_create_default()`
+- Settings resolved via `resolve_config_settings()` helper: CLI flag > config.yaml > hardcoded constant
+- Constant: `DEFAULT_CONFIG_FILE = "config.yaml"` (renamed from `DEFAULT_PLAYLISTS_CONF`)
+- IMPORT_MAP includes `'PyYAML': 'yaml'` for dependency checking
+
+**Profile-Scoped Export Directories:**
+- Export paths are now scoped by output profile: `export/<profile>/<playlist>/`
+- Examples: `export/ride-command/Pop_Workout/`, `export/basic/Pop_Workout/`
+- Helper function `get_export_dir(profile_name, playlist_key=None)` builds these paths
+- Without `playlist_key`: returns `export/<profile>/`
+- With `playlist_key`: returns `export/<profile>/<playlist_key>/`
+
 **Pipeline Orchestration (PipelineOrchestrator class):**
 - Coordinates: download → convert → tag → USB sync
 - Stage dependency handling
@@ -716,6 +776,7 @@ The `music-porter` script is a modern, unified Python tool (3,065 lines) that re
   - U (Enter URL)
   - C (Copy to USB)
   - S (Show library summary)
+  - P (Change output profile — shows current profile, persists selection to config.yaml)
   - X (Exit)
 - Case-insensitive input handling
 - Post-processing prompts for USB copy
@@ -754,7 +815,7 @@ The `music-porter` script is a modern, unified Python tool (3,065 lines) that re
 ./music-porter --dry-run --verbose convert music/NewPlaylist
 
 # Verify with verbose mode
-./music-porter --verbose tag export/NewPlaylist --album "Test"
+./music-porter --verbose tag export/ride-command/NewPlaylist --album "Test"
 
 # Check logs for detailed information
 tail -100 logs/$(ls -t logs/ | head -1)
