@@ -13,6 +13,7 @@ A powerful music playlist management and conversion tool that downloads Apple Mu
 - **Pipeline orchestration** for automated multi-stage workflows
 - **Interactive menu** for user-friendly operation
 - **Automatic cookie management** with browser-based refresh and validation
+- **Cover art management** with embed, extract, update, strip, and resize operations
 - **Comprehensive statistics** and detailed logging
 - **Tag management** with update, restore, and reset operations
 - **Dry-run mode** for safe preview of all operations
@@ -170,6 +171,30 @@ MP3 conversion supports configurable quality presets to balance file size and au
 ```bash
 ./apple-to-ride-command sync-usb export/Pop_Workout
 ./apple-to-ride-command sync-usb  # Copy entire export directory
+```
+
+**Cover Art** - Manage embedded album artwork
+```bash
+# Embed cover art from M4A sources into MP3s
+./apple-to-ride-command cover-art embed export/Pop_Workout
+
+# Embed cover art for all configured playlists
+./apple-to-ride-command cover-art embed --all
+
+# Extract cover art to image files
+./apple-to-ride-command cover-art extract export/Pop_Workout
+
+# Replace cover art from a single image
+./apple-to-ride-command cover-art update export/Pop_Workout --image artwork.jpg
+
+# Strip cover art to reduce file size
+./apple-to-ride-command cover-art strip export/Pop_Workout
+
+# Resize embedded cover art
+./apple-to-ride-command cover-art resize export/Pop_Workout --max-size 600
+
+# Resize cover art for all configured playlists
+./apple-to-ride-command cover-art resize --all --max-size 600
 ```
 
 **Summary** - Display export library statistics
@@ -335,7 +360,7 @@ For more detailed troubleshooting, see the [User Guide](APPLE-TO-RIDE-COMMAND-GU
 
 The tool uses a "hard gate" protection system for original metadata:
 - Original tags stored in TXXX (user-defined text) ID3 frames
-- Frame names: `OriginalTitle`, `OriginalArtist`, `OriginalAlbum`
+- Frame names: `OriginalTitle`, `OriginalArtist`, `OriginalAlbum`, `OriginalCoverArtHash`
 - Once written, these frames are **never overwritten**
 - Restoration always possible via `--restore-*` flags
 
@@ -375,23 +400,24 @@ The tool uses a "hard gate" protection system for original metadata:
 13. **Duplicate detection** - Find and remove duplicate tracks across playlists
 14. **Tag validation** - Verify tag integrity and fix common issues
 15. **Export formats** - Support for additional formats (FLAC, AAC, OGG)
+16. **Cover art resize on embed/convert** - Add `--cover-art-size` flag to `embed`, `update`, `convert`, and `pipeline` commands for automatic resizing during processing
 
 ### Low Priority / Nice to Have
-16. **Spotify integration** - Download from Spotify playlists
-17. **YouTube Music integration** - Download from YouTube Music playlists
-18. **Metadata enrichment** - Fetch additional metadata from online databases
-19. **Lyrics embedding** - Download and embed synchronized lyrics
-20. **BPM detection** - Analyze and tag tracks with BPM information
-21. **Playlist statistics** - Detailed analytics (genre distribution, duration, etc.)
-22. **Tag history** - Track changes to tags over time
-23. **Backup and restore** - Backup entire library with metadata
-24. **Cloud storage sync** - Sync to Dropbox, Google Drive, etc.
-25. **Mobile app** - iOS/Android app for remote control
-26. **Scheduling** - Automatic periodic syncing on schedule
-27. **Notification system** - Email/SMS alerts for completed operations
-28. **Custom filename templates** - Configurable output filename patterns
-29. **Equalizer presets** - Apply audio processing (normalization, compression)
-30. **Collaborative playlists** - Share playlists with others for collaborative management
+17. **Spotify integration** - Download from Spotify playlists
+18. **YouTube Music integration** - Download from YouTube Music playlists
+19. **Metadata enrichment** - Fetch additional metadata from online databases
+20. **Lyrics embedding** - Download and embed synchronized lyrics
+21. **BPM detection** - Analyze and tag tracks with BPM information
+22. **Playlist statistics** - Detailed analytics (genre distribution, duration, etc.)
+23. **Tag history** - Track changes to tags over time
+24. **Backup and restore** - Backup entire library with metadata
+25. **Cloud storage sync** - Sync to Dropbox, Google Drive, etc.
+26. **Mobile app** - iOS/Android app for remote control
+27. **Scheduling** - Automatic periodic syncing on schedule
+28. **Notification system** - Email/SMS alerts for completed operations
+29. **Custom filename templates** - Configurable output filename patterns
+30. **Equalizer presets** - Apply audio processing (normalization, compression)
+31. **Collaborative playlists** - Share playlists with others for collaborative management
 
 ## Version
 

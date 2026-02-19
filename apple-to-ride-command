@@ -3147,6 +3147,8 @@ class PlaylistSummary:
         # Cover art stats
         self.files_with_cover_art = 0
         self.files_without_cover_art = 0
+        self.files_with_original_cover_art = 0
+        self.files_with_resized_cover_art = 0
 
 
 class LibrarySummaryStatistics:
@@ -3167,6 +3169,8 @@ class LibrarySummaryStatistics:
         # Cover art stats
         self.files_with_cover_art = 0
         self.files_without_cover_art = 0
+        self.files_with_original_cover_art = 0
+        self.files_with_resized_cover_art = 0
 
         # Per-playlist breakdown
         self.playlists = []  # List of PlaylistSummary objects
@@ -3318,6 +3322,7 @@ class SummaryManager:
 
     def _check_tag_integrity(self):
         """Check all files for TXXX protection tags and cover art."""
+        import hashlib
         from mutagen.id3 import ID3, ID3NoHeaderError
 
         for playlist in self.stats.playlists:
@@ -3343,10 +3348,26 @@ class SummaryManager:
                         self.stats.files_missing_protection_tags += 1
 
                     # Check for cover art (APIC frame)
-                    has_cover = any(key.startswith("APIC") for key in tags.keys())
-                    if has_cover:
+                    apic_frame = None
+                    for key in tags.keys():
+                        if key.startswith("APIC"):
+                            apic_frame = tags[key]
+                            break
+
+                    if apic_frame is not None:
                         playlist.files_with_cover_art += 1
                         self.stats.files_with_cover_art += 1
+
+                        # Check if cover art is original or resized
+                        original_hash = _get_txxx(tags, TXXX_ORIGINAL_COVER_ART_HASH)
+                        if original_hash:
+                            current_hash = hashlib.sha256(apic_frame.data).hexdigest()[:16]
+                            if current_hash == original_hash:
+                                playlist.files_with_original_cover_art += 1
+                                self.stats.files_with_original_cover_art += 1
+                            else:
+                                playlist.files_with_resized_cover_art += 1
+                                self.stats.files_with_resized_cover_art += 1
                     else:
                         playlist.files_without_cover_art += 1
                         self.stats.files_without_cover_art += 1
@@ -3423,6 +3444,13 @@ class SummaryManager:
             cover_pct = (self.stats.files_with_cover_art / total_cover_checked) * 100
             print(f"  Files with cover art:    {self.stats.files_with_cover_art}/{total_cover_checked} ({cover_pct:.0f}%)")
 
+            if self.stats.files_with_cover_art > 0:
+                original_pct = (self.stats.files_with_original_cover_art / self.stats.files_with_cover_art) * 100
+                print(f"  Original cover art:      {self.stats.files_with_original_cover_art}/{self.stats.files_with_cover_art} ({original_pct:.0f}%)")
+
+                resized_pct = (self.stats.files_with_resized_cover_art / self.stats.files_with_cover_art) * 100
+                print(f"  Modified cover art:      {self.stats.files_with_resized_cover_art}/{self.stats.files_with_cover_art} ({resized_pct:.0f}%)")
+
             if self.stats.files_without_cover_art == 0:
                 print(f"  Status:                  ✅ All files have embedded cover art")
             else:
@@ -3491,6 +3519,12 @@ class SummaryManager:
             if total_cover > 0:
                 cover_pct = (playlist.files_with_cover_art / total_cover) * 100
                 print(f"     Cover art:            {playlist.files_with_cover_art}/{total_cover} ({cover_pct:.0f}%)")
+                if playlist.files_with_cover_art > 0:
+                    original_pct = (playlist.files_with_original_cover_art / playlist.files_with_cover_art) * 100
+                    print(f"     Original cover art:   {playlist.files_with_original_cover_art}/{playlist.files_with_cover_art} ({original_pct:.0f}%)")
+                    if playlist.files_with_resized_cover_art > 0:
+                        resized_pct = (playlist.files_with_resized_cover_art / playlist.files_with_cover_art) * 100
+                        print(f"     Modified cover art:   {playlist.files_with_resized_cover_art}/{playlist.files_with_cover_art} ({resized_pct:.0f}%)")
 
             print()
 
@@ -3549,7 +3583,7 @@ class CoverArtManager:
     def __init__(self, logger=None):
         self.logger = logger or Logger()
 
-    def embed(self, directory, source_dir=None, dry_run=False, verbose=False):
+    def embed(self, directory, source_dir=None, force=False, dry_run=False, verbose=False):
         """
         Embed cover art into existing MP3s from matching M4A source files.
         Auto-derives source dir from export/ → music/ if not specified.
@@ -3635,21 +3669,36 @@ class CoverArtManager:
                     except ID3NoHeaderError:
                         tags = ID3()
 
-                    has_apic = any(
-                        key.startswith("APIC") for key in tags.keys()
-                    )
+                    apic_keys = [key for key in tags.keys() if key.startswith("APIC")]
 
-                    if has_apic and not dry_run:
-                        skipped += 1
-                        if verbose:
-                            self.logger.debug(f"Already has cover art: {mp3_file.name}")
-                        progress.update(1)
-                        continue
+                    if apic_keys:
+                        if not force:
+                            skipped += 1
+                            if verbose:
+                                self.logger.debug(f"Already has cover art: {mp3_file.name}")
+                            progress.update(1)
+                            continue
+
+                        # Force mode: check if current art already matches original
+                        original_hash = _get_txxx(tags, TXXX_ORIGINAL_COVER_ART_HASH)
+                        if original_hash:
+                            current_hash = hashlib.sha256(tags[apic_keys[0]].data).hexdigest()[:16]
+                            if current_hash == original_hash:
+                                skipped += 1
+                                if verbose:
+                                    self.logger.debug(f"Already has original cover art: {mp3_file.name}")
+                                progress.update(1)
+                                continue
 
                     if dry_run:
-                        self.logger.dry_run(f"Would embed cover art: {mp3_file.name} ({len(cover_data) / 1024:.1f} KB)")
+                        action = "Would re-embed" if apic_keys else "Would embed"
+                        self.logger.dry_run(f"{action} cover art: {mp3_file.name} ({len(cover_data) / 1024:.1f} KB)")
                         progress.update(1)
                         continue
+
+                    # Remove existing APIC frames before embedding
+                    for key in apic_keys:
+                        del tags[key]
 
                     # Embed cover art
                     tags.add(APIC(
@@ -3967,6 +4016,163 @@ class CoverArtManager:
 
         return errors == 0
 
+    def resize(self, directory, max_size, dry_run=False, verbose=False):
+        """Resize embedded cover art to a maximum dimension, preserving aspect ratio."""
+        try:
+            from PIL import Image
+        except ImportError:
+            self.logger.error("Pillow is required for cover art resizing.")
+            self.logger.error("Install with: pip install Pillow")
+            return False
+
+        import io
+        from mutagen.id3 import ID3, ID3NoHeaderError
+
+        dir_path = Path(directory)
+        if not dir_path.exists():
+            self.logger.error(f"Directory not found: '{directory}'")
+            return False
+
+        mp3_files = sorted(dir_path.glob("*.mp3"))
+        if not mp3_files:
+            self.logger.info(f"No MP3 files found in '{directory}'")
+            return True
+
+        resized = 0
+        skipped_small = 0
+        skipped_no_art = 0
+        errors = 0
+        total_before = 0
+        total_after = 0
+
+        progress = ProgressBar(
+            total=len(mp3_files), desc="Resizing cover art",
+            logger=self.logger, disable=dry_run,
+        )
+
+        try:
+            for mp3_file in mp3_files:
+                try:
+                    try:
+                        tags = ID3(str(mp3_file))
+                    except ID3NoHeaderError:
+                        skipped_no_art += 1
+                        progress.update(1)
+                        continue
+
+                    # Find APIC frame
+                    apic_key = None
+                    apic_frame = None
+                    for key in tags.keys():
+                        if key.startswith("APIC"):
+                            apic_key = key
+                            apic_frame = tags[key]
+                            break
+
+                    if apic_frame is None:
+                        skipped_no_art += 1
+                        if verbose:
+                            self.logger.debug(f"No cover art: {mp3_file.name}")
+                        progress.update(1)
+                        continue
+
+                    original_size = len(apic_frame.data)
+                    total_before += original_size
+
+                    # Open image and check dimensions
+                    img = Image.open(io.BytesIO(apic_frame.data))
+                    width, height = img.size
+
+                    if width <= max_size and height <= max_size:
+                        skipped_small += 1
+                        total_after += original_size
+                        if verbose:
+                            self.logger.debug(f"Already small enough ({width}x{height}): {mp3_file.name}")
+                        progress.update(1)
+                        continue
+
+                    if dry_run:
+                        # Estimate new dimensions
+                        ratio = min(max_size / width, max_size / height)
+                        new_w = int(width * ratio)
+                        new_h = int(height * ratio)
+                        self.logger.dry_run(
+                            f"Would resize: {mp3_file.name} "
+                            f"({width}x{height} → {new_w}x{new_h}, "
+                            f"{original_size / 1024:.0f} KB)"
+                        )
+                        progress.update(1)
+                        continue
+
+                    # Resize
+                    img.thumbnail((max_size, max_size), Image.LANCZOS)
+                    new_w, new_h = img.size
+
+                    # Re-encode to same format
+                    buf = io.BytesIO()
+                    mime = apic_frame.mime
+                    if mime == "image/png":
+                        img.save(buf, format="PNG")
+                    else:
+                        # Default to JPEG for image/jpeg or unknown
+                        if img.mode in ("RGBA", "P"):
+                            img = img.convert("RGB")
+                        img.save(buf, format="JPEG", quality=90)
+                        mime = "image/jpeg"
+
+                    new_data = buf.getvalue()
+                    new_size = len(new_data)
+                    total_after += new_size
+
+                    # Replace APIC frame data
+                    apic_frame.data = new_data
+                    apic_frame.mime = mime
+                    tags.save(str(mp3_file), v2_version=3, v1=0)
+                    resized += 1
+
+                    if verbose:
+                        self.logger.info(
+                            f"Resized: {mp3_file.name} "
+                            f"({width}x{height} → {new_w}x{new_h}, "
+                            f"{original_size / 1024:.0f} KB → {new_size / 1024:.0f} KB)"
+                        )
+
+                    progress.update(1)
+
+                except Exception as e:
+                    errors += 1
+                    self.logger.error(f"Failed to resize art in '{mp3_file.name}': {e}")
+                    progress.update(1)
+        finally:
+            progress.close()
+
+        # Format sizes for summary
+        def fmt_size(b):
+            if b >= 1024 * 1024:
+                return f"{b / (1024 * 1024):.1f} MB"
+            return f"{b / 1024:.1f} KB"
+
+        # Print summary
+        print(f"\n{'=' * 60}")
+        print(f"  COVER ART RESIZE SUMMARY")
+        print(f"{'=' * 60}")
+        print(f"  Directory:               '{directory}'")
+        print(f"  Max dimension:           {max_size}px")
+        print(f"{'─' * 60}")
+        print(f"  Resized:                 {resized}")
+        print(f"  Skipped (already small): {skipped_small}")
+        print(f"  Skipped (no art):        {skipped_no_art}")
+        print(f"  Errors:                  {errors}")
+        if total_before > 0 and not dry_run:
+            print(f"{'─' * 60}")
+            print(f"  Total cover art:         {fmt_size(total_before)} → {fmt_size(total_after)}")
+        elif total_before > 0:
+            print(f"{'─' * 60}")
+            print(f"  Total cover art:         {fmt_size(total_before)}")
+        print(f"{'=' * 60}")
+
+        return errors == 0
+
 
 # ══════════════════════════════════════════════════════════════════
 # Section 9: Pipeline Orchestration
@@ -3989,6 +4195,10 @@ class PipelineStatistics:
         self.tagging_stats = None
         self.tagging_album = None
         self.tagging_artist = None
+
+        # Cover art stats
+        self.cover_art_embedded = 0
+        self.cover_art_missing = 0
 
         # USB sync stats
         self.usb_success = False
@@ -4191,6 +4401,10 @@ class PipelineOrchestrator:
             self.stats.stages_failed.append("tag")
             self.logger.error("Tagging stage failed")
 
+        # ── Stage 3b: Cover art check ────────────────────────────────
+        if self.embed_cover_art:
+            self._check_and_embed_cover_art(export_dir, auto, dry_run, verbose)
+
         # ── Stage 4: USB sync (optional) ───────────────────────────────
         if copy_to_usb:
             self.logger.info("\n=== STAGE 4: Copy to USB ===")
@@ -4326,6 +4540,75 @@ class PipelineOrchestrator:
             print()
             pass
 
+    def _check_and_embed_cover_art(self, export_dir, auto, dry_run, verbose):
+        """Check for missing cover art and embed if needed."""
+        from mutagen.id3 import ID3, ID3NoHeaderError
+
+        export_path = Path(export_dir)
+        if not export_path.exists():
+            return
+
+        mp3_files = list(export_path.glob("*.mp3"))
+        if not mp3_files:
+            return
+
+        # Scan for missing cover art
+        missing = 0
+        for mp3_file in mp3_files:
+            try:
+                tags = ID3(str(mp3_file))
+                if not any(k.startswith("APIC") for k in tags.keys()):
+                    missing += 1
+            except (ID3NoHeaderError, Exception):
+                missing += 1
+
+        total = len(mp3_files)
+
+        if missing == 0:
+            self.stats.cover_art_embedded = total
+            return
+        playlist_name = export_path.name
+
+        if dry_run:
+            self.logger.dry_run(
+                f"{playlist_name}: {missing}/{total} files missing cover art — would embed from source"
+            )
+            self.stats.cover_art_missing = missing
+            return
+
+        should_embed = False
+        if auto:
+            self.logger.info(f"\n  {playlist_name}: {missing}/{total} files missing cover art — auto-embedding")
+            should_embed = True
+        else:
+            try:
+                self.logger.info(f"\n  {playlist_name}: {missing}/{total} files missing cover art")
+                response = input("Embed cover art from source files? [Y/n] ").strip().lower()
+                should_embed = response in ('', 'y', 'yes')
+            except KeyboardInterrupt:
+                print()
+                return
+
+        if should_embed:
+            cam = CoverArtManager(self.logger)
+            cam.embed(export_dir, dry_run=False, verbose=verbose)
+            # Re-scan to get accurate counts
+            embedded_count = 0
+            still_missing = 0
+            for mp3_file in mp3_files:
+                try:
+                    tags = ID3(str(mp3_file))
+                    if any(k.startswith("APIC") for k in tags.keys()):
+                        embedded_count += 1
+                    else:
+                        still_missing += 1
+                except (ID3NoHeaderError, Exception):
+                    still_missing += 1
+            self.stats.cover_art_embedded = embedded_count
+            self.stats.cover_art_missing = still_missing
+        else:
+            self.stats.cover_art_missing = missing
+
     def _print_pipeline_summary(self):
         """Print comprehensive pipeline summary."""
         duration = time.time() - self.stats.start_time
@@ -4385,6 +4668,9 @@ class PipelineOrchestrator:
             print(f"  OriginalTitle stored:    {s.title_stored}")
             print(f"  OriginalArtist stored:   {s.artist_stored}")
             print(f"  OriginalAlbum stored:    {s.album_stored}")
+            if self.stats.cover_art_embedded > 0 or self.stats.cover_art_missing > 0:
+                print(f"  Cover art embedded:      {self.stats.cover_art_embedded}")
+                print(f"  Cover art missing:       {self.stats.cover_art_missing}")
 
         # USB sync stage
         if self.stats.usb_success or "usb-sync" in self.stats.stages_failed:
@@ -4427,6 +4713,10 @@ class PipelineOrchestrator:
                 total_original_stored = t.title_stored + t.artist_stored + t.album_stored
                 if total_original_stored > 0:
                     print(f"  Original tags stored:    {total_original_stored}")
+                if self.stats.cover_art_embedded > 0 or self.stats.cover_art_missing > 0:
+                    print(f"  Cover art embedded:      {self.stats.cover_art_embedded}")
+                    if self.stats.cover_art_missing > 0:
+                        print(f"  Cover art missing:       {self.stats.cover_art_missing}")
 
             # USB sync
             if self.stats.usb_success and self.stats.conversion_stats:
@@ -4689,13 +4979,6 @@ class InteractiveMenu:
             verbose=verbose
         )
 
-        # Check for missing cover art and offer to embed
-        if success and not dry_run:
-            self._check_and_offer_cover_art(
-                f"{DEFAULT_EXPORT_DIR}/{playlist.key}",
-                dry_run
-            )
-
         # Ask about USB copy
         if success and not dry_run:
             self._ask_copy_to_usb(
@@ -4739,14 +5022,6 @@ class InteractiveMenu:
             if not success:
                 self.logger.error(f"Failed to process {playlist.name}")
 
-        # Check for missing cover art across all playlists
-        if not dry_run:
-            for playlist in self.config.playlists:
-                self._check_and_offer_cover_art(
-                    f"{DEFAULT_EXPORT_DIR}/{playlist.key}",
-                    dry_run
-                )
-
         # Ask about USB copy after all playlists
         if not dry_run:
             self._ask_copy_to_usb(DEFAULT_EXPORT_DIR, dry_run)
@@ -4782,13 +5057,6 @@ class InteractiveMenu:
                 dry_run=dry_run,
                 verbose=verbose
             )
-
-            # Check for missing cover art and offer to embed
-            if success and not dry_run:
-                self._check_and_offer_cover_art(
-                    f"{DEFAULT_EXPORT_DIR}/{orchestrator.stats.playlist_key}",
-                    dry_run
-                )
 
             # Ask about USB copy
             if success and not dry_run:
@@ -4876,42 +5144,6 @@ class InteractiveMenu:
         except KeyboardInterrupt:
             print("\n\nCancelled by user")
             return False
-
-    def _check_and_offer_cover_art(self, export_dir, dry_run):
-        """Check if MP3s are missing cover art and offer to embed."""
-        from mutagen.id3 import ID3, ID3NoHeaderError
-
-        export_path = Path(export_dir)
-        if not export_path.exists():
-            return
-
-        mp3_files = list(export_path.glob("*.mp3"))
-        if not mp3_files:
-            return
-
-        # Quick scan for missing cover art
-        missing = 0
-        for mp3_file in mp3_files:
-            try:
-                tags = ID3(str(mp3_file))
-                if not any(k.startswith("APIC") for k in tags.keys()):
-                    missing += 1
-            except (ID3NoHeaderError, Exception):
-                missing += 1
-
-        if missing == 0:
-            return
-
-        try:
-            playlist_name = export_path.name
-            self.logger.info(f"\n  {playlist_name}: {missing}/{len(mp3_files)} files missing cover art")
-            response = input("Embed cover art from source files? [Y/n] ").strip().lower()
-            if response in ('', 'y', 'yes'):
-                cam = CoverArtManager(self.logger)
-                cam.embed(export_dir, dry_run=dry_run)
-        except KeyboardInterrupt:
-            print()
-            pass
 
     def _ask_copy_to_usb(self, source_dir, dry_run):
         """Ask user if they want to copy to USB."""
@@ -5109,15 +5341,19 @@ For command-specific help: \033[36mapple-to-ride-command <command> --help\033[0m
 
     # ── cover-art ─────────────────────────────────────────────────
     coverart_parser = subparsers.add_parser('cover-art',
-        help='Manage cover art (embed, extract, update, strip)')
+        help='Manage cover art (embed, extract, update, strip, resize)')
     coverart_sub = coverart_parser.add_subparsers(dest='cover_art_action',
                                                    help='Cover art action')
 
     # cover-art embed
     ca_embed = coverart_sub.add_parser('embed',
         help='Embed cover art from M4A sources into MP3s')
-    ca_embed.add_argument('directory', help='Directory with MP3 files')
+    ca_embed.add_argument('directory', nargs='?', help='Directory with MP3 files')
+    ca_embed.add_argument('--all', action='store_true', dest='all_playlists',
+                          help='Process all configured playlists')
     ca_embed.add_argument('--source', help='Source M4A directory (auto-derived if omitted)')
+    ca_embed.add_argument('--force', action='store_true',
+                          help='Re-embed even if cover art already exists')
 
     # cover-art extract
     ca_extract = coverart_sub.add_parser('extract',
@@ -5135,6 +5371,15 @@ For command-specific help: \033[36mapple-to-ride-command <command> --help\033[0m
     ca_strip = coverart_sub.add_parser('strip',
         help='Remove cover art from MP3s to reduce file size')
     ca_strip.add_argument('directory', help='Directory with MP3 files')
+
+    # cover-art resize
+    ca_resize = coverart_sub.add_parser('resize',
+        help='Resize embedded cover art to reduce file size')
+    ca_resize.add_argument('directory', nargs='?', help='Directory with MP3 files')
+    ca_resize.add_argument('--all', action='store_true', dest='all_playlists',
+                           help='Process all configured playlists')
+    ca_resize.add_argument('--max-size', type=int, required=True,
+                           help='Maximum dimension in pixels (longest side)')
 
     # ── summary ───────────────────────────────────────────────────
     summary_parser = subparsers.add_parser('summary',
@@ -5396,12 +5641,52 @@ def main():
         cam = CoverArtManager(logger)
 
         if args.cover_art_action == 'embed':
-            success = cam.embed(
-                args.directory,
-                source_dir=args.source,
-                dry_run=args.dry_run,
-                verbose=args.verbose
-            )
+            if getattr(args, 'all_playlists', False) and args.directory:
+                logger.error("Cannot specify both a directory and --all")
+                sys.exit(1)
+            elif getattr(args, 'all_playlists', False):
+                config = ConfigManager(logger=logger)
+                dirs = [f"{DEFAULT_EXPORT_DIR}/{p.key}" for p in config.playlists]
+                existing = [d for d in dirs if Path(d).exists()]
+
+                if not existing:
+                    logger.error("No export directories found for configured playlists")
+                    sys.exit(1)
+
+                logger.info(f"\nWill embed cover art for {len(existing)} playlist(s):")
+                for d in existing:
+                    logger.info(f"  • {d}")
+
+                try:
+                    response = input(f"\nContinue? [Y/n] ").strip().lower()
+                    if response not in ('', 'y', 'yes'):
+                        logger.info("Cancelled")
+                        sys.exit(0)
+                except KeyboardInterrupt:
+                    print()
+                    sys.exit(0)
+
+                all_success = True
+                for d in existing:
+                    logger.info(f"\n{'─' * 60}")
+                    logger.info(f"  Embedding: {d}")
+                    logger.info(f"{'─' * 60}")
+                    ok = cam.embed(d, force=getattr(args, 'force', False),
+                                   dry_run=args.dry_run, verbose=args.verbose)
+                    if not ok:
+                        all_success = False
+                success = all_success
+            elif args.directory:
+                success = cam.embed(
+                    args.directory,
+                    source_dir=args.source,
+                    force=args.force,
+                    dry_run=args.dry_run,
+                    verbose=args.verbose
+                )
+            else:
+                logger.error("Specify a directory or use --all")
+                sys.exit(1)
         elif args.cover_art_action == 'extract':
             success = cam.extract(
                 args.directory,
@@ -5422,8 +5707,54 @@ def main():
                 dry_run=args.dry_run,
                 verbose=args.verbose
             )
+        elif args.cover_art_action == 'resize':
+            if getattr(args, 'all_playlists', False) and args.directory:
+                logger.error("Cannot specify both a directory and --all")
+                sys.exit(1)
+            elif getattr(args, 'all_playlists', False):
+                config = ConfigManager(logger=logger)
+                dirs = [f"{DEFAULT_EXPORT_DIR}/{p.key}" for p in config.playlists]
+                existing = [d for d in dirs if Path(d).exists()]
+
+                if not existing:
+                    logger.error("No export directories found for configured playlists")
+                    sys.exit(1)
+
+                logger.info(f"\nWill resize cover art for {len(existing)} playlist(s):")
+                for d in existing:
+                    logger.info(f"  • {d}")
+
+                try:
+                    response = input(f"\nContinue? [Y/n] ").strip().lower()
+                    if response not in ('', 'y', 'yes'):
+                        logger.info("Cancelled")
+                        sys.exit(0)
+                except KeyboardInterrupt:
+                    print()
+                    sys.exit(0)
+
+                all_success = True
+                for d in existing:
+                    logger.info(f"\n{'─' * 60}")
+                    logger.info(f"  Resizing: {d}")
+                    logger.info(f"{'─' * 60}")
+                    ok = cam.resize(d, args.max_size,
+                                    dry_run=args.dry_run, verbose=args.verbose)
+                    if not ok:
+                        all_success = False
+                success = all_success
+            elif args.directory:
+                success = cam.resize(
+                    args.directory,
+                    args.max_size,
+                    dry_run=args.dry_run,
+                    verbose=args.verbose
+                )
+            else:
+                logger.error("Specify a directory or use --all")
+                sys.exit(1)
         else:
-            logger.error("Specify an action: embed, extract, update, or strip")
+            logger.error("Specify an action: embed, extract, update, strip, or resize")
             logger.info("Use: apple-to-ride-command cover-art --help")
             sys.exit(1)
 
