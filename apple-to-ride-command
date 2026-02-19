@@ -50,7 +50,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "1.5.0"
+VERSION = "1.5.1"
 
 DEFAULT_MUSIC_DIR = "music"
 DEFAULT_EXPORT_DIR = "export"
@@ -85,7 +85,7 @@ QUALITY_PRESETS = {
 DEFAULT_QUALITY_PRESET = 'lossless'
 
 # Worker pool defaults for parallel conversion
-MAX_DEFAULT_WORKERS = 4
+MAX_DEFAULT_WORKERS = 6
 DEFAULT_WORKERS = min(os.cpu_count() or 1, MAX_DEFAULT_WORKERS)
 
 # Default cleanup options for ID3 tag operations
