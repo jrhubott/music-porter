@@ -3,7 +3,7 @@ name: merge-to-main
 description: Merge the current feature branch into main with version bump and git tag
 model: opus
 disable-model-invocation: true
-allowed-tools: Bash, Read, Edit, Grep, Glob, AskUserQuestion
+allowed-tools: Bash, Read, Edit, Grep, Glob, AskUserQuestion, Skill
 ---
 
 Merge the current feature branch into main following the project's version workflow.
@@ -40,15 +40,15 @@ Merge the current feature branch into main following the project's version workf
 5. **Add unfinished work to README**
    - Review the branch's commits and diffs for TODOs, FIXMEs, partial implementations, known limitations, or follow-up work that was deferred
    - Also check for any comments in the code mentioning future improvements related to this branch's changes
-   - If any are found, ask the user which (if any) should be added to the README "Future Features" list
+   - Also check `todos.md` (via `/todo list`) for active items that represent future work related to this branch — these may belong in the README "Future Features" list even if they weren't completed
+   - If any unfinished items are found (from code, diffs, or todos.md), ask the user which (if any) should be added to the README "Future Features" list
    - Append new items to the appropriate priority section (High / Medium / Low), continuing the existing numbering
    - Keep descriptions concise and consistent with the existing list style: `**Bold title** - Description`
 
 5b. **Update todos.md**
-   - Check if `todos.md` exists in the project root
-   - If it exists, scan the **Active** list for any todos that match the work completed on this branch
-   - For each matching active todo: move it to the **Completed** section by changing `- [ ]` to `- [x]` and appending `| Done: MM-DD-YYYY`
-   - Use today's date for the Done timestamp
+   - Use `/todo list` (via the Skill tool) to view current todos
+   - Identify any active todos that match the work completed on this branch
+   - For each matching active todo, use `/todo complete` (via the Skill tool) with the todo text to mark it done
    - If no todos.md exists or no active todos match, skip this step silently
    - Do NOT ask the user — complete matching todos automatically as part of the merge
 
