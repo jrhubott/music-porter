@@ -13,17 +13,32 @@ import time
 import shutil
 from pathlib import Path
 from datetime import datetime
-import ffmpeg
 import platform
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-try:
-    from tqdm import tqdm as _tqdm
-    _tqdm.monitor_interval = 0  # Prevent TMonitor thread from interfering with input()
-    TQDM_AVAILABLE = True
-except ImportError:
-    TQDM_AVAILABLE = False
+
+# ── Auto-activate venv ──
+# If a .venv exists but we're running under system Python, re-exec with venv Python.
+def _auto_activate_venv():
+    """Re-launch this script under .venv/bin/python if available."""
+    # sys.prefix != sys.base_prefix is Python's own way to detect a venv
+    if sys.prefix != sys.base_prefix:
+        return  # Already running inside a venv
+
+    if platform.system() == 'Windows':
+        venv_python = Path('.venv/Scripts/python.exe')
+    else:
+        venv_python = Path('.venv/bin/python')
+
+    if not venv_python.exists():
+        return  # No venv to activate
+
+    # Use absolute path (not realpath) so Python finds pyvenv.cfg via the venv path
+    venv_python_abs = str(venv_python.absolute())
+    os.execv(venv_python_abs, [venv_python_abs] + sys.argv)
+
+_auto_activate_venv()
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -50,7 +65,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "1.5.1"
+VERSION = "1.5.1-consolidate-dependencies"
 
 DEFAULT_MUSIC_DIR = "music"
 DEFAULT_EXPORT_DIR = "export"
@@ -117,6 +132,20 @@ APIC_TYPE_FRONT_COVER = 3
 APPLE_COOKIE_DOMAIN = 'apple.com'
 
 
+# Third-party imports — deferred so the script can start without a venv
+# and let DependencyChecker install missing packages first.
+_tqdm = None   # set by _init_third_party()
+
+def _init_third_party():
+    """Import third-party packages after DependencyChecker has ensured they exist."""
+    global _tqdm
+    if _tqdm is not None:
+        return
+    from tqdm import tqdm as _tqdm_cls
+    _tqdm_cls.monitor_interval = 0  # Prevent TMonitor thread from interfering with input()
+    _tqdm = _tqdm_cls
+
+
 # ══════════════════════════════════════════════════════════════════
 # Section 2: Logging Infrastructure
 # ══════════════════════════════════════════════════════════════════
@@ -152,7 +181,7 @@ class Logger:
             formatted_with_prefix = f"[{timestamp}] [{level}] {message}"
 
             # Console: route through tqdm.write() if a bar is active
-            if self._active_bars and TQDM_AVAILABLE:
+            if self._active_bars and _tqdm is not None:
                 _tqdm.write(message)
             else:
                 print(message)
@@ -208,8 +237,8 @@ class Logger:
 class ProgressBar:
     """Context manager wrapping tqdm with project conventions.
 
-    Disables gracefully when tqdm is unavailable, during dry-run, or when
-    disable=True.  Supports deferred initialization via set_total() for
+    Disables gracefully during dry-run or when disable=True.
+    Supports deferred initialization via set_total() for
     cases where the total isn't known upfront (e.g. Downloader).
 
     Saves and restores terminal state around the tqdm bar lifetime to
@@ -220,7 +249,7 @@ class ProgressBar:
                  unit="file", disable=False):
         self._desc = desc
         self._unit = unit
-        self._disabled = disable or not TQDM_AVAILABLE
+        self._disabled = disable
         self._bar = None
         self.logger = logger
         self.total = total
@@ -377,7 +406,17 @@ class ConfigManager:
 # ══════════════════════════════════════════════════════════════════
 
 class DependencyChecker:
-    """Checks and manages dependencies (mutagen, ffmpeg, gamdl, venv)."""
+    """Checks and manages dependencies from requirements.txt."""
+
+    # Maps pip package names to their Python import names
+    IMPORT_MAP = {
+        'ffmpeg-python': 'ffmpeg',
+        'webdriver-manager': 'webdriver_manager',
+        'Pillow': 'PIL',
+    }
+
+    # Packages that must be checked via subprocess instead of import
+    SUBPROCESS_CHECK = {'gamdl'}
 
     def __init__(self, logger=None):
         self.logger = logger or Logger()
@@ -385,9 +424,7 @@ class DependencyChecker:
         self.venv_path = None
         self.dep_status = {
             'venv': False,
-            'mutagen': False,
-            'gamdl': False,
-            'ffmpeg_python': False,
+            'packages': {},
             'ffmpeg': False,
             'playlists': 0
         }
@@ -395,14 +432,14 @@ class DependencyChecker:
 
     def _detect_venv(self):
         """Detect virtual environment Python interpreter."""
-        # Check if already in venv
-        if os.environ.get('VIRTUAL_ENV'):
+        # sys.prefix != sys.base_prefix is Python's own venv detection
+        if sys.prefix != sys.base_prefix:
             self.venv_python = sys.executable
-            self.venv_path = os.environ['VIRTUAL_ENV']
+            self.venv_path = sys.prefix
             self.dep_status['venv'] = True
             return
 
-        # Check for .venv directory with OS-appropriate path
+        # Not in a venv — check if .venv directory exists for install target
         if IS_WINDOWS:
             venv_path = Path('.venv/Scripts/python.exe')
         else:  # Unix (macOS, Linux)
@@ -416,59 +453,78 @@ class DependencyChecker:
             self.venv_python = sys.executable
             self.dep_status['venv'] = False
 
+    def _parse_requirements(self):
+        """Parse package names from requirements.txt."""
+        packages = []
+        requirements_path = Path("requirements.txt")
+        if not requirements_path.exists():
+            return packages
+        for line in requirements_path.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            # Extract package name (before any version specifier)
+            name = line.split('>=')[0].split('<=')[0].split('==')[0].split('!=')[0].split('~=')[0].strip()
+            if name:
+                packages.append(name)
+        return packages
+
+    def _check_package(self, package_name):
+        """Check if a single package is available. Returns True if installed."""
+        if package_name in self.SUBPROCESS_CHECK:
+            try:
+                subprocess.run(
+                    [self.venv_python, "-m", package_name, "--version"],
+                    capture_output=True, check=True
+                )
+                return True
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                return False
+        else:
+            import_name = self.IMPORT_MAP.get(package_name, package_name)
+            try:
+                __import__(import_name)
+                return True
+            except ImportError:
+                return False
+
     def check_python_packages(self):
-        """Check if Python packages are installed, install from requirements.txt if needed."""
-        # Check if mutagen is available
-        try:
-            import mutagen
-            self.dep_status['mutagen'] = True
-            mutagen_installed = True
-        except ImportError:
-            mutagen_installed = False
-            self.dep_status['mutagen'] = False
+        """Check all packages from requirements.txt, install if any are missing."""
+        packages = self._parse_requirements()
+        if not packages:
+            self.logger.error("requirements.txt not found or empty")
+            self._show_package_install_help()
+            return False
 
-        # Check if gamdl is available
-        try:
-            result = subprocess.run(
-                [self.venv_python, "-m", "gamdl", "--version"],
-                capture_output=True,
-                check=True
-            )
-            self.dep_status['gamdl'] = True
-            gamdl_installed = True
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            gamdl_installed = False
-            self.dep_status['gamdl'] = False
+        any_missing = False
+        for pkg in packages:
+            installed = self._check_package(pkg)
+            self.dep_status['packages'][pkg] = installed
+            if not installed:
+                any_missing = True
 
-        # Check if ffmpeg-python is available
-        try:
-            import ffmpeg
-            self.dep_status['ffmpeg_python'] = True
-            ffmpeg_python_installed = True
-        except ImportError:
-            ffmpeg_python_installed = False
-            self.dep_status['ffmpeg_python'] = False
+        if any_missing:
+            if not self.dep_status['venv']:
+                self._create_venv()
+                # _create_venv re-execs on success, so reaching here means it failed
+                return False
 
-        # If any packages are missing, try to install from requirements.txt
-        if not mutagen_installed or not gamdl_installed or not ffmpeg_python_installed:
-            requirements_path = Path("requirements.txt")
-            if requirements_path.exists():
-                self.logger.info("Python packages missing. Installing from requirements.txt...")
-                try:
-                    subprocess.check_call([
-                        self.venv_python, "-m", "pip", "install", "-r", "requirements.txt"
-                    ])
-                    self.logger.ok("Python packages installed successfully from requirements.txt")
-                    return True
-                except subprocess.CalledProcessError as e:
-                    self.logger.error(f"Failed to install from requirements.txt: {e}")
-                    self._show_package_install_help()
-                    return False
-            else:
-                self.logger.error("requirements.txt not found")
+            self.logger.info("Python packages missing. Installing from requirements.txt...")
+            try:
+                subprocess.check_call([
+                    self.venv_python, "-m", "pip", "install", "-r", "requirements.txt"
+                ])
+                self.logger.ok("Python packages installed successfully from requirements.txt")
+                # Re-exec so the fresh process can import newly installed packages
+                self.logger.info("Restarting with installed packages...")
+                os.execv(self.venv_python, [self.venv_python] + sys.argv)
+                return True  # unreachable, but keeps the code path clear
+            except subprocess.CalledProcessError as e:
+                self.logger.error(f"Failed to install from requirements.txt: {e}")
                 self._show_package_install_help()
                 return False
 
+        _init_third_party()
         return True
 
     def check_ffmpeg(self):
@@ -485,6 +541,39 @@ class DependencyChecker:
             self.dep_status['ffmpeg'] = False
             self._show_ffmpeg_install_help()
             return False
+
+    def _create_venv(self):
+        """Create a virtual environment, install packages, and re-exec."""
+        venv_dir = Path('.venv')
+        self.logger.info("No virtual environment detected. Creating .venv...")
+
+        try:
+            subprocess.check_call([sys.executable, '-m', 'venv', str(venv_dir)])
+            self.logger.ok("Virtual environment created at .venv/")
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"Failed to create virtual environment: {e}")
+            return
+
+        # Determine venv python path
+        if IS_WINDOWS:
+            venv_python = str(venv_dir / 'Scripts' / 'python.exe')
+        else:
+            venv_python = str(venv_dir / 'bin' / 'python')
+
+        # Install packages
+        self.logger.info("Installing packages from requirements.txt...")
+        try:
+            subprocess.check_call([
+                venv_python, '-m', 'pip', 'install', '-r', 'requirements.txt'
+            ])
+            self.logger.ok("Packages installed successfully")
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"Failed to install packages: {e}")
+            return
+
+        # Re-exec under venv python
+        self.logger.info("Restarting with virtual environment...")
+        os.execv(venv_python, [venv_python] + sys.argv)
 
     def _show_ffmpeg_install_help(self):
         """Show OS-specific ffmpeg installation instructions."""
@@ -512,26 +601,13 @@ class DependencyChecker:
         self.logger.error("\n=== Python Package Installation Required ===")
 
         if IS_WINDOWS:
-            self.logger.error("Activate virtual environment:")
+            self.logger.error("Create and activate virtual environment:")
+            self.logger.error("  python3 -m venv .venv")
             self.logger.error("  .venv\\Scripts\\activate")
-            self.logger.error("Then install packages:")
-            self.logger.error("  pip install -r requirements.txt")
         else:  # Unix (macOS, Linux)
-            self.logger.error("Activate virtual environment and install:")
+            self.logger.error("Create and activate virtual environment:")
+            self.logger.error("  python3 -m venv .venv")
             self.logger.error("  source .venv/bin/activate")
-            self.logger.error("  pip install -r requirements.txt")
-
-    def check_gamdl(self):
-        """Check if gamdl is available."""
-        try:
-            subprocess.run(
-                [self.venv_python, "-m", "gamdl", "--help"],
-                capture_output=True,
-                check=True
-            )
-            return True
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            return False
 
     def display_summary(self, config=None):
         """Display formatted dependency summary."""
@@ -547,17 +623,17 @@ class DependencyChecker:
             self.logger.file_info("Python: No virtual environment")
 
         # Python packages
-        deps_ok = self.dep_status['mutagen'] and self.dep_status['gamdl'] and self.dep_status['ffmpeg_python']
-        if deps_ok:
-            print(f"  Packages: ✓ mutagen, gamdl, ffmpeg-python")
-            self.logger.file_info("Packages: mutagen, gamdl, ffmpeg-python installed")
-        else:
-            missing = []
-            if not self.dep_status['mutagen']: missing.append('mutagen')
-            if not self.dep_status['gamdl']: missing.append('gamdl')
-            if not self.dep_status['ffmpeg_python']: missing.append('ffmpeg-python')
-            print(f"  Packages: ⚠ Missing: {', '.join(missing)}")
-            self.logger.file_info(f"Packages: Missing {', '.join(missing)}")
+        packages = self.dep_status['packages']
+        if packages:
+            installed = [pkg for pkg, ok in packages.items() if ok]
+            missing = [pkg for pkg, ok in packages.items() if not ok]
+            if not missing:
+                pkg_list = ', '.join(installed)
+                print(f"  Packages: ✓ {pkg_list}")
+                self.logger.file_info(f"Packages: {pkg_list} installed")
+            else:
+                print(f"  Packages: ⚠ Missing: {', '.join(missing)}")
+                self.logger.file_info(f"Packages: Missing {', '.join(missing)}")
 
         # System dependencies
         if self.dep_status['ffmpeg']:
@@ -585,12 +661,6 @@ class DependencyChecker:
             all_ok = False
 
         if require_ffmpeg and not self.check_ffmpeg():
-            all_ok = False
-
-        # Verify gamdl is available after installation
-        if require_gamdl and not self.check_gamdl():
-            self.logger.error("gamdl is not available after installation")
-            self._show_package_install_help()
             all_ok = False
 
         return all_ok
@@ -1533,6 +1603,7 @@ class Converter:
                 return
 
             # Run ffmpeg conversion
+            import ffmpeg as _ffmpeg
             try:
                 # Build FFmpeg parameters based on quality mode
                 ffmpeg_params = {'acodec': 'libmp3lame'}
@@ -1542,12 +1613,12 @@ class Converter:
                     ffmpeg_params['b:a'] = self.quality_settings['value'] + 'k'
 
                 (
-                    ffmpeg
+                    _ffmpeg
                     .input(str(input_file))
                     .output(str(output_file), **ffmpeg_params)
                     .run(overwrite_output=True, quiet=True)
                 )
-            except ffmpeg.Error as e:
+            except _ffmpeg.Error as e:
                 # Re-raise as generic exception to be caught by outer try/except
                 error_msg = e.stderr.decode('utf-8') if e.stderr else str(e)
                 raise Exception(f"FFmpeg conversion failed: {error_msg}")
@@ -2312,42 +2383,6 @@ class CookieManager:
             # Fallback to all browsers
             return available_browsers
 
-    def _install_selenium(self):
-        """
-        Attempt to install selenium and webdriver-manager.
-        Returns True if successful, False otherwise.
-        """
-
-        self.logger.info("Selenium is required for automatic cookie refresh")
-        self.logger.info("This will install: selenium, webdriver-manager")
-
-        try:
-            response = input("Install selenium now? [Y/n] ").strip().lower()
-            if response not in ['', 'y', 'yes']:
-                self.logger.info("Installation cancelled")
-                return False
-
-            self.logger.info("Installing selenium and webdriver-manager...")
-
-            # Use the same python that's running this script
-            cmd = [sys.executable, '-m', 'pip', 'install', 'selenium', 'webdriver-manager']
-
-            result = subprocess.run(cmd, capture_output=True, text=True)
-
-            if result.returncode == 0:
-                self.logger.ok("Successfully installed selenium and webdriver-manager")
-                return True
-            else:
-                self.logger.error(f"Installation failed: {result.stderr}")
-                return False
-
-        except KeyboardInterrupt:
-            print("\n\nInstallation cancelled by user")
-            return False
-        except Exception as e:
-            self.logger.error(f"Failed to install selenium: {e}")
-            return False
-
     def _extract_with_selenium(self):
         """
         Extract cookies using Selenium WebDriver.
@@ -2357,32 +2392,11 @@ class CookieManager:
         import http.cookiejar
         import time
 
-        # Check if selenium is installed
-        try:
-            from selenium import webdriver
-            from selenium.webdriver.common.by import By
-            from selenium.webdriver.support.ui import WebDriverWait
-            from selenium.webdriver.support import expected_conditions as EC
-            from selenium.common.exceptions import TimeoutException, WebDriverException
-        except ImportError:
-            self.logger.error("Selenium not installed")
-
-            # Offer to install it
-            if self._install_selenium():
-                # Try importing again after installation
-                try:
-                    from selenium import webdriver
-                    from selenium.webdriver.common.by import By
-                    from selenium.webdriver.support.ui import WebDriverWait
-                    from selenium.webdriver.support import expected_conditions as EC
-                    from selenium.common.exceptions import TimeoutException, WebDriverException
-                    self.logger.ok("Selenium loaded successfully")
-                except ImportError as e:
-                    self.logger.error(f"Still cannot import selenium: {e}")
-                    return None
-            else:
-                self.logger.info("Manual installation: pip install selenium webdriver-manager")
-                return None
+        from selenium import webdriver
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
+        from selenium.common.exceptions import TimeoutException, WebDriverException
 
         # Detect browsers
         default_browser = self._detect_default_browser()
@@ -4018,13 +4032,7 @@ class CoverArtManager:
 
     def resize(self, directory, max_size, dry_run=False, verbose=False):
         """Resize embedded cover art to a maximum dimension, preserving aspect ratio."""
-        try:
-            from PIL import Image
-        except ImportError:
-            self.logger.error("Pillow is required for cover art resizing.")
-            self.logger.error("Install with: pip install Pillow")
-            return False
-
+        from PIL import Image
         import io
         from mutagen.id3 import ID3, ID3NoHeaderError
 
@@ -5556,7 +5564,7 @@ def main():
     elif args.command == 'download':
         # Download from Apple Music
         deps = DependencyChecker(logger)
-        if not deps.check_gamdl():
+        if not deps.check_python_packages():
             sys.exit(1)
 
         downloader = Downloader(logger, deps.venv_python, cookie_path=args.cookies)
@@ -5617,6 +5625,10 @@ def main():
 
     elif args.command == 'summary':
         # Display export library summary
+        deps = DependencyChecker(logger)
+        if not deps.check_python_packages():
+            sys.exit(1)
+
         summary_manager = SummaryManager(logger)
 
         # Validate mutually exclusive flags

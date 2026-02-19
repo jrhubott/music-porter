@@ -284,8 +284,11 @@ The tool supports **macOS**, **Linux**, and **Windows**. Platform is auto-detect
   - **Linux:** `sudo apt-get install ffmpeg` (Ubuntu/Debian), `sudo dnf install ffmpeg` (Fedora/RHEL), `sudo pacman -S ffmpeg` (Arch)
   - **Windows:** `choco install ffmpeg` or download from https://ffmpeg.org/download.html
 - gamdl (Apple Music downloader, installed via pip in venv)
-- mutagen (Python ID3 tag library, auto-installed by scripts)
-- ffmpeg-python (Python wrapper for FFmpeg, auto-installed by scripts)
+- mutagen (Python ID3 tag library, installed via pip in venv)
+- ffmpeg-python (Python wrapper for FFmpeg, installed via pip in venv)
+- selenium (Browser automation for cookie extraction, installed via pip in venv)
+- webdriver-manager (Automatic browser driver management, installed via pip in venv)
+- Pillow (Image processing for cover art resizing, installed via pip in venv)
 
 ### Initial Setup
 ```bash
@@ -400,7 +403,7 @@ git tag v1.2.0
 - Tool automatically validates cookies at startup and before downloads
 - Expired cookies trigger interactive prompt: "Attempt automatic cookie refresh? [Y/n]"
 - Automatic refresh uses selenium to extract cookies from browser (Chrome, Firefox, Safari, Edge)
-- Selenium auto-installs if missing (prompts user for confirmation)
+- Selenium is installed via requirements.txt
 - Backup created before overwriting: `cookies.txt.backup`
 - Cookie validation checks `media-user-token` for `.music.apple.com` domain
 - Expiration shown in days: "Cookies valid until 2026-08-16 (178 days remaining)"
@@ -454,7 +457,7 @@ git tag v1.2.0
 │   └── Pop_Workout/                 # Flat: "Artist - Title.mp3"
 ├── logs/                            # Execution logs (timestamped)
 ├── .venv/                           # Python virtual environment
-├── requirements-optional.txt        # Optional: selenium, webdriver-manager
+├── requirements.txt                 # All Python dependencies
 ├── APPLE-TO-RIDE-COMMAND-GUIDE.md   # Complete usage guide
 ├── COOKIE-MANAGEMENT-GUIDE.md       # Cookie validation and refresh guide
 ├── QUICK-REFERENCE.md               # Command cheat sheet
@@ -489,7 +492,7 @@ git tag v1.2.0
 - **Cookie Extraction:** Converts Selenium cookies to `http.cookiejar.Cookie` objects
 - **Backup Strategy:** Creates `.backup` file before overwriting (preserves working cookies)
 - **Interactive Prompts:** Menu-level checks before batch operations, per-download checks for single operations
-- **Auto-Installation:** Offers to `pip install selenium webdriver-manager` when missing
+- **Dependencies:** Selenium and webdriver-manager installed via `requirements.txt`
 - **Non-Interactive Mode:** Fails immediately with clear error if cookies invalid (prevents hanging)
 - **Key Methods:** `validate()`, `auto_refresh()`, `_extract_with_selenium()`, `_detect_default_browser()`
 

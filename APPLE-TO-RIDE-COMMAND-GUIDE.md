@@ -123,17 +123,6 @@ Supports **Chrome**, **Firefox**, **Safari**, and **Edge**:
 - Falls back to other installed browsers if needed
 - Works on macOS, Linux, and Windows
 
-### Optional Dependencies
-
-For automatic cookie refresh:
-
-```bash
-source .venv/bin/activate
-pip install -r requirements-optional.txt
-```
-
-Alternatively, the tool will **offer to auto-install** selenium when you first use `--auto-refresh-cookies`.
-
 ### Manual Cookie Refresh (Alternative)
 
 If you prefer manual control or automation fails:
@@ -147,12 +136,6 @@ If you prefer manual control or automation fails:
 5. Save as `cookies.txt` in project directory
 
 ### Troubleshooting
-
-**Selenium not installed:**
-```
-[ERROR] Selenium not installed
-Install selenium now? [Y/n]  ← Press Enter to auto-install
-```
 
 **All browsers failed:**
 - Update your browser to the latest version

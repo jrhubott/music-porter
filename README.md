@@ -291,17 +291,6 @@ The tool includes intelligent cookie management to prevent authentication failur
 ./apple-to-ride-command download --playlist 1 --skip-cookie-validation
 ```
 
-### Optional Dependencies
-
-For automatic cookie refresh, install optional dependencies:
-
-```bash
-source .venv/bin/activate
-pip install -r requirements-optional.txt
-```
-
-This installs `selenium` and `webdriver-manager` for browser automation. Alternatively, the tool will offer to install these automatically when you first use auto-refresh.
-
 **See [Cookie Management Guide](COOKIE-MANAGEMENT-GUIDE.md) for complete documentation including troubleshooting, security details, and manual refresh instructions.**
 
 ## Project Structure

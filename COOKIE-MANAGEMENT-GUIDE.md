@@ -25,19 +25,14 @@ The cookie management system automatically validates Apple Music authentication 
 
 ## Installation
 
-### 1. Install Optional Dependencies
+### 1. Verify Dependencies
+
+Selenium and webdriver-manager are included in `requirements.txt` and installed automatically during setup:
 
 ```bash
-# Activate virtual environment
 source .venv/bin/activate
-
-# Install selenium and webdriver-manager
-pip install -r requirements-optional.txt
+pip install -r requirements.txt
 ```
-
-This installs:
-- `selenium` - Browser automation framework
-- `webdriver-manager` - Automatic driver downloads (no manual setup!)
 
 ### 2. Verify Installation
 
@@ -278,10 +273,10 @@ If automatic refresh fails or you prefer manual control:
 [ERROR] Selenium not installed. Install with: pip install selenium webdriver-manager
 ```
 
-**Solution**: Install optional dependencies
+**Solution**: Install dependencies
 ```bash
 source .venv/bin/activate
-pip install -r requirements-optional.txt
+pip install -r requirements.txt
 ```
 
 ### No Browsers Found
@@ -444,7 +439,7 @@ The cookie management system makes maintaining Apple Music authentication seamle
 For most users:
 ```bash
 # Install once
-pip install -r requirements-optional.txt
+pip install -r requirements.txt
 
 # Use always
 ./apple-to-ride-command pipeline --auto --auto-refresh-cookies
