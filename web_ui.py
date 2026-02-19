@@ -239,10 +239,6 @@ def create_app(project_root=None):
     def usb_page():
         return render_template('usb_sync.html')
 
-    @app.route('/summary')
-    def summary_page():
-        return render_template('summary.html')
-
     @app.route('/settings')
     def settings_page():
         return render_template('settings.html')
