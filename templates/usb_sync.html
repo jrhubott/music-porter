@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}USB Sync - Music Porter{% endblock %}
+{% block content %}
+<h4 class="mb-4">USB Sync</h4>
+
+<div class="card mb-4">
+  <div class="card-body">
+    <form id="usbForm">
+      <div class="row g-3">
+        <div class="col-md-4">
+          <label class="form-label">Source Directory</label>
+          <select class="form-select form-select-sm" id="usbSource">
+            <option value="">Loading...</option>
+          </select>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">USB Drive</label>
+          <div class="input-group input-group-sm">
+            <select class="form-select form-select-sm" id="usbDrive">
+              <option value="">Detecting...</option>
+            </select>
+            <button type="button" class="btn btn-outline-secondary" id="refreshDrives"><i class="bi bi-arrow-clockwise"></i></button>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">USB Subdirectory</label>
+          <input type="text" class="form-control form-control-sm" id="usbDir" placeholder="RZR/Music">
+        </div>
+      </div>
+      <div class="d-flex gap-3 mt-3">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="usbDryRun">
+          <label class="form-check-label" for="usbDryRun">Dry Run</label>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="usbVerbose">
+          <label class="form-check-label" for="usbVerbose">Verbose</label>
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary mt-3"><i class="bi bi-play-fill"></i> Sync to USB</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-terminal"></i> Output</span>
+    <span class="badge bg-secondary" id="usbStatus">Idle</span>
+  </div>
+  <div class="card-body p-0">
+    <div class="log-panel" id="usbLog">
+      <div class="log-line text-muted">Ready. Select source and USB drive.</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function loadSources() {
+  fetch('/api/directories/export').then(r=>r.json()).then(dirs => {
+    const sel = document.getElementById('usbSource');
+    // Get profile to build correct path
+    fetch('/api/status').then(r=>r.json()).then(status => {
+      const profile = status.profile;
+      let opts = `<option value="export/${profile}">All (export/${profile}/)</option>`;
+      opts += dirs.map(d => `<option value="export/${profile}/${d.name}">${d.name} (${d.files} files)</option>`).join('');
+      sel.innerHTML = opts;
+
+      // Set default USB dir from settings
+      fetch('/api/settings').then(r=>r.json()).then(s => {
+        document.getElementById('usbDir').value = s.settings.usb_dir || 'RZR/Music';
+      });
+    });
+  });
+}
+
+function loadDrives() {
+  const sel = document.getElementById('usbDrive');
+  sel.innerHTML = '<option value="">Detecting...</option>';
+  fetch('/api/usb/drives').then(r=>r.json()).then(drives => {
+    if (drives.length === 0) {
+      sel.innerHTML = '<option value="">No USB drives detected</option>';
+    } else {
+      sel.innerHTML = drives.map(d => `<option value="${d}">${d}</option>`).join('');
+    }
+  });
+}
+
+document.getElementById('refreshDrives').addEventListener('click', loadDrives);
+
+document.getElementById('usbForm').addEventListener('submit', function(e) {
+  e.preventDefault();
+  const data = {
+    source_dir: document.getElementById('usbSource').value,
+    volume: document.getElementById('usbDrive').value,
+    usb_dir: document.getElementById('usbDir').value,
+    dry_run: document.getElementById('usbDryRun').checked,
+    verbose: document.getElementById('usbVerbose').checked,
+  };
+  if (!data.source_dir) { showToast('Select a source directory', 'warning'); return; }
+  if (!data.volume) { showToast('Select a USB drive', 'warning'); return; }
+
+  document.getElementById('usbStatus').textContent = 'Running';
+  document.getElementById('usbStatus').className = 'badge bg-primary badge-running';
+
+  submitOperation('/api/usb/sync', data, 'usbLog', function(msg) {
+    const badge = document.getElementById('usbStatus');
+    if (msg.status === 'completed') { badge.textContent = 'Completed'; badge.className = 'badge bg-success'; }
+    else { badge.textContent = msg.status; badge.className = 'badge bg-danger'; }
+  });
+});
+
+loadSources();
+loadDrives();
+</script>
+{% endblock %}

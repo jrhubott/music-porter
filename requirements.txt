@@ -23,3 +23,6 @@ Pillow>=10.0.0
 
 # YAML configuration file support
 PyYAML>=6.0
+
+# Web dashboard UI
+Flask>=3.0.0

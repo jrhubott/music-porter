@@ -1,0 +1,297 @@
+{% extends "base.html" %}
+{% block title %}Summary - Music Porter{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h4 class="mb-0">Library Summary</h4>
+  <button class="btn btn-outline-primary btn-sm" id="refreshBtn" onclick="loadSummary()">
+    <i class="bi bi-arrow-clockwise"></i> Refresh
+  </button>
+</div>
+
+<!-- Loading spinner -->
+<div id="loadingSpinner" class="text-center py-5">
+  <div class="spinner-border text-primary" role="status"></div>
+  <div class="text-muted mt-2">Scanning library...</div>
+</div>
+
+<!-- Empty state -->
+<div id="emptyState" class="d-none text-center py-5">
+  <i class="bi bi-inbox fs-1 text-muted"></i>
+  <p class="text-muted mt-2">Export library is empty</p>
+  <a href="/pipeline" class="btn btn-primary btn-sm"><i class="bi bi-arrow-repeat"></i> Run Pipeline</a>
+</div>
+
+<!-- Summary content (hidden until loaded) -->
+<div id="summaryContent" class="d-none">
+
+  <!-- Top row: 4 stat cards -->
+  <div class="row g-3 mb-3">
+    <div class="col-md-3">
+      <div class="card h-100">
+        <div class="card-body text-center">
+          <div class="text-muted small">Total Files</div>
+          <div class="fs-2 fw-bold" id="statFiles">-</div>
+          <div class="text-muted small" id="statPlaylists">- playlists</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card h-100">
+        <div class="card-body text-center">
+          <div class="text-muted small">Total Size</div>
+          <div class="fs-2 fw-bold" id="statSize">-</div>
+          <div class="text-muted small" id="statScanTime">scanned in -s</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card h-100">
+        <div class="card-body text-center">
+          <div class="text-muted small">Tag Integrity</div>
+          <div class="fs-2 fw-bold" id="statTagPct">-</div>
+          <div class="progress mt-2" style="height: 6px;">
+            <div class="progress-bar bg-success" id="statTagBar" style="width: 0%"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card h-100">
+        <div class="card-body text-center">
+          <div class="text-muted small">Cover Art</div>
+          <div class="fs-2 fw-bold" id="statCoverPct">-</div>
+          <div class="progress mt-2" style="height: 6px;">
+            <div class="progress-bar bg-info" id="statCoverBar" style="width: 0%"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Middle row: breakdown cards -->
+  <div class="row g-3 mb-3">
+    <div class="col-md-6">
+      <div class="card h-100">
+        <div class="card-body">
+          <h6 class="card-title"><i class="bi bi-shield-check"></i> Tag Integrity Breakdown</h6>
+          <div class="d-flex justify-content-between mt-3 mb-1">
+            <span>Protected</span>
+            <span class="fw-bold text-success" id="tagProtectedCount">-</span>
+          </div>
+          <div class="progress mb-3" style="height: 8px;">
+            <div class="progress-bar bg-success" id="tagProtectedBar" style="width: 0%"></div>
+          </div>
+          <div class="d-flex justify-content-between mb-1">
+            <span>Missing protection</span>
+            <span class="fw-bold text-danger" id="tagMissingCount">-</span>
+          </div>
+          <div class="progress" style="height: 8px;">
+            <div class="progress-bar bg-danger" id="tagMissingBar" style="width: 0%"></div>
+          </div>
+          <div class="text-muted small mt-2" id="tagCheckedLabel">- files checked</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="card h-100">
+        <div class="card-body">
+          <h6 class="card-title"><i class="bi bi-image"></i> Cover Art Breakdown</h6>
+          <div class="d-flex justify-content-between mt-3 mb-1">
+            <span>With cover art</span>
+            <span class="fw-bold text-info" id="coverWithCount">-</span>
+          </div>
+          <div class="progress mb-3" style="height: 8px;">
+            <div class="progress-bar bg-info" id="coverWithBar" style="width: 0%"></div>
+          </div>
+          <div class="d-flex justify-content-between mb-1">
+            <span>Without cover art</span>
+            <span class="fw-bold text-danger" id="coverWithoutCount">-</span>
+          </div>
+          <div class="progress mb-3" style="height: 8px;">
+            <div class="progress-bar bg-danger" id="coverWithoutBar" style="width: 0%"></div>
+          </div>
+          <div class="row text-center text-muted small">
+            <div class="col">Original: <span id="coverOriginal">-</span></div>
+            <div class="col">Resized: <span id="coverResized">-</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Playlist table -->
+  <div class="card">
+    <div class="card-body">
+      <h6 class="card-title"><i class="bi bi-list-ul"></i> Playlists</h6>
+      <div class="table-responsive mt-2">
+        <table class="table table-sm table-hover align-middle mb-0">
+          <thead>
+            <tr>
+              <th class="sortable" data-sort="name" onclick="sortTable('name')">Name <i class="bi bi-chevron-expand small"></i></th>
+              <th class="sortable text-end" data-sort="file_count" onclick="sortTable('file_count')">Files <i class="bi bi-chevron-expand small"></i></th>
+              <th class="sortable text-end" data-sort="size_bytes" onclick="sortTable('size_bytes')">Size <i class="bi bi-chevron-expand small"></i></th>
+              <th class="text-end">Avg Size</th>
+              <th class="sortable text-center" data-sort="tag_pct" onclick="sortTable('tag_pct')">Tags <i class="bi bi-chevron-expand small"></i></th>
+              <th class="sortable text-center" data-sort="cover_pct" onclick="sortTable('cover_pct')">Cover Art <i class="bi bi-chevron-expand small"></i></th>
+              <th class="sortable text-end" data-sort="last_modified" onclick="sortTable('last_modified')">Last Modified <i class="bi bi-chevron-expand small"></i></th>
+            </tr>
+          </thead>
+          <tbody id="playlistTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Profile info -->
+  <div class="text-muted small mt-3 text-end" id="profileLabel"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<style>
+  .sortable { cursor: pointer; user-select: none; }
+  .sortable:hover { color: #fff; }
+</style>
+<script>
+let summaryData = null;
+let currentSort = { key: 'name', asc: true };
+
+function formatBytes(bytes) {
+  if (bytes >= 1e9) return (bytes / 1e9).toFixed(1) + ' GB';
+  if (bytes >= 1e6) return (bytes / 1e6).toFixed(1) + ' MB';
+  if (bytes >= 1e3) return (bytes / 1e3).toFixed(1) + ' KB';
+  return bytes + ' B';
+}
+
+function pct(n, d) {
+  return d > 0 ? Math.round((n / d) * 100) : 0;
+}
+
+function integrityBadge(percent) {
+  let cls = 'bg-success';
+  if (percent < 80) cls = 'bg-danger';
+  else if (percent < 95) cls = 'bg-warning text-dark';
+  return `<span class="badge ${cls}">${percent}%</span>`;
+}
+
+function formatDate(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function loadSummary() {
+  const spinner = document.getElementById('loadingSpinner');
+  const content = document.getElementById('summaryContent');
+  const empty = document.getElementById('emptyState');
+  const btn = document.getElementById('refreshBtn');
+
+  spinner.classList.remove('d-none');
+  content.classList.add('d-none');
+  empty.classList.add('d-none');
+  btn.disabled = true;
+
+  fetch('/api/summary')
+    .then(r => r.json())
+    .then(data => {
+      summaryData = data;
+      spinner.classList.add('d-none');
+      btn.disabled = false;
+
+      if (data.total_files === 0) {
+        empty.classList.remove('d-none');
+        return;
+      }
+
+      content.classList.remove('d-none');
+      renderStats(data);
+      renderTable(data.playlists);
+    })
+    .catch(err => {
+      spinner.classList.add('d-none');
+      btn.disabled = false;
+      showToast('Failed to load summary: ' + err, 'error');
+    });
+}
+
+function renderStats(data) {
+  // Top cards
+  document.getElementById('statFiles').textContent = data.total_files.toLocaleString();
+  document.getElementById('statPlaylists').textContent = data.total_playlists + ' playlist' + (data.total_playlists !== 1 ? 's' : '');
+  document.getElementById('statSize').textContent = formatBytes(data.total_size_bytes);
+  document.getElementById('statScanTime').textContent = 'scanned in ' + data.scan_duration + 's';
+
+  const tagPct = pct(data.tag_integrity.protected, data.tag_integrity.checked);
+  document.getElementById('statTagPct').textContent = tagPct + '%';
+  document.getElementById('statTagBar').style.width = tagPct + '%';
+
+  const coverTotal = data.cover_art.with_art + data.cover_art.without_art;
+  const coverPct = pct(data.cover_art.with_art, coverTotal);
+  document.getElementById('statCoverPct').textContent = coverPct + '%';
+  document.getElementById('statCoverBar').style.width = coverPct + '%';
+
+  // Tag breakdown
+  document.getElementById('tagProtectedCount').textContent = data.tag_integrity.protected.toLocaleString();
+  document.getElementById('tagMissingCount').textContent = data.tag_integrity.missing.toLocaleString();
+  document.getElementById('tagProtectedBar').style.width = tagPct + '%';
+  document.getElementById('tagMissingBar').style.width = (100 - tagPct) + '%';
+  document.getElementById('tagCheckedLabel').textContent = data.tag_integrity.checked.toLocaleString() + ' files checked';
+
+  // Cover breakdown
+  document.getElementById('coverWithCount').textContent = data.cover_art.with_art.toLocaleString();
+  document.getElementById('coverWithoutCount').textContent = data.cover_art.without_art.toLocaleString();
+  document.getElementById('coverWithBar').style.width = coverPct + '%';
+  document.getElementById('coverWithoutBar').style.width = (100 - coverPct) + '%';
+  document.getElementById('coverOriginal').textContent = data.cover_art.original.toLocaleString();
+  document.getElementById('coverResized').textContent = data.cover_art.resized.toLocaleString();
+
+  // Profile
+  document.getElementById('profileLabel').textContent = 'Profile: ' + data.profile;
+}
+
+function renderTable(playlists) {
+  // Add computed fields for sorting
+  playlists.forEach(p => {
+    p.tag_pct = p.tags_checked > 0 ? Math.round((p.tags_protected / p.tags_checked) * 100) : 0;
+    p.cover_pct = (p.cover_with + p.cover_without) > 0 ? Math.round((p.cover_with / (p.cover_with + p.cover_without)) * 100) : 0;
+  });
+
+  // Sort
+  playlists.sort((a, b) => {
+    let va = a[currentSort.key], vb = b[currentSort.key];
+    if (typeof va === 'string') va = va.toLowerCase();
+    if (typeof vb === 'string') vb = vb.toLowerCase();
+    if (va == null) va = '';
+    if (vb == null) vb = '';
+    if (va < vb) return currentSort.asc ? -1 : 1;
+    if (va > vb) return currentSort.asc ? 1 : -1;
+    return 0;
+  });
+
+  const tbody = document.getElementById('playlistTableBody');
+  tbody.innerHTML = playlists.map(p => `
+    <tr>
+      <td>${p.name}</td>
+      <td class="text-end">${p.file_count}</td>
+      <td class="text-end">${formatBytes(p.size_bytes)}</td>
+      <td class="text-end">${p.avg_size_mb.toFixed(1)} MB</td>
+      <td class="text-center">${integrityBadge(p.tag_pct)}</td>
+      <td class="text-center">${integrityBadge(p.cover_pct)}</td>
+      <td class="text-end">${formatDate(p.last_modified)}</td>
+    </tr>
+  `).join('');
+}
+
+function sortTable(key) {
+  if (currentSort.key === key) {
+    currentSort.asc = !currentSort.asc;
+  } else {
+    currentSort.key = key;
+    currentSort.asc = true;
+  }
+  if (summaryData) renderTable(summaryData.playlists);
+}
+
+loadSummary();
+</script>
+{% endblock %}

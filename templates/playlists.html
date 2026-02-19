@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block title %}Playlists - Music Porter{% endblock %}
+{% block content %}
+<h4 class="mb-4">Playlists</h4>
+
+<!-- Add Playlist -->
+<div class="card mb-4">
+  <div class="card-body">
+    <h6 class="card-title"><i class="bi bi-plus-circle"></i> Add Playlist</h6>
+    <form id="addForm" class="row g-2 mt-1">
+      <div class="col-md-2">
+        <input type="text" class="form-control form-control-sm" id="addKey" placeholder="Key (e.g. Pop_Workout)" required>
+      </div>
+      <div class="col-md-5">
+        <input type="url" class="form-control form-control-sm" id="addUrl" placeholder="Apple Music URL" required>
+      </div>
+      <div class="col-md-3">
+        <input type="text" class="form-control form-control-sm" id="addName" placeholder="Display Name" required>
+      </div>
+      <div class="col-md-2">
+        <button type="submit" class="btn btn-primary btn-sm w-100">Add</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Playlist Table -->
+<div class="card">
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-sm table-hover mb-0">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Key</th>
+            <th>Name</th>
+            <th>URL</th>
+            <th class="text-end">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="playlistTable">
+          <tr><td colspan="5" class="text-center text-muted">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Modal -->
+<div class="modal fade" id="editModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title">Edit Playlist</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editKey">
+        <div class="mb-3">
+          <label class="form-label">Name</label>
+          <input type="text" class="form-control" id="editName">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">URL</label>
+          <input type="url" class="form-control" id="editUrl">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="editSave">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function loadPlaylists() {
+  fetch('/api/playlists').then(r => r.json()).then(playlists => {
+    const tbody = document.getElementById('playlistTable');
+    if (playlists.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No playlists configured</td></tr>';
+      return;
+    }
+    tbody.innerHTML = playlists.map((p, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td><code>${p.key}</code></td>
+        <td>${p.name}</td>
+        <td><small class="text-muted text-truncate d-inline-block" style="max-width:300px" title="${p.url}">${p.url}</small></td>
+        <td class="text-end">
+          <button class="btn btn-outline-primary btn-sm py-0 px-2" onclick="openEdit('${p.key}','${p.name}','${p.url}')"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-outline-danger btn-sm py-0 px-2" onclick="removePlaylist('${p.key}')"><i class="bi bi-trash"></i></button>
+        </td>
+      </tr>
+    `).join('');
+  });
+}
+
+document.getElementById('addForm').addEventListener('submit', function(e) {
+  e.preventDefault();
+  const data = {
+    key: document.getElementById('addKey').value.trim(),
+    url: document.getElementById('addUrl').value.trim(),
+    name: document.getElementById('addName').value.trim(),
+  };
+  fetch('/api/playlists', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
+    .then(r => r.json())
+    .then(d => {
+      if (d.error) { showToast(d.error, 'error'); return; }
+      showToast('Playlist added', 'success');
+      document.getElementById('addForm').reset();
+      loadPlaylists();
+    });
+});
+
+function openEdit(key, name, url) {
+  document.getElementById('editKey').value = key;
+  document.getElementById('editName').value = name;
+  document.getElementById('editUrl').value = url;
+  new bootstrap.Modal(document.getElementById('editModal')).show();
+}
+
+document.getElementById('editSave').addEventListener('click', function() {
+  const key = document.getElementById('editKey').value;
+  const data = {
+    name: document.getElementById('editName').value.trim(),
+    url: document.getElementById('editUrl').value.trim(),
+  };
+  fetch('/api/playlists/' + encodeURIComponent(key), {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
+    .then(r => r.json())
+    .then(d => {
+      if (d.error) { showToast(d.error, 'error'); return; }
+      showToast('Playlist updated', 'success');
+      bootstrap.Modal.getInstance(document.getElementById('editModal')).hide();
+      loadPlaylists();
+    });
+});
+
+function removePlaylist(key) {
+  if (!confirm('Remove playlist "' + key + '"?')) return;
+  fetch('/api/playlists/' + encodeURIComponent(key), {method:'DELETE'})
+    .then(r => r.json())
+    .then(d => {
+      if (d.error) { showToast(d.error, 'error'); return; }
+      showToast('Playlist removed', 'success');
+      loadPlaylists();
+    });
+}
+
+loadPlaylists();
+</script>
+{% endblock %}

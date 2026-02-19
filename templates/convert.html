@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Convert - Music Porter{% endblock %}
+{% block content %}
+<h4 class="mb-4">Convert M4A to MP3</h4>
+
+<div class="card mb-4">
+  <div class="card-body">
+    <form id="convertForm">
+      <div class="row g-3">
+        <div class="col-md-4">
+          <label class="form-label">Source Directory (music/...)</label>
+          <select class="form-select form-select-sm" id="convertInput">
+            <option value="">Loading...</option>
+          </select>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Output Directory (optional)</label>
+          <input type="text" class="form-control form-control-sm" id="convertOutput" placeholder="Auto: export/<profile>/">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Quality Preset</label>
+          <select class="form-select form-select-sm" id="convertPreset">
+            <option value="lossless">Lossless (320kbps CBR)</option>
+            <option value="high">High (VBR ~190-250kbps)</option>
+            <option value="medium">Medium (VBR ~165-210kbps)</option>
+            <option value="low">Low (VBR ~115-150kbps)</option>
+          </select>
+        </div>
+      </div>
+      <div class="d-flex gap-3 mt-3">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="convertForce">
+          <label class="form-check-label" for="convertForce">Force re-convert</label>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="convertNoCover">
+          <label class="form-check-label" for="convertNoCover">No cover art</label>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="convertDryRun">
+          <label class="form-check-label" for="convertDryRun">Dry Run</label>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="convertVerbose">
+          <label class="form-check-label" for="convertVerbose">Verbose</label>
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary mt-3"><i class="bi bi-play-fill"></i> Convert</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-terminal"></i> Output</span>
+    <span class="badge bg-secondary" id="convertStatus">Idle</span>
+  </div>
+  <div class="card-body p-0">
+    <div class="log-panel" id="convertLog">
+      <div class="log-line text-muted">Ready.</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+fetch('/api/directories/music').then(r=>r.json()).then(dirs => {
+  const sel = document.getElementById('convertInput');
+  sel.innerHTML = dirs.map(d => `<option value="music/${d}">music/${d}</option>`).join('');
+  if (dirs.length === 0) sel.innerHTML = '<option value="">No music directories found</option>';
+});
+
+document.getElementById('convertForm').addEventListener('submit', function(e) {
+  e.preventDefault();
+  const data = {
+    input_dir: document.getElementById('convertInput').value,
+    output_dir: document.getElementById('convertOutput').value,
+    preset: document.getElementById('convertPreset').value,
+    force: document.getElementById('convertForce').checked,
+    no_cover_art: document.getElementById('convertNoCover').checked,
+    dry_run: document.getElementById('convertDryRun').checked,
+    verbose: document.getElementById('convertVerbose').checked,
+  };
+  if (!data.input_dir) { showToast('Select a source directory', 'warning'); return; }
+
+  document.getElementById('convertStatus').textContent = 'Running';
+  document.getElementById('convertStatus').className = 'badge bg-primary badge-running';
+
+  submitOperation('/api/convert/run', data, 'convertLog', function(msg) {
+    const badge = document.getElementById('convertStatus');
+    if (msg.status === 'completed') { badge.textContent = 'Completed'; badge.className = 'badge bg-success'; }
+    else { badge.textContent = msg.status; badge.className = 'badge bg-danger'; }
+  });
+});
+</script>
+{% endblock %}

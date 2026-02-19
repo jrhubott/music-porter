@@ -499,6 +499,32 @@ class ConfigManager:
         self.logger.info(f"Added playlist '{name}' to configuration")
         return True
 
+    def update_playlist(self, key, url=None, name=None):
+        """Update an existing playlist and persist to config.yaml."""
+        playlist = self.get_playlist_by_key(key)
+        if not playlist:
+            self.logger.warn(f"Playlist key '{key}' not found")
+            return False
+        if url is not None:
+            playlist.url = url
+        if name is not None:
+            playlist.name = name
+        self._save()
+        self.logger.info(f"Updated playlist '{key}'")
+        return True
+
+    def remove_playlist(self, key):
+        """Remove a playlist by key (case-insensitive) and persist to config.yaml."""
+        key_lower = key.lower()
+        original_len = len(self.playlists)
+        self.playlists = [p for p in self.playlists if p.key.lower() != key_lower]
+        if len(self.playlists) == original_len:
+            self.logger.warn(f"Playlist key '{key}' not found")
+            return False
+        self._save()
+        self.logger.info(f"Removed playlist '{key}' from configuration")
+        return True
+
 
 # ══════════════════════════════════════════════════════════════════
 # Section 4: Dependency Checking
@@ -513,6 +539,7 @@ class DependencyChecker:
         'webdriver-manager': 'webdriver_manager',
         'Pillow': 'PIL',
         'PyYAML': 'yaml',
+        'Flask': 'flask',
     }
 
     # Packages that must be checked via subprocess instead of import
@@ -2549,10 +2576,12 @@ class CookieManager:
             # Fallback to all browsers
             return available_browsers
 
-    def _extract_with_selenium(self):
+    def _extract_with_selenium(self, browser=None):
         """
         Extract cookies using Selenium WebDriver.
         Tries default browser first, then falls back to others.
+        browser: None = interactive prompt, 'auto' = try all detected,
+                 'chrome'/'firefox'/'safari'/'edge' = specific browser.
         Returns cookie_jar on success, None on failure.
         """
         import http.cookiejar
@@ -2574,19 +2603,33 @@ class CookieManager:
             browser_priority.append(default_browser)
             self.logger.info(f"Detected default browser: {default_browser.capitalize()}")
 
-        for browser in installed_browsers:
-            if browser not in browser_priority:
-                browser_priority.append(browser)
+        for b in installed_browsers:
+            if b not in browser_priority:
+                browser_priority.append(b)
 
         if not browser_priority:
             self.logger.error("No supported browsers found (Chrome, Firefox, Safari, or Edge)")
             return None
 
-        # Let user select browser
-        selected_browsers = self._prompt_browser_selection(browser_priority, default_browser)
-        if not selected_browsers:
-            self.logger.info("Browser selection cancelled")
-            return None
+        # Determine which browsers to try
+        interactive = browser is None
+        if browser is None:
+            # CLI interactive mode — prompt user
+            selected_browsers = self._prompt_browser_selection(browser_priority, default_browser)
+            if not selected_browsers:
+                self.logger.info("Browser selection cancelled")
+                return None
+        elif browser == 'auto':
+            # Non-interactive: try all detected browsers
+            selected_browsers = browser_priority
+            self.logger.info(f"Auto mode: will try {', '.join(b.capitalize() for b in selected_browsers)}")
+        else:
+            # Non-interactive: specific browser requested
+            if browser not in installed_browsers:
+                self.logger.error(f"Browser '{browser}' is not installed or not supported")
+                return None
+            selected_browsers = [browser]
+            self.logger.info(f"Using specified browser: {browser.capitalize()}")
 
         # Try each selected browser
         for browser_name in selected_browsers:
@@ -2595,7 +2638,8 @@ class CookieManager:
             try:
                 driver = self._launch_browser(browser_name, headless=True)
                 if driver:
-                    cookies = self._extract_cookies_from_driver(driver, browser_name)
+                    cookies = self._extract_cookies_from_driver(
+                        driver, browser_name, interactive=interactive)
                     if cookies:
                         return cookies
 
@@ -2685,8 +2729,12 @@ class CookieManager:
             self.logger.info(f"Unexpected error launching {browser_name}: {e}")
             return None
 
-    def _extract_cookies_from_driver(self, driver, browser_name):
-        """Extract cookies from Selenium driver. Returns cookie_jar or None."""
+    def _extract_cookies_from_driver(self, driver, browser_name, interactive=True):
+        """Extract cookies from Selenium driver. Returns cookie_jar or None.
+
+        interactive: True = can open visible browser and prompt for login (CLI),
+                     False = fail if not logged in (web UI / non-interactive).
+        """
         import http.cookiejar
         import time
         from selenium.webdriver.common.by import By
@@ -2704,6 +2752,11 @@ class CookieManager:
             if not is_logged_in:
                 self.logger.warn("Not logged in to Apple Music")
                 driver.quit()
+
+                if not interactive:
+                    self.logger.error(
+                        "Please log in to Apple Music in your browser first, then retry")
+                    return None
 
                 # Relaunch in visible mode
                 self.logger.info(f"Launching visible {browser_name.capitalize()} for login...")
@@ -2810,16 +2863,18 @@ class CookieManager:
             self.logger.info(f"Login check uncertain: {e}")
             return False  # Assume not logged in on error
 
-    def auto_refresh(self, backup=True):
+    def auto_refresh(self, backup=True, browser=None):
         """
         Automatically refresh cookies using Selenium.
         Creates backup before overwriting if backup=True.
+        browser: None = interactive prompt (CLI), 'auto' = try all browsers,
+                 'chrome'/'firefox'/'safari'/'edge' = specific browser.
         Returns True if successful, False otherwise.
         """
         self.logger.info("Attempting automatic cookie refresh...")
 
         # Extract cookies using Selenium
-        cookie_jar = self._extract_with_selenium()
+        cookie_jar = self._extract_with_selenium(browser=browser)
 
         if not cookie_jar:
             self.logger.error("Automatic cookie refresh failed")
@@ -3070,11 +3125,14 @@ class USBManager:
         # File is up-to-date, skip
         return False
 
-    def sync_to_usb(self, source_dir, usb_dir=DEFAULT_USB_DIR, dry_run=False):
+    def sync_to_usb(self, source_dir, usb_dir=DEFAULT_USB_DIR, dry_run=False, volume=None):
         """
         Copy files from source_dir to USB drive with incremental sync.
         Only copies new or modified files, skips unchanged files.
         Returns (success boolean, USBSyncStatistics).
+
+        Args:
+            volume: Pre-selected volume name. Skips interactive selection if provided.
         """
         start_time = time.time()
         stats = USBSyncStatistics()
@@ -3098,8 +3156,9 @@ class USBManager:
         stats.files_found = len(mp3_files)
         self.logger.info(f"Files to process: {stats.files_found}")
 
-        # Select USB drive
-        volume = self.select_usb_drive()
+        # Select USB drive (skip interactive prompt if volume pre-selected)
+        if volume is None:
+            volume = self.select_usb_drive()
         if not volume:
             return False, stats
 
@@ -5730,6 +5789,14 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
     summary_parser.add_argument('--quick', action='store_true',
                                help='Show only aggregate statistics')
 
+    # ── web ────────────────────────────────────────────────────────
+    web_parser = subparsers.add_parser('web',
+        help='Start the web dashboard UI')
+    web_parser.add_argument('--host', default='127.0.0.1',
+                            help='Host to bind (default: 127.0.0.1)')
+    web_parser.add_argument('--port', type=int, default=5555,
+                            help='Port (default: 5555)')
+
     return parser
 
 
@@ -6200,6 +6267,20 @@ def main():
 
         else:
             logger.error("For pipeline command, specify --playlist, --url, or --auto")
+            sys.exit(1)
+
+    elif args.command == 'web':
+        # Start web dashboard UI
+        try:
+            import importlib.util
+            web_ui_path = Path(__file__).resolve().parent / 'web_ui.py'
+            spec = importlib.util.spec_from_file_location('web_ui', web_ui_path)
+            web_ui = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(web_ui)
+            web_ui.start_server(host=args.host, port=args.port)
+        except ImportError as e:
+            logger.error(f"Web UI requires Flask: {e}")
+            logger.info("Install with: pip install flask")
             sys.exit(1)
 
     else:

@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Music Porter{% endblock %}
+{% block content %}
+<h4 class="mb-4">Dashboard</h4>
+
+<div class="row g-3">
+  <!-- Cookie Status -->
+  <div class="col-md-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center">
+          <h6 class="card-title mb-0"><i class="bi bi-shield-lock"></i> Cookie Status</h6>
+          <button type="button" class="btn btn-outline-warning btn-sm py-0 px-1" id="dashRefreshCookies" title="Refresh Cookies">
+            <i class="bi bi-arrow-clockwise"></i>
+          </button>
+        </div>
+        <div id="cookieStatus" class="mt-2">
+          <span class="spinner-border spinner-border-sm"></span> Checking...
+        </div>
+        <div id="dashCookieLog" class="log-panel mt-2 d-none" style="max-height:200px;min-height:0"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Library Stats -->
+  <div class="col-md-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h6 class="card-title"><i class="bi bi-collection"></i> Library</h6>
+        <div id="libraryStats" class="mt-2">
+          <span class="spinner-border spinner-border-sm"></span> Loading...
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Active Operations -->
+  <div class="col-md-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h6 class="card-title"><i class="bi bi-activity"></i> Operations</h6>
+        <div id="activeOps" class="mt-2">
+          <span class="text-muted">No active operations</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="card mt-4">
+  <div class="card-body">
+    <h6 class="card-title"><i class="bi bi-lightning"></i> Quick Actions</h6>
+    <div class="d-flex gap-2 flex-wrap mt-2">
+      <a href="/pipeline" class="btn btn-primary btn-sm"><i class="bi bi-arrow-repeat"></i> Run Pipeline</a>
+      <a href="/convert" class="btn btn-outline-primary btn-sm"><i class="bi bi-file-earmark-music"></i> Convert</a>
+      <a href="/usb" class="btn btn-outline-primary btn-sm"><i class="bi bi-usb-drive"></i> USB Sync</a>
+      <a href="/playlists" class="btn btn-outline-secondary btn-sm"><i class="bi bi-list-ul"></i> Manage Playlists</a>
+      <a href="/settings" class="btn btn-outline-secondary btn-sm"><i class="bi bi-gear"></i> Settings</a>
+    </div>
+  </div>
+</div>
+
+<!-- Profile Info -->
+<div class="card mt-3">
+  <div class="card-body">
+    <h6 class="card-title"><i class="bi bi-sliders"></i> Current Profile</h6>
+    <div id="profileInfo" class="mt-2">
+      <span class="spinner-border spinner-border-sm"></span> Loading...
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function loadDashboard() {
+  fetch('/api/status').then(r => r.json()).then(data => {
+    // Cookie status
+    const cs = data.cookies;
+    let cookieHtml;
+    if (cs.valid) {
+      cookieHtml = `<span class="badge bg-success">Valid</span> <span class="text-muted ms-2">${cs.reason}</span>`;
+    } else if (cs.exists) {
+      cookieHtml = `<span class="badge bg-danger">Expired</span> <span class="text-muted ms-2">${cs.reason}</span>`;
+    } else {
+      cookieHtml = `<span class="badge bg-warning text-dark">Missing</span> <span class="text-muted ms-2">${cs.reason}</span>`;
+    }
+    document.getElementById('cookieStatus').innerHTML = cookieHtml;
+
+    // Library stats
+    const lib = data.library;
+    document.getElementById('libraryStats').innerHTML = `
+      <div class="row text-center">
+        <div class="col"><div class="fs-4 fw-bold">${lib.playlists}</div><small class="text-muted">Playlists</small></div>
+        <div class="col"><div class="fs-4 fw-bold">${lib.files}</div><small class="text-muted">Files</small></div>
+        <div class="col"><div class="fs-4 fw-bold">${lib.size_mb}</div><small class="text-muted">MB</small></div>
+      </div>`;
+
+    // Profile
+    document.getElementById('profileInfo').innerHTML = `
+      <span class="badge bg-info">${data.profile}</span>
+      <a href="/settings" class="btn btn-link btn-sm">Change</a>`;
+  }).catch(() => {
+    document.getElementById('cookieStatus').innerHTML = '<span class="text-danger">Failed to load</span>';
+  });
+
+  // Active operations
+  fetch('/api/tasks').then(r => r.json()).then(tasks => {
+    const running = tasks.filter(t => t.status === 'running');
+    const el = document.getElementById('activeOps');
+    if (running.length === 0) {
+      el.innerHTML = '<span class="text-muted">No active operations</span>';
+    } else {
+      el.innerHTML = running.map(t =>
+        `<div class="d-flex justify-content-between align-items-center mb-1">
+          <span><span class="badge bg-primary badge-running">Running</span> ${t.description}</span>
+          <span class="text-muted">${t.elapsed}s</span>
+        </div>`
+      ).join('');
+    }
+  }).catch(()=>{});
+}
+loadDashboard();
+setInterval(loadDashboard, 10000);
+
+// ── Dashboard cookie refresh ──
+document.getElementById('dashRefreshCookies').addEventListener('click', function() {
+  const btn = this;
+  btn.disabled = true;
+  const panel = document.getElementById('dashCookieLog');
+  panel.classList.remove('d-none');
+  panel.innerHTML = '';
+
+  submitOperation('/api/cookies/refresh', {browser: 'auto'}, 'dashCookieLog', function(msg) {
+    btn.disabled = false;
+    loadDashboard();
+    if (msg.status === 'completed') {
+      setTimeout(() => { panel.classList.add('d-none'); }, 5000);
+    }
+  });
+});
+</script>
+{% endblock %}
