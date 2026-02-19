@@ -395,7 +395,7 @@ The tool uses a "hard gate" protection system for original metadata:
 2. **Incremental updates** - Smart detection of changed tracks without full re-download
 3. ~~**Multi-threaded conversion** - Parallel processing for faster batch conversions~~ *(implemented in v1.3.0)*
 4. **Batch tag operations** - Apply tag changes to multiple playlists at once
-5. ~~**Configuration presets** - Save and load common conversion/tagging configurations~~ *(implemented in v1.7.0)*
+5. ~~**Configuration presets** - Save and load common conversion/tagging configurations~~ *(implemented in v1.8.0)*
 
 ### Medium Priority
 6. **Web UI** - Browser-based interface for remote management
@@ -426,11 +426,11 @@ The tool uses a "hard gate" protection system for original metadata:
 29. **Custom filename templates** - Configurable output filename patterns
 30. **Equalizer presets** - Apply audio processing (normalization, compression)
 31. **Collaborative playlists** - Share playlists with others for collaborative management
-32. ~~**Additional output type profiles** - Add device-specific profiles beyond Ride Command (e.g., generic car stereo, nested directory structures, alternative filename formats)~~ *(implemented in v1.8.0)*
+32. ~~**Additional output type profiles** - Add device-specific profiles beyond Ride Command (e.g., generic car stereo, nested directory structures, alternative filename formats)~~ *(implemented in v1.7.0)*
 
 ## Version
 
-Current version: **v1.7.0**
+Current version: **v1.8.0**
 
 ## License
 
