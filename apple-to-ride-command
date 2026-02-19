@@ -65,7 +65,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "1.5.3"
+VERSION = "1.6.0"
 
 DEFAULT_MUSIC_DIR = "music"
 DEFAULT_EXPORT_DIR = "export"
@@ -4906,11 +4906,12 @@ class InteractiveMenu:
             print("   ────────────────────────────────────────────────────────────")
             print()  # Blank line after separator
 
-            print(f"  📁 A. Process all playlists")
-            print(f"  🔗 U. Enter URL to add a new playlist")
-            print(f"  💾 C. Copy to USB only")
-            print(f"  📊 S. Show library summary")
-            print(f"  ❌ X. Exit (or press Enter)")
+            print(f"  📁  A. Process all playlists")
+            print(f"  🔗  U. Enter URL to add a new playlist")
+            print(f"  💾  C. Copy to USB only")
+            print(f"  📊  S. Show library summary")
+            print(f"  🖼️  R. Resize all cover art")
+            print(f"  ❌  X. Exit (or press Enter)")
 
             # Get user selection
             try:
@@ -4925,7 +4926,7 @@ class InteractiveMenu:
                 selection_upper = selection.upper()
 
                 # Validate input: must be digit (1-N) or valid letter (A, U, C, S, X)
-                valid_letters = ['A', 'U', 'C', 'S', 'X']
+                valid_letters = ['A', 'U', 'C', 'S', 'R', 'X']
 
                 is_valid_digit = selection.isdigit() and 1 <= int(selection) <= len(self.config.playlists)
                 is_valid_letter = selection_upper in valid_letters
@@ -4955,6 +4956,10 @@ class InteractiveMenu:
                 elif selection_upper == 'S':
                     self._handle_summary(dry_run)
                     # Return to menu after showing summary
+
+                elif selection_upper == 'R':
+                    self._handle_resize_cover_art(dry_run, verbose)
+                    # Return to menu after resizing
 
                 elif selection.isdigit():
                     # Must be valid digit at this point (validated earlier)
@@ -5120,6 +5125,53 @@ class InteractiveMenu:
                 pass
 
         return success
+
+    def _handle_resize_cover_art(self, dry_run, verbose):
+        """Handle 'Resize all cover art' selection."""
+        try:
+            raw = input("Max dimension in pixels [100]: ").strip()
+            if raw == "":
+                max_size = 100
+            else:
+                try:
+                    max_size = int(raw)
+                    if max_size <= 0:
+                        self.logger.error("Max size must be a positive integer")
+                        return False
+                except ValueError:
+                    self.logger.error(f"Invalid value: '{raw}' — must be a number")
+                    return False
+        except KeyboardInterrupt:
+            print("\n\nCancelled by user")
+            return False
+
+        config = ConfigManager(logger=self.logger)
+        dirs = [f"{DEFAULT_EXPORT_DIR}/{p.key}" for p in config.playlists]
+        existing = [d for d in dirs if Path(d).exists()]
+
+        if not existing:
+            self.logger.error("No export directories found for configured playlists")
+            return False
+
+        self.logger.info(f"Resizing cover art to max {max_size}px across {len(existing)} playlist(s)...")
+
+        cam = CoverArtManager(self.logger)
+        all_success = True
+
+        for d in existing:
+            self.logger.info(f"\n{'─' * 60}")
+            self.logger.info(f"  Resizing: {d}")
+            self.logger.info(f"{'─' * 60}")
+            ok = cam.resize(d, max_size, dry_run=dry_run, verbose=verbose)
+            if not ok:
+                all_success = False
+
+        try:
+            input("\nPress Enter to continue...")
+        except KeyboardInterrupt:
+            print()
+
+        return all_success
 
     def _check_and_refresh_cookies(self, cookie_path='cookies.txt'):
         """
