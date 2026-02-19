@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block title %}Settings - Music Porter{% endblock %}
+{% block content %}
+<h4 class="mb-4">Settings</h4>
+
+<div class="row g-4">
+  <!-- Output Profile -->
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-body">
+        <h6 class="card-title"><i class="bi bi-sliders"></i> Output Profile</h6>
+        <div id="profileCards" class="mt-3">Loading...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- General Settings -->
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-body">
+        <h6 class="card-title"><i class="bi bi-gear"></i> General Settings</h6>
+        <form id="settingsForm" class="mt-3">
+          <div class="mb-3">
+            <label class="form-label">USB Directory</label>
+            <input type="text" class="form-control form-control-sm" id="settingUsbDir" placeholder="RZR/Music">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Workers (parallel conversion threads)</label>
+            <input type="number" class="form-control form-control-sm" id="settingWorkers" min="1" max="16">
+          </div>
+          <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-check"></i> Save Settings</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Cookie Management -->
+<div class="card mt-4">
+  <div class="card-body">
+    <h6 class="card-title"><i class="bi bi-shield-lock"></i> Cookie Management</h6>
+    <div class="row align-items-end mt-3">
+      <div class="col-auto">
+        <label class="form-label mb-1">Status</label>
+        <div id="cookieStatusBadge"><span class="spinner-border spinner-border-sm"></span> Checking...</div>
+      </div>
+      <div class="col-auto">
+        <label class="form-label mb-1" for="browserSelect">Browser</label>
+        <select class="form-select form-select-sm" id="browserSelect" style="width:auto">
+          <option value="auto">Auto-detect</option>
+        </select>
+      </div>
+      <div class="col-auto">
+        <button type="button" class="btn btn-warning btn-sm" id="btnRefreshCookies">
+          <i class="bi bi-arrow-clockwise"></i> Refresh Cookies
+        </button>
+      </div>
+    </div>
+    <div id="cookieLogPanel" class="log-panel mt-3 d-none"></div>
+  </div>
+</div>
+
+<!-- Profile Details -->
+<div class="card mt-4">
+  <div class="card-body">
+    <h6 class="card-title">Profile Comparison</h6>
+    <div class="table-responsive">
+      <table class="table table-sm table-bordered mb-0">
+        <thead>
+          <tr><th>Property</th><th id="profileCol1">-</th><th id="profileCol2">-</th></tr>
+        </thead>
+        <tbody id="profileCompare"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentSettings = {};
+
+function loadSettings() {
+  fetch('/api/settings').then(r=>r.json()).then(data => {
+    currentSettings = data.settings;
+    document.getElementById('settingUsbDir').value = data.settings.usb_dir || '';
+    document.getElementById('settingWorkers').value = data.settings.workers || 6;
+
+    // Profile cards
+    const profiles = data.profiles;
+    const activeProfile = data.settings.output_type || 'ride-command';
+    let html = '';
+    for (const [name, p] of Object.entries(profiles)) {
+      const active = name === activeProfile;
+      html += `
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="radio" name="profileRadio" id="profile_${name}" value="${name}" ${active ? 'checked' : ''}>
+          <label class="form-check-label" for="profile_${name}">
+            <strong>${name}</strong> <span class="text-muted">- ${p.description}</span>
+            ${active ? '<span class="badge bg-success ms-2">Active</span>' : ''}
+          </label>
+        </div>`;
+    }
+    html += '<button type="button" class="btn btn-outline-primary btn-sm mt-2" id="saveProfile">Apply Profile</button>';
+    document.getElementById('profileCards').innerHTML = html;
+
+    document.getElementById('saveProfile').addEventListener('click', function() {
+      const selected = document.querySelector('input[name="profileRadio"]:checked').value;
+      fetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({output_type: selected})})
+        .then(r=>r.json()).then(() => { showToast('Profile updated to ' + selected, 'success'); loadSettings(); });
+    });
+
+    // Profile comparison table
+    const names = Object.keys(profiles);
+    if (names.length >= 2) {
+      document.getElementById('profileCol1').textContent = names[0];
+      document.getElementById('profileCol2').textContent = names[1];
+      const p1 = profiles[names[0]], p2 = profiles[names[1]];
+      const rows = [
+        ['Quality', p1.quality_preset, p2.quality_preset],
+        ['Artwork', p1.artwork_size > 0 ? p1.artwork_size + 'px' : p1.artwork_size === 0 ? 'original' : 'stripped',
+                    p2.artwork_size > 0 ? p2.artwork_size + 'px' : p2.artwork_size === 0 ? 'original' : 'stripped'],
+        ['ID3 Version', 'v2.' + p1.id3_version, 'v2.' + p2.id3_version],
+      ];
+      document.getElementById('profileCompare').innerHTML = rows.map(r =>
+        `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`
+      ).join('');
+    }
+  });
+}
+
+document.getElementById('settingsForm').addEventListener('submit', function(e) {
+  e.preventDefault();
+  const data = {
+    usb_dir: document.getElementById('settingUsbDir').value.trim(),
+    workers: parseInt(document.getElementById('settingWorkers').value),
+  };
+  fetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
+    .then(r=>r.json()).then(() => { showToast('Settings saved', 'success'); });
+});
+
+loadSettings();
+
+// ── Cookie Management ──
+function loadCookieStatus() {
+  fetch('/api/status').then(r=>r.json()).then(data => {
+    const cs = data.cookies;
+    let html;
+    if (cs.valid) {
+      html = `<span class="badge bg-success">Valid</span> <small class="text-muted ms-2">${cs.reason}</small>`;
+    } else if (cs.exists) {
+      html = `<span class="badge bg-danger">Expired</span> <small class="text-muted ms-2">${cs.reason}</small>`;
+    } else {
+      html = `<span class="badge bg-warning text-dark">Missing</span> <small class="text-muted ms-2">${cs.reason}</small>`;
+    }
+    document.getElementById('cookieStatusBadge').innerHTML = html;
+  });
+}
+
+function loadBrowsers() {
+  fetch('/api/cookies/browsers').then(r=>r.json()).then(data => {
+    const sel = document.getElementById('browserSelect');
+    sel.innerHTML = '<option value="auto">Auto-detect</option>';
+    (data.installed || []).forEach(b => {
+      const label = b.charAt(0).toUpperCase() + b.slice(1);
+      const isDefault = b === data.default ? ' (default)' : '';
+      sel.insertAdjacentHTML('beforeend',
+        `<option value="${b}">${label}${isDefault}</option>`);
+    });
+  });
+}
+
+document.getElementById('btnRefreshCookies').addEventListener('click', function() {
+  const btn = this;
+  btn.disabled = true;
+  const panel = document.getElementById('cookieLogPanel');
+  panel.classList.remove('d-none');
+  panel.innerHTML = '';
+
+  const browser = document.getElementById('browserSelect').value;
+  submitOperation('/api/cookies/refresh', {browser}, 'cookieLogPanel', function(msg) {
+    btn.disabled = false;
+    loadCookieStatus();
+  });
+});
+
+loadCookieStatus();
+loadBrowsers();
+</script>
+{% endblock %}

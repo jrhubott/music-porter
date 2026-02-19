@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Pipeline - Music Porter{% endblock %}
+{% block content %}
+<h4 class="mb-4">Pipeline</h4>
+<p class="text-muted">Full workflow: Download &rarr; Convert &rarr; Tag &rarr; (USB Sync)</p>
+
+<div class="card mb-4">
+  <div class="card-body">
+    <form id="pipelineForm">
+      <div class="row g-3">
+        <!-- Mode -->
+        <div class="col-md-4">
+          <label class="form-label">Mode</label>
+          <select class="form-select form-select-sm" id="pipelineMode">
+            <option value="playlist">Single Playlist</option>
+            <option value="url">From URL</option>
+            <option value="auto">All Playlists (Auto)</option>
+          </select>
+        </div>
+
+        <!-- Playlist selector -->
+        <div class="col-md-4" id="playlistGroup">
+          <label class="form-label">Playlist</label>
+          <select class="form-select form-select-sm" id="pipelinePlaylist">
+            <option value="">Loading...</option>
+          </select>
+        </div>
+
+        <!-- URL input -->
+        <div class="col-md-4 d-none" id="urlGroup">
+          <label class="form-label">Apple Music URL</label>
+          <input type="url" class="form-control form-control-sm" id="pipelineUrl" placeholder="https://music.apple.com/...">
+        </div>
+
+        <!-- Quality preset -->
+        <div class="col-md-4">
+          <label class="form-label">Quality</label>
+          <select class="form-select form-select-sm" id="pipelinePreset">
+            <option value="">Profile Default</option>
+            <option value="lossless">Lossless (320kbps CBR)</option>
+            <option value="high">High (VBR ~190-250kbps)</option>
+            <option value="medium">Medium (VBR ~165-210kbps)</option>
+            <option value="low">Low (VBR ~115-150kbps)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Options -->
+      <div class="d-flex gap-3 mt-3">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="pipelineDryRun">
+          <label class="form-check-label" for="pipelineDryRun">Dry Run</label>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="pipelineVerbose">
+          <label class="form-check-label" for="pipelineVerbose">Verbose</label>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="pipelineUsb">
+          <label class="form-check-label" for="pipelineUsb">Copy to USB</label>
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary mt-3"><i class="bi bi-play-fill"></i> Run Pipeline</button>
+    </form>
+  </div>
+</div>
+
+<!-- Log Output -->
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-terminal"></i> Output</span>
+    <span class="badge bg-secondary" id="pipelineStatus">Idle</span>
+  </div>
+  <div class="card-body p-0">
+    <div class="log-panel" id="pipelineLog">
+      <div class="log-line text-muted">Ready. Configure options and click Run Pipeline.</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Load playlists
+fetch('/api/playlists').then(r=>r.json()).then(playlists => {
+  const sel = document.getElementById('pipelinePlaylist');
+  sel.innerHTML = playlists.map(p => `<option value="${p.key}">${p.name} (${p.key})</option>`).join('');
+  if (playlists.length === 0) sel.innerHTML = '<option value="">No playlists configured</option>';
+});
+
+// Toggle mode fields
+document.getElementById('pipelineMode').addEventListener('change', function() {
+  const mode = this.value;
+  document.getElementById('playlistGroup').classList.toggle('d-none', mode === 'url' || mode === 'auto');
+  document.getElementById('urlGroup').classList.toggle('d-none', mode !== 'url');
+});
+
+// Submit
+document.getElementById('pipelineForm').addEventListener('submit', function(e) {
+  e.preventDefault();
+  const mode = document.getElementById('pipelineMode').value;
+  const data = {
+    dry_run: document.getElementById('pipelineDryRun').checked,
+    verbose: document.getElementById('pipelineVerbose').checked,
+    copy_to_usb: document.getElementById('pipelineUsb').checked,
+  };
+  const preset = document.getElementById('pipelinePreset').value;
+  if (preset) data.preset = preset;
+
+  if (mode === 'auto') {
+    data.auto = true;
+  } else if (mode === 'url') {
+    data.url = document.getElementById('pipelineUrl').value;
+    if (!data.url) { showToast('URL is required', 'warning'); return; }
+  } else {
+    data.playlist = document.getElementById('pipelinePlaylist').value;
+    if (!data.playlist) { showToast('Select a playlist', 'warning'); return; }
+  }
+
+  document.getElementById('pipelineStatus').textContent = 'Running';
+  document.getElementById('pipelineStatus').className = 'badge bg-primary badge-running';
+
+  submitOperation('/api/pipeline/run', data, 'pipelineLog', function(msg) {
+    const badge = document.getElementById('pipelineStatus');
+    if (msg.status === 'completed') { badge.textContent = 'Completed'; badge.className = 'badge bg-success'; }
+    else { badge.textContent = msg.status; badge.className = 'badge bg-danger'; }
+  });
+});
+</script>
+{% endblock %}

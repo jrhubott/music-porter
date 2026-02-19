@@ -66,7 +66,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "1.8.0"
+VERSION = "2.0.0"
 
 DEFAULT_MUSIC_DIR = "music"
 DEFAULT_EXPORT_DIR = "export"
@@ -499,6 +499,32 @@ class ConfigManager:
         self.logger.info(f"Added playlist '{name}' to configuration")
         return True
 
+    def update_playlist(self, key, url=None, name=None):
+        """Update an existing playlist and persist to config.yaml."""
+        playlist = self.get_playlist_by_key(key)
+        if not playlist:
+            self.logger.warn(f"Playlist key '{key}' not found")
+            return False
+        if url is not None:
+            playlist.url = url
+        if name is not None:
+            playlist.name = name
+        self._save()
+        self.logger.info(f"Updated playlist '{key}'")
+        return True
+
+    def remove_playlist(self, key):
+        """Remove a playlist by key (case-insensitive) and persist to config.yaml."""
+        key_lower = key.lower()
+        original_len = len(self.playlists)
+        self.playlists = [p for p in self.playlists if p.key.lower() != key_lower]
+        if len(self.playlists) == original_len:
+            self.logger.warn(f"Playlist key '{key}' not found")
+            return False
+        self._save()
+        self.logger.info(f"Removed playlist '{key}' from configuration")
+        return True
+
 
 # ══════════════════════════════════════════════════════════════════
 # Section 4: Dependency Checking
@@ -513,6 +539,7 @@ class DependencyChecker:
         'webdriver-manager': 'webdriver_manager',
         'Pillow': 'PIL',
         'PyYAML': 'yaml',
+        'Flask': 'flask',
     }
 
     # Packages that must be checked via subprocess instead of import
@@ -2549,10 +2576,12 @@ class CookieManager:
             # Fallback to all browsers
             return available_browsers
 
-    def _extract_with_selenium(self):
+    def _extract_with_selenium(self, browser=None):
         """
         Extract cookies using Selenium WebDriver.
         Tries default browser first, then falls back to others.
+        browser: None = interactive prompt, 'auto' = try all detected,
+                 'chrome'/'firefox'/'safari'/'edge' = specific browser.
         Returns cookie_jar on success, None on failure.
         """
         import http.cookiejar
@@ -2574,28 +2603,45 @@ class CookieManager:
             browser_priority.append(default_browser)
             self.logger.info(f"Detected default browser: {default_browser.capitalize()}")
 
-        for browser in installed_browsers:
-            if browser not in browser_priority:
-                browser_priority.append(browser)
+        for b in installed_browsers:
+            if b not in browser_priority:
+                browser_priority.append(b)
 
         if not browser_priority:
             self.logger.error("No supported browsers found (Chrome, Firefox, Safari, or Edge)")
             return None
 
-        # Let user select browser
-        selected_browsers = self._prompt_browser_selection(browser_priority, default_browser)
-        if not selected_browsers:
-            self.logger.info("Browser selection cancelled")
-            return None
+        # Determine which browsers to try
+        interactive = browser is None
+        if browser is None:
+            # CLI interactive mode — prompt user
+            selected_browsers = self._prompt_browser_selection(browser_priority, default_browser)
+            if not selected_browsers:
+                self.logger.info("Browser selection cancelled")
+                return None
+        elif browser == 'auto':
+            # Non-interactive: try all detected browsers
+            selected_browsers = browser_priority
+            self.logger.info(f"Auto mode: will try {', '.join(b.capitalize() for b in selected_browsers)}")
+        else:
+            # Non-interactive: specific browser requested
+            if browser not in installed_browsers:
+                self.logger.error(f"Browser '{browser}' is not installed or not supported")
+                return None
+            selected_browsers = [browser]
+            self.logger.info(f"Using specified browser: {browser.capitalize()}")
 
         # Try each selected browser
+        # Non-interactive mode launches visible so the user can log in if needed
+        headless = interactive  # CLI tries headless first; web UI goes visible
         for browser_name in selected_browsers:
             self.logger.info(f"Attempting to use {browser_name.capitalize()}...")
 
             try:
-                driver = self._launch_browser(browser_name, headless=True)
+                driver = self._launch_browser(browser_name, headless=headless)
                 if driver:
-                    cookies = self._extract_cookies_from_driver(driver, browser_name)
+                    cookies = self._extract_cookies_from_driver(
+                        driver, browser_name, interactive=interactive)
                     if cookies:
                         return cookies
 
@@ -2604,6 +2650,27 @@ class CookieManager:
                 continue
 
         self.logger.error("All browsers failed. Please ensure browser is up to date.")
+        return None
+
+    def _find_cached_driver(self, driver_name):
+        """Search webdriver-manager cache for a previously downloaded driver binary.
+
+        Returns the path to the most recent cached binary, or None.
+        """
+        wdm_dir = Path.home() / '.wdm' / 'drivers' / driver_name
+        if not wdm_dir.exists():
+            return None
+
+        # Find all driver binaries (exclude .zip files)
+        binary_name = driver_name + '.exe' if IS_WINDOWS else driver_name
+        matches = sorted(
+            [p for p in wdm_dir.rglob(binary_name) if p.is_file() and not p.suffix == '.zip'],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if matches:
+            self.logger.info(f"Found cached driver: {matches[0]}")
+            return str(matches[0])
         return None
 
     def _launch_browser(self, browser_name, headless=True):
@@ -2629,6 +2696,23 @@ class CookieManager:
 
             driver = None
 
+            def _try_with_fallbacks(manager_fn, cached_fn, direct_fn):
+                """Try webdriver-manager → cached driver → system driver."""
+                if use_manager:
+                    try:
+                        return manager_fn()
+                    except Exception as mgr_err:
+                        self.logger.info(f"webdriver-manager failed ({mgr_err}), trying cached driver")
+                # Try cached driver from previous webdriver-manager run
+                try:
+                    result = cached_fn()
+                    if result:
+                        return result
+                except Exception:
+                    pass
+                self.logger.info("No cached driver found, trying system driver")
+                return direct_fn()
+
             if browser_name == 'chrome':
                 from selenium.webdriver.chrome.options import Options
                 options = Options()
@@ -2638,11 +2722,16 @@ class CookieManager:
                 options.add_argument("--disable-dev-shm-usage")
                 options.add_argument("--disable-gpu")
 
-                if use_manager:
-                    service = ChromeService(ChromeDriverManager().install())
-                    driver = webdriver.Chrome(service=service, options=options)
-                else:
-                    driver = webdriver.Chrome(options=options)
+                def _cached_chrome():
+                    path = self._find_cached_driver('chromedriver')
+                    if path:
+                        return webdriver.Chrome(service=ChromeService(path), options=options)
+
+                driver = _try_with_fallbacks(
+                    lambda: webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options),
+                    _cached_chrome,
+                    lambda: webdriver.Chrome(options=options),
+                )
 
             elif browser_name == 'firefox':
                 from selenium.webdriver.firefox.options import Options
@@ -2650,11 +2739,16 @@ class CookieManager:
                 if headless:
                     options.add_argument("--headless")
 
-                if use_manager:
-                    service = FirefoxService(GeckoDriverManager().install())
-                    driver = webdriver.Firefox(service=service, options=options)
-                else:
-                    driver = webdriver.Firefox(options=options)
+                def _cached_firefox():
+                    path = self._find_cached_driver('geckodriver')
+                    if path:
+                        return webdriver.Firefox(service=FirefoxService(path), options=options)
+
+                driver = _try_with_fallbacks(
+                    lambda: webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), options=options),
+                    _cached_firefox,
+                    lambda: webdriver.Firefox(options=options),
+                )
 
             elif browser_name == 'edge':
                 from selenium.webdriver.edge.options import Options
@@ -2664,11 +2758,16 @@ class CookieManager:
                 options.add_argument("--no-sandbox")
                 options.add_argument("--disable-dev-shm-usage")
 
-                if use_manager:
-                    service = EdgeService(EdgeChromiumDriverManager().install())
-                    driver = webdriver.Edge(service=service, options=options)
-                else:
-                    driver = webdriver.Edge(options=options)
+                def _cached_edge():
+                    path = self._find_cached_driver('msedgedriver')
+                    if path:
+                        return webdriver.Edge(service=EdgeService(path), options=options)
+
+                driver = _try_with_fallbacks(
+                    lambda: webdriver.Edge(service=EdgeService(EdgeChromiumDriverManager().install()), options=options),
+                    _cached_edge,
+                    lambda: webdriver.Edge(options=options),
+                )
 
             elif browser_name == 'safari':
                 # Safari doesn't support headless mode and doesn't need webdriver-manager
@@ -2685,12 +2784,19 @@ class CookieManager:
             self.logger.info(f"Unexpected error launching {browser_name}: {e}")
             return None
 
-    def _extract_cookies_from_driver(self, driver, browser_name):
-        """Extract cookies from Selenium driver. Returns cookie_jar or None."""
+    def _extract_cookies_from_driver(self, driver, browser_name, interactive=True):
+        """Extract cookies from Selenium driver. Returns cookie_jar or None.
+
+        interactive: True = prompt with input() after login (CLI mode),
+                     False = poll for login automatically (web UI mode).
+        """
         import http.cookiejar
         import time
         from selenium.webdriver.common.by import By
         from selenium.common.exceptions import TimeoutException
+
+        LOGIN_POLL_INTERVAL = 3   # seconds between login checks
+        LOGIN_TIMEOUT = 300       # 5 minutes max wait
 
         try:
             # Navigate to Apple Music
@@ -2703,26 +2809,46 @@ class CookieManager:
 
             if not is_logged_in:
                 self.logger.warn("Not logged in to Apple Music")
-                driver.quit()
 
-                # Relaunch in visible mode
-                self.logger.info(f"Launching visible {browser_name.capitalize()} for login...")
-                driver = self._launch_browser(browser_name, headless=False)
-                if not driver:
-                    return None
+                if interactive:
+                    # CLI mode: quit headless, relaunch visible, wait for input()
+                    driver.quit()
+                    self.logger.info(f"Launching visible {browser_name.capitalize()} for login...")
+                    driver = self._launch_browser(browser_name, headless=False)
+                    if not driver:
+                        return None
 
-                driver.get("https://music.apple.com")
+                    driver.get("https://music.apple.com")
 
-                self.logger.info("\n" + "=" * 60)
-                self.logger.info("Please log in to Apple Music")
-                self.logger.info("=" * 60)
-                self.logger.info(f"1. A {browser_name.capitalize()} window has opened")
-                self.logger.info("2. Log in to your Apple Music account")
-                self.logger.info("3. Once logged in, press Enter here to continue")
-                self.logger.info("=" * 60 + "\n")
+                    self.logger.info("\n" + "=" * 60)
+                    self.logger.info("Please log in to Apple Music")
+                    self.logger.info("=" * 60)
+                    self.logger.info(f"1. A {browser_name.capitalize()} window has opened")
+                    self.logger.info("2. Log in to your Apple Music account")
+                    self.logger.info("3. Once logged in, press Enter here to continue")
+                    self.logger.info("=" * 60 + "\n")
 
-                input("Press Enter after logging in...")
-                time.sleep(2)  # Let cookies settle
+                    input("Press Enter after logging in...")
+                    time.sleep(2)  # Let cookies settle
+                else:
+                    # Web UI mode: browser is already visible, poll for login
+                    self.logger.info("=" * 60)
+                    self.logger.info("Please log in to Apple Music in the browser window")
+                    self.logger.info(f"Waiting up to {LOGIN_TIMEOUT // 60} minutes...")
+                    self.logger.info("=" * 60)
+
+                    elapsed = 0
+                    while elapsed < LOGIN_TIMEOUT:
+                        time.sleep(LOGIN_POLL_INTERVAL)
+                        elapsed += LOGIN_POLL_INTERVAL
+                        if self._check_login_status(driver):
+                            self.logger.ok("Login detected!")
+                            time.sleep(2)  # Let cookies settle
+                            break
+                    else:
+                        self.logger.error("Login timed out. Please try again.")
+                        driver.quit()
+                        return None
 
             # Extract cookies
             selenium_cookies = driver.get_cookies()
@@ -2810,16 +2936,18 @@ class CookieManager:
             self.logger.info(f"Login check uncertain: {e}")
             return False  # Assume not logged in on error
 
-    def auto_refresh(self, backup=True):
+    def auto_refresh(self, backup=True, browser=None):
         """
         Automatically refresh cookies using Selenium.
         Creates backup before overwriting if backup=True.
+        browser: None = interactive prompt (CLI), 'auto' = try all browsers,
+                 'chrome'/'firefox'/'safari'/'edge' = specific browser.
         Returns True if successful, False otherwise.
         """
         self.logger.info("Attempting automatic cookie refresh...")
 
         # Extract cookies using Selenium
-        cookie_jar = self._extract_with_selenium()
+        cookie_jar = self._extract_with_selenium(browser=browser)
 
         if not cookie_jar:
             self.logger.error("Automatic cookie refresh failed")
@@ -3070,11 +3198,14 @@ class USBManager:
         # File is up-to-date, skip
         return False
 
-    def sync_to_usb(self, source_dir, usb_dir=DEFAULT_USB_DIR, dry_run=False):
+    def sync_to_usb(self, source_dir, usb_dir=DEFAULT_USB_DIR, dry_run=False, volume=None):
         """
         Copy files from source_dir to USB drive with incremental sync.
         Only copies new or modified files, skips unchanged files.
         Returns (success boolean, USBSyncStatistics).
+
+        Args:
+            volume: Pre-selected volume name. Skips interactive selection if provided.
         """
         start_time = time.time()
         stats = USBSyncStatistics()
@@ -3098,8 +3229,9 @@ class USBManager:
         stats.files_found = len(mp3_files)
         self.logger.info(f"Files to process: {stats.files_found}")
 
-        # Select USB drive
-        volume = self.select_usb_drive()
+        # Select USB drive (skip interactive prompt if volume pre-selected)
+        if volume is None:
+            volume = self.select_usb_drive()
         if not volume:
             return False, stats
 
@@ -5730,6 +5862,14 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
     summary_parser.add_argument('--quick', action='store_true',
                                help='Show only aggregate statistics')
 
+    # ── web ────────────────────────────────────────────────────────
+    web_parser = subparsers.add_parser('web',
+        help='Start the web dashboard UI')
+    web_parser.add_argument('--host', default='127.0.0.1',
+                            help='Host to bind (default: 127.0.0.1)')
+    web_parser.add_argument('--port', type=int, default=5555,
+                            help='Port (default: 5555)')
+
     return parser
 
 
@@ -6200,6 +6340,20 @@ def main():
 
         else:
             logger.error("For pipeline command, specify --playlist, --url, or --auto")
+            sys.exit(1)
+
+    elif args.command == 'web':
+        # Start web dashboard UI
+        try:
+            import importlib.util
+            web_ui_path = Path(__file__).resolve().parent / 'web_ui.py'
+            spec = importlib.util.spec_from_file_location('web_ui', web_ui_path)
+            web_ui = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(web_ui)
+            web_ui.start_server(host=args.host, port=args.port)
+        except ImportError as e:
+            logger.error(f"Web UI requires Flask: {e}")
+            logger.info("Install with: pip install flask")
             sys.exit(1)
 
     else:

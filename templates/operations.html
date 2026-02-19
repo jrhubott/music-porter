@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}Operations - Music Porter{% endblock %}
+{% block content %}
+<h4 class="mb-4">Operations</h4>
+
+<div class="card mb-4">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h6 class="mb-0">Task History</h6>
+      <button class="btn btn-outline-secondary btn-sm" id="refreshTasks"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover mb-0">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Operation</th>
+            <th>Description</th>
+            <th>Duration</th>
+            <th class="text-end">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="tasksTable">
+          <tr><td colspan="5" class="text-center text-muted">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Log viewer for selected task -->
+<div class="card d-none" id="taskLogCard">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-terminal"></i> Task Log: <span id="taskLogTitle">-</span></span>
+    <button type="button" class="btn-close btn-close-white" id="closeLog"></button>
+  </div>
+  <div class="card-body p-0">
+    <div class="log-panel" id="taskLog"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function statusBadge(status) {
+  const map = {
+    running: 'bg-primary badge-running',
+    completed: 'bg-success',
+    failed: 'bg-danger',
+    cancelled: 'bg-warning text-dark',
+    pending: 'bg-secondary',
+  };
+  return `<span class="badge ${map[status] || 'bg-secondary'}">${status}</span>`;
+}
+
+function formatDuration(seconds) {
+  if (seconds < 60) return seconds.toFixed(1) + 's';
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return m + 'm ' + s + 's';
+}
+
+function loadTasks() {
+  fetch('/api/tasks').then(r=>r.json()).then(tasks => {
+    const tbody = document.getElementById('tasksTable');
+    if (tasks.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No operations yet</td></tr>';
+      return;
+    }
+    // Show most recent first
+    tasks.reverse();
+    tbody.innerHTML = tasks.map(t => `
+      <tr>
+        <td>${statusBadge(t.status)}</td>
+        <td><code>${t.operation}</code></td>
+        <td>${t.description}</td>
+        <td>${formatDuration(t.elapsed)}</td>
+        <td class="text-end">
+          ${t.status === 'running' ? `<button class="btn btn-outline-warning btn-sm py-0 px-2" onclick="cancelTask('${t.id}')"><i class="bi bi-stop-fill"></i></button>` : ''}
+          <button class="btn btn-outline-secondary btn-sm py-0 px-2" onclick="viewLog('${t.id}', '${t.description}')"><i class="bi bi-terminal"></i></button>
+        </td>
+      </tr>
+    `).join('');
+  });
+}
+
+function cancelTask(id) {
+  fetch('/api/tasks/' + id + '/cancel', {method:'POST'})
+    .then(r=>r.json()).then(d => {
+      if (d.ok) showToast('Cancellation requested', 'info');
+      else showToast(d.error || 'Failed', 'error');
+      loadTasks();
+    });
+}
+
+function viewLog(id, desc) {
+  document.getElementById('taskLogCard').classList.remove('d-none');
+  document.getElementById('taskLogTitle').textContent = desc;
+
+  // Check if task is still running
+  fetch('/api/tasks/' + id).then(r=>r.json()).then(task => {
+    if (task.status === 'running') {
+      startSSE(id, 'taskLog');
+    } else {
+      // For completed tasks, show a summary
+      const panel = document.getElementById('taskLog');
+      panel.innerHTML = `<div class="log-line log-INFO">Task ${task.status}: ${desc}</div>`;
+      if (task.error) panel.innerHTML += `<div class="log-line log-ERROR">${task.error}</div>`;
+      if (task.result) {
+        const resultStr = JSON.stringify(task.result, null, 2);
+        panel.innerHTML += `<div class="log-line log-OK">Result: ${resultStr}</div>`;
+      }
+    }
+  });
+}
+
+document.getElementById('closeLog').addEventListener('click', function() {
+  document.getElementById('taskLogCard').classList.add('d-none');
+});
+
+document.getElementById('refreshTasks').addEventListener('click', loadTasks);
+
+loadTasks();
+setInterval(loadTasks, 5000);
+</script>
+{% endblock %}

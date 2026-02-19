@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+{% block title %}Cover Art - Music Porter{% endblock %}
+{% block content %}
+<h4 class="mb-4">Cover Art Management</h4>
+
+<ul class="nav nav-tabs mb-3" role="tablist">
+  <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#caEmbed">Embed</a></li>
+  <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#caExtract">Extract</a></li>
+  <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#caStrip">Strip</a></li>
+  <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#caResize">Resize</a></li>
+</ul>
+
+<div class="tab-content">
+  <!-- Embed -->
+  <div class="tab-pane fade show active" id="caEmbed">
+    <div class="card mb-3">
+      <div class="card-body">
+        <p class="text-muted">Embed cover art from M4A source files into MP3s.</p>
+        <form id="embedForm">
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label">Export Directory</label>
+              <select class="form-select form-select-sm export-dir-select" id="embedDir"><option value="">Loading...</option></select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Source Directory (optional)</label>
+              <select class="form-select form-select-sm" id="embedSource">
+                <option value="">Auto-detect from music/</option>
+              </select>
+            </div>
+          </div>
+          <div class="d-flex gap-3 mt-3">
+            <div class="form-check"><input class="form-check-input" type="checkbox" id="embedForce"><label class="form-check-label" for="embedForce">Force re-embed</label></div>
+            <div class="form-check"><input class="form-check-input" type="checkbox" id="embedDryRun"><label class="form-check-label" for="embedDryRun">Dry Run</label></div>
+            <div class="form-check"><input class="form-check-input" type="checkbox" id="embedVerbose"><label class="form-check-label" for="embedVerbose">Verbose</label></div>
+          </div>
+          <button type="submit" class="btn btn-primary mt-3"><i class="bi bi-play-fill"></i> Embed</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Extract -->
+  <div class="tab-pane fade" id="caExtract">
+    <div class="card mb-3">
+      <div class="card-body">
+        <p class="text-muted">Extract embedded cover art to image files.</p>
+        <form id="extractForm">
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label">Export Directory</label>
+              <select class="form-select form-select-sm export-dir-select" id="extractDir"><option value="">Loading...</option></select>
+            </div>
+          </div>
+          <div class="d-flex gap-3 mt-3">
+            <div class="form-check"><input class="form-check-input" type="checkbox" id="extractDryRun"><label class="form-check-label" for="extractDryRun">Dry Run</label></div>
+            <div class="form-check"><input class="form-check-input" type="checkbox" id="extractVerbose"><label class="form-check-label" for="extractVerbose">Verbose</label></div>
+          </div>
+          <button type="submit" class="btn btn-primary mt-3"><i class="bi bi-play-fill"></i> Extract</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Strip -->
+  <div class="tab-pane fade" id="caStrip">
+    <div class="card mb-3">
+      <div class="card-body">
+        <p class="text-muted">Remove cover art from MP3s to reduce file size.</p>
+        <form id="stripForm">
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label">Export Directory</label>
+              <select class="form-select form-select-sm export-dir-select" id="stripDir"><option value="">Loading...</option></select>
+            </div>
+          </div>
+          <div class="d-flex gap-3 mt-3">
+            <div class="form-check"><input class="form-check-input" type="checkbox" id="stripDryRun"><label class="form-check-label" for="stripDryRun">Dry Run</label></div>
+            <div class="form-check"><input class="form-check-input" type="checkbox" id="stripVerbose"><label class="form-check-label" for="stripVerbose">Verbose</label></div>
+          </div>
+          <button type="submit" class="btn btn-warning mt-3"><i class="bi bi-play-fill"></i> Strip Cover Art</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Resize -->
+  <div class="tab-pane fade" id="caResize">
+    <div class="card mb-3">
+      <div class="card-body">
+        <p class="text-muted">Resize embedded cover art to reduce file size.</p>
+        <form id="resizeForm">
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label">Export Directory</label>
+              <select class="form-select form-select-sm export-dir-select" id="resizeDir"><option value="">Loading...</option></select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Max Size (px)</label>
+              <input type="number" class="form-control form-control-sm" id="resizeMaxSize" value="100" min="16" max="2000">
+            </div>
+          </div>
+          <div class="d-flex gap-3 mt-3">
+            <div class="form-check"><input class="form-check-input" type="checkbox" id="resizeDryRun"><label class="form-check-label" for="resizeDryRun">Dry Run</label></div>
+            <div class="form-check"><input class="form-check-input" type="checkbox" id="resizeVerbose"><label class="form-check-label" for="resizeVerbose">Verbose</label></div>
+          </div>
+          <button type="submit" class="btn btn-primary mt-3"><i class="bi bi-play-fill"></i> Resize</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Log -->
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-terminal"></i> Output</span>
+    <span class="badge bg-secondary" id="caStatus">Idle</span>
+  </div>
+  <div class="card-body p-0">
+    <div class="log-panel" id="caLog"><div class="log-line text-muted">Ready.</div></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentProfile = '';
+
+function loadDirs() {
+  fetch('/api/status').then(r=>r.json()).then(s => { currentProfile = s.profile; });
+  fetch('/api/directories/export').then(r=>r.json()).then(dirs => {
+    const html = dirs.map(d => `<option value="${d.name}">${d.name} (${d.files} files)</option>`).join('');
+    document.querySelectorAll('.export-dir-select').forEach(sel => {
+      sel.innerHTML = html || '<option value="">No export directories</option>';
+    });
+  });
+  fetch('/api/directories/music').then(r=>r.json()).then(dirs => {
+    const sel = document.getElementById('embedSource');
+    sel.innerHTML = '<option value="">Auto-detect from music/</option>' +
+      dirs.map(d => `<option value="music/${d}">music/${d}</option>`).join('');
+  });
+}
+
+function statusCb(msg) {
+  const badge = document.getElementById('caStatus');
+  if (msg.status === 'completed') { badge.textContent = 'Completed'; badge.className = 'badge bg-success'; }
+  else { badge.textContent = msg.status; badge.className = 'badge bg-danger'; }
+}
+
+function runCoverArt(action, data) {
+  document.getElementById('caStatus').textContent = 'Running';
+  document.getElementById('caStatus').className = 'badge bg-primary badge-running';
+  submitOperation('/api/cover-art/' + action, data, 'caLog', statusCb);
+}
+
+document.getElementById('embedForm').addEventListener('submit', function(e) {
+  e.preventDefault();
+  runCoverArt('embed', {
+    directory: `export/${currentProfile}/${document.getElementById('embedDir').value}`,
+    source: document.getElementById('embedSource').value || null,
+    force: document.getElementById('embedForce').checked,
+    dry_run: document.getElementById('embedDryRun').checked,
+    verbose: document.getElementById('embedVerbose').checked,
+  });
+});
+
+document.getElementById('extractForm').addEventListener('submit', function(e) {
+  e.preventDefault();
+  runCoverArt('extract', {
+    directory: `export/${currentProfile}/${document.getElementById('extractDir').value}`,
+    dry_run: document.getElementById('extractDryRun').checked,
+    verbose: document.getElementById('extractVerbose').checked,
+  });
+});
+
+document.getElementById('stripForm').addEventListener('submit', function(e) {
+  e.preventDefault();
+  if (!confirm('This will remove all cover art. Continue?')) return;
+  runCoverArt('strip', {
+    directory: `export/${currentProfile}/${document.getElementById('stripDir').value}`,
+    dry_run: document.getElementById('stripDryRun').checked,
+    verbose: document.getElementById('stripVerbose').checked,
+  });
+});
+
+document.getElementById('resizeForm').addEventListener('submit', function(e) {
+  e.preventDefault();
+  runCoverArt('resize', {
+    directory: `export/${currentProfile}/${document.getElementById('resizeDir').value}`,
+    max_size: parseInt(document.getElementById('resizeMaxSize').value),
+    dry_run: document.getElementById('resizeDryRun').checked,
+    verbose: document.getElementById('resizeVerbose').checked,
+  });
+});
+
+loadDirs();
+</script>
+{% endblock %}

@@ -398,7 +398,7 @@ The tool uses a "hard gate" protection system for original metadata:
 5. ~~**Configuration presets** - Save and load common conversion/tagging configurations~~ *(implemented in v1.8.0)*
 
 ### Medium Priority
-6. **Web UI** - Browser-based interface for remote management
+6. ~~**Web UI** - Browser-based interface for remote management~~ *(implemented in v2.0.0)*
 7. **Automatic USB detection** - Start sync when USB drive is plugged in
 8. ~~**Progress indicators** - Real-time progress bars for long-running operations~~ *(implemented in v1.4.0)*
 9. **Download resume** - Resume interrupted downloads
