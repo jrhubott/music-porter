@@ -11,6 +11,7 @@ Interactive menu - easiest way to get started!
 - **A**: Process all playlists
 - **U**: Enter a URL
 - **C**: Copy to USB only
+- **P**: Change output profile
 - **X**: Exit
 
 ### Full Workflow in One Command:
@@ -34,9 +35,9 @@ Processes all configured playlists and copies to USB.
 | **Download only** | `./music-porter download --playlist "Name"` |
 | **Convert only** | `./music-porter convert music/Name` |
 | **Convert with quality** | `./music-porter convert music/Name --preset high` |
-| **Update tags** | `./music-porter tag export/Name --album "Album"` |
-| **Restore tags** | `./music-porter restore export/Name --all` |
-| **Copy to USB** | `./music-porter sync-usb export/Name` |
+| **Update tags** | `./music-porter tag export/ride-command/Name --album "Album"` |
+| **Restore tags** | `./music-porter restore export/ride-command/Name --all` |
+| **Copy to USB** | `./music-porter sync-usb export/ride-command/Name` |
 | **Preview changes** | Add `--dry-run` before any command |
 | **See details** | Add `--verbose` before any command |
 | **Get help** | `./music-porter --help` |
@@ -47,7 +48,7 @@ Processes all configured playlists and copies to USB.
 ### New Playlist from URL
 ```bash
 ./music-porter pipeline --url "https://music.apple.com/..."
-# Asks to save to playlists.conf
+# Asks to save to config.yaml
 # Asks to copy to USB
 ```
 
@@ -63,13 +64,13 @@ Processes all configured playlists and copies to USB.
 
 ### Re-convert with Force
 ```bash
-./music-porter convert music/Pop_Workout --output export/Pop_Workout --force
+./music-porter convert music/Pop_Workout --output export/ride-command/Pop_Workout --force
 ```
 
 ### Quick USB Copy
 ```bash
 ./music-porter sync-usb
-# Copies entire export/ directory
+# Copies entire export/<profile>/ directory
 ```
 
 ## 🔧 Useful Flags
@@ -77,8 +78,9 @@ Processes all configured playlists and copies to USB.
 | Flag | What It Does | Example |
 |------|-------------|---------|
 | `--dry-run` | Preview without changes | `--dry-run convert music/Pop_Workout` |
-| `--verbose` | Show detailed info | `--verbose tag export/Pop_Workout --album "Test"` |
+| `--verbose` | Show detailed info | `--verbose tag export/ride-command/Pop_Workout --album "Test"` |
 | `--force` | Overwrite existing files | `convert music/Pop_Workout --force` |
+| `--output-type` | Select output profile | `pipeline --playlist "Name" --output-type basic` |
 | `--copy-to-usb` | Auto-copy after pipeline | `pipeline --playlist "Name" --copy-to-usb` |
 | `--auto` | No prompts (batch mode) | `pipeline --auto` |
 | `--preset` | Quality preset | `convert music/Pop_Workout --preset high` |
@@ -112,10 +114,36 @@ Processes all configured playlists and copies to USB.
 ## 📁 Where Files Go
 
 ```
-music/Pop_Workout/           ← Downloaded M4A files
-export/Pop_Workout/          ← Converted MP3 files (flat)
-logs/2026-02-17_23-00-00.log ← Execution logs
+music/Pop_Workout/                    ← Downloaded M4A files
+export/ride-command/Pop_Workout/      ← Converted MP3 files (profile-scoped, flat)
+export/basic/Pop_Workout/             ← Another profile's output
+logs/2026-02-17_23-00-00.log          ← Execution logs
+config.yaml                           ← Configuration (playlists, settings)
 ```
+
+Export directories are scoped by output profile: `export/<profile>/<playlist>/`.
+
+## ⚙️ Configuration (config.yaml)
+
+Configuration uses `config.yaml` (YAML format) instead of the old `playlists.conf`.
+
+```yaml
+settings:
+  output_type: ride-command   # Default output profile
+  usb_dir: RZR/Music          # USB subdirectory
+  workers: 4                  # Parallel conversion workers
+
+playlists:
+  Pop_Workout:
+    url: https://music.apple.com/us/playlist/...
+    name: Pop Workout
+  Thumbs_Up:
+    url: https://music.apple.com/us/playlist/...
+    name: Thumbs Up
+```
+
+**Settings override precedence:** CLI flags override config.yaml values.
+For example, `--output-type basic` overrides the `output_type` setting in config.yaml.
 
 ## 🆘 Quick Fixes
 

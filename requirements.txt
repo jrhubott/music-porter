@@ -20,3 +20,6 @@ webdriver-manager>=4.0.1
 
 # Image processing for cover art resizing
 Pillow>=10.0.0
+
+# YAML configuration file support
+PyYAML>=6.0

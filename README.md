@@ -11,7 +11,8 @@ A powerful music playlist management and conversion tool that downloads Apple Mu
 - **Preserve metadata** with TXXX frame protection for original tags
 - **USB sync** with automatic drive detection and intelligent copying
 - **Pipeline orchestration** for automated multi-stage workflows
-- **Interactive menu** for user-friendly operation
+- **Interactive menu** for user-friendly operation (includes profile switching via `P`)
+- **YAML configuration** with global settings and CLI flag overrides
 - **Automatic cookie management** with browser-based refresh and validation
 - **Cover art management** with embed, extract, update, strip, and resize operations
 - **Comprehensive statistics** and detailed logging
@@ -58,6 +59,7 @@ A powerful music playlist management and conversion tool that downloads Apple Mu
 
 - Python 3.8+
 - ffmpeg (system binary)
+- PyYAML>=6.0 (installed via requirements.txt)
 - Valid Apple Music subscription and cookies.txt file
 
 ### Installation
@@ -74,7 +76,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 # Configure playlists
-# Edit playlists.conf with format: key|url|name
+# Edit config.yaml (see Configuration section below)
 ```
 
 ### Basic Usage
@@ -110,13 +112,13 @@ MP3 conversion supports configurable quality presets to balance file size and au
 
 ```bash
 # Default lossless quality (320kbps CBR)
-./music-porter convert music/Pop_Workout --output export/Pop_Workout
+./music-porter convert music/Pop_Workout --output export/ride-command/Pop_Workout
 
 # High quality (VBR)
-./music-porter convert music/Pop_Workout --output export/Pop_Workout --preset high
+./music-porter convert music/Pop_Workout --output export/ride-command/Pop_Workout --preset high
 
 # Custom quality (VBR quality 0 - best)
-./music-porter convert music/Pop_Workout --output export/Pop_Workout --preset custom --quality 0
+./music-porter convert music/Pop_Workout --output export/ride-command/Pop_Workout --preset custom --quality 0
 
 # Full pipeline with quality preset
 ./music-porter pipeline --playlist "Pop_Workout" --preset medium
@@ -144,7 +146,7 @@ MP3 conversion supports configurable quality presets to balance file size and au
 
 **Convert** - Convert M4A to MP3
 ```bash
-./music-porter convert music/Pop_Workout --output export/Pop_Workout
+./music-porter convert music/Pop_Workout --output export/ride-command/Pop_Workout
 ./music-porter convert music/Pop_Workout --preset high --force
 ./music-porter convert music/Pop_Workout --workers 4    # Parallel conversion
 ./music-porter convert music/Pop_Workout --workers 1    # Sequential (single-threaded)
@@ -152,46 +154,46 @@ MP3 conversion supports configurable quality presets to balance file size and au
 
 **Tag** - Update MP3 tags
 ```bash
-./music-porter tag export/Pop_Workout --album "Pop Workout"
-./music-porter tag export/Pop_Workout --album "Pop" --artist "Various"
+./music-porter tag export/ride-command/Pop_Workout --album "Pop Workout"
+./music-porter tag export/ride-command/Pop_Workout --album "Pop" --artist "Various"
 ```
 
 **Restore** - Restore original tags from TXXX frames
 ```bash
-./music-porter restore export/Pop_Workout --all
-./music-porter restore export/Pop_Workout --album --artist
+./music-porter restore export/ride-command/Pop_Workout --all
+./music-porter restore export/ride-command/Pop_Workout --album --artist
 ```
 
 **Reset** - Reset tags from source M4A files (⚠️ overwrites TXXX protection)
 ```bash
-./music-porter reset music/Pop_Workout export/Pop_Workout
+./music-porter reset music/Pop_Workout export/ride-command/Pop_Workout
 ```
 
 **USB Sync** - Copy to USB drive
 ```bash
-./music-porter sync-usb export/Pop_Workout
+./music-porter sync-usb export/ride-command/Pop_Workout
 ./music-porter sync-usb  # Copy entire export directory
 ```
 
 **Cover Art** - Manage embedded album artwork
 ```bash
 # Embed cover art from M4A sources into MP3s
-./music-porter cover-art embed export/Pop_Workout
+./music-porter cover-art embed export/ride-command/Pop_Workout
 
 # Embed cover art for all configured playlists
 ./music-porter cover-art embed --all
 
 # Extract cover art to image files
-./music-porter cover-art extract export/Pop_Workout
+./music-porter cover-art extract export/ride-command/Pop_Workout
 
 # Replace cover art from a single image
-./music-porter cover-art update export/Pop_Workout --image artwork.jpg
+./music-porter cover-art update export/ride-command/Pop_Workout --image artwork.jpg
 
 # Strip cover art to reduce file size
-./music-porter cover-art strip export/Pop_Workout
+./music-porter cover-art strip export/ride-command/Pop_Workout
 
 # Resize embedded cover art
-./music-porter cover-art resize export/Pop_Workout --max-size 600
+./music-porter cover-art resize export/ride-command/Pop_Workout --max-size 600
 
 # Resize cover art for all configured playlists
 ./music-porter cover-art resize --all --max-size 600
@@ -210,8 +212,11 @@ MP3 conversion supports configurable quality presets to balance file size and au
 --verbose, -v     Enable verbose output
 --dry-run         Preview changes without modifying files
 --workers N       Parallel conversion workers (default: min(cpu_count, 4))
+--output-type T   Select output profile (default from config.yaml settings.output_type)
 --version         Show version information
 ```
+
+> **Note:** CLI flags always override settings from `config.yaml`.
 
 ## Documentation
 
@@ -223,17 +228,26 @@ MP3 conversion supports configurable quality presets to balance file size and au
 
 ## Configuration
 
-### playlists.conf Format
+### config.yaml Format
 
-```
-key|url|album_name
+Configuration uses YAML format with two sections: `settings` (global defaults) and `playlists` (playlist definitions).
+
+```yaml
+settings:
+  output_type: ride-command    # Default output profile
+  usb_dir: RZR/Music           # Default USB directory
+  workers: 6                   # Parallel conversion workers
+
+playlists:
+  - key: Pop_Workout
+    url: https://music.apple.com/us/playlist/...
+    name: Pop Workout
+  - key: Thumbs_Up
+    url: https://music.apple.com/us/playlist/...
+    name: Thumbs Up
 ```
 
-Example:
-```
-Pop_Workout|https://music.apple.com/us/playlist/...|Pop Workout
-Thumbs_Up|https://music.apple.com/us/playlist/...|Thumbs Up
-```
+Settings in `config.yaml` are overridden by CLI flags (e.g., `--output-type`, `--workers`).
 
 ### Apple Music Authentication
 
@@ -297,19 +311,24 @@ The tool includes intelligent cookie management to prevent authentication failur
 
 ```
 .
-├── music-porter            # Main unified tool (RECOMMENDED)
+├── music-porter                     # Main unified tool (RECOMMENDED)
 ├── do-it-all                        # Legacy wrapper (deprecated)
 ├── ride-command-mp3-export          # Legacy wrapper (deprecated)
-├── playlists.conf                   # Playlist configuration
+├── config.yaml                      # Configuration (playlists + settings)
 ├── cookies.txt                      # Apple Music authentication
 ├── music/                           # Downloaded M4A files (nested structure)
 │   └── Pop_Workout/                 # Artist/Album/Track.m4a
-├── export/                          # Converted MP3 files (flat structure)
-│   └── Pop_Workout/                 # "Artist - Title.mp3"
+├── export/                          # Converted MP3 files (profile-scoped)
+│   ├── ride-command/                # Ride Command profile exports
+│   │   └── Pop_Workout/             # "Artist - Title.mp3"
+│   └── basic/                       # Basic profile exports
+│       └── Pop_Workout/             # "Artist - Title.mp3"
 ├── logs/                            # Execution logs (timestamped)
 ├── .venv/                           # Python virtual environment
 └── docs/                            # Documentation
 ```
+
+Export directories are scoped by output profile: `export/<profile>/<playlist>/`. This keeps files from different profiles separate and allows switching profiles without overwriting previous exports.
 
 ## Troubleshooting
 
@@ -376,7 +395,7 @@ The tool uses a "hard gate" protection system for original metadata:
 2. **Incremental updates** - Smart detection of changed tracks without full re-download
 3. ~~**Multi-threaded conversion** - Parallel processing for faster batch conversions~~ *(implemented in v1.3.0)*
 4. **Batch tag operations** - Apply tag changes to multiple playlists at once
-5. **Configuration presets** - Save and load common conversion/tagging configurations
+5. ~~**Configuration presets** - Save and load common conversion/tagging configurations~~ *(implemented in v1.7.0)*
 
 ### Medium Priority
 6. **Web UI** - Browser-based interface for remote management

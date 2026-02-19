@@ -6,6 +6,8 @@ The unified Apple Music to Ride Command MP3 converter combines download, convers
 
 The tool uses the ffmpeg-python library for audio conversion, which provides a Pythonic API around the system ffmpeg binary. The ffmpeg binary must be installed on your system. The Python library is automatically installed when running the tool for the first time.
 
+Configuration is stored in `config.yaml` (YAML format), which requires the `PyYAML>=6.0` dependency (installed via `requirements.txt`). If `config.yaml` does not exist, a default one is auto-created on first run.
+
 ## Platform Support
 
 The tool runs on **macOS**, **Linux**, and **Windows** with automatic platform detection.
@@ -40,6 +42,15 @@ The tool runs on **macOS**, **Linux**, and **Windows** with automatic platform d
 ./music-porter
 ```
 Shows an interactive menu for easy playlist selection and processing.
+
+**Menu options:**
+- **1-N** - Select a numbered playlist to process
+- **A** - Process all playlists (auto mode)
+- **U** - Enter a URL to download
+- **C** - Copy to USB drive
+- **P** - Change output profile (shows current profile, persists choice to `config.yaml`)
+- **S** - Show library summary
+- **X** - Exit
 
 ### Full Pipeline (One Command)
 ```bash
@@ -171,7 +182,7 @@ If you prefer manual control or automation fails:
 
 **What it does:**
 1. Downloads playlist from Apple Music → `music/{key}/`
-2. Converts M4A → MP3 → `export/{key}/`
+2. Converts M4A → MP3 → `export/{profile}/{key}/`
 3. Updates tags (Album = playlist name, Artist = "Various")
 4. Optionally copies to USB drive
 
@@ -200,7 +211,7 @@ If you prefer manual control or automation fails:
 ./music-porter convert music/Pop_Workout
 
 # Specify output directory
-./music-porter convert music/Pop_Workout --output export/Pop_Workout
+./music-porter convert music/Pop_Workout --output export/ride-command/Pop_Workout
 
 # With quality presets
 ./music-porter convert music/Pop_Workout --preset high
@@ -227,10 +238,10 @@ If you prefer manual control or automation fails:
 
 ```bash
 # Update album tag
-./music-porter tag export/Pop_Workout --album "Pop Workout"
+./music-porter tag export/ride-command/Pop_Workout --album "Pop Workout"
 
 # Update both album and artist
-./music-porter tag export/Pop_Workout --album "Pop Workout" --artist "Various"
+./music-porter tag export/ride-command/Pop_Workout --album "Pop Workout" --artist "Various"
 ```
 
 **Features:**
@@ -244,12 +255,12 @@ If you prefer manual control or automation fails:
 
 ```bash
 # Restore all original tags
-./music-porter restore export/Pop_Workout --all
+./music-porter restore export/ride-command/Pop_Workout --all
 
 # Restore specific tags
-./music-porter restore export/Pop_Workout --album
-./music-porter restore export/Pop_Workout --title
-./music-porter restore export/Pop_Workout --artist
+./music-porter restore export/ride-command/Pop_Workout --album
+./music-porter restore export/ride-command/Pop_Workout --title
+./music-porter restore export/ride-command/Pop_Workout --artist
 ```
 
 **Features:**
@@ -265,10 +276,10 @@ If you prefer manual control or automation fails:
 ./music-porter sync-usb
 
 # Copy specific directory
-./music-porter sync-usb export/Pop_Workout
+./music-porter sync-usb export/ride-command/Pop_Workout
 
 # Custom USB path
-./music-porter sync-usb export/Pop_Workout --usb-dir "RZR/Music"
+./music-porter sync-usb export/ride-command/Pop_Workout --usb-dir "RZR/Music"
 ```
 
 **Features:**
@@ -284,7 +295,7 @@ Preview changes without modifying any files
 
 ```bash
 ./music-porter --dry-run convert music/Pop_Workout
-./music-porter --dry-run tag export/Pop_Workout --album "Test"
+./music-porter --dry-run tag export/ride-command/Pop_Workout --album "Test"
 ```
 
 ### --verbose / -v
@@ -292,7 +303,7 @@ Show detailed information during processing
 
 ```bash
 ./music-porter --verbose convert music/Pop_Workout
-./music-porter -v tag export/Pop_Workout --album "Test"
+./music-porter -v tag export/ride-command/Pop_Workout --album "Test"
 ```
 
 ### Combined
@@ -440,17 +451,39 @@ Invalid quality settings produce clear errors:
 
 ## Configuration
 
-### playlists.conf
-Format: `key|url|name`
+### config.yaml
 
-```conf
-# Format: key|url|name
-Pop_Workout|https://music.apple.com/us/playlist/pop-workout/...|Pop Workout
-Thumbs_Up|https://music.apple.com/us/playlist/thumbs-up/...|Thumbs Up
+The tool uses a YAML configuration file (`config.yaml`) for playlists and settings. If `config.yaml` does not exist, a default one is auto-created on first run.
+
+```yaml
+settings:
+  output_type: ride-command
+  usb_dir: RZR/Music
+  workers: 6
+
+playlists:
+  - key: Pop_Workout
+    url: https://music.apple.com/us/playlist/pop-workout/...
+    name: Pop Workout
+  - key: Thumbs_Up
+    url: https://music.apple.com/us/playlist/thumbs-up/...
+    name: Thumbs Up
 ```
 
+**Settings fields:**
+- `output_type`: Default output profile (e.g., `ride-command`, `basic`). Overridden by `--output-type` CLI flag.
+- `usb_dir`: Default USB destination directory. Overridden by `--usb-dir` CLI flag.
+- `workers`: Number of parallel workers for batch operations.
+
+**Playlist fields:**
+- `key`: Short identifier (used for directory names)
+- `url`: Apple Music playlist URL
+- `name`: Display name for the playlist
+
+**Settings precedence:** CLI flag > config.yaml > hardcoded constant
+
 **Adding new playlists:**
-- Edit `playlists.conf` manually, or
+- Edit `config.yaml` manually, or
 - Use the interactive menu "Enter URL" option (asks to save after download)
 
 ## Directory Structure
@@ -458,16 +491,19 @@ Thumbs_Up|https://music.apple.com/us/playlist/thumbs-up/...|Thumbs Up
 ```
 .
 ├── music-porter    # Main script
-├── playlists.conf           # Playlist configuration
+├── config.yaml              # Playlist and settings configuration
 ├── music/                   # Downloaded M4A files (nested by artist/album)
 │   └── Pop_Workout/
 │       └── Artist/Album/Track.m4a
-├── export/                  # Converted MP3 files (flat structure)
-│   └── Pop_Workout/
-│       └── Artist - Title.mp3
+├── export/                  # Converted MP3 files (profile-scoped, flat structure)
+│   └── ride-command/        # Output profile directory
+│       └── Pop_Workout/
+│           └── Artist - Title.mp3
 └── logs/                    # Timestamped execution logs
     └── YYYY-MM-DD_HH-MM-SS.log
 ```
+
+Export directories are scoped by the active output profile: `export/<profile>/<playlist>/` (e.g., `export/ride-command/Pop_Workout/`, `export/basic/Pop_Workout/`). This keeps outputs from different profiles separate.
 
 ## Tag Preservation System
 
@@ -489,17 +525,17 @@ Thumbs_Up|https://music.apple.com/us/playlist/thumbs-up/...|Thumbs Up
 
 ```bash
 # 1. Convert M4A → MP3
-./music-porter convert music/Pop_Workout --output export/Pop_Workout
+./music-porter convert music/Pop_Workout --output export/ride-command/Pop_Workout
 # Result: Title = "Ava Max - My Oh My"
 #         TXXX:OriginalTitle = "My Oh My"
 
 # 2. Update album tag
-./music-porter tag export/Pop_Workout --album "Pop Workout"
+./music-porter tag export/ride-command/Pop_Workout --album "Pop Workout"
 # Result: Album = "Pop Workout"
 #         TXXX:OriginalAlbum = "My Oh My - Single" (protected)
 
 # 3. Restore original album
-./music-porter restore export/Pop_Workout --album
+./music-porter restore export/ride-command/Pop_Workout --album
 # Result: Album = "My Oh My - Single" (restored from TXXX)
 ```
 
@@ -525,19 +561,19 @@ Thumbs_Up|https://music.apple.com/us/playlist/thumbs-up/...|Thumbs Up
 ```bash
 # Download, convert, and copy from a direct URL
 ./music-porter pipeline --url "https://music.apple.com/us/playlist/..."
-# Asks to save to playlists.conf after download
+# Asks to save to config.yaml after download
 ```
 
 ### Workflow 4: Re-convert with Different Settings
 ```bash
 # Re-convert existing M4A files
-./music-porter convert music/Pop_Workout --output export/Pop_Workout --force
+./music-porter convert music/Pop_Workout --output export/ride-command/Pop_Workout --force
 ```
 
 ### Workflow 5: Batch Tag Update
 ```bash
-# Update tags on all playlists
-for dir in export/*/; do
+# Update tags on all playlists for the ride-command profile
+for dir in export/ride-command/*/; do
     name=$(basename "$dir")
     ./music-porter tag "$dir" --album "$name" --artist "Various"
 done
@@ -545,8 +581,8 @@ done
 
 ### Workflow 6: Copy Multiple Playlists to USB
 ```bash
-# Copy all exported playlists
-./music-porter sync-usb export/
+# Copy all exported playlists for the active profile
+./music-porter sync-usb export/ride-command/
 ```
 
 ## Logging
@@ -572,7 +608,7 @@ Each command provides detailed summary reports:
 ============================================================
   Run date:                2026-02-17 23:00:00
   Input directory:         'music/Pop_Workout'
-  Output directory:        'export/Pop_Workout'
+  Output directory:        'export/ride-command/Pop_Workout'
   Duration:                125.3s
 ────────────────────────────────────────────────────────────
   FILES
@@ -706,14 +742,14 @@ pip install mutagen
 
 5. **Test USB sync without copying** using dry-run
    ```bash
-   ./music-porter --dry-run sync-usb export/Pop_Workout
+   ./music-porter --dry-run sync-usb export/ride-command/Pop_Workout
    ```
 
 6. **Use interactive menu** for occasional use - most user-friendly
 
 7. **Use --auto flag** for scheduled/scripted operations
 
-8. **Backup playlists.conf** before making changes
+8. **Backup config.yaml** before making changes
 
 ## Version
 

@@ -71,7 +71,7 @@ VERSION = "1.7.0-enhanced-output-profiles"
 DEFAULT_MUSIC_DIR = "music"
 DEFAULT_EXPORT_DIR = "export"
 DEFAULT_LOG_DIR = "logs"
-DEFAULT_PLAYLISTS_CONF = "playlists.conf"
+DEFAULT_CONFIG_FILE = "config.yaml"
 DEFAULT_COOKIES = "cookies.txt"
 DEFAULT_USB_DIR = "RZR/Music"
 
@@ -179,6 +179,13 @@ OUTPUT_PROFILES: dict = {
     ),
 }
 DEFAULT_OUTPUT_TYPE = "ride-command"
+
+
+def get_export_dir(profile_name, playlist_key=None):
+    """Build profile-scoped export path: export/<profile>/ or export/<profile>/<playlist>/"""
+    if playlist_key:
+        return f"{DEFAULT_EXPORT_DIR}/{profile_name}/{playlist_key}"
+    return f"{DEFAULT_EXPORT_DIR}/{profile_name}"
 
 
 # Third-party imports — deferred so the script can start without a venv
@@ -386,38 +393,86 @@ class PlaylistConfig:
 
 
 class ConfigManager:
-    """Manages playlist configuration from playlists.conf."""
+    """Manages configuration from config.yaml (YAML format)."""
 
-    def __init__(self, conf_path=DEFAULT_PLAYLISTS_CONF, logger=None):
+    def __init__(self, conf_path=DEFAULT_CONFIG_FILE, logger=None):
         self.conf_path = Path(conf_path)
         self.logger = logger or Logger()
         self.playlists = []
+        self.settings = {}
 
         if self.conf_path.exists():
-            self._load()
+            try:
+                self._load_yaml()
+            except ImportError:
+                # PyYAML not yet installed (first run before DependencyChecker)
+                self.logger.warn("PyYAML not available — cannot load config.yaml yet")
+                self.settings = {}
         else:
-            self.logger.warn(f"Configuration file not found: {self.conf_path}")
+            try:
+                self._create_default()
+            except ImportError:
+                # PyYAML not yet installed (first run before DependencyChecker)
+                self.logger.warn(f"Configuration file not found: {self.conf_path}")
+                self.settings = {}
 
-    def _load(self):
-        """Load playlists from configuration file."""
+    def _load_yaml(self):
+        """Load configuration from YAML file."""
+        import yaml
+
         with open(self.conf_path, 'r') as f:
-            for line in f:
-                line = line.strip()
+            data = yaml.safe_load(f) or {}
 
-                # Skip comments and empty lines
-                if not line or line.startswith('#'):
-                    continue
+        # Load settings
+        self.settings = data.get('settings', {})
 
-                # Parse pipe-delimited format
-                parts = line.split('|')
-                if len(parts) != 3:
-                    self.logger.warn(f"Invalid config line (expected 3 fields): {line}")
-                    continue
-
-                key, url, name = [p.strip() for p in parts]
+        # Load playlists
+        for entry in data.get('playlists', []):
+            key = entry.get('key', '').strip()
+            url = entry.get('url', '').strip()
+            name = entry.get('name', '').strip()
+            if key and url and name:
                 self.playlists.append(PlaylistConfig(key, url, name))
+            elif key or url or name:
+                self.logger.warn(f"Incomplete playlist entry (need key, url, name): {entry}")
 
         self.logger.info(f"Loaded {len(self.playlists)} playlists from {self.conf_path}")
+
+    def _create_default(self):
+        """Create a default config.yaml with empty playlists."""
+        self.settings = {
+            'output_type': DEFAULT_OUTPUT_TYPE,
+            'usb_dir': DEFAULT_USB_DIR,
+            'workers': DEFAULT_WORKERS,
+        }
+        self._save()
+        self.logger.info(f"Created default configuration: {self.conf_path}")
+
+    def _save(self):
+        """Write current configuration to YAML file."""
+        import yaml
+
+        data = {
+            'settings': self.settings,
+            'playlists': [
+                {'key': p.key, 'url': p.url, 'name': p.name}
+                for p in self.playlists
+            ],
+        }
+
+        with open(self.conf_path, 'w') as f:
+            f.write("# Music Porter Configuration\n")
+            f.write("# CLI flags override these settings when specified.\n\n")
+            yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+
+    def get_setting(self, key, default=None):
+        """Get a setting value, returning default if not set."""
+        return self.settings.get(key, default)
+
+    def update_setting(self, key, value):
+        """Update a setting and persist to config.yaml."""
+        self.settings[key] = value
+        self._save()
 
     def get_playlist_by_key(self, key):
         """Get playlist by key (case-insensitive)."""
@@ -434,18 +489,13 @@ class ConfigManager:
         return None
 
     def add_playlist(self, key, url, name):
-        """Add a new playlist to configuration file."""
-        # Check for duplicates
+        """Add a new playlist and persist to config.yaml."""
         if self.get_playlist_by_key(key):
             self.logger.warn(f"Playlist key '{key}' already exists")
             return False
 
-        # Append to file
-        with open(self.conf_path, 'a') as f:
-            f.write(f"{key}|{url}|{name}\n")
-
-        # Add to in-memory list
         self.playlists.append(PlaylistConfig(key, url, name))
+        self._save()
         self.logger.info(f"Added playlist '{name}' to configuration")
         return True
 
@@ -462,6 +512,7 @@ class DependencyChecker:
         'ffmpeg-python': 'ffmpeg',
         'webdriver-manager': 'webdriver_manager',
         'Pillow': 'PIL',
+        'PyYAML': 'yaml',
     }
 
     # Packages that must be checked via subprocess instead of import
@@ -697,7 +748,7 @@ class DependencyChecker:
             count = len(config.playlists)
             self.dep_status['playlists'] = count
             print(f"  Config:   ✓ {count} playlist{'s' if count != 1 else ''} loaded")
-            self.logger.file_info(f"Config: {count} playlists loaded from playlists.conf")
+            self.logger.file_info(f"Config: {count} playlists loaded from {DEFAULT_CONFIG_FILE}")
 
         print()  # Blank line after summary
 
@@ -3735,10 +3786,19 @@ class CoverArtManager:
 
         # Auto-derive source directory
         if source_dir is None:
-            # export/PlaylistName → music/PlaylistName
+            # export/profile/PlaylistName → music/PlaylistName
+            # Strip export base + optional profile subdirectory
             dir_str = str(dir_path)
-            if DEFAULT_EXPORT_DIR in dir_str:
-                source_dir = dir_str.replace(DEFAULT_EXPORT_DIR, DEFAULT_MUSIC_DIR, 1)
+            if dir_str.startswith(DEFAULT_EXPORT_DIR + "/"):
+                remainder = dir_str[len(DEFAULT_EXPORT_DIR) + 1:]  # "profile/Playlist" or "Playlist"
+                # Check if next segment is a known profile name
+                parts = remainder.split("/", 1)
+                if len(parts) == 2 and parts[0] in OUTPUT_PROFILES:
+                    # export/profile/Playlist → music/Playlist
+                    source_dir = f"{DEFAULT_MUSIC_DIR}/{parts[1]}"
+                else:
+                    # export/Playlist (legacy flat layout)
+                    source_dir = f"{DEFAULT_MUSIC_DIR}/{remainder}"
             else:
                 self.logger.error("Cannot auto-derive source directory. Use --source to specify.")
                 return False
@@ -4482,7 +4542,7 @@ class PipelineOrchestrator:
         # ── Stage 2: Convert M4A → MP3 ────────────────────────────────
         self.logger.info("\n=== STAGE 2: Convert M4A → MP3 ===")
         music_dir = f"{DEFAULT_MUSIC_DIR}/{self.stats.playlist_key}"
-        export_dir = f"{DEFAULT_EXPORT_DIR}/{self.stats.playlist_key}"
+        export_dir = get_export_dir(self.output_profile.name, self.stats.playlist_key)
 
         # Use quality_preset parameter if provided, otherwise use instance default
         preset = quality_preset if quality_preset is not None else self.quality_preset
@@ -4668,7 +4728,7 @@ class PipelineOrchestrator:
     def _ask_save_to_config(self, key, url, album_name):
         """Ask user if they want to save a new playlist to config."""
         try:
-            response = input(f"\nSave '{album_name}' to {DEFAULT_PLAYLISTS_CONF}? [y/N] ").strip().lower()
+            response = input(f"\nSave '{album_name}' to {DEFAULT_CONFIG_FILE}? [y/N] ").strip().lower()
             if response == 'y':
                 self.config.add_playlist(key, url, album_name)
         except KeyboardInterrupt:
@@ -5010,7 +5070,7 @@ class InteractiveMenu:
     def show(self, dry_run=False, verbose=False):
         """Display interactive menu and handle user selection."""
         if not self.config.playlists:
-            self.logger.warn("No playlists configured in playlists.conf")
+            self.logger.warn("No playlists configured in config.yaml")
             self.logger.info("Use --url to download from a direct URL")
             return False
 
@@ -5035,6 +5095,7 @@ class InteractiveMenu:
             print(f"  💾  C. Copy to USB only")
             print(f"  📊  S. Show library summary")
             print(f"  🖼️  R. Resize all cover art")
+            print(f"  🔧  P. Change output profile (current: {self.output_profile.name})")
             print(f"  ❌  X. Exit (or press Enter)")
 
             # Get user selection
@@ -5050,7 +5111,7 @@ class InteractiveMenu:
                 selection_upper = selection.upper()
 
                 # Validate input: must be digit (1-N) or valid letter (A, U, C, S, X)
-                valid_letters = ['A', 'U', 'C', 'S', 'R', 'X']
+                valid_letters = ['A', 'U', 'C', 'S', 'R', 'P', 'X']
 
                 is_valid_digit = selection.isdigit() and 1 <= int(selection) <= len(self.config.playlists)
                 is_valid_letter = selection_upper in valid_letters
@@ -5084,6 +5145,10 @@ class InteractiveMenu:
                 elif selection_upper == 'R':
                     self._handle_resize_cover_art(dry_run, verbose)
                     # Return to menu after resizing
+
+                elif selection_upper == 'P':
+                    self._handle_change_profile()
+                    # Return to menu after profile change
 
                 elif selection.isdigit():
                     # Must be valid digit at this point (validated earlier)
@@ -5128,7 +5193,7 @@ class InteractiveMenu:
         # Ask about USB copy
         if success and not dry_run:
             self._ask_copy_to_usb(
-                f"{DEFAULT_EXPORT_DIR}/{playlist.key}",
+                get_export_dir(self.output_profile.name, playlist.key),
                 dry_run
             )
 
@@ -5171,7 +5236,7 @@ class InteractiveMenu:
 
         # Ask about USB copy after all playlists
         if not dry_run:
-            self._ask_copy_to_usb(DEFAULT_EXPORT_DIR, dry_run)
+            self._ask_copy_to_usb(get_export_dir(self.output_profile.name), dry_run)
 
         # Print aggregate summary (only for multiple playlists)
         if len(self.config.playlists) > 1:
@@ -5209,7 +5274,7 @@ class InteractiveMenu:
             # Ask about USB copy
             if success and not dry_run:
                 self._ask_copy_to_usb(
-                    f"{DEFAULT_EXPORT_DIR}/{orchestrator.stats.playlist_key}",
+                    get_export_dir(self.output_profile.name, orchestrator.stats.playlist_key),
                     dry_run
                 )
 
@@ -5225,7 +5290,7 @@ class InteractiveMenu:
 
         usb_manager = USBManager(self.logger)
         success, _ = usb_manager.sync_to_usb(
-            DEFAULT_EXPORT_DIR,
+            get_export_dir(self.output_profile.name),
             usb_dir=DEFAULT_USB_DIR,
             dry_run=dry_run
         )
@@ -5237,7 +5302,7 @@ class InteractiveMenu:
 
         summary_manager = SummaryManager(self.logger)
         success = summary_manager.generate_summary(
-            export_dir=DEFAULT_EXPORT_DIR,
+            export_dir=get_export_dir(self.output_profile.name),
             detailed=False,
             quick=False,
             dry_run=dry_run
@@ -5281,8 +5346,7 @@ class InteractiveMenu:
             self.logger.info("Keeping original artwork — nothing to do")
             return True
 
-        config = ConfigManager(logger=self.logger)
-        dirs = [f"{DEFAULT_EXPORT_DIR}/{p.key}" for p in config.playlists]
+        dirs = [get_export_dir(self.output_profile.name, p.key) for p in self.config.playlists]
         existing = [d for d in dirs if Path(d).exists()]
 
         if not existing:
@@ -5317,6 +5381,33 @@ class InteractiveMenu:
             print()
 
         return all_success
+
+    def _handle_change_profile(self):
+        """Handle 'Change output profile' selection."""
+        profiles = list(OUTPUT_PROFILES.items())
+        print(f"\n  Available output profiles:")
+        print()
+        for i, (name, profile) in enumerate(profiles, 1):
+            current = " (current)" if name == self.output_profile.name else ""
+            print(f"     {i}. {name} — {profile.description}{current}")
+        print()
+
+        try:
+            choice = input("Select profile number (or Enter to cancel): ").strip()
+            if not choice:
+                return
+
+            if not choice.isdigit() or not (1 <= int(choice) <= len(profiles)):
+                self.logger.error(f"Invalid selection: {choice}")
+                return
+
+            name, profile = profiles[int(choice) - 1]
+            self.output_profile = profile
+            self.config.update_setting('output_type', name)
+            self.logger.info(f"Output profile changed to: {name} ({profile.description})")
+            self.logger.info(f"Exports will go to: {get_export_dir(name)}/")
+        except KeyboardInterrupt:
+            print()
 
     def _check_and_refresh_cookies(self, cookie_path='cookies.txt'):
         """
@@ -5403,6 +5494,29 @@ def resolve_quality_preset(args, logger, output_profile=None):
     return quality_preset
 
 
+def resolve_config_settings(args, config):
+    """
+    Resolve output_type, usb_dir, and workers from CLI > config.yaml > constant.
+    Returns (output_type, usb_dir, workers) tuple.
+    """
+    # output_type: CLI > config > DEFAULT_OUTPUT_TYPE
+    output_type = args.output_type
+    if output_type is None:
+        output_type = config.get_setting('output_type', DEFAULT_OUTPUT_TYPE)
+
+    # usb_dir: CLI > config > DEFAULT_USB_DIR
+    usb_dir = getattr(args, 'usb_dir', None)
+    if usb_dir is None:
+        usb_dir = config.get_setting('usb_dir', DEFAULT_USB_DIR)
+
+    # workers: CLI > config > DEFAULT_WORKERS
+    workers = args.workers
+    if workers is None:
+        workers = config.get_setting('workers', DEFAULT_WORKERS)
+
+    return output_type, usb_dir, workers
+
+
 def _create_quality_args_parser():
     """Create shared parent parser for quality-related arguments."""
     parser = argparse.ArgumentParser(add_help=False)
@@ -5429,7 +5543,7 @@ def _create_cookie_args_parser():
 def _create_usb_args_parser():
     """Create shared parent parser for USB-related arguments."""
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument('--usb-dir', default=DEFAULT_USB_DIR,
+    parser.add_argument('--usb-dir', default=None,
                         help=f'USB directory (default: {DEFAULT_USB_DIR})')
     return parser
 
@@ -5465,9 +5579,9 @@ A comprehensive music playlist management and conversion tool that:
         epilog=f'''
 Default Paths:
   \033[1mDownloads:\033[0m  \033[36m{DEFAULT_MUSIC_DIR}/\033[0m
-  \033[1mExports:\033[0m    \033[36m{DEFAULT_EXPORT_DIR}/\033[0m
+  \033[1mExports:\033[0m    \033[36m{DEFAULT_EXPORT_DIR}/<profile>/\033[0m
   \033[1mLogs:\033[0m       \033[36m{DEFAULT_LOG_DIR}/\033[0m
-  \033[1mConfig:\033[0m     \033[36m{DEFAULT_PLAYLISTS_CONF}\033[0m
+  \033[1mConfig:\033[0m     \033[36m{DEFAULT_CONFIG_FILE}\033[0m
   \033[1mCookies:\033[0m    \033[36m{DEFAULT_COOKIES}\033[0m
   \033[1mUSB Target:\033[0m \033[36m{DEFAULT_USB_DIR}\033[0m
 
@@ -5481,11 +5595,11 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
                        help='Enable verbose output')
     parser.add_argument('--dry-run', action='store_true',
                        help='Preview changes without modifying files')
-    parser.add_argument('--workers', type=positive_int, default=DEFAULT_WORKERS,
+    parser.add_argument('--workers', type=positive_int, default=None,
                        metavar='N',
                        help=f'Parallel conversion workers (default: {DEFAULT_WORKERS})')
     parser.add_argument('--output-type',
-                       default=DEFAULT_OUTPUT_TYPE,
+                       default=None,
                        choices=list(OUTPUT_PROFILES.keys()),
                        metavar='TYPE',
                        help=f'Output format profile (default: {DEFAULT_OUTPUT_TYPE}). '
@@ -5561,8 +5675,8 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
     sync_parser = subparsers.add_parser('sync-usb',
         parents=[usb_parent],
         help='Copy files to USB drive')
-    sync_parser.add_argument('source_dir', nargs='?', default=DEFAULT_EXPORT_DIR,
-                            help='Source directory to copy')
+    sync_parser.add_argument('source_dir', nargs='?', default=None,
+                            help='Source directory to copy (default: export/<profile>/)')
 
     # ── cover-art ─────────────────────────────────────────────────
     coverart_parser = subparsers.add_parser('cover-art',
@@ -5609,8 +5723,8 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
     # ── summary ───────────────────────────────────────────────────
     summary_parser = subparsers.add_parser('summary',
         help='Display export library statistics')
-    summary_parser.add_argument('--export-dir', default=DEFAULT_EXPORT_DIR,
-                               help=f'Export directory to analyze (default: {DEFAULT_EXPORT_DIR})')
+    summary_parser.add_argument('--export-dir', default=None,
+                               help='Export directory to analyze (default: export/<profile>/)')
     summary_parser.add_argument('--detailed', action='store_true',
                                help='Show detailed statistics and breakdowns')
     summary_parser.add_argument('--quick', action='store_true',
@@ -5631,6 +5745,13 @@ def main():
     # Initialize logger
     logger = Logger(verbose=args.verbose)
 
+    # Load config early (before banner) so settings are available everywhere
+    config = ConfigManager(logger=logger)
+
+    # Resolve settings: CLI > config.yaml > hardcoded constant
+    output_type, usb_dir, workers = resolve_config_settings(args, config)
+    output_profile = OUTPUT_PROFILES[output_type]
+
     # Display startup banner
     banner_text = f"  Music Porter v{VERSION}  "
     banner_width = max(len(banner_text), 62)
@@ -5646,8 +5767,6 @@ def main():
     # Display system information
     platform_str = f"{get_os_display_name()} ({CURRENT_OS})"
     command_str = args.command or 'interactive'
-    output_profile = OUTPUT_PROFILES[args.output_type]
-    output_type_str = args.output_type
     output_type_desc = output_profile.description
 
     # Format artwork description
@@ -5669,22 +5788,22 @@ def main():
 
     print(f"  Platform:    {platform_str}")
     print(f"  Command:     {command_str}")
-    print(f"  Output type: {output_type_str} ({output_type_desc})")
+    print(f"  Output type: {output_type} ({output_type_desc})")
     print(f"  Quality:     {quality_desc}")
     print(f"  Artwork:     {artwork_desc}")
 
     # Log to file
     logger.file_info(f"Platform: {platform_str}")
     logger.file_info(f"Command: {command_str}")
-    logger.file_info(f"Output type: {output_type_str}")
+    logger.file_info(f"Output type: {output_type}")
     logger.file_info(f"Quality: {quality_desc}")
     logger.file_info(f"Artwork: {artwork_desc}")
 
-    if args.workers > 1:
-        print(f"  Workers:     {args.workers} (parallel conversion)")
+    if workers > 1:
+        print(f"  Workers:     {workers} (parallel conversion)")
     else:
         print(f"  Workers:     1 (sequential)")
-    logger.file_info(f"Workers: {args.workers}")
+    logger.file_info(f"Workers: {workers}")
 
     if args.dry_run:
         print(f"  Mode:        DRY-RUN (no files will be modified)")
@@ -5722,17 +5841,18 @@ def main():
             logger.file_info("Warning: Downloads will fail until cookies.txt is created")
 
     # Display default paths
+    export_path_display = get_export_dir(output_profile.name)
     print("\n  ── Default Paths ──")
     print(f"  Downloads:  {DEFAULT_MUSIC_DIR}/")
-    print(f"  Exports:    {DEFAULT_EXPORT_DIR}/")
+    print(f"  Exports:    {export_path_display}/")
     print(f"  Logs:       {DEFAULT_LOG_DIR}/")
-    print(f"  Config:     {DEFAULT_PLAYLISTS_CONF}")
+    print(f"  Config:     {DEFAULT_CONFIG_FILE}")
     print(f"  Cookies:    {DEFAULT_COOKIES}")
-    print(f"  USB Target: {DEFAULT_USB_DIR}")
+    print(f"  USB Target: {usb_dir}")
     print()  # Blank line after paths
 
     # Log to file
-    logger.file_info(f"Default paths: downloads={DEFAULT_MUSIC_DIR}, exports={DEFAULT_EXPORT_DIR}, logs={DEFAULT_LOG_DIR}, config={DEFAULT_PLAYLISTS_CONF}, cookies={DEFAULT_COOKIES}, usb={DEFAULT_USB_DIR}")
+    logger.file_info(f"Default paths: downloads={DEFAULT_MUSIC_DIR}, exports={export_path_display}, logs={DEFAULT_LOG_DIR}, config={DEFAULT_CONFIG_FILE}, cookies={DEFAULT_COOKIES}, usb={usb_dir}")
 
     # Route to appropriate handlers based on command
     if args.command == 'convert':
@@ -5741,11 +5861,10 @@ def main():
         if not deps.check_all(require_ffmpeg=True, require_gamdl=False):
             sys.exit(1)
 
-        output_dir = args.output or DEFAULT_EXPORT_DIR
+        output_dir = args.output or get_export_dir(output_profile.name)
         embed_cover_art = not getattr(args, 'no_cover_art', False)
-        output_profile = OUTPUT_PROFILES[args.output_type]
         quality_preset = resolve_quality_preset(args, logger, output_profile)
-        converter = Converter(logger, quality_preset=quality_preset, workers=args.workers,
+        converter = Converter(logger, quality_preset=quality_preset, workers=workers,
                               embed_cover_art=embed_cover_art, output_profile=output_profile)
         success = converter.convert(
             args.input_dir,
@@ -5762,7 +5881,6 @@ def main():
         if not deps.check_python_packages():
             sys.exit(1)
 
-        output_profile = OUTPUT_PROFILES[args.output_type]
         tagger = TaggerManager(logger, output_profile=output_profile)
         success = tagger.update_tags(
             args.directory,
@@ -5779,7 +5897,6 @@ def main():
         if not deps.check_python_packages():
             sys.exit(1)
 
-        output_profile = OUTPUT_PROFILES[args.output_type]
         tagger = TaggerManager(logger, output_profile=output_profile)
         success = tagger.restore_tags(
             args.directory,
@@ -5797,7 +5914,6 @@ def main():
         if not deps.check_python_packages():
             sys.exit(1)
 
-        output_profile = OUTPUT_PROFILES[args.output_type]
         tagger = TaggerManager(logger, output_profile=output_profile)
         success = tagger.reset_tags_from_source(
             args.input_dir,
@@ -5817,7 +5933,6 @@ def main():
 
         # Handle --playlist or --url
         if args.playlist:
-            config = ConfigManager(logger=logger)
             # Try to find playlist by name or index
             playlist = None
             if args.playlist.isdigit():
@@ -5861,10 +5976,11 @@ def main():
 
     elif args.command == 'sync-usb':
         # Copy files to USB drive
+        source_dir = args.source_dir or get_export_dir(output_profile.name)
         usb_manager = USBManager(logger)
         success, _ = usb_manager.sync_to_usb(
-            args.source_dir,
-            usb_dir=args.usb_dir,
+            source_dir,
+            usb_dir=usb_dir,
             dry_run=args.dry_run
         )
         sys.exit(0 if success else 1)
@@ -5882,8 +5998,9 @@ def main():
             logger.error("Cannot use --detailed and --quick together")
             sys.exit(1)
 
+        export_dir = args.export_dir or get_export_dir(output_profile.name)
         success = summary_manager.generate_summary(
-            export_dir=args.export_dir,
+            export_dir=export_dir,
             detailed=args.detailed,
             quick=args.quick,
             dry_run=args.dry_run
@@ -5903,8 +6020,7 @@ def main():
                 logger.error("Cannot specify both a directory and --all")
                 sys.exit(1)
             elif getattr(args, 'all_playlists', False):
-                config = ConfigManager(logger=logger)
-                dirs = [f"{DEFAULT_EXPORT_DIR}/{p.key}" for p in config.playlists]
+                dirs = [get_export_dir(output_profile.name, p.key) for p in config.playlists]
                 existing = [d for d in dirs if Path(d).exists()]
 
                 if not existing:
@@ -5970,8 +6086,7 @@ def main():
                 logger.error("Cannot specify both a directory and --all")
                 sys.exit(1)
             elif getattr(args, 'all_playlists', False):
-                config = ConfigManager(logger=logger)
-                dirs = [f"{DEFAULT_EXPORT_DIR}/{p.key}" for p in config.playlists]
+                dirs = [get_export_dir(output_profile.name, p.key) for p in config.playlists]
                 existing = [d for d in dirs if Path(d).exists()]
 
                 if not existing:
@@ -6024,14 +6139,12 @@ def main():
         if not deps.check_all(require_ffmpeg=True, require_gamdl=True):
             sys.exit(1)
 
-        config = ConfigManager(logger=logger)
         embed_cover_art = not getattr(args, 'no_cover_art', False)
-        output_profile = OUTPUT_PROFILES[args.output_type]
         quality_preset = resolve_quality_preset(args, logger, output_profile)
         orchestrator = PipelineOrchestrator(logger, deps, config,
                                           quality_preset=quality_preset,
                                           cookie_path=args.cookies,
-                                          workers=args.workers,
+                                          workers=workers,
                                           embed_cover_art=embed_cover_art,
                                           output_profile=output_profile)
 
@@ -6052,7 +6165,7 @@ def main():
                     playlist=str(i + 1),
                     auto=True,
                     copy_to_usb=args.copy_to_usb,
-                    usb_dir=args.usb_dir,
+                    usb_dir=usb_dir,
                     dry_run=args.dry_run,
                     verbose=args.verbose,
                     quality_preset=quality_preset,
@@ -6076,7 +6189,7 @@ def main():
                 url=args.url,
                 auto=False,
                 copy_to_usb=args.copy_to_usb,
-                usb_dir=args.usb_dir,
+                usb_dir=usb_dir,
                 dry_run=args.dry_run,
                 verbose=args.verbose,
                 quality_preset=quality_preset,
@@ -6095,13 +6208,10 @@ def main():
         if not deps.check_all(require_ffmpeg=True, require_gamdl=True):
             sys.exit(1)
 
-        config = ConfigManager(logger=logger)
-
         # Display dependency summary
         deps.display_summary(config)
 
-        output_profile = OUTPUT_PROFILES[args.output_type]
-        menu = InteractiveMenu(logger, config, deps, workers=args.workers,
+        menu = InteractiveMenu(logger, config, deps, workers=workers,
                                output_profile=output_profile)
 
         success = menu.show(dry_run=args.dry_run, verbose=args.verbose)
