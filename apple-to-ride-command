@@ -4903,7 +4903,8 @@ class InteractiveMenu:
             return
 
         try:
-            self.logger.info(f"\n  {missing}/{len(mp3_files)} files missing cover art")
+            playlist_name = export_path.name
+            self.logger.info(f"\n  {playlist_name}: {missing}/{len(mp3_files)} files missing cover art")
             response = input("Embed cover art from source files? [Y/n] ").strip().lower()
             if response in ('', 'y', 'yes'):
                 cam = CoverArtManager(self.logger)
