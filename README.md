@@ -369,7 +369,7 @@ The tool uses a "hard gate" protection system for original metadata:
 7. **Automatic USB detection** - Start sync when USB drive is plugged in
 8. ~~**Progress indicators** - Real-time progress bars for long-running operations~~ *(implemented in v1.4.0)*
 9. **Download resume** - Resume interrupted downloads
-10. **Cover art management** - Embed, extract, and update album artwork
+10. ~~**Cover art management** - Embed, extract, and update album artwork~~ *(implemented in v1.5.0)*
 11. **Playlist merging** - Combine multiple playlists into one
 12. **Smart playlists** - Auto-generate playlists based on criteria (genre, artist, etc.)
 13. **Duplicate detection** - Find and remove duplicate tracks across playlists
@@ -395,7 +395,7 @@ The tool uses a "hard gate" protection system for original metadata:
 
 ## Version
 
-Current version: **v1.4.0**
+Current version: **v1.5.0**
 
 ## License
 

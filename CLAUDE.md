@@ -31,11 +31,11 @@ The system follows an integrated pipeline:
 
 **apple-to-ride-command** (python) - **RECOMMENDED**
 - Unified tool combining all functionality in a single command
-- Professional subcommand architecture: `pipeline`, `download`, `convert`, `tag`, `restore`, `reset`, `sync-usb`
+- Professional subcommand architecture: `pipeline`, `download`, `convert`, `tag`, `restore`, `reset`, `sync-usb`, `cover-art`, `summary`
 - Interactive menu for easy operation
 - Comprehensive error handling and statistics
 - Full pipeline orchestration (download → convert → tag → USB)
-- Modular design with 20 classes
+- Modular design with 21 classes
 - 4,270 lines of production-ready Python code
 - See `APPLE-TO-RIDE-COMMAND-GUIDE.md` for complete documentation
 
@@ -56,7 +56,7 @@ The system follows an integrated pipeline:
 The codebase uses a "hard gate" protection system for original metadata:
 
 - Original tags are stored in TXXX (user-defined text) ID3 frames
-- Frame names: `OriginalTitle`, `OriginalArtist`, `OriginalAlbum`
+- Frame names: `OriginalTitle`, `OriginalArtist`, `OriginalAlbum`, `OriginalCoverArtHash`
 - Once written, these frames are NEVER overwritten (enforced via `_txxx_exists()` checks)
 - This ensures true originals are preserved even across multiple script runs
 - Restoration is always possible via `--restore-*` flags
@@ -215,6 +215,27 @@ The conversion system supports configurable quality presets to balance file size
 
 # Analyze custom directory
 ./apple-to-ride-command summary --export-dir /path/to/export
+```
+
+**Cover Art Management:**
+```bash
+# Embed cover art from M4A sources into existing MP3s
+./apple-to-ride-command cover-art embed export/Pop_Workout
+
+# Embed with explicit source directory
+./apple-to-ride-command cover-art embed export/Pop_Workout --source music/Pop_Workout
+
+# Extract cover art to image files
+./apple-to-ride-command cover-art extract export/Pop_Workout
+
+# Replace cover art from a single image
+./apple-to-ride-command cover-art update export/Pop_Workout --image artwork.jpg
+
+# Strip cover art to reduce file size
+./apple-to-ride-command cover-art strip export/Pop_Workout
+
+# Convert without cover art
+./apple-to-ride-command convert music/Pop_Workout --no-cover-art
 ```
 
 ### Global Flags (Apply to All Commands)
@@ -539,6 +560,7 @@ The `apple-to-ride-command` script is a modern, unified Python tool (3,065 lines
 18. `InteractiveMenu` - Interactive user interface
 19. `PlaylistResult` - Results for single playlist in batch processing
 20. `AggregateStatistics` - Cumulative statistics across multiple playlists
+21. `CoverArtManager` - Cover art embed, extract, update, and strip operations
 
 **Subcommands:**
 - `pipeline` - Full download + convert + tag workflow (default)
@@ -548,6 +570,7 @@ The `apple-to-ride-command` script is a modern, unified Python tool (3,065 lines
 - `restore` - Restore original tags from TXXX frames
 - `reset` - Reset tags from source M4A files (⚠️ overwrites TXXX frames)
 - `sync-usb` - Copy files to USB drive
+- `cover-art` - Cover art management (embed, extract, update, strip)
 - `summary` - Display export library statistics
 
 **Features:**
@@ -640,6 +663,20 @@ The `apple-to-ride-command` script is a modern, unified Python tool (3,065 lines
 - Statistics tracked: total files, total size, per-playlist breakdowns, tag integrity percentages
 - Uses same TXXX protection detection as other managers for consistency
 - Available in interactive menu as "S. Show library summary" option
+- Cover art statistics: tracks files with/without embedded APIC frames
+
+**Cover Art Management (CoverArtManager class):**
+- Manages cover art operations on existing MP3 files
+- Four actions: `embed`, `extract`, `update`, `strip`
+- `embed`: Reads cover art from matching M4A source files (auto-derives `export/` → `music/`)
+- `extract`: Saves embedded cover art to image files in `cover-art/` subdirectory
+- `update`: Replaces cover art on all MP3s from a single image file (.jpg or .png)
+- `strip`: Removes all APIC frames to reduce file size
+- Automatic cover art embedding during conversion (APIC frame from M4A source)
+- SHA-256 hash prefix stored in `TXXX:OriginalCoverArtHash` with hard-gate protection
+- `--no-cover-art` flag on `convert` and `pipeline` commands to skip embedding
+- Progress bars for all operations
+- Dry-run and verbose support
 
 ### Testing Workflow
 

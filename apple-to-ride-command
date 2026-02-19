@@ -50,7 +50,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "1.4.0"
+VERSION = "1.5.0-cover-art-management"
 
 DEFAULT_MUSIC_DIR = "music"
 DEFAULT_EXPORT_DIR = "export"
@@ -104,6 +104,13 @@ TXXX_ORIGINAL_ALBUM = "OriginalAlbum"
 M4A_TAG_TITLE = '\xa9nam'
 M4A_TAG_ARTIST = '\xa9ART'
 M4A_TAG_ALBUM = '\xa9alb'
+M4A_TAG_COVER = 'covr'
+
+# Cover art constants
+TXXX_ORIGINAL_COVER_ART_HASH = "OriginalCoverArtHash"
+APIC_MIME_JPEG = "image/jpeg"
+APIC_MIME_PNG = "image/png"
+APIC_TYPE_FRONT_COVER = 3
 
 # Apple domain filter for cookie cleanup
 # Used by CookieManager.clean_cookies() to strip non-Apple cookies
@@ -691,6 +698,27 @@ def read_m4a_tags(input_file):
     return title, artist, album
 
 
+def read_m4a_cover_art(input_file):
+    """
+    Read cover art data from an M4A file.
+    Returns (cover_data: bytes, mime_type: str) or (None, None) if no art found.
+    """
+    from mutagen.mp4 import MP4, MP4Cover
+    try:
+        m4a = MP4(str(input_file))
+        covers = m4a.tags.get(M4A_TAG_COVER)
+        if not covers:
+            return None, None
+        cover = covers[0]
+        # Detect format from MP4Cover imageformat attribute
+        if hasattr(cover, 'imageformat'):
+            if cover.imageformat == MP4Cover.FORMAT_PNG:
+                return bytes(cover), APIC_MIME_PNG
+        return bytes(cover), APIC_MIME_JPEG
+    except Exception:
+        return None, None
+
+
 def update_title_tag(tags, logger=None, dry_run=False, verbose=False):
     """
     Update the TIT2 (Title) tag to 'Artist - Title' format.
@@ -763,8 +791,9 @@ def _apply_cleanup(tags, filepath, cleanup_options):
     v2_version = 3 if cleanup_options.get("use_id3v23") else 4
     v1         = 0 if cleanup_options.get("remove_id3v1") else 1
 
-    allowed_frames     = {"TIT2", "TPE1", "TALB"}
-    allowed_txxx_descs = {TXXX_ORIGINAL_TITLE, TXXX_ORIGINAL_ARTIST, TXXX_ORIGINAL_ALBUM}
+    allowed_frames     = {"TIT2", "TPE1", "TALB", "APIC"}
+    allowed_txxx_descs = {TXXX_ORIGINAL_TITLE, TXXX_ORIGINAL_ARTIST, TXXX_ORIGINAL_ALBUM,
+                          TXXX_ORIGINAL_COVER_ART_HASH}
 
     for key in list(tags.keys()):
         frame = tags[key]
@@ -1407,12 +1436,13 @@ class ConversionStatistics:
 class Converter:
     """Manages M4A to MP3 conversion with tag preservation."""
 
-    def __init__(self, logger=None, quality_preset='lossless', workers=None):
+    def __init__(self, logger=None, quality_preset='lossless', workers=None, embed_cover_art=True):
         self.logger = logger or Logger()
         self.stats = ConversionStatistics()
         self.quality_preset = quality_preset
         self.quality_settings = self._get_quality_settings(quality_preset)
         self.workers = workers if workers is not None else DEFAULT_WORKERS
+        self.embed_cover_art = embed_cover_art
 
     def _get_quality_settings(self, preset):
         """Resolve quality preset to FFmpeg parameters."""
@@ -1438,7 +1468,8 @@ class Converter:
 
     def _convert_single_file(self, input_file, input_path, output_path, force, dry_run, verbose, progress_bar=None):
         """Convert a single M4A file to MP3. Thread-safe for parallel execution."""
-        from mutagen.id3 import ID3, TIT2, TPE1, TALB, ID3NoHeaderError
+        from mutagen.id3 import ID3, TIT2, TPE1, TALB, APIC, TXXX, ID3NoHeaderError
+        import hashlib
 
         display_name = input_file.relative_to(input_path)
         count = self.stats.next_progress()
@@ -1491,6 +1522,14 @@ class Converter:
                 self.logger.dry_run(f"  → Title:      '{title}'")
                 self.logger.dry_run(f"  → Artist:     '{artist}'")
                 self.logger.dry_run(f"  → Album:      '{album}'")
+                if self.embed_cover_art:
+                    cover_data, cover_mime = read_m4a_cover_art(input_file)
+                    if cover_data:
+                        self.logger.dry_run(f"  → Cover art:  {len(cover_data) / 1024:.1f} KB ({cover_mime})")
+                    else:
+                        self.logger.dry_run(f"  → Cover art:  (none found in source)")
+                else:
+                    self.logger.dry_run(f"  → Cover art:  (disabled)")
                 return
 
             # Run ffmpeg conversion
@@ -1522,6 +1561,29 @@ class Converter:
             tags["TIT2"] = TIT2(encoding=3, text=title)
             tags["TPE1"] = TPE1(encoding=3, text=artist)
             tags["TALB"] = TALB(encoding=3, text=album)
+
+            # Embed cover art from source M4A
+            if self.embed_cover_art:
+                cover_data, cover_mime = read_m4a_cover_art(input_file)
+                if cover_data:
+                    tags.add(APIC(
+                        encoding=3,
+                        mime=cover_mime,
+                        type=APIC_TYPE_FRONT_COVER,
+                        desc='Cover',
+                        data=cover_data,
+                    ))
+                    # Store hash with hard-gate protection
+                    if not _txxx_exists(tags, TXXX_ORIGINAL_COVER_ART_HASH):
+                        art_hash = hashlib.sha256(cover_data).hexdigest()[:16]
+                        tags.add(TXXX(encoding=3,
+                                      desc=TXXX_ORIGINAL_COVER_ART_HASH,
+                                      text=[art_hash]))
+                    if verbose:
+                        self.logger.debug(f"  → Cover art: {len(cover_data) / 1024:.1f} KB ({cover_mime})")
+                else:
+                    if verbose:
+                        self.logger.debug(f"  → Cover art: (none found in source)")
 
             # Save with ID3v2.3 for compatibility, remove ID3v1
             tags.save(str(output_file), v2_version=3, v1=0)
@@ -3082,6 +3144,10 @@ class PlaylistSummary:
         self.sample_files_checked = 0
         self.sample_files_with_tags = 0
 
+        # Cover art stats
+        self.files_with_cover_art = 0
+        self.files_without_cover_art = 0
+
 
 class LibrarySummaryStatistics:
     """Statistics for the entire export library."""
@@ -3097,6 +3163,10 @@ class LibrarySummaryStatistics:
         self.sample_size = 0
         self.files_with_protection_tags = 0
         self.files_missing_protection_tags = 0
+
+        # Cover art stats
+        self.files_with_cover_art = 0
+        self.files_without_cover_art = 0
 
         # Per-playlist breakdown
         self.playlists = []  # List of PlaylistSummary objects
@@ -3247,7 +3317,7 @@ class SummaryManager:
             return None
 
     def _check_tag_integrity(self):
-        """Check all files for TXXX protection tags."""
+        """Check all files for TXXX protection tags and cover art."""
         from mutagen.id3 import ID3, ID3NoHeaderError
 
         for playlist in self.stats.playlists:
@@ -3272,12 +3342,25 @@ class SummaryManager:
                     else:
                         self.stats.files_missing_protection_tags += 1
 
+                    # Check for cover art (APIC frame)
+                    has_cover = any(key.startswith("APIC") for key in tags.keys())
+                    if has_cover:
+                        playlist.files_with_cover_art += 1
+                        self.stats.files_with_cover_art += 1
+                    else:
+                        playlist.files_without_cover_art += 1
+                        self.stats.files_without_cover_art += 1
+
                 except ID3NoHeaderError:
                     self.logger.debug(f"No ID3 tags found in {mp3_file}")
                     self.stats.files_missing_protection_tags += 1
+                    playlist.files_without_cover_art += 1
+                    self.stats.files_without_cover_art += 1
                 except Exception as e:
                     self.logger.debug(f"Error reading tags from {mp3_file}: {e}")
                     self.stats.files_missing_protection_tags += 1
+                    playlist.files_without_cover_art += 1
+                    self.stats.files_without_cover_art += 1
 
         # Calculate aggregate sample size
         self.stats.sample_size = sum(p.sample_files_checked for p in self.stats.playlists)
@@ -3325,6 +3408,26 @@ class SummaryManager:
                 print(f"  Status:                  ✅ All files have TXXX protection tags")
             else:
                 print(f"  Status:                  ⚠️  Some files missing TXXX protection tags")
+        else:
+            print("  Status:                  ℹ️  No files checked")
+
+        print()
+
+        # Cover art
+        print("─" * 60)
+        print(f"  COVER ART")
+        print("─" * 60)
+
+        total_cover_checked = self.stats.files_with_cover_art + self.stats.files_without_cover_art
+        if total_cover_checked > 0:
+            cover_pct = (self.stats.files_with_cover_art / total_cover_checked) * 100
+            print(f"  Files with cover art:    {self.stats.files_with_cover_art}/{total_cover_checked} ({cover_pct:.0f}%)")
+
+            if self.stats.files_without_cover_art == 0:
+                print(f"  Status:                  ✅ All files have embedded cover art")
+            else:
+                print(f"  Status:                  ⚠️  {self.stats.files_without_cover_art} files missing cover art")
+                print(f"  Fix:                     ./apple-to-ride-command cover-art embed <dir>")
         else:
             print("  Status:                  ℹ️  No files checked")
 
@@ -3383,6 +3486,12 @@ class SummaryManager:
                 percentage = (playlist.sample_files_with_tags / playlist.sample_files_checked) * 100
                 print(f"     Tag integrity:        {playlist.sample_files_with_tags}/{playlist.sample_files_checked} ({percentage:.0f}%)")
 
+            # Cover art for this playlist
+            total_cover = playlist.files_with_cover_art + playlist.files_without_cover_art
+            if total_cover > 0:
+                cover_pct = (playlist.files_with_cover_art / total_cover) * 100
+                print(f"     Cover art:            {playlist.files_with_cover_art}/{total_cover} ({cover_pct:.0f}%)")
+
             print()
 
         print("═" * 60)
@@ -3428,6 +3537,435 @@ class SummaryManager:
             return f"{bytes_size / (1024 * 1024):.1f} MB"
         else:
             return f"{bytes_size / (1024 * 1024 * 1024):.1f} GB"
+
+
+# ══════════════════════════════════════════════════════════════════
+# Section 8B: Cover Art Management
+# ══════════════════════════════════════════════════════════════════
+
+class CoverArtManager:
+    """Manages cover art operations: embed, extract, update, strip."""
+
+    def __init__(self, logger=None):
+        self.logger = logger or Logger()
+
+    def embed(self, directory, source_dir=None, dry_run=False, verbose=False):
+        """
+        Embed cover art into existing MP3s from matching M4A source files.
+        Auto-derives source dir from export/ → music/ if not specified.
+        """
+        from mutagen.id3 import ID3, APIC, TXXX, ID3NoHeaderError
+        import hashlib
+
+        dir_path = Path(directory)
+        if not dir_path.exists():
+            self.logger.error(f"Directory not found: '{directory}'")
+            return False
+
+        # Auto-derive source directory
+        if source_dir is None:
+            # export/PlaylistName → music/PlaylistName
+            dir_str = str(dir_path)
+            if DEFAULT_EXPORT_DIR in dir_str:
+                source_dir = dir_str.replace(DEFAULT_EXPORT_DIR, DEFAULT_MUSIC_DIR, 1)
+            else:
+                self.logger.error("Cannot auto-derive source directory. Use --source to specify.")
+                return False
+
+        source_path = Path(source_dir)
+        if not source_path.exists():
+            self.logger.error(f"Source directory not found: '{source_dir}'")
+            return False
+
+        mp3_files = sorted(dir_path.glob("*.mp3"))
+        if not mp3_files:
+            self.logger.info(f"No MP3 files found in '{directory}'")
+            return True
+
+        # Build lookup of M4A files by artist-title
+        m4a_lookup = {}
+        for m4a_file in source_path.rglob("*.m4a"):
+            if m4a_file.name.startswith('._'):
+                continue
+            try:
+                title, artist, _ = read_m4a_tags(m4a_file)
+                safe_artist = sanitize_filename(artist)
+                safe_title = sanitize_filename(title)
+                key = f"{safe_artist} - {safe_title}.mp3"
+                m4a_lookup[key] = m4a_file
+            except Exception:
+                continue
+
+        self.logger.info(f"Found {len(mp3_files)} MP3 files, {len(m4a_lookup)} M4A sources")
+
+        embedded = 0
+        skipped = 0
+        errors = 0
+        no_source = 0
+
+        progress = ProgressBar(
+            total=len(mp3_files), desc="Embedding cover art",
+            logger=self.logger, disable=dry_run,
+        )
+
+        try:
+            for mp3_file in mp3_files:
+                try:
+                    # Find matching M4A source
+                    m4a_file = m4a_lookup.get(mp3_file.name)
+                    if not m4a_file:
+                        no_source += 1
+                        if verbose:
+                            self.logger.debug(f"No M4A source for: {mp3_file.name}")
+                        progress.update(1)
+                        continue
+
+                    # Read cover art from M4A
+                    cover_data, cover_mime = read_m4a_cover_art(m4a_file)
+                    if not cover_data:
+                        skipped += 1
+                        if verbose:
+                            self.logger.debug(f"No cover art in source: {m4a_file.name}")
+                        progress.update(1)
+                        continue
+
+                    # Check if MP3 already has cover art
+                    try:
+                        tags = ID3(str(mp3_file))
+                    except ID3NoHeaderError:
+                        tags = ID3()
+
+                    has_apic = any(
+                        key.startswith("APIC") for key in tags.keys()
+                    )
+
+                    if has_apic and not dry_run:
+                        skipped += 1
+                        if verbose:
+                            self.logger.debug(f"Already has cover art: {mp3_file.name}")
+                        progress.update(1)
+                        continue
+
+                    if dry_run:
+                        self.logger.dry_run(f"Would embed cover art: {mp3_file.name} ({len(cover_data) / 1024:.1f} KB)")
+                        progress.update(1)
+                        continue
+
+                    # Embed cover art
+                    tags.add(APIC(
+                        encoding=3,
+                        mime=cover_mime,
+                        type=APIC_TYPE_FRONT_COVER,
+                        desc='Cover',
+                        data=cover_data,
+                    ))
+
+                    # Store hash with hard-gate protection
+                    if not _txxx_exists(tags, TXXX_ORIGINAL_COVER_ART_HASH):
+                        art_hash = hashlib.sha256(cover_data).hexdigest()[:16]
+                        tags.add(TXXX(encoding=3,
+                                      desc=TXXX_ORIGINAL_COVER_ART_HASH,
+                                      text=[art_hash]))
+
+                    tags.save(str(mp3_file), v2_version=3, v1=0)
+                    embedded += 1
+
+                    if verbose:
+                        self.logger.info(f"Embedded: {mp3_file.name} ({len(cover_data) / 1024:.1f} KB)")
+
+                    progress.update(1)
+
+                except Exception as e:
+                    errors += 1
+                    self.logger.error(f"Failed to embed art for '{mp3_file.name}': {e}")
+                    progress.update(1)
+        finally:
+            progress.close()
+
+        # Print summary
+        print(f"\n{'=' * 60}")
+        print(f"  COVER ART EMBED SUMMARY")
+        print(f"{'=' * 60}")
+        print(f"  Directory:               '{directory}'")
+        print(f"  Source:                   '{source_dir}'")
+        print(f"{'─' * 60}")
+        print(f"  Embedded:                {embedded}")
+        print(f"  Skipped (already has):   {skipped}")
+        print(f"  No source found:         {no_source}")
+        print(f"  Errors:                  {errors}")
+        print(f"{'=' * 60}")
+
+        return errors == 0
+
+    def extract(self, directory, output_dir=None, dry_run=False, verbose=False):
+        """Extract cover art from MP3 files to image files."""
+        from mutagen.id3 import ID3, ID3NoHeaderError
+
+        dir_path = Path(directory)
+        if not dir_path.exists():
+            self.logger.error(f"Directory not found: '{directory}'")
+            return False
+
+        # Default output to same directory
+        if output_dir is None:
+            out_path = dir_path / "cover-art"
+        else:
+            out_path = Path(output_dir)
+
+        mp3_files = sorted(dir_path.glob("*.mp3"))
+        if not mp3_files:
+            self.logger.info(f"No MP3 files found in '{directory}'")
+            return True
+
+        if not dry_run:
+            out_path.mkdir(parents=True, exist_ok=True)
+
+        extracted = 0
+        skipped = 0
+        errors = 0
+
+        progress = ProgressBar(
+            total=len(mp3_files), desc="Extracting cover art",
+            logger=self.logger, disable=dry_run,
+        )
+
+        try:
+            for mp3_file in mp3_files:
+                try:
+                    try:
+                        tags = ID3(str(mp3_file))
+                    except ID3NoHeaderError:
+                        skipped += 1
+                        progress.update(1)
+                        continue
+
+                    # Find APIC frame
+                    apic_frame = None
+                    for key, frame in tags.items():
+                        if key.startswith("APIC"):
+                            apic_frame = frame
+                            break
+
+                    if not apic_frame:
+                        skipped += 1
+                        if verbose:
+                            self.logger.debug(f"No cover art: {mp3_file.name}")
+                        progress.update(1)
+                        continue
+
+                    # Determine file extension
+                    ext = ".jpg" if apic_frame.mime == APIC_MIME_JPEG else ".png"
+                    stem = mp3_file.stem
+                    out_file = out_path / f"{stem}{ext}"
+
+                    if dry_run:
+                        self.logger.dry_run(f"Would extract: {out_file.name} ({len(apic_frame.data) / 1024:.1f} KB)")
+                        progress.update(1)
+                        continue
+
+                    out_file.write_bytes(apic_frame.data)
+                    extracted += 1
+
+                    if verbose:
+                        self.logger.info(f"Extracted: {out_file.name} ({len(apic_frame.data) / 1024:.1f} KB)")
+
+                    progress.update(1)
+
+                except Exception as e:
+                    errors += 1
+                    self.logger.error(f"Failed to extract art from '{mp3_file.name}': {e}")
+                    progress.update(1)
+        finally:
+            progress.close()
+
+        # Print summary
+        print(f"\n{'=' * 60}")
+        print(f"  COVER ART EXTRACT SUMMARY")
+        print(f"{'=' * 60}")
+        print(f"  Source:                  '{directory}'")
+        print(f"  Output:                  '{out_path}'")
+        print(f"{'─' * 60}")
+        print(f"  Extracted:               {extracted}")
+        print(f"  Skipped (no art):        {skipped}")
+        print(f"  Errors:                  {errors}")
+        print(f"{'=' * 60}")
+
+        return errors == 0
+
+    def update(self, directory, image_path, dry_run=False, verbose=False):
+        """Replace cover art on all MP3s in a directory from a single image file."""
+        from mutagen.id3 import ID3, APIC, ID3NoHeaderError
+
+        dir_path = Path(directory)
+        img_path = Path(image_path)
+
+        if not dir_path.exists():
+            self.logger.error(f"Directory not found: '{directory}'")
+            return False
+
+        if not img_path.exists():
+            self.logger.error(f"Image file not found: '{image_path}'")
+            return False
+
+        # Detect MIME type from extension
+        ext = img_path.suffix.lower()
+        if ext in ('.jpg', '.jpeg'):
+            mime_type = APIC_MIME_JPEG
+        elif ext == '.png':
+            mime_type = APIC_MIME_PNG
+        else:
+            self.logger.error(f"Unsupported image format: '{ext}' (use .jpg or .png)")
+            return False
+
+        cover_data = img_path.read_bytes()
+        self.logger.info(f"Image: {img_path.name} ({len(cover_data) / 1024:.1f} KB, {mime_type})")
+
+        mp3_files = sorted(dir_path.glob("*.mp3"))
+        if not mp3_files:
+            self.logger.info(f"No MP3 files found in '{directory}'")
+            return True
+
+        updated = 0
+        errors = 0
+
+        progress = ProgressBar(
+            total=len(mp3_files), desc="Updating cover art",
+            logger=self.logger, disable=dry_run,
+        )
+
+        try:
+            for mp3_file in mp3_files:
+                try:
+                    if dry_run:
+                        self.logger.dry_run(f"Would update cover art: {mp3_file.name}")
+                        progress.update(1)
+                        continue
+
+                    try:
+                        tags = ID3(str(mp3_file))
+                    except ID3NoHeaderError:
+                        tags = ID3()
+
+                    # Remove existing APIC frames
+                    for key in list(tags.keys()):
+                        if key.startswith("APIC"):
+                            del tags[key]
+
+                    # Add new cover art
+                    tags.add(APIC(
+                        encoding=3,
+                        mime=mime_type,
+                        type=APIC_TYPE_FRONT_COVER,
+                        desc='Cover',
+                        data=cover_data,
+                    ))
+
+                    tags.save(str(mp3_file), v2_version=3, v1=0)
+                    updated += 1
+
+                    if verbose:
+                        self.logger.info(f"Updated: {mp3_file.name}")
+
+                    progress.update(1)
+
+                except Exception as e:
+                    errors += 1
+                    self.logger.error(f"Failed to update art for '{mp3_file.name}': {e}")
+                    progress.update(1)
+        finally:
+            progress.close()
+
+        # Print summary
+        print(f"\n{'=' * 60}")
+        print(f"  COVER ART UPDATE SUMMARY")
+        print(f"{'=' * 60}")
+        print(f"  Directory:               '{directory}'")
+        print(f"  Image:                   '{image_path}'")
+        print(f"{'─' * 60}")
+        print(f"  Updated:                 {updated}")
+        print(f"  Errors:                  {errors}")
+        print(f"{'=' * 60}")
+
+        return errors == 0
+
+    def strip(self, directory, dry_run=False, verbose=False):
+        """Remove cover art from all MP3s in a directory."""
+        from mutagen.id3 import ID3, ID3NoHeaderError
+
+        dir_path = Path(directory)
+        if not dir_path.exists():
+            self.logger.error(f"Directory not found: '{directory}'")
+            return False
+
+        mp3_files = sorted(dir_path.glob("*.mp3"))
+        if not mp3_files:
+            self.logger.info(f"No MP3 files found in '{directory}'")
+            return True
+
+        stripped = 0
+        skipped = 0
+        errors = 0
+
+        progress = ProgressBar(
+            total=len(mp3_files), desc="Stripping cover art",
+            logger=self.logger, disable=dry_run,
+        )
+
+        try:
+            for mp3_file in mp3_files:
+                try:
+                    try:
+                        tags = ID3(str(mp3_file))
+                    except ID3NoHeaderError:
+                        skipped += 1
+                        progress.update(1)
+                        continue
+
+                    # Find and remove APIC frames
+                    apic_keys = [key for key in tags.keys() if key.startswith("APIC")]
+
+                    if not apic_keys:
+                        skipped += 1
+                        if verbose:
+                            self.logger.debug(f"No cover art to strip: {mp3_file.name}")
+                        progress.update(1)
+                        continue
+
+                    if dry_run:
+                        self.logger.dry_run(f"Would strip cover art: {mp3_file.name}")
+                        progress.update(1)
+                        continue
+
+                    for key in apic_keys:
+                        del tags[key]
+
+                    tags.save(str(mp3_file), v2_version=3, v1=0)
+                    stripped += 1
+
+                    if verbose:
+                        self.logger.info(f"Stripped: {mp3_file.name}")
+
+                    progress.update(1)
+
+                except Exception as e:
+                    errors += 1
+                    self.logger.error(f"Failed to strip art from '{mp3_file.name}': {e}")
+                    progress.update(1)
+        finally:
+            progress.close()
+
+        # Print summary
+        print(f"\n{'=' * 60}")
+        print(f"  COVER ART STRIP SUMMARY")
+        print(f"{'=' * 60}")
+        print(f"  Directory:               '{directory}'")
+        print(f"{'─' * 60}")
+        print(f"  Stripped:                {stripped}")
+        print(f"  Skipped (no art):        {skipped}")
+        print(f"  Errors:                  {errors}")
+        print(f"{'=' * 60}")
+
+        return errors == 0
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -3566,7 +4104,7 @@ class PipelineOrchestrator:
     """Coordinates multi-stage workflows: download → convert → tag → USB sync."""
 
     def __init__(self, logger=None, deps=None, config=None, quality_preset='lossless',
-                 cookie_path='cookies.txt', workers=None):
+                 cookie_path='cookies.txt', workers=None, embed_cover_art=True):
         self.logger = logger or Logger()
         self.deps = deps or DependencyChecker(self.logger)
         self.config = config or ConfigManager(logger=self.logger)
@@ -3574,6 +4112,7 @@ class PipelineOrchestrator:
         self.quality_preset = quality_preset
         self.cookie_path = cookie_path
         self.workers = workers
+        self.embed_cover_art = embed_cover_art
 
     def run_full_pipeline(self, playlist=None, url=None, auto=False,
                          copy_to_usb=False, usb_dir=DEFAULT_USB_DIR,
@@ -3614,7 +4153,8 @@ class PipelineOrchestrator:
 
         # Use quality_preset parameter if provided, otherwise use instance default
         preset = quality_preset if quality_preset is not None else self.quality_preset
-        converter = Converter(self.logger, quality_preset=preset, workers=self.workers)
+        converter = Converter(self.logger, quality_preset=preset, workers=self.workers,
+                              embed_cover_art=self.embed_cover_art)
         success = converter.convert(
             music_dir,
             export_dir,
@@ -4149,6 +4689,13 @@ class InteractiveMenu:
             verbose=verbose
         )
 
+        # Check for missing cover art and offer to embed
+        if success and not dry_run:
+            self._check_and_offer_cover_art(
+                f"{DEFAULT_EXPORT_DIR}/{playlist.key}",
+                dry_run
+            )
+
         # Ask about USB copy
         if success and not dry_run:
             self._ask_copy_to_usb(
@@ -4192,6 +4739,14 @@ class InteractiveMenu:
             if not success:
                 self.logger.error(f"Failed to process {playlist.name}")
 
+        # Check for missing cover art across all playlists
+        if not dry_run:
+            for playlist in self.config.playlists:
+                self._check_and_offer_cover_art(
+                    f"{DEFAULT_EXPORT_DIR}/{playlist.key}",
+                    dry_run
+                )
+
         # Ask about USB copy after all playlists
         if not dry_run:
             self._ask_copy_to_usb(DEFAULT_EXPORT_DIR, dry_run)
@@ -4227,6 +4782,13 @@ class InteractiveMenu:
                 dry_run=dry_run,
                 verbose=verbose
             )
+
+            # Check for missing cover art and offer to embed
+            if success and not dry_run:
+                self._check_and_offer_cover_art(
+                    f"{DEFAULT_EXPORT_DIR}/{orchestrator.stats.playlist_key}",
+                    dry_run
+                )
 
             # Ask about USB copy
             if success and not dry_run:
@@ -4314,6 +4876,41 @@ class InteractiveMenu:
         except KeyboardInterrupt:
             print("\n\nCancelled by user")
             return False
+
+    def _check_and_offer_cover_art(self, export_dir, dry_run):
+        """Check if MP3s are missing cover art and offer to embed."""
+        from mutagen.id3 import ID3, ID3NoHeaderError
+
+        export_path = Path(export_dir)
+        if not export_path.exists():
+            return
+
+        mp3_files = list(export_path.glob("*.mp3"))
+        if not mp3_files:
+            return
+
+        # Quick scan for missing cover art
+        missing = 0
+        for mp3_file in mp3_files:
+            try:
+                tags = ID3(str(mp3_file))
+                if not any(k.startswith("APIC") for k in tags.keys()):
+                    missing += 1
+            except (ID3NoHeaderError, Exception):
+                missing += 1
+
+        if missing == 0:
+            return
+
+        try:
+            self.logger.info(f"\n  {missing}/{len(mp3_files)} files missing cover art")
+            response = input("Embed cover art from source files? [Y/n] ").strip().lower()
+            if response in ('', 'y', 'yes'):
+                cam = CoverArtManager(self.logger)
+                cam.embed(export_dir, dry_run=dry_run)
+        except KeyboardInterrupt:
+            print()
+            pass
 
     def _ask_copy_to_usb(self, source_dir, dry_run):
         """Ask user if they want to copy to USB."""
@@ -4454,6 +5051,8 @@ For command-specific help: \033[36mapple-to-ride-command <command> --help\033[0m
                                 help='Process all playlists without prompting')
     pipeline_parser.add_argument('--copy-to-usb', action='store_true',
                                 help='Copy to USB drive after processing')
+    pipeline_parser.add_argument('--no-cover-art', action='store_true',
+                                help='Skip embedding cover art (reduces file size)')
 
     # ── download ──────────────────────────────────────────────────
     download_parser = subparsers.add_parser('download',
@@ -4471,6 +5070,8 @@ For command-specific help: \033[36mapple-to-ride-command <command> --help\033[0m
     convert_parser.add_argument('--output', help='Output directory')
     convert_parser.add_argument('--force', action='store_true',
                                help='Re-convert existing files')
+    convert_parser.add_argument('--no-cover-art', action='store_true',
+                               help='Skip embedding cover art (reduces file size)')
 
     # ── tag ───────────────────────────────────────────────────────
     tag_parser = subparsers.add_parser('tag',
@@ -4504,6 +5105,35 @@ For command-specific help: \033[36mapple-to-ride-command <command> --help\033[0m
         help='Copy files to USB drive')
     sync_parser.add_argument('source_dir', nargs='?', default=DEFAULT_EXPORT_DIR,
                             help='Source directory to copy')
+
+    # ── cover-art ─────────────────────────────────────────────────
+    coverart_parser = subparsers.add_parser('cover-art',
+        help='Manage cover art (embed, extract, update, strip)')
+    coverart_sub = coverart_parser.add_subparsers(dest='cover_art_action',
+                                                   help='Cover art action')
+
+    # cover-art embed
+    ca_embed = coverart_sub.add_parser('embed',
+        help='Embed cover art from M4A sources into MP3s')
+    ca_embed.add_argument('directory', help='Directory with MP3 files')
+    ca_embed.add_argument('--source', help='Source M4A directory (auto-derived if omitted)')
+
+    # cover-art extract
+    ca_extract = coverart_sub.add_parser('extract',
+        help='Extract cover art from MP3s to image files')
+    ca_extract.add_argument('directory', help='Directory with MP3 files')
+    ca_extract.add_argument('--output', help='Output directory for images')
+
+    # cover-art update
+    ca_update = coverart_sub.add_parser('update',
+        help='Replace cover art on all MP3s from a single image')
+    ca_update.add_argument('directory', help='Directory with MP3 files')
+    ca_update.add_argument('--image', required=True, help='Image file (.jpg or .png)')
+
+    # cover-art strip
+    ca_strip = coverart_sub.add_parser('strip',
+        help='Remove cover art from MP3s to reduce file size')
+    ca_strip.add_argument('directory', help='Directory with MP3 files')
 
     # ── summary ───────────────────────────────────────────────────
     summary_parser = subparsers.add_parser('summary',
@@ -4617,7 +5247,9 @@ def main():
         quality_preset = resolve_quality_preset(args, logger)
 
         output_dir = args.output or DEFAULT_EXPORT_DIR
-        converter = Converter(logger, quality_preset=quality_preset, workers=args.workers)
+        embed_cover_art = not getattr(args, 'no_cover_art', False)
+        converter = Converter(logger, quality_preset=quality_preset, workers=args.workers,
+                              embed_cover_art=embed_cover_art)
         success = converter.convert(
             args.input_dir,
             output_dir,
@@ -4754,6 +5386,48 @@ def main():
         )
         sys.exit(0 if success else 1)
 
+    elif args.command == 'cover-art':
+        # Cover art management
+        deps = DependencyChecker(logger)
+        if not deps.check_python_packages():
+            sys.exit(1)
+
+        cam = CoverArtManager(logger)
+
+        if args.cover_art_action == 'embed':
+            success = cam.embed(
+                args.directory,
+                source_dir=args.source,
+                dry_run=args.dry_run,
+                verbose=args.verbose
+            )
+        elif args.cover_art_action == 'extract':
+            success = cam.extract(
+                args.directory,
+                output_dir=args.output,
+                dry_run=args.dry_run,
+                verbose=args.verbose
+            )
+        elif args.cover_art_action == 'update':
+            success = cam.update(
+                args.directory,
+                args.image,
+                dry_run=args.dry_run,
+                verbose=args.verbose
+            )
+        elif args.cover_art_action == 'strip':
+            success = cam.strip(
+                args.directory,
+                dry_run=args.dry_run,
+                verbose=args.verbose
+            )
+        else:
+            logger.error("Specify an action: embed, extract, update, or strip")
+            logger.info("Use: apple-to-ride-command cover-art --help")
+            sys.exit(1)
+
+        sys.exit(0 if success else 1)
+
     elif args.command == 'pipeline':
         # Full pipeline workflow
         deps = DependencyChecker(logger)
@@ -4763,10 +5437,12 @@ def main():
         quality_preset = resolve_quality_preset(args, logger)
 
         config = ConfigManager(logger=logger)
+        embed_cover_art = not getattr(args, 'no_cover_art', False)
         orchestrator = PipelineOrchestrator(logger, deps, config,
                                           quality_preset=quality_preset,
                                           cookie_path=args.cookies,
-                                          workers=args.workers)
+                                          workers=args.workers,
+                                          embed_cover_art=embed_cover_art)
 
         # Determine what to process
         if args.auto:
