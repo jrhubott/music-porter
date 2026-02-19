@@ -1,6 +1,7 @@
 ---
 name: merge-to-main
 description: Merge the current feature branch into main with version bump and git tag
+model: opus
 disable-model-invocation: true
 allowed-tools: Bash, Read, Edit, Grep, Glob, AskUserQuestion
 ---
