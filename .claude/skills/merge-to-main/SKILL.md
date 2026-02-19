@@ -44,6 +44,14 @@ Merge the current feature branch into main following the project's version workf
    - Append new items to the appropriate priority section (High / Medium / Low), continuing the existing numbering
    - Keep descriptions concise and consistent with the existing list style: `**Bold title** - Description`
 
+5b. **Update todos.md**
+   - Check if `todos.md` exists in the project root
+   - If it exists, scan the **Active** list for any todos that match the work completed on this branch
+   - For each matching active todo: move it to the **Completed** section by changing `- [ ]` to `- [x]` and appending `| Done: MM-DD-YYYY`
+   - Use today's date for the Done timestamp
+   - If no todos.md exists or no active todos match, skip this step silently
+   - Do NOT ask the user — complete matching todos automatically as part of the merge
+
 6. **Update version and commit on feature branch**
    - Edit `music-porter` to set `VERSION = "X.Y.Z"` (clean version, no branch suffix)
    - Stage the version change (and README if modified)
