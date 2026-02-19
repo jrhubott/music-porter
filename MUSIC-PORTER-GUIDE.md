@@ -1,4 +1,4 @@
-# apple-to-ride-command - Usage Guide
+# music-porter - Usage Guide
 
 The unified Apple Music to Ride Command MP3 converter combines download, conversion, tag management, and USB sync into a single powerful tool.
 
@@ -37,26 +37,26 @@ The tool runs on **macOS**, **Linux**, and **Windows** with automatic platform d
 
 ### Interactive Menu (Recommended)
 ```bash
-./apple-to-ride-command
+./music-porter
 ```
 Shows an interactive menu for easy playlist selection and processing.
 
 ### Full Pipeline (One Command)
 ```bash
 # Process a configured playlist
-./apple-to-ride-command pipeline --playlist "Pop_Workout"
+./music-porter pipeline --playlist "Pop_Workout"
 
 # Process from URL
-./apple-to-ride-command pipeline --url "https://music.apple.com/us/playlist/..."
+./music-porter pipeline --url "https://music.apple.com/us/playlist/..."
 
 # Process all playlists (auto mode)
-./apple-to-ride-command pipeline --auto
+./music-porter pipeline --auto
 
 # With quality preset (lossless, high, medium, low, custom)
-./apple-to-ride-command pipeline --playlist "Pop_Workout" --preset high
+./music-porter pipeline --playlist "Pop_Workout" --preset high
 
 # Include USB copy
-./apple-to-ride-command pipeline --playlist "Pop_Workout" --copy-to-usb
+./music-porter pipeline --playlist "Pop_Workout" --copy-to-usb
 ```
 
 ## Cookie Management
@@ -107,13 +107,13 @@ Attempt automatic cookie refresh? [Y/n]  ← Just press Enter!
 
 ```bash
 # Auto-refresh cookies (non-interactive)
-./apple-to-ride-command pipeline --auto --auto-refresh-cookies
+./music-porter pipeline --auto --auto-refresh-cookies
 
 # Use custom cookie file
-./apple-to-ride-command download --playlist 1 --cookies /path/to/cookies.txt
+./music-porter download --playlist 1 --cookies /path/to/cookies.txt
 
 # Skip validation (not recommended)
-./apple-to-ride-command download --playlist 1 --skip-cookie-validation
+./music-porter download --playlist 1 --skip-cookie-validation
 ```
 
 ### Browser Support
@@ -152,21 +152,21 @@ If you prefer manual control or automation fails:
 
 ```bash
 # Process specific playlist
-./apple-to-ride-command pipeline --playlist "Pop_Workout"
-./apple-to-ride-command pipeline --playlist 1
+./music-porter pipeline --playlist "Pop_Workout"
+./music-porter pipeline --playlist 1
 
 # Process from URL
-./apple-to-ride-command pipeline --url "https://music.apple.com/us/playlist/..."
+./music-porter pipeline --url "https://music.apple.com/us/playlist/..."
 
 # Process all playlists (no prompts)
-./apple-to-ride-command pipeline --auto
+./music-porter pipeline --auto
 
 # With quality preset
-./apple-to-ride-command pipeline --playlist "Pop_Workout" --preset high
-./apple-to-ride-command pipeline --auto --preset medium
+./music-porter pipeline --playlist "Pop_Workout" --preset high
+./music-porter pipeline --auto --preset medium
 
 # Include USB sync
-./apple-to-ride-command pipeline --playlist "Pop_Workout" --copy-to-usb --usb-dir "RZR/Music"
+./music-porter pipeline --playlist "Pop_Workout" --copy-to-usb --usb-dir "RZR/Music"
 ```
 
 **What it does:**
@@ -180,14 +180,14 @@ If you prefer manual control or automation fails:
 
 ```bash
 # Download by playlist name/number
-./apple-to-ride-command download --playlist "Pop_Workout"
-./apple-to-ride-command download --playlist 1
+./music-porter download --playlist "Pop_Workout"
+./music-porter download --playlist 1
 
 # Download by URL
-./apple-to-ride-command download --url "https://music.apple.com/us/playlist/..."
+./music-porter download --url "https://music.apple.com/us/playlist/..."
 
 # Custom output directory
-./apple-to-ride-command download --playlist "Pop_Workout" --output custom/path
+./music-porter download --playlist "Pop_Workout" --output custom/path
 ```
 
 **Output:** M4A files in `music/{key}/` directory
@@ -197,21 +197,21 @@ If you prefer manual control or automation fails:
 
 ```bash
 # Basic conversion (default: lossless 320kbps)
-./apple-to-ride-command convert music/Pop_Workout
+./music-porter convert music/Pop_Workout
 
 # Specify output directory
-./apple-to-ride-command convert music/Pop_Workout --output export/Pop_Workout
+./music-porter convert music/Pop_Workout --output export/Pop_Workout
 
 # With quality presets
-./apple-to-ride-command convert music/Pop_Workout --preset high
-./apple-to-ride-command convert music/Pop_Workout --preset medium
-./apple-to-ride-command convert music/Pop_Workout --preset custom --quality 0
+./music-porter convert music/Pop_Workout --preset high
+./music-porter convert music/Pop_Workout --preset medium
+./music-porter convert music/Pop_Workout --preset custom --quality 0
 
 # Force re-conversion of existing files
-./apple-to-ride-command convert music/Pop_Workout --force
+./music-porter convert music/Pop_Workout --force
 
 # Combine flags
-./apple-to-ride-command convert music/Pop_Workout --preset high --force
+./music-porter convert music/Pop_Workout --preset high --force
 ```
 
 **Features:**
@@ -227,10 +227,10 @@ If you prefer manual control or automation fails:
 
 ```bash
 # Update album tag
-./apple-to-ride-command tag export/Pop_Workout --album "Pop Workout"
+./music-porter tag export/Pop_Workout --album "Pop Workout"
 
 # Update both album and artist
-./apple-to-ride-command tag export/Pop_Workout --album "Pop Workout" --artist "Various"
+./music-porter tag export/Pop_Workout --album "Pop Workout" --artist "Various"
 ```
 
 **Features:**
@@ -244,12 +244,12 @@ If you prefer manual control or automation fails:
 
 ```bash
 # Restore all original tags
-./apple-to-ride-command restore export/Pop_Workout --all
+./music-porter restore export/Pop_Workout --all
 
 # Restore specific tags
-./apple-to-ride-command restore export/Pop_Workout --album
-./apple-to-ride-command restore export/Pop_Workout --title
-./apple-to-ride-command restore export/Pop_Workout --artist
+./music-porter restore export/Pop_Workout --album
+./music-porter restore export/Pop_Workout --title
+./music-porter restore export/Pop_Workout --artist
 ```
 
 **Features:**
@@ -262,13 +262,13 @@ If you prefer manual control or automation fails:
 
 ```bash
 # Copy default export directory
-./apple-to-ride-command sync-usb
+./music-porter sync-usb
 
 # Copy specific directory
-./apple-to-ride-command sync-usb export/Pop_Workout
+./music-porter sync-usb export/Pop_Workout
 
 # Custom USB path
-./apple-to-ride-command sync-usb export/Pop_Workout --usb-dir "RZR/Music"
+./music-porter sync-usb export/Pop_Workout --usb-dir "RZR/Music"
 ```
 
 **Features:**
@@ -283,21 +283,21 @@ If you prefer manual control or automation fails:
 Preview changes without modifying any files
 
 ```bash
-./apple-to-ride-command --dry-run convert music/Pop_Workout
-./apple-to-ride-command --dry-run tag export/Pop_Workout --album "Test"
+./music-porter --dry-run convert music/Pop_Workout
+./music-porter --dry-run tag export/Pop_Workout --album "Test"
 ```
 
 ### --verbose / -v
 Show detailed information during processing
 
 ```bash
-./apple-to-ride-command --verbose convert music/Pop_Workout
-./apple-to-ride-command -v tag export/Pop_Workout --album "Test"
+./music-porter --verbose convert music/Pop_Workout
+./music-porter -v tag export/Pop_Workout --album "Test"
 ```
 
 ### Combined
 ```bash
-./apple-to-ride-command --dry-run --verbose convert music/Pop_Workout
+./music-porter --dry-run --verbose convert music/Pop_Workout
 ```
 
 ## Quality Presets
@@ -333,25 +333,25 @@ MP3 conversion supports configurable quality presets to balance file size and au
 #### Basic Usage
 ```bash
 # Default (lossless 320kbps CBR)
-./apple-to-ride-command convert music/Pop_Workout
+./music-porter convert music/Pop_Workout
 
 # High quality VBR
-./apple-to-ride-command convert music/Pop_Workout --preset high
+./music-porter convert music/Pop_Workout --preset high
 
 # Medium quality VBR (balanced)
-./apple-to-ride-command convert music/Pop_Workout --preset medium
+./music-porter convert music/Pop_Workout --preset medium
 
 # Low quality VBR (space-saving)
-./apple-to-ride-command convert music/Pop_Workout --preset low
+./music-porter convert music/Pop_Workout --preset low
 ```
 
 #### Custom Quality
 ```bash
 # Custom VBR quality 0 (best possible)
-./apple-to-ride-command convert music/Pop_Workout --preset custom --quality 0
+./music-porter convert music/Pop_Workout --preset custom --quality 0
 
 # Custom VBR quality 5 (medium-low)
-./apple-to-ride-command convert music/Pop_Workout --preset custom --quality 5
+./music-porter convert music/Pop_Workout --preset custom --quality 5
 
 # Note: --preset custom REQUIRES --quality parameter
 ```
@@ -359,26 +359,26 @@ MP3 conversion supports configurable quality presets to balance file size and au
 #### Pipeline Integration
 ```bash
 # Full pipeline with high quality
-./apple-to-ride-command pipeline --playlist "Pop_Workout" --preset high
+./music-porter pipeline --playlist "Pop_Workout" --preset high
 
 # Batch process all playlists with medium quality
-./apple-to-ride-command pipeline --auto --preset medium
+./music-porter pipeline --auto --preset medium
 
 # URL download with custom quality
-./apple-to-ride-command pipeline --url "https://..." --preset custom --quality 0
+./music-porter pipeline --url "https://..." --preset custom --quality 0
 ```
 
 #### Force Re-conversion with New Quality
 ```bash
 # Re-convert existing files with different quality
-./apple-to-ride-command convert music/Pop_Workout --preset high --force
+./music-porter convert music/Pop_Workout --preset high --force
 ```
 
 ### Quality Setting Display
 
 When using `--verbose`, quality settings are displayed:
 ```bash
-./apple-to-ride-command --verbose convert music/Pop_Workout --preset high
+./music-porter --verbose convert music/Pop_Workout --preset high
 # Output includes:
 # Quality: VBR quality 2 (preset: high)
 ```
@@ -426,15 +426,15 @@ Mode:                    VBR quality 2
 Invalid quality settings produce clear errors:
 ```bash
 # Missing --quality with custom preset
-./apple-to-ride-command convert music/Pop_Workout --preset custom
+./music-porter convert music/Pop_Workout --preset custom
 # Error: --preset custom requires --quality parameter (0-9)
 
 # Out of range quality value
-./apple-to-ride-command convert music/Pop_Workout --preset custom --quality 15
+./music-porter convert music/Pop_Workout --preset custom --quality 15
 # Error: --quality must be between 0-9, got: 15
 
 # --quality without custom preset (warning, not error)
-./apple-to-ride-command convert music/Pop_Workout --preset high --quality 5
+./music-porter convert music/Pop_Workout --preset high --quality 5
 # Warning: --quality ignored unless --preset custom is specified
 ```
 
@@ -457,7 +457,7 @@ Thumbs_Up|https://music.apple.com/us/playlist/thumbs-up/...|Thumbs Up
 
 ```
 .
-├── apple-to-ride-command    # Main script
+├── music-porter    # Main script
 ├── playlists.conf           # Playlist configuration
 ├── music/                   # Downloaded M4A files (nested by artist/album)
 │   └── Pop_Workout/
@@ -489,17 +489,17 @@ Thumbs_Up|https://music.apple.com/us/playlist/thumbs-up/...|Thumbs Up
 
 ```bash
 # 1. Convert M4A → MP3
-./apple-to-ride-command convert music/Pop_Workout --output export/Pop_Workout
+./music-porter convert music/Pop_Workout --output export/Pop_Workout
 # Result: Title = "Ava Max - My Oh My"
 #         TXXX:OriginalTitle = "My Oh My"
 
 # 2. Update album tag
-./apple-to-ride-command tag export/Pop_Workout --album "Pop Workout"
+./music-porter tag export/Pop_Workout --album "Pop Workout"
 # Result: Album = "Pop Workout"
 #         TXXX:OriginalAlbum = "My Oh My - Single" (protected)
 
 # 3. Restore original album
-./apple-to-ride-command restore export/Pop_Workout --album
+./music-porter restore export/Pop_Workout --album
 # Result: Album = "My Oh My - Single" (restored from TXXX)
 ```
 
@@ -508,30 +508,30 @@ Thumbs_Up|https://music.apple.com/us/playlist/thumbs-up/...|Thumbs Up
 ### Workflow 1: Download and Convert New Playlist
 ```bash
 # Interactive (recommended)
-./apple-to-ride-command
+./music-porter
 # Select playlist, choose to copy to USB
 
 # Or one command
-./apple-to-ride-command pipeline --playlist "Pop_Workout" --copy-to-usb
+./music-porter pipeline --playlist "Pop_Workout" --copy-to-usb
 ```
 
 ### Workflow 2: Update All Playlists
 ```bash
 # Process all configured playlists automatically
-./apple-to-ride-command pipeline --auto --copy-to-usb
+./music-porter pipeline --auto --copy-to-usb
 ```
 
 ### Workflow 3: One-Time URL Download
 ```bash
 # Download, convert, and copy from a direct URL
-./apple-to-ride-command pipeline --url "https://music.apple.com/us/playlist/..."
+./music-porter pipeline --url "https://music.apple.com/us/playlist/..."
 # Asks to save to playlists.conf after download
 ```
 
 ### Workflow 4: Re-convert with Different Settings
 ```bash
 # Re-convert existing M4A files
-./apple-to-ride-command convert music/Pop_Workout --output export/Pop_Workout --force
+./music-porter convert music/Pop_Workout --output export/Pop_Workout --force
 ```
 
 ### Workflow 5: Batch Tag Update
@@ -539,14 +539,14 @@ Thumbs_Up|https://music.apple.com/us/playlist/thumbs-up/...|Thumbs Up
 # Update tags on all playlists
 for dir in export/*/; do
     name=$(basename "$dir")
-    ./apple-to-ride-command tag "$dir" --album "$name" --artist "Various"
+    ./music-porter tag "$dir" --album "$name" --artist "Various"
 done
 ```
 
 ### Workflow 6: Copy Multiple Playlists to USB
 ```bash
 # Copy all exported playlists
-./apple-to-ride-command sync-usb export/
+./music-porter sync-usb export/
 ```
 
 ## Logging
@@ -671,7 +671,7 @@ pip install mutagen
 
 ## Comparison with Old Scripts
 
-| Feature | do-it-all | ride-command-mp3-export | apple-to-ride-command |
+| Feature | do-it-all | ride-command-mp3-export | music-porter |
 |---------|-----------|-------------------------|----------------------|
 | Download | ✅ | ❌ | ✅ |
 | Convert | ✅ (calls script) | ✅ | ✅ |
@@ -689,14 +689,14 @@ pip install mutagen
 
 1. **Always use dry-run first** for new operations
    ```bash
-   ./apple-to-ride-command --dry-run --verbose convert music/NewPlaylist
+   ./music-porter --dry-run --verbose convert music/NewPlaylist
    ```
 
 2. **Keep originals safe** - TXXX frames preserve true originals forever
 
 3. **Use pipeline for new downloads** - handles everything in one command
    ```bash
-   ./apple-to-ride-command pipeline --playlist "New_Playlist"
+   ./music-porter pipeline --playlist "New_Playlist"
    ```
 
 4. **Check logs** if something goes wrong
@@ -706,7 +706,7 @@ pip install mutagen
 
 5. **Test USB sync without copying** using dry-run
    ```bash
-   ./apple-to-ride-command --dry-run sync-usb export/Pop_Workout
+   ./music-porter --dry-run sync-usb export/Pop_Workout
    ```
 
 6. **Use interactive menu** for occasional use - most user-friendly

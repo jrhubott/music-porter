@@ -81,17 +81,17 @@ pip install -r requirements.txt
 
 ```bash
 # Interactive menu (easiest way to start)
-./apple-to-ride-command
+./music-porter
 
 # Full pipeline for a specific playlist
-./apple-to-ride-command pipeline --playlist "Pop_Workout"
+./music-porter pipeline --playlist "Pop_Workout"
 
 # Process all playlists automatically
-./apple-to-ride-command pipeline --auto
+./music-porter pipeline --auto
 
 # Get help
-./apple-to-ride-command --help
-./apple-to-ride-command [command] --help
+./music-porter --help
+./music-porter [command] --help
 ```
 
 ## Quality Presets
@@ -110,16 +110,16 @@ MP3 conversion supports configurable quality presets to balance file size and au
 
 ```bash
 # Default lossless quality (320kbps CBR)
-./apple-to-ride-command convert music/Pop_Workout --output export/Pop_Workout
+./music-porter convert music/Pop_Workout --output export/Pop_Workout
 
 # High quality (VBR)
-./apple-to-ride-command convert music/Pop_Workout --output export/Pop_Workout --preset high
+./music-porter convert music/Pop_Workout --output export/Pop_Workout --preset high
 
 # Custom quality (VBR quality 0 - best)
-./apple-to-ride-command convert music/Pop_Workout --output export/Pop_Workout --preset custom --quality 0
+./music-porter convert music/Pop_Workout --output export/Pop_Workout --preset custom --quality 0
 
 # Full pipeline with quality preset
-./apple-to-ride-command pipeline --playlist "Pop_Workout" --preset medium
+./music-porter pipeline --playlist "Pop_Workout" --preset medium
 ```
 
 ## Commands Overview
@@ -128,80 +128,80 @@ MP3 conversion supports configurable quality presets to balance file size and au
 
 **Full Pipeline** - Download → Convert → Tag → USB (optional)
 ```bash
-./apple-to-ride-command pipeline --playlist "Pop_Workout"
-./apple-to-ride-command pipeline --url "https://music.apple.com/..."
-./apple-to-ride-command pipeline --auto  # Process all playlists
-./apple-to-ride-command pipeline --playlist 1 --copy-to-usb  # Include USB sync
+./music-porter pipeline --playlist "Pop_Workout"
+./music-porter pipeline --url "https://music.apple.com/..."
+./music-porter pipeline --auto  # Process all playlists
+./music-porter pipeline --playlist 1 --copy-to-usb  # Include USB sync
 ```
 
 ### Individual Commands
 
 **Download** - Download Apple Music playlists
 ```bash
-./apple-to-ride-command download --playlist "Pop_Workout"
-./apple-to-ride-command download --url "https://music.apple.com/..."
+./music-porter download --playlist "Pop_Workout"
+./music-porter download --url "https://music.apple.com/..."
 ```
 
 **Convert** - Convert M4A to MP3
 ```bash
-./apple-to-ride-command convert music/Pop_Workout --output export/Pop_Workout
-./apple-to-ride-command convert music/Pop_Workout --preset high --force
-./apple-to-ride-command convert music/Pop_Workout --workers 4    # Parallel conversion
-./apple-to-ride-command convert music/Pop_Workout --workers 1    # Sequential (single-threaded)
+./music-porter convert music/Pop_Workout --output export/Pop_Workout
+./music-porter convert music/Pop_Workout --preset high --force
+./music-porter convert music/Pop_Workout --workers 4    # Parallel conversion
+./music-porter convert music/Pop_Workout --workers 1    # Sequential (single-threaded)
 ```
 
 **Tag** - Update MP3 tags
 ```bash
-./apple-to-ride-command tag export/Pop_Workout --album "Pop Workout"
-./apple-to-ride-command tag export/Pop_Workout --album "Pop" --artist "Various"
+./music-porter tag export/Pop_Workout --album "Pop Workout"
+./music-porter tag export/Pop_Workout --album "Pop" --artist "Various"
 ```
 
 **Restore** - Restore original tags from TXXX frames
 ```bash
-./apple-to-ride-command restore export/Pop_Workout --all
-./apple-to-ride-command restore export/Pop_Workout --album --artist
+./music-porter restore export/Pop_Workout --all
+./music-porter restore export/Pop_Workout --album --artist
 ```
 
 **Reset** - Reset tags from source M4A files (⚠️ overwrites TXXX protection)
 ```bash
-./apple-to-ride-command reset music/Pop_Workout export/Pop_Workout
+./music-porter reset music/Pop_Workout export/Pop_Workout
 ```
 
 **USB Sync** - Copy to USB drive
 ```bash
-./apple-to-ride-command sync-usb export/Pop_Workout
-./apple-to-ride-command sync-usb  # Copy entire export directory
+./music-porter sync-usb export/Pop_Workout
+./music-porter sync-usb  # Copy entire export directory
 ```
 
 **Cover Art** - Manage embedded album artwork
 ```bash
 # Embed cover art from M4A sources into MP3s
-./apple-to-ride-command cover-art embed export/Pop_Workout
+./music-porter cover-art embed export/Pop_Workout
 
 # Embed cover art for all configured playlists
-./apple-to-ride-command cover-art embed --all
+./music-porter cover-art embed --all
 
 # Extract cover art to image files
-./apple-to-ride-command cover-art extract export/Pop_Workout
+./music-porter cover-art extract export/Pop_Workout
 
 # Replace cover art from a single image
-./apple-to-ride-command cover-art update export/Pop_Workout --image artwork.jpg
+./music-porter cover-art update export/Pop_Workout --image artwork.jpg
 
 # Strip cover art to reduce file size
-./apple-to-ride-command cover-art strip export/Pop_Workout
+./music-porter cover-art strip export/Pop_Workout
 
 # Resize embedded cover art
-./apple-to-ride-command cover-art resize export/Pop_Workout --max-size 600
+./music-porter cover-art resize export/Pop_Workout --max-size 600
 
 # Resize cover art for all configured playlists
-./apple-to-ride-command cover-art resize --all --max-size 600
+./music-porter cover-art resize --all --max-size 600
 ```
 
 **Summary** - Display export library statistics
 ```bash
-./apple-to-ride-command summary
-./apple-to-ride-command summary --detailed
-./apple-to-ride-command summary --quick
+./music-porter summary
+./music-porter summary --detailed
+./music-porter summary --quick
 ```
 
 ### Global Flags
@@ -215,7 +215,7 @@ MP3 conversion supports configurable quality presets to balance file size and au
 
 ## Documentation
 
-- **[User Guide](APPLE-TO-RIDE-COMMAND-GUIDE.md)** - Complete usage guide with detailed examples
+- **[User Guide](MUSIC-PORTER-GUIDE.md)** - Complete usage guide with detailed examples
 - **[Cookie Management Guide](COOKIE-MANAGEMENT-GUIDE.md)** - Cookie validation, auto-refresh, and troubleshooting
 - **[Quick Reference](QUICK-REFERENCE.md)** - Command cheat sheet for quick lookup
 - **[Architecture](CLAUDE.md)** - Developer guide and AI assistant context
@@ -278,17 +278,17 @@ The tool includes intelligent cookie management to prevent authentication failur
 
 ```bash
 # Automatic refresh (interactive)
-./apple-to-ride-command download --playlist 1
+./music-porter download --playlist 1
 # If cookies expired, press Enter to auto-refresh
 
 # Automatic refresh (command-line)
-./apple-to-ride-command pipeline --auto --auto-refresh-cookies
+./music-porter pipeline --auto --auto-refresh-cookies
 
 # Use custom cookie file
-./apple-to-ride-command download --playlist 1 --cookies /path/to/cookies.txt
+./music-porter download --playlist 1 --cookies /path/to/cookies.txt
 
 # Skip validation (not recommended)
-./apple-to-ride-command download --playlist 1 --skip-cookie-validation
+./music-porter download --playlist 1 --skip-cookie-validation
 ```
 
 **See [Cookie Management Guide](COOKIE-MANAGEMENT-GUIDE.md) for complete documentation including troubleshooting, security details, and manual refresh instructions.**
@@ -297,7 +297,7 @@ The tool includes intelligent cookie management to prevent authentication failur
 
 ```
 .
-├── apple-to-ride-command            # Main unified tool (RECOMMENDED)
+├── music-porter            # Main unified tool (RECOMMENDED)
 ├── do-it-all                        # Legacy wrapper (deprecated)
 ├── ride-command-mp3-export          # Legacy wrapper (deprecated)
 ├── playlists.conf                   # Playlist configuration
@@ -317,7 +317,7 @@ The tool includes intelligent cookie management to prevent authentication failur
 
 **Cookies expired / Downloads fail with authentication error**
 - Tool automatically detects expired cookies at startup
-- Use auto-refresh: `./apple-to-ride-command download --playlist 1` → press Enter when prompted
+- Use auto-refresh: `./music-porter download --playlist 1` → press Enter when prompted
 - Or use `--auto-refresh-cookies` flag for non-interactive refresh
 - Manual refresh: Export cookies from music.apple.com browser extension
 - See [Cookie Management Guide](COOKIE-MANAGEMENT-GUIDE.md) for detailed troubleshooting
@@ -341,7 +341,7 @@ The tool includes intelligent cookie management to prevent authentication failur
 - Reinstall dependencies: `pip install -r requirements.txt`
 - Check Python version: `python --version` (requires 3.8+)
 
-For more detailed troubleshooting, see the [User Guide](APPLE-TO-RIDE-COMMAND-GUIDE.md).
+For more detailed troubleshooting, see the [User Guide](MUSIC-PORTER-GUIDE.md).
 
 ## Architecture Highlights
 

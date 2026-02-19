@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-apple-to-ride-command - Unified Apple Music to Ride Command MP3 converter
+music-porter - Apple Music to Ride Command MP3 converter
 
 Combines download, conversion, tag management, and USB sync into a single tool.
 """
@@ -3224,7 +3224,7 @@ class SummaryManager:
             print(f"  Path: '{export_dir}'")
             print()
             print("  Suggested next steps:")
-            print("    • Run: ./apple-to-ride-command pipeline --auto")
+            print("    • Run: ./music-porter pipeline --auto")
             print("    • Or specify custom directory: --export-dir /path/to/export")
             print()
             return True  # Not an error, just no data
@@ -3245,8 +3245,8 @@ class SummaryManager:
             print("  ℹ️  Library is empty")
             print()
             print("  Suggested next steps:")
-            print("    • Run: ./apple-to-ride-command pipeline --auto")
-            print("    • Or download a playlist: ./apple-to-ride-command download --playlist 1")
+            print("    • Run: ./music-porter pipeline --auto")
+            print("    • Or download a playlist: ./music-porter download --playlist 1")
             print()
             return True  # Not an error
 
@@ -3469,7 +3469,7 @@ class SummaryManager:
                 print(f"  Status:                  ✅ All files have embedded cover art")
             else:
                 print(f"  Status:                  ⚠️  {self.stats.files_without_cover_art} files missing cover art")
-                print(f"  Fix:                     ./apple-to-ride-command cover-art embed <dir>")
+                print(f"  Fix:                     ./music-porter cover-art embed <dir>")
         else:
             print("  Status:                  ℹ️  No files checked")
 
@@ -4894,7 +4894,7 @@ class InteractiveMenu:
         while True:
             # Display menu
             print("\n╔══════════════════════════════════════════════════════════════╗")
-            print("║          Apple Music to Ride Command MP3 Converter           ║")
+            print("║                       Music Porter                           ║")
             print("╚══════════════════════════════════════════════════════════════╝")
             print("\n  📝 Process playlist:")
             print()
@@ -5298,8 +5298,8 @@ def positive_int(value):
 def create_parser():
     """Create the argument parser with subcommands."""
     parser = argparse.ArgumentParser(
-        prog='apple-to-ride-command',
-        description='''\033[1;36mApple Music to Ride Command MP3 Converter\033[0m
+        prog='music-porter',
+        description='''\033[1;36mMusic Porter\033[0m
 
 A comprehensive music playlist management and conversion tool that:
   \033[32m•\033[0m Downloads Apple Music playlists using gamdl
@@ -5321,7 +5321,7 @@ Default Paths:
   \033[1mCookies:\033[0m    \033[36m{DEFAULT_COOKIES}\033[0m
   \033[1mUSB Target:\033[0m \033[36m{DEFAULT_USB_DIR}\033[0m
 
-For command-specific help: \033[36mapple-to-ride-command <command> --help\033[0m
+For command-specific help: \033[36mmusic-porter <command> --help\033[0m
 ''',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -5475,7 +5475,7 @@ def main():
     logger = Logger(verbose=args.verbose)
 
     # Display startup banner
-    banner_text = f"  Apple Music to Ride Command MP3 Converter v{VERSION}  "
+    banner_text = f"  Music Porter v{VERSION}  "
     banner_width = max(len(banner_text), 62)
     banner_text = banner_text.ljust(banner_width)
     print(f"\n╔{'═' * banner_width}╗")
@@ -5483,7 +5483,7 @@ def main():
     print(f"╚{'═' * banner_width}╝\n")
 
     # Log startup (file only)
-    logger.file_info(f"apple-to-ride-command v{VERSION}")
+    logger.file_info(f"music-porter v{VERSION}")
     logger.file_info("Session started")
 
     # Display system information
@@ -5827,7 +5827,7 @@ def main():
                 sys.exit(1)
         else:
             logger.error("Specify an action: embed, extract, update, strip, or resize")
-            logger.info("Use: apple-to-ride-command cover-art --help")
+            logger.info("Use: music-porter cover-art --help")
             sys.exit(1)
 
         sys.exit(0 if success else 1)

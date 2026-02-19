@@ -48,9 +48,9 @@ python3 -c "from webdriver_manager.chrome import ChromeDriverManager; print('✓
 Every command shows cookie status at startup:
 
 ```bash
-$ ./apple-to-ride-command --dry-run download --playlist 1
+$ ./music-porter --dry-run download --playlist 1
 
-apple-to-ride-command v1.0.0
+music-porter v1.0.0
 Platform: macOS (Darwin)
 Command: download
 Cookie status: Cookies valid until 2026-08-16 (178 days remaining)  ✅
@@ -69,10 +69,10 @@ Use the `--auto-refresh-cookies` flag to automatically refresh expired cookies:
 
 ```bash
 # Download with auto-refresh
-./apple-to-ride-command download --playlist 1 --auto-refresh-cookies
+./music-porter download --playlist 1 --auto-refresh-cookies
 
 # Pipeline with auto-refresh
-./apple-to-ride-command pipeline --playlist 1 --auto-refresh-cookies
+./music-porter pipeline --playlist 1 --auto-refresh-cookies
 ```
 
 ### Workflow Example: Already Logged In
@@ -80,9 +80,9 @@ Use the `--auto-refresh-cookies` flag to automatically refresh expired cookies:
 If you're already logged in to Apple Music in your browser:
 
 ```bash
-$ ./apple-to-ride-command download --playlist 1 --auto-refresh-cookies
+$ ./music-porter download --playlist 1 --auto-refresh-cookies
 
-apple-to-ride-command v1.0.0
+music-porter v1.0.0
 Platform: macOS (Darwin)
 Command: download
 Cookie status: Cookies expired on 2026-02-15 (3 days ago)
@@ -127,7 +127,7 @@ Starting download from Apple Music...
 If you're not logged in, a browser window opens:
 
 ```bash
-$ ./apple-to-ride-command download --playlist 1 --auto-refresh-cookies
+$ ./music-porter download --playlist 1 --auto-refresh-cookies
 
 [... startup info ...]
 
@@ -243,13 +243,13 @@ The tool automatically detects:
 
 ```bash
 # Use custom cookie file
-./apple-to-ride-command download --cookies /path/to/cookies.txt --playlist 1
+./music-porter download --cookies /path/to/cookies.txt --playlist 1
 
 # Auto-refresh with custom cookie file
-./apple-to-ride-command download --cookies /path/to/cookies.txt --auto-refresh-cookies --playlist 1
+./music-porter download --cookies /path/to/cookies.txt --auto-refresh-cookies --playlist 1
 
 # Skip validation (not recommended)
-./apple-to-ride-command download --skip-cookie-validation --playlist 1
+./music-porter download --skip-cookie-validation --playlist 1
 ```
 
 ## Manual Refresh (Alternative)
@@ -381,12 +381,12 @@ Fields: `domain | flag | path | secure | expiration | name | value`
 
 ✅ **Use auto-refresh for convenience**
 ```bash
-./apple-to-ride-command pipeline --auto --auto-refresh-cookies
+./music-porter pipeline --auto --auto-refresh-cookies
 ```
 
 ✅ **Check status before batch operations**
 ```bash
-./apple-to-ride-command pipeline --dry-run --auto
+./music-porter pipeline --dry-run --auto
 ```
 
 ✅ **Keep browser updated**
@@ -400,7 +400,7 @@ Fields: `domain | flag | path | secure | expiration | name | value`
 ❌ **Don't skip validation in production**
 ```bash
 # Bad: Downloads will fail silently with expired cookies
-./apple-to-ride-command download --skip-cookie-validation --playlist 1
+./music-porter download --skip-cookie-validation --playlist 1
 ```
 
 ## FAQ
@@ -442,7 +442,7 @@ For most users:
 pip install -r requirements.txt
 
 # Use always
-./apple-to-ride-command pipeline --auto --auto-refresh-cookies
+./music-porter pipeline --auto --auto-refresh-cookies
 ```
 
 That's it! No more manual cookie exports. 🎉

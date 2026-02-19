@@ -23,7 +23,7 @@ Merge the current feature branch into main following the project's version workf
    - If diverged (local main is both ahead and behind origin/main), warn the user and abort — manual resolution needed
 
 3. **Determine version bump**
-   - Read the current VERSION from `apple-to-ride-command` (line 68)
+   - Read the current VERSION from `music-porter` (line 68)
    - Extract the base version (the part before the `-branch-name` suffix)
    - Analyze the commits on this branch to determine the nature of changes
    - Ask the user which version bump to apply:
@@ -45,7 +45,7 @@ Merge the current feature branch into main following the project's version workf
    - Keep descriptions concise and consistent with the existing list style: `**Bold title** - Description`
 
 6. **Update version and commit on feature branch**
-   - Edit `apple-to-ride-command` to set `VERSION = "X.Y.Z"` (clean version, no branch suffix)
+   - Edit `music-porter` to set `VERSION = "X.Y.Z"` (clean version, no branch suffix)
    - Stage the version change (and README if modified)
    - Commit on the feature branch with message: `Update version to X.Y.Z for merge to main`
    - Do NOT include Co-Authored-By lines
@@ -65,7 +65,7 @@ Merge the current feature branch into main following the project's version workf
 8. **Verify merge**
    - Verify working tree is clean: `git status`
    - Verify branch commits are present: `git log --oneline -10` should include the feature branch commits
-   - Verify VERSION matches the expected clean `X.Y.Z`: read line 68 of `apple-to-ride-command`
+   - Verify VERSION matches the expected clean `X.Y.Z`: read line 68 of `music-porter`
    - If any check fails, warn the user and ask whether to proceed with tagging or abort
 
 9. **Tag the release**
