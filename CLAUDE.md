@@ -314,11 +314,77 @@ pip install -r requirements.txt
 - Test tag preservation by running updates multiple times
 - Verify TXXX frames with: `./apple-to-ride-command --verbose tag export/PlaylistName`
 
+### Feature Branch Workflow
+
+**When to use feature branches vs direct commits:**
+
+| Use Feature Branch | Commit Directly to Main |
+|---|---|
+| New features | Single-commit bug fixes |
+| Multi-commit changes | Documentation-only updates |
+| Refactoring | Config changes (playlists.conf) |
+| Experimental or risky changes | Typo corrections |
+
+**Branch naming conventions:**
+
+| Prefix | Use Case | Example |
+|--------|----------|---------|
+| `feature/` | New features | `feature/playlist-search` |
+| `bugfix/` | Bug fixes | `bugfix/tag-double-prefix` |
+| `refactor/` | Refactoring | `refactor/converter-class` |
+| `docs/` | Documentation | `docs/cookie-guide` |
+
+- Lowercase with hyphens (no underscores or slashes in the description)
+- Keep descriptions to 2-4 words
+
+**Creating a feature branch:**
+```bash
+# 1. Start from up-to-date main
+git checkout main
+git pull origin main
+
+# 2. Create and switch to feature branch
+git checkout -b feature/my-feature
+
+# 3. Set branch version in apple-to-ride-command (line 68)
+VERSION = "1.5.3-my-feature"
+
+# 4. Commit the version change as first commit
+git add apple-to-ride-command
+git commit -m "Start my-feature branch"
+```
+
+**Working on the branch:**
+- Commit regularly with descriptive messages
+- Keep the branch version (e.g. `1.5.3-my-feature`) throughout development
+- Don't bump the base version number during dev — that happens at merge time
+- For long-lived branches, periodically sync with main:
+  ```bash
+  # Option A: Rebase (cleaner history, preferred for solo branches)
+  git fetch origin
+  git rebase origin/main
+
+  # Option B: Merge (safer for shared branches)
+  git fetch origin
+  git merge origin/main
+  ```
+
+**Pre-merge checklist:**
+- [ ] Working tree is clean (`git status` shows nothing)
+- [ ] All changes tested with `--dry-run` and `--verbose`
+- [ ] No temporary or debug code left in
+- [ ] Commit history is clean and descriptive
+- [ ] Branch is up to date with main
+- [ ] README future features updated if applicable (strikethrough implemented items)
+
+**Merging to main:**
+Use the `/merge-to-main` skill, which automates version bump, README updates, tagging, and branch cleanup. See the Version Management section below for version numbering details.
+
 ### Version Management
 
 **IMPORTANT: Version number strategy depends on branch context.**
 
-The version number is defined in `apple-to-ride-command` at line 44:
+The version number is defined in `apple-to-ride-command` at line 68:
 ```python
 VERSION = "1.1.0"
 ```
@@ -364,7 +430,7 @@ VERSION = "1.1.0"
 git checkout -b feature/cookie-management
 
 # Update version to include branch name
-# In apple-to-ride-command line 44:
+# In apple-to-ride-command line 68:
 VERSION = "1.1.0-cookie-management"
 git commit -m "Start cookie management feature"
 
@@ -376,7 +442,7 @@ git checkout main
 git merge feature/cookie-management
 
 # Update version to clean release number
-# In apple-to-ride-command line 44:
+# In apple-to-ride-command line 68:
 VERSION = "1.2.0"  # MINOR bump for new feature
 git commit -m "Bump version to 1.2.0 for cookie management feature"
 
