@@ -18,6 +18,13 @@ import platform
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+try:
+    from tqdm import tqdm as _tqdm
+    _tqdm.monitor_interval = 0  # Prevent TMonitor thread from interfering with input()
+    TQDM_AVAILABLE = True
+except ImportError:
+    TQDM_AVAILABLE = False
+
 
 # ══════════════════════════════════════════════════════════════════
 # Section 0: Platform Detection
@@ -43,7 +50,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "1.3.1"
+VERSION = "1.3.1-progress-indicators"
 
 DEFAULT_MUSIC_DIR = "music"
 DEFAULT_EXPORT_DIR = "export"
@@ -115,9 +122,21 @@ class Logger:
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(exist_ok=True)
         self._lock = threading.Lock()
+        self._active_bars = []
 
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self.log_file = self.log_dir / f"{timestamp}.log"
+
+    def register_bar(self, bar):
+        """Register an active tqdm bar for write routing."""
+        self._active_bars.append(bar)
+
+    def unregister_bar(self, bar):
+        """Unregister a tqdm bar."""
+        try:
+            self._active_bars.remove(bar)
+        except ValueError:
+            pass
 
     def _write(self, level, message):
         """Write message to both console and log file."""
@@ -125,8 +144,11 @@ class Logger:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             formatted_with_prefix = f"[{timestamp}] [{level}] {message}"
 
-            # Console: just the message (no timestamp/level)
-            print(message)
+            # Console: route through tqdm.write() if a bar is active
+            if self._active_bars and TQDM_AVAILABLE:
+                _tqdm.write(message)
+            else:
+                print(message)
 
             # File: full format with timestamp and level
             with open(self.log_file, 'a') as f:
@@ -174,6 +196,92 @@ class Logger:
         """Log debug message (only if verbose enabled)."""
         if self.verbose:
             self._write("VERBOSE", message)
+
+
+class ProgressBar:
+    """Context manager wrapping tqdm with project conventions.
+
+    Disables gracefully when tqdm is unavailable, during dry-run, or when
+    disable=True.  Supports deferred initialization via set_total() for
+    cases where the total isn't known upfront (e.g. Downloader).
+
+    Saves and restores terminal state around the tqdm bar lifetime to
+    prevent input() from hanging after the bar closes.
+    """
+
+    def __init__(self, total=0, desc="Processing", logger=None,
+                 unit="file", disable=False):
+        self._desc = desc
+        self._unit = unit
+        self._disabled = disable or not TQDM_AVAILABLE
+        self._bar = None
+        self.logger = logger
+        self.total = total
+        self._saved_termios = None
+
+        if not self._disabled and total > 0:
+            self._create_bar(total)
+
+    def _save_terminal(self):
+        """Save terminal attributes before tqdm takes over."""
+        try:
+            import termios
+            self._saved_termios = termios.tcgetattr(sys.stdin)
+        except Exception:
+            pass
+
+    def _restore_terminal(self):
+        """Restore terminal attributes after tqdm is done."""
+        if self._saved_termios is not None:
+            try:
+                import termios
+                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self._saved_termios)
+            except Exception:
+                pass
+            self._saved_termios = None
+
+    def _create_bar(self, total):
+        """Create the underlying tqdm bar."""
+        self._save_terminal()
+        self._bar = _tqdm(
+            total=total,
+            desc=self._desc,
+            unit=self._unit,
+            bar_format="{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
+            dynamic_ncols=True,
+        )
+        if self.logger:
+            self.logger.register_bar(self._bar)
+
+    def set_total(self, total):
+        """Lazily initialize the bar when total becomes known."""
+        if self._bar is not None or self._disabled:
+            return
+        self.total = total
+        self._create_bar(total)
+
+    def update(self, n=1):
+        """Advance the progress bar."""
+        if self._bar is not None:
+            self._bar.update(n)
+
+    def close(self):
+        """Close the progress bar and unregister from logger."""
+        if self._bar is not None:
+            try:
+                self._bar.close()
+            finally:
+                if self.logger:
+                    self.logger.unregister_bar(self._bar)
+                self._bar = None
+                self._restore_terminal()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+        return False
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -513,7 +621,8 @@ def _txxx_exists(tags, desc_name):
     return False
 
 
-def save_original_tag(tags, tag_key, tag_name, current_value, label, logger=None):
+def save_original_tag(tags, tag_key, tag_name, current_value, label, logger=None,
+                      verbose=False):
     """
     Save the original value in a TXXX tag only if one does not already
     exist. Uses _txxx_exists() as a hard gate — if the tag is already
@@ -539,7 +648,11 @@ def save_original_tag(tags, tag_key, tag_name, current_value, label, logger=None
     if current_value:
         tags.add(TXXX(encoding=3, desc=tag_name, text=current_value))
         if logger:
-            logger.info(f"Stored original {label} '{current_value}' in '{tag_name}' tag")
+            msg = f"Stored original {label} '{current_value}' in '{tag_name}' tag"
+            if verbose:
+                logger.info(msg)
+            else:
+                logger.file_info(msg)
         return (current_value, True)
     else:
         if logger:
@@ -609,7 +722,10 @@ def update_title_tag(tags, logger=None, dry_run=False, verbose=False):
     # ── Guard: skip if already correct ────────────────────────────
     if current_title == new_title:
         if logger:
-            logger.skip(f"Title already correct: '{current_title}'")
+            if verbose:
+                logger.skip(f"Title already correct: '{current_title}'")
+            else:
+                logger.file_info(f"Title already correct: '{current_title}'")
         return False
 
     if verbose and logger:
@@ -626,7 +742,11 @@ def update_title_tag(tags, logger=None, dry_run=False, verbose=False):
 
     tags["TIT2"] = TIT2(encoding=3, text=new_title)
     if logger:
-        logger.info(f"Title updated: '{current_title}' → '{new_title}'")
+        msg = f"Title updated: '{current_title}' → '{new_title}'"
+        if verbose:
+            logger.info(msg)
+        else:
+            logger.file_info(msg)
     return True
 
 
@@ -740,97 +860,112 @@ class TaggerManager:
         skipped = 0
         errors = 0
 
-        for filepath in mp3_files:
-            filename = filepath.relative_to(directory)
+        progress = ProgressBar(
+            total=len(mp3_files), desc="Tagging",
+            logger=self.logger, disable=dry_run,
+        )
 
-            try:
+        try:
+            for filepath in mp3_files:
+                filename = filepath.relative_to(directory)
+
                 try:
-                    tags = ID3(str(filepath))
-                except ID3NoHeaderError:
-                    self.logger.warn(f"No ID3 tags found in '{filename}'. Skipping.")
-                    skipped += 1
-                    continue
+                    try:
+                        tags = ID3(str(filepath))
+                    except ID3NoHeaderError:
+                        self.logger.warn(f"No ID3 tags found in '{filename}'. Skipping.")
+                        skipped += 1
+                        progress.update(1)
+                        continue
 
-                current_album  = str(tags["TALB"]) if "TALB" in tags else ""
-                current_artist = str(tags["TPE1"]) if "TPE1" in tags else ""
-                current_title  = str(tags["TIT2"]) if "TIT2" in tags else ""
+                    current_album  = str(tags["TALB"]) if "TALB" in tags else ""
+                    current_artist = str(tags["TPE1"]) if "TPE1" in tags else ""
+                    current_title  = str(tags["TIT2"]) if "TIT2" in tags else ""
 
-                if verbose:
-                    self.logger.debug(f"Tags BEFORE update:")
-                    self.logger.debug(f"  → Title:  '{current_title}'")
-                    self.logger.debug(f"  → Artist: '{current_artist}'")
-                    self.logger.debug(f"  → Album:  '{current_album}'")
+                    if verbose:
+                        self.logger.debug(f"Tags BEFORE update:")
+                        self.logger.debug(f"  → Title:  '{current_title}'")
+                        self.logger.debug(f"  → Artist: '{current_artist}'")
+                        self.logger.debug(f"  → Album:  '{current_album}'")
 
-                if dry_run:
+                    if dry_run:
+                        if new_album:
+                            self.logger.dry_run(f"Album:  '{current_album}' → '{new_album}'")
+                        if new_artist:
+                            self.logger.dry_run(f"Artist: '{current_artist}' → '{new_artist}'")
+                        update_title_tag(tags, self.logger, dry_run=True, verbose=verbose)
+                        continue
+
+                    # ── Store ALL originals BEFORE any tag is modified ──
+                    file_changed = False
+
                     if new_album:
-                        self.logger.dry_run(f"Album:  '{current_album}' → '{new_album}'")
+                        _, was_stored = save_original_tag(
+                            tags, "TXXX:OriginalAlbum", TXXX_ORIGINAL_ALBUM,
+                            current_album, "album", self.logger, verbose=verbose)
+                        if was_stored:
+                            self.stats.album_stored += 1
+                        else:
+                            self.stats.album_protected += 1
+
                     if new_artist:
-                        self.logger.dry_run(f"Artist: '{current_artist}' → '{new_artist}'")
-                    update_title_tag(tags, self.logger, dry_run=True, verbose=verbose)
-                    continue
+                        _, was_stored = save_original_tag(
+                            tags, "TXXX:OriginalArtist", TXXX_ORIGINAL_ARTIST,
+                            current_artist, "artist", self.logger, verbose=verbose)
+                        if was_stored:
+                            self.stats.artist_stored += 1
+                        else:
+                            self.stats.artist_protected += 1
 
-                # ── Store ALL originals BEFORE any tag is modified ──
-                file_changed = False
-
-                if new_album:
+                    # ── Store OriginalTitle BEFORE update_title_tag() runs ──
+                    source_artist = _get_txxx(tags, TXXX_ORIGINAL_ARTIST) or current_artist
+                    clean_title   = _strip_artist_prefix(current_title, source_artist)
                     _, was_stored = save_original_tag(
-                        tags, "TXXX:OriginalAlbum", TXXX_ORIGINAL_ALBUM,
-                        current_album, "album", self.logger)
+                        tags, "TXXX:OriginalTitle", TXXX_ORIGINAL_TITLE,
+                        clean_title, "title", self.logger, verbose=verbose)
                     if was_stored:
-                        self.stats.album_stored += 1
+                        self.stats.title_stored += 1
                     else:
-                        self.stats.album_protected += 1
+                        self.stats.title_protected += 1
 
-                if new_artist:
-                    _, was_stored = save_original_tag(
-                        tags, "TXXX:OriginalArtist", TXXX_ORIGINAL_ARTIST,
-                        current_artist, "artist", self.logger)
-                    if was_stored:
-                        self.stats.artist_stored += 1
+                    # ── Now apply new tag values ───────────────────────────
+                    if new_album:
+                        if current_album != new_album:
+                            file_changed = True
+                            self.stats.album_updated += 1  # Track album updates
+                        tags["TALB"] = TALB(encoding=3, text=new_album)
+
+                    if new_artist:
+                        if current_artist != new_artist:
+                            file_changed = True
+                            self.stats.artist_updated += 1  # Track artist updates
+                        tags["TPE1"] = TPE1(encoding=3, text=new_artist)
+
+                    # ── Refresh Title to 'Artist - Title' format ──────────
+                    if update_title_tag(tags, self.logger, dry_run=dry_run, verbose=verbose):
+                        self.stats.title_updated += 1
+                        file_changed = True
+
+                    _apply_cleanup(tags, str(filepath), self.cleanup_options)
+
+                    if file_changed:
+                        updated += 1
+                        msg = f"[{updated}/{len(mp3_files)}] Tags updated: {filename}"
                     else:
-                        self.stats.artist_protected += 1
+                        skipped += 1
+                        msg = f"[{skipped}/{len(mp3_files)}] Skipping (no changes): {filename}"
+                    if not verbose:
+                        self.logger.file_info(msg)
+                    else:
+                        self.logger.info(msg)
+                    progress.update(1)
 
-                # ── Store OriginalTitle BEFORE update_title_tag() runs ──
-                source_artist = _get_txxx(tags, TXXX_ORIGINAL_ARTIST) or current_artist
-                clean_title   = _strip_artist_prefix(current_title, source_artist)
-                _, was_stored = save_original_tag(
-                    tags, "TXXX:OriginalTitle", TXXX_ORIGINAL_TITLE,
-                    clean_title, "title", self.logger)
-                if was_stored:
-                    self.stats.title_stored += 1
-                else:
-                    self.stats.title_protected += 1
-
-                # ── Now apply new tag values ───────────────────────────
-                if new_album:
-                    if current_album != new_album:
-                        file_changed = True
-                        self.stats.album_updated += 1  # Track album updates
-                    tags["TALB"] = TALB(encoding=3, text=new_album)
-
-                if new_artist:
-                    if current_artist != new_artist:
-                        file_changed = True
-                        self.stats.artist_updated += 1  # Track artist updates
-                    tags["TPE1"] = TPE1(encoding=3, text=new_artist)
-
-                # ── Refresh Title to 'Artist - Title' format ──────────
-                if update_title_tag(tags, self.logger, dry_run=dry_run, verbose=verbose):
-                    self.stats.title_updated += 1
-                    file_changed = True
-
-                _apply_cleanup(tags, str(filepath), self.cleanup_options)
-
-                if file_changed:
-                    updated += 1
-                    self.logger.info(f"[{updated}/{len(mp3_files)}] Tags updated: {filename}")
-                else:
-                    skipped += 1
-                    self.logger.info(f"[{skipped}/{len(mp3_files)}] Skipping (no changes): {filename}")
-
-            except Exception as e:
-                self.logger.error(f"Failed to update '{filename}': {e}")
-                errors += 1
+                except Exception as e:
+                    self.logger.error(f"Failed to update '{filename}': {e}")
+                    errors += 1
+                    progress.update(1)
+        finally:
+            progress.close()
 
         duration = time.time() - start_time
         self._print_update_summary(directory, duration, updated, skipped, errors)
@@ -906,80 +1041,119 @@ class TaggerManager:
         skipped = 0
         errors = 0
 
-        for filepath in mp3_files:
-            count += 1
-            filename = filepath.relative_to(directory)
+        progress = ProgressBar(
+            total=len(mp3_files), desc="Restoring",
+            logger=self.logger, disable=dry_run,
+        )
 
-            try:
+        try:
+            for filepath in mp3_files:
+                count += 1
+                filename = filepath.relative_to(directory)
+
                 try:
-                    tags = ID3(str(filepath))
-                except ID3NoHeaderError:
-                    self.logger.warn(f"No ID3 tags found in '{filename}'. Skipping.")
-                    skipped += 1
-                    continue
+                    try:
+                        tags = ID3(str(filepath))
+                    except ID3NoHeaderError:
+                        self.logger.warn(f"No ID3 tags found in '{filename}'. Skipping.")
+                        skipped += 1
+                        progress.update(1)
+                        continue
 
-                orig_title  = _get_txxx(tags, TXXX_ORIGINAL_TITLE)
-                orig_artist = _get_txxx(tags, TXXX_ORIGINAL_ARTIST)
-                orig_album  = _get_txxx(tags, TXXX_ORIGINAL_ALBUM)
+                    orig_title  = _get_txxx(tags, TXXX_ORIGINAL_TITLE)
+                    orig_artist = _get_txxx(tags, TXXX_ORIGINAL_ARTIST)
+                    orig_album  = _get_txxx(tags, TXXX_ORIGINAL_ALBUM)
 
-                if verbose:
-                    self.logger.debug(f"Preserved originals:")
-                    self.logger.debug(f"  → OriginalTitle:  '{orig_title}'")
-                    self.logger.debug(f"  → OriginalArtist: '{orig_artist}'")
-                    self.logger.debug(f"  → OriginalAlbum:  '{orig_album}'")
+                    if verbose:
+                        self.logger.debug(f"Preserved originals:")
+                        self.logger.debug(f"  → OriginalTitle:  '{orig_title}'")
+                        self.logger.debug(f"  → OriginalArtist: '{orig_artist}'")
+                        self.logger.debug(f"  → OriginalAlbum:  '{orig_album}'")
 
-                file_restored = False
+                    file_restored = False
 
-                if restore_title:
-                    if orig_title:
-                        if dry_run:
-                            self.logger.dry_run(f"Would restore Title: → '{orig_title}'")
+                    if restore_title:
+                        if orig_title:
+                            if dry_run:
+                                self.logger.dry_run(f"Would restore Title: → '{orig_title}'")
+                            else:
+                                tags["TIT2"] = TIT2(encoding=3, text=orig_title)
+                                msg = f"Title restored → '{orig_title}'"
+                                if verbose:
+                                    self.logger.info(msg)
+                                else:
+                                    self.logger.file_info(msg)
+                                self.stats.title_restored += 1
+                                file_restored = True
                         else:
-                            tags["TIT2"] = TIT2(encoding=3, text=orig_title)
-                            self.logger.info(f"Title restored → '{orig_title}'")
-                            self.stats.title_restored += 1
-                            file_restored = True
-                    else:
-                        self.logger.skip(f"No OriginalTitle for '{filename}'")
-                        self.stats.title_missing += 1
+                            if verbose:
+                                self.logger.skip(f"No OriginalTitle for '{filename}'")
+                            else:
+                                self.logger.file_info(f"No OriginalTitle for '{filename}'")
+                            self.stats.title_missing += 1
 
-                if restore_artist:
-                    if orig_artist:
-                        if dry_run:
-                            self.logger.dry_run(f"Would restore Artist: → '{orig_artist}'")
+                    if restore_artist:
+                        if orig_artist:
+                            if dry_run:
+                                self.logger.dry_run(f"Would restore Artist: → '{orig_artist}'")
+                            else:
+                                tags["TPE1"] = TPE1(encoding=3, text=orig_artist)
+                                msg = f"Artist restored → '{orig_artist}'"
+                                if verbose:
+                                    self.logger.info(msg)
+                                else:
+                                    self.logger.file_info(msg)
+                                self.stats.artist_restored += 1
+                                file_restored = True
                         else:
-                            tags["TPE1"] = TPE1(encoding=3, text=orig_artist)
-                            self.logger.info(f"Artist restored → '{orig_artist}'")
-                            self.stats.artist_restored += 1
-                            file_restored = True
-                    else:
-                        self.logger.skip(f"No OriginalArtist for '{filename}'")
-                        self.stats.artist_missing += 1
+                            if verbose:
+                                self.logger.skip(f"No OriginalArtist for '{filename}'")
+                            else:
+                                self.logger.file_info(f"No OriginalArtist for '{filename}'")
+                            self.stats.artist_missing += 1
 
-                if restore_album:
-                    if orig_album:
-                        if dry_run:
-                            self.logger.dry_run(f"Would restore Album: → '{orig_album}'")
+                    if restore_album:
+                        if orig_album:
+                            if dry_run:
+                                self.logger.dry_run(f"Would restore Album: → '{orig_album}'")
+                            else:
+                                tags["TALB"] = TALB(encoding=3, text=orig_album)
+                                msg = f"Album restored → '{orig_album}'"
+                                if verbose:
+                                    self.logger.info(msg)
+                                else:
+                                    self.logger.file_info(msg)
+                                self.stats.album_restored += 1
+                                file_restored = True
                         else:
-                            tags["TALB"] = TALB(encoding=3, text=orig_album)
-                            self.logger.info(f"Album restored → '{orig_album}'")
-                            self.stats.album_restored += 1
-                            file_restored = True
+                            if verbose:
+                                self.logger.skip(f"No OriginalAlbum for '{filename}'")
+                            else:
+                                self.logger.file_info(f"No OriginalAlbum for '{filename}'")
+                            self.stats.album_missing += 1
+
+                    if not dry_run and file_restored:
+                        _apply_cleanup(tags, str(filepath), self.cleanup_options)
+                        restored += 1
+                        msg = f"[{restored}/{len(mp3_files)}] Tags restored: {filename}"
+                    elif not file_restored:
+                        skipped += 1
+                        msg = f"[{skipped}/{len(mp3_files)}] Skipping (nothing to restore): {filename}"
                     else:
-                        self.logger.skip(f"No OriginalAlbum for '{filename}'")
-                        self.stats.album_missing += 1
+                        msg = None
+                    if msg:
+                        if not verbose:
+                            self.logger.file_info(msg)
+                        else:
+                            self.logger.info(msg)
+                    progress.update(1)
 
-                if not dry_run and file_restored:
-                    _apply_cleanup(tags, str(filepath), self.cleanup_options)
-                    restored += 1
-                    self.logger.info(f"[{restored}/{len(mp3_files)}] Tags restored: {filename}")
-                elif not file_restored:
-                    skipped += 1
-                    self.logger.info(f"[{skipped}/{len(mp3_files)}] Skipping (nothing to restore): {filename}")
-
-            except Exception as e:
-                self.logger.error(f"Failed to restore '{filename}': {e}")
-                errors += 1
+                except Exception as e:
+                    self.logger.error(f"Failed to restore '{filename}': {e}")
+                    errors += 1
+                    progress.update(1)
+        finally:
+            progress.close()
 
         duration = time.time() - start_time
         self._print_restore_summary(directory, duration, restored, skipped, errors)
@@ -1137,11 +1311,11 @@ class TaggerManager:
 
                 # ── Store fresh originals — gate is clear after reset ──
                 save_original_tag(tags, "TXXX:OriginalTitle", TXXX_ORIGINAL_TITLE,
-                                title, "title", self.logger)
+                                title, "title", self.logger, verbose=verbose)
                 save_original_tag(tags, "TXXX:OriginalArtist", TXXX_ORIGINAL_ARTIST,
-                                artist, "artist", self.logger)
+                                artist, "artist", self.logger, verbose=verbose)
                 save_original_tag(tags, "TXXX:OriginalAlbum", TXXX_ORIGINAL_ALBUM,
-                                album, "album", self.logger)
+                                album, "album", self.logger, verbose=verbose)
 
                 # ── Refresh Title to 'Artist - Title' format ──────────
                 update_title_tag(tags, self.logger, dry_run=dry_run, verbose=verbose)
@@ -1262,7 +1436,7 @@ class Converter:
         """Remove invalid filename characters."""
         return sanitize_filename(name)
 
-    def _convert_single_file(self, input_file, input_path, output_path, force, dry_run, verbose):
+    def _convert_single_file(self, input_file, input_path, output_path, force, dry_run, verbose, progress_bar=None):
         """Convert a single M4A file to MP3. Thread-safe for parallel execution."""
         from mutagen.id3 import ID3, TIT2, TPE1, TALB, ID3NoHeaderError
 
@@ -1282,7 +1456,13 @@ class Converter:
 
             if already_exists and not force:
                 self.stats.increment('skipped')
-                self.logger.info(f"[{count}/{self.stats.total_found}] Skipping (already exists): {output_filename}")
+                msg = f"[{count}/{self.stats.total_found}] Skipping (already exists): {output_filename}"
+                if progress_bar and not verbose:
+                    self.logger.file_info(msg)
+                else:
+                    self.logger.info(msg)
+                if progress_bar:
+                    progress_bar.update(1)
                 return
 
             if verbose:
@@ -1355,14 +1535,22 @@ class Converter:
 
             if already_exists and force:
                 self.stats.increment('overwritten')
-                self.logger.info(f"[{count}/{self.stats.total_found}] Overwritten: {output_filename}")
+                msg = f"[{count}/{self.stats.total_found}] Overwritten: {output_filename}"
             else:
                 self.stats.increment('converted')
-                self.logger.info(f"[{count}/{self.stats.total_found}] Converted: {output_filename}")
+                msg = f"[{count}/{self.stats.total_found}] Converted: {output_filename}"
+            if progress_bar and not verbose:
+                self.logger.file_info(msg)
+            else:
+                self.logger.info(msg)
+            if progress_bar:
+                progress_bar.update(1)
 
         except Exception as e:
             self.logger.error(f"Failed to convert '{display_name}': {e}")
             self.stats.increment('errors')
+            if progress_bar:
+                progress_bar.update(1)
 
     def convert(self, input_dir, output_dir, force=False, dry_run=False, verbose=False):
         """
@@ -1402,34 +1590,42 @@ class Converter:
         # Determine effective worker count
         effective_workers = min(self.workers, self.stats.total_found)
 
-        if effective_workers > 1:
-            self.logger.info(f"Using {effective_workers} parallel workers")
+        progress = ProgressBar(
+            total=self.stats.total_found, desc="Converting",
+            logger=self.logger, disable=dry_run,
+        )
 
-            with ThreadPoolExecutor(max_workers=effective_workers) as executor:
-                futures = {
-                    executor.submit(
-                        self._convert_single_file,
+        try:
+            if effective_workers > 1:
+                self.logger.info(f"Using {effective_workers} parallel workers")
+
+                with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+                    futures = {
+                        executor.submit(
+                            self._convert_single_file,
+                            input_file, input_path, output_path,
+                            force, dry_run, verbose, progress
+                        ): input_file
+                        for input_file in m4a_files
+                    }
+
+                    for future in as_completed(futures):
+                        # Exceptions are already handled inside _convert_single_file,
+                        # but catch any unexpected errors from the future itself
+                        try:
+                            future.result()
+                        except Exception as e:
+                            input_file = futures[future]
+                            self.logger.error(f"Unexpected error processing '{input_file.name}': {e}")
+                            self.stats.increment('errors')
+            else:
+                for input_file in m4a_files:
+                    self._convert_single_file(
                         input_file, input_path, output_path,
-                        force, dry_run, verbose
-                    ): input_file
-                    for input_file in m4a_files
-                }
-
-                for future in as_completed(futures):
-                    # Exceptions are already handled inside _convert_single_file,
-                    # but catch any unexpected errors from the future itself
-                    try:
-                        future.result()
-                    except Exception as e:
-                        input_file = futures[future]
-                        self.logger.error(f"Unexpected error processing '{input_file.name}': {e}")
-                        self.stats.increment('errors')
-        else:
-            for input_file in m4a_files:
-                self._convert_single_file(
-                    input_file, input_path, output_path,
-                    force, dry_run, verbose
-                )
+                        force, dry_run, verbose, progress
+                    )
+        finally:
+            progress.close()
 
         duration = time.time() - start_time
         self._print_summary(input_dir, output_dir, duration)
@@ -1671,55 +1867,76 @@ class Downloader:
             )
 
             # Parse output line by line
-            for line in process.stdout:
-                # Clean carriage returns to prevent screen scrolling
-                cleaned = self._clean_line(line)
+            progress = ProgressBar(
+                total=0, desc="Downloading",
+                logger=self.logger, disable=dry_run,
+            )
+            verbose = self.logger.verbose
 
-                # Skip empty lines
-                if not cleaned:
-                    continue
+            try:
+                for line in process.stdout:
+                    # Clean carriage returns to prevent screen scrolling
+                    cleaned = self._clean_line(line)
 
-                # Filter out download progress bars (still noisy)
-                if cleaned.startswith('[download]'):
-                    continue
+                    # Skip empty lines
+                    if not cleaned:
+                        continue
 
-                try:
-                    # Extract total track count
-                    if '[Track' in cleaned and '/' in cleaned:
-                        match = re.search(r'\[Track (\d+)/(\d+)\]', cleaned)
-                        if match:
-                            current_track = int(match.group(1))
-                            total_tracks = int(match.group(2))
-                            if stats.playlist_total == 0:
-                                stats.playlist_total = total_tracks
+                    # Filter out download progress bars (still noisy)
+                    if cleaned.startswith('[download]'):
+                        continue
 
-                    # Track downloads and show real-time feedback
-                    if '[INFO' in cleaned and 'Downloading "' in cleaned:
-                        # Extract track name
-                        match = re.search(r'Downloading "([^"]+)"', cleaned)
-                        if match:
-                            track_name = match.group(1)
-                            # Display message (counts will be calculated from filesystem after download)
-                            self.logger.info(f"Downloading: {track_name}")
+                    try:
+                        # Extract total track count
+                        if '[Track' in cleaned and '/' in cleaned:
+                            match = re.search(r'\[Track (\d+)/(\d+)\]', cleaned)
+                            if match:
+                                current_track = int(match.group(1))
+                                total_tracks = int(match.group(2))
+                                if stats.playlist_total == 0:
+                                    stats.playlist_total = total_tracks
+                                    progress.set_total(total_tracks)
 
-                    # Track skips and show feedback
-                    elif '[WARNING' in cleaned and 'Skipping "' in cleaned and 'Media file already exists' in cleaned:
-                        # Extract track name
-                        match = re.search(r'Skipping "([^"]+)"', cleaned)
-                        if match:
-                            track_name = match.group(1)
-                            # Display message (counts will be calculated from filesystem after download)
-                            self.logger.info(f"Skipping (already exists): {track_name}")
+                        # Track downloads and show real-time feedback
+                        # Note: gamdl emits "Downloading" for EVERY track (even skips),
+                        # so we advance the bar here (exactly once per track).
+                        if '[INFO' in cleaned and 'Downloading "' in cleaned:
+                            # Extract track name
+                            match = re.search(r'Downloading "([^"]+)"', cleaned)
+                            if match:
+                                track_name = match.group(1)
+                                msg = f"Downloading: {track_name}"
+                                if verbose:
+                                    self.logger.info(msg)
+                                else:
+                                    self.logger.file_info(msg)
+                                progress.update(1)
 
-                    # Track errors
-                    elif 'Finished with' in cleaned and 'error' in cleaned:
-                        error_match = re.search(r'Finished with (\d+) error', cleaned)
-                        if error_match:
-                            stats.failed = int(error_match.group(1))
+                        # Track skips and show feedback
+                        # Don't update progress here — already counted on the
+                        # "Downloading" line that gamdl emits before the skip.
+                        elif '[WARNING' in cleaned and 'Skipping "' in cleaned and 'Media file already exists' in cleaned:
+                            # Extract track name
+                            match = re.search(r'Skipping "([^"]+)"', cleaned)
+                            if match:
+                                track_name = match.group(1)
+                                msg = f"Skipping (already exists): {track_name}"
+                                if verbose:
+                                    self.logger.info(msg)
+                                else:
+                                    self.logger.file_info(msg)
 
-                except Exception as parse_error:
-                    # If parsing fails for a line, log and continue without crashing
-                    self.logger.file_info(f"Output parse error: {parse_error}")
+                        # Track errors
+                        elif 'Finished with' in cleaned and 'error' in cleaned:
+                            error_match = re.search(r'Finished with (\d+) error', cleaned)
+                            if error_match:
+                                stats.failed = int(error_match.group(1))
+
+                    except Exception as parse_error:
+                        # If parsing fails for a line, log and continue without crashing
+                        self.logger.file_info(f"Output parse error: {parse_error}")
+            finally:
+                progress.close()
 
             process.wait()
 
@@ -2677,35 +2894,46 @@ class USBManager:
             return False, stats
 
         # Copy files with incremental check
-        for src_file in mp3_files:
-            try:
-                # Preserve directory structure relative to source
-                if source_path.is_dir():
-                    rel_path = src_file.relative_to(source_path)
-                else:
-                    rel_path = src_file.name
-                dst_file = dest / rel_path
+        progress = ProgressBar(
+            total=len(mp3_files), desc="Syncing to USB",
+            logger=self.logger, disable=dry_run,
+        )
 
-                # Create parent directory if needed
-                dst_file.parent.mkdir(parents=True, exist_ok=True)
-
-                # Incremental check
-                if self._should_copy_file(src_file, dst_file):
-                    shutil.copy2(src_file, dst_file)  # Preserves timestamps
-                    stats.files_copied += 1
-                    self.logger.info(f"Copied: {src_file.name}")
-                else:
-                    stats.files_skipped += 1
-                    if self.logger.verbose:
-                        self.logger.info(f"Skipped (unchanged): {src_file.name}")
+        try:
+            for src_file in mp3_files:
+                try:
+                    # Preserve directory structure relative to source
+                    if source_path.is_dir():
+                        rel_path = src_file.relative_to(source_path)
                     else:
-                        # Only log every 10th skip to avoid spam
-                        if stats.files_skipped % 10 == 0:
-                            self.logger.info(f"Skipped {stats.files_skipped} unchanged files...")
+                        rel_path = src_file.name
+                    dst_file = dest / rel_path
 
-            except Exception as e:
-                stats.files_failed += 1
-                self.logger.error(f"Failed to copy {src_file.name}: {e}")
+                    # Create parent directory if needed
+                    dst_file.parent.mkdir(parents=True, exist_ok=True)
+
+                    # Incremental check
+                    if self._should_copy_file(src_file, dst_file):
+                        shutil.copy2(src_file, dst_file)  # Preserves timestamps
+                        stats.files_copied += 1
+                        if self.logger.verbose:
+                            self.logger.info(f"Copied: {src_file.name}")
+                        else:
+                            self.logger.file_info(f"Copied: {src_file.name}")
+                    else:
+                        stats.files_skipped += 1
+                        if self.logger.verbose:
+                            self.logger.info(f"Skipped (unchanged): {src_file.name}")
+                        else:
+                            self.logger.file_info(f"Skipped (unchanged): {src_file.name}")
+
+                except Exception as e:
+                    stats.files_failed += 1
+                    self.logger.error(f"Failed to copy {src_file.name}: {e}")
+
+                progress.update(1)
+        finally:
+            progress.close()
 
         # Log summary
         self.logger.ok("Sync complete")

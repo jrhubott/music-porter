@@ -9,3 +9,6 @@ mutagen>=1.47.0
 
 # FFmpeg Python wrapper for audio conversion
 ffmpeg-python>=0.2.0
+
+# Progress bars for file processing operations
+tqdm>=4.66.0
