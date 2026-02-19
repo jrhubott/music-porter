@@ -4906,12 +4906,12 @@ class InteractiveMenu:
             print("   ────────────────────────────────────────────────────────────")
             print()  # Blank line after separator
 
-            print(f"  📁 A. Process all playlists")
-            print(f"  🔗 U. Enter URL to add a new playlist")
-            print(f"  💾 C. Copy to USB only")
-            print(f"  📊 S. Show library summary")
+            print(f"  📁  A. Process all playlists")
+            print(f"  🔗  U. Enter URL to add a new playlist")
+            print(f"  💾  C. Copy to USB only")
+            print(f"  📊  S. Show library summary")
             print(f"  🖼️  R. Resize all cover art")
-            print(f"  ❌ X. Exit (or press Enter)")
+            print(f"  ❌  X. Exit (or press Enter)")
 
             # Get user selection
             try:
