@@ -65,7 +65,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "1.5.2"
+VERSION = "1.5.2-summary-art-column"
 
 DEFAULT_MUSIC_DIR = "music"
 DEFAULT_EXPORT_DIR = "export"
@@ -3552,28 +3552,36 @@ class SummaryManager:
             return
 
         # Header
-        print(f"  {'Playlist':<25} {'Files':>6}  {'Size':>10}  {'Avg Size':>8}  {'Updated':<10}")
-        print("  " + "─" * 60)
+        print(f"  {'Playlist':<25} {'Files':>6}  {'Art/Mod':>9}  {'Size':>10}  {'Updated':<10}")
+        print("  " + "─" * 62)
 
         # Sort by name
         sorted_playlists = sorted(self.stats.playlists, key=lambda p: p.name)
 
         # Rows
+        today = datetime.now().date()
         for playlist in sorted_playlists:
             name = playlist.name[:24]  # Truncate long names
             files = str(playlist.file_count)
+            art = f"{playlist.files_with_cover_art}/{playlist.files_with_resized_cover_art}"
             size = self._format_size(playlist.total_size_bytes)
-            avg_size = f"{playlist.avg_file_size_mb:.1f} MB"
+
+            # Highlight Art/Mod if art has been modified but not all match
+            if playlist.files_with_resized_cover_art > 0 and playlist.files_with_cover_art != playlist.files_with_resized_cover_art:
+                art = f"⚠️{art}"
 
             if playlist.last_modified:
                 # Format as "Feb 17" or "Feb 18"
                 updated = playlist.last_modified.strftime("%b %d")
+                # Highlight Updated if not today
+                if playlist.last_modified.date() != today:
+                    updated = f"⚠️{updated}"
             else:
-                updated = "N/A"
+                updated = "⚠️N/A"
 
-            print(f"  {name:<25} {files:>6}  {size:>10}  {avg_size:>8}  {updated:<10}")
+            print(f"  {name:<25} {files:>6}  {art:>9}  {size:>10}  {updated:<10}")
 
-        print("  " + "─" * 60)
+        print("  " + "─" * 62)
 
     def _format_size(self, bytes_size):
         """Format bytes to human-readable size."""
