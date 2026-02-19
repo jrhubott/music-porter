@@ -29,7 +29,7 @@ The system follows an integrated pipeline:
 
 ### Key Scripts
 
-**apple-to-ride-command** (python) - **RECOMMENDED**
+**music-porter** (python) - **RECOMMENDED**
 - Unified tool combining all functionality in a single command
 - Professional subcommand architecture: `pipeline`, `download`, `convert`, `tag`, `restore`, `reset`, `sync-usb`, `cover-art`, `summary`
 - Interactive menu for easy operation
@@ -37,19 +37,19 @@ The system follows an integrated pipeline:
 - Full pipeline orchestration (download → convert → tag → USB)
 - Modular design with 21 classes
 - 4,270 lines of production-ready Python code
-- See `APPLE-TO-RIDE-COMMAND-GUIDE.md` for complete documentation
+- See `MUSIC-PORTER-GUIDE.md` for complete documentation
 
 **do-it-all** (bash) - **DEPRECATED**
 - Legacy orchestration script (now a compatibility wrapper)
-- Calls `apple-to-ride-command` internally
+- Calls `music-porter` internally
 - Will be removed in a future version
-- Migrate to: `./apple-to-ride-command`
+- Migrate to: `./music-porter`
 
 **ride-command-mp3-export** (python) - **DEPRECATED**
 - Legacy conversion and tag management tool (now a compatibility wrapper)
-- Calls `apple-to-ride-command` internally
+- Calls `music-porter` internally
 - Will be removed in a future version
-- Migrate to: `./apple-to-ride-command`
+- Migrate to: `./music-porter`
 
 ### Tag Preservation System
 
@@ -74,17 +74,17 @@ The codebase uses a "hard gate" protection system for original metadata:
 
 ```bash
 # Interactive menu (easiest way to start)
-./apple-to-ride-command
+./music-porter
 
 # Full pipeline for one playlist
-./apple-to-ride-command pipeline --playlist "Pop_Workout"
+./music-porter pipeline --playlist "Pop_Workout"
 
 # Process all playlists automatically
-./apple-to-ride-command pipeline --auto
+./music-porter pipeline --auto
 
 # Get help
-./apple-to-ride-command --help
-./apple-to-ride-command [command] --help
+./music-porter --help
+./music-porter [command] --help
 ```
 
 ## MP3 Quality Presets
@@ -109,24 +109,24 @@ The conversion system supports configurable quality presets to balance file size
 
 ```bash
 # Process a specific playlist (download → convert → tag)
-./apple-to-ride-command pipeline --playlist "Pop_Workout"
-./apple-to-ride-command pipeline --playlist 1
+./music-porter pipeline --playlist "Pop_Workout"
+./music-porter pipeline --playlist 1
 
 # Process from direct URL
-./apple-to-ride-command pipeline --url "https://music.apple.com/us/playlist/..."
+./music-porter pipeline --url "https://music.apple.com/us/playlist/..."
 
 # Process all playlists (auto mode, no prompts)
-./apple-to-ride-command pipeline --auto
+./music-porter pipeline --auto
 
 # With quality presets (lossless, high, medium, low, custom)
-./apple-to-ride-command pipeline --playlist "Pop_Workout" --preset high
-./apple-to-ride-command pipeline --auto --preset medium
+./music-porter pipeline --playlist "Pop_Workout" --preset high
+./music-porter pipeline --auto --preset medium
 
 # Include USB copy after processing
-./apple-to-ride-command pipeline --playlist "Pop_Workout" --copy-to-usb
+./music-porter pipeline --playlist "Pop_Workout" --copy-to-usb
 
 # Custom USB directory
-./apple-to-ride-command pipeline --playlist "Pop_Workout" --copy-to-usb --usb-dir "RZR/Music"
+./music-porter pipeline --playlist "Pop_Workout" --copy-to-usb --usb-dir "RZR/Music"
 ```
 
 ### Granular Control (Individual Commands)
@@ -134,124 +134,124 @@ The conversion system supports configurable quality presets to balance file size
 **Download:**
 ```bash
 # Download specific playlist
-./apple-to-ride-command download --playlist "Pop_Workout"
+./music-porter download --playlist "Pop_Workout"
 
 # Download from URL
-./apple-to-ride-command download --url "https://music.apple.com/..."
+./music-porter download --url "https://music.apple.com/..."
 
 # Custom output directory
-./apple-to-ride-command download --playlist "Pop_Workout" --output custom/path
+./music-porter download --playlist "Pop_Workout" --output custom/path
 ```
 
 **Convert:**
 ```bash
 # Convert M4A files to MP3 (default: lossless 320kbps)
-./apple-to-ride-command convert music/Pop_Workout
+./music-porter convert music/Pop_Workout
 
 # Specify output directory
-./apple-to-ride-command convert music/Pop_Workout --output export/Pop_Workout
+./music-porter convert music/Pop_Workout --output export/Pop_Workout
 
 # Use quality presets (lossless, high, medium, low)
-./apple-to-ride-command convert music/Pop_Workout --preset high
-./apple-to-ride-command convert music/Pop_Workout --preset medium
+./music-porter convert music/Pop_Workout --preset high
+./music-porter convert music/Pop_Workout --preset medium
 
 # Custom VBR quality (0=best, 9=worst)
-./apple-to-ride-command convert music/Pop_Workout --preset custom --quality 0
+./music-porter convert music/Pop_Workout --preset custom --quality 0
 
 # Force re-conversion of existing files
-./apple-to-ride-command convert music/Pop_Workout --force
+./music-porter convert music/Pop_Workout --force
 ```
 
 **Tag Operations:**
 ```bash
 # Update album tag
-./apple-to-ride-command tag export/Pop_Workout --album "Pop Workout"
+./music-porter tag export/Pop_Workout --album "Pop Workout"
 
 # Update album and artist
-./apple-to-ride-command tag export/Pop_Workout --album "Pop Workout" --artist "Various"
+./music-porter tag export/Pop_Workout --album "Pop Workout" --artist "Various"
 ```
 
 **Restore Original Tags:**
 ```bash
 # Restore all original tags
-./apple-to-ride-command restore export/Pop_Workout --all
+./music-porter restore export/Pop_Workout --all
 
 # Restore specific tags
-./apple-to-ride-command restore export/Pop_Workout --album
-./apple-to-ride-command restore export/Pop_Workout --title
-./apple-to-ride-command restore export/Pop_Workout --artist
+./music-porter restore export/Pop_Workout --album
+./music-porter restore export/Pop_Workout --title
+./music-porter restore export/Pop_Workout --artist
 ```
 
 **Reset Tags from Source (⚠️ Overwrites Protection):**
 ```bash
 # Reset all protection tags from source M4A files
-./apple-to-ride-command reset music/Pop_Workout export/Pop_Workout
+./music-porter reset music/Pop_Workout export/Pop_Workout
 # Requires confirmation prompt
 ```
 
 **USB Operations:**
 ```bash
 # Copy to USB drive
-./apple-to-ride-command sync-usb export/Pop_Workout
+./music-porter sync-usb export/Pop_Workout
 
 # Copy entire export directory
-./apple-to-ride-command sync-usb
+./music-porter sync-usb
 
 # Custom USB directory
-./apple-to-ride-command sync-usb export/Pop_Workout --usb-dir "RZR/Music"
+./music-porter sync-usb export/Pop_Workout --usb-dir "RZR/Music"
 ```
 
 **Library Summary:**
 ```bash
 # Display export library statistics (default mode)
 # Always checks all files for tag integrity
-./apple-to-ride-command summary
+./music-porter summary
 
 # Quick mode (aggregate statistics only)
-./apple-to-ride-command summary --quick
+./music-porter summary --quick
 
 # Detailed mode (extended per-playlist information)
-./apple-to-ride-command summary --detailed
+./music-porter summary --detailed
 
 # Analyze custom directory
-./apple-to-ride-command summary --export-dir /path/to/export
+./music-porter summary --export-dir /path/to/export
 ```
 
 **Cover Art Management:**
 ```bash
 # Embed cover art from M4A sources into existing MP3s
-./apple-to-ride-command cover-art embed export/Pop_Workout
+./music-porter cover-art embed export/Pop_Workout
 
 # Embed with explicit source directory
-./apple-to-ride-command cover-art embed export/Pop_Workout --source music/Pop_Workout
+./music-porter cover-art embed export/Pop_Workout --source music/Pop_Workout
 
 # Extract cover art to image files
-./apple-to-ride-command cover-art extract export/Pop_Workout
+./music-porter cover-art extract export/Pop_Workout
 
 # Replace cover art from a single image
-./apple-to-ride-command cover-art update export/Pop_Workout --image artwork.jpg
+./music-porter cover-art update export/Pop_Workout --image artwork.jpg
 
 # Strip cover art to reduce file size
-./apple-to-ride-command cover-art strip export/Pop_Workout
+./music-porter cover-art strip export/Pop_Workout
 
 # Convert without cover art
-./apple-to-ride-command convert music/Pop_Workout --no-cover-art
+./music-porter convert music/Pop_Workout --no-cover-art
 ```
 
 ### Global Flags (Apply to All Commands)
 
 ```bash
 # Preview changes without modifying files
-./apple-to-ride-command --dry-run convert music/Pop_Workout
+./music-porter --dry-run convert music/Pop_Workout
 
 # Verbose output for detailed information
-./apple-to-ride-command --verbose tag export/Pop_Workout --album "Test"
+./music-porter --verbose tag export/Pop_Workout --album "Test"
 
 # Combine flags
-./apple-to-ride-command --dry-run --verbose convert music/Pop_Workout
+./music-porter --dry-run --verbose convert music/Pop_Workout
 
 # Show version
-./apple-to-ride-command --version
+./music-porter --version
 ```
 
 ### Legacy Commands (Deprecated)
@@ -260,11 +260,11 @@ The conversion system supports configurable quality presets to balance file size
 
 ```bash
 # Old commands (show deprecation warnings, call new tool internally)
-./do-it-all                                    # Use: ./apple-to-ride-command
-./ride-command-mp3-export music/Pop_Workout/   # Use: ./apple-to-ride-command convert music/Pop_Workout
+./do-it-all                                    # Use: ./music-porter
+./ride-command-mp3-export music/Pop_Workout/   # Use: ./music-porter convert music/Pop_Workout
 ```
 
-**Migration:** Replace all `do-it-all` and `ride-command-mp3-export` calls with `apple-to-ride-command`. See `APPLE-TO-RIDE-COMMAND-GUIDE.md` for detailed migration instructions.
+**Migration:** Replace all `do-it-all` and `ride-command-mp3-export` calls with `music-porter`. See `MUSIC-PORTER-GUIDE.md` for detailed migration instructions.
 
 ## Development Setup
 
@@ -312,7 +312,7 @@ pip install -r requirements.txt
 - Use `--dry-run` flag extensively to preview behavior
 - Use `--verbose` to inspect tag transformations
 - Test tag preservation by running updates multiple times
-- Verify TXXX frames with: `./apple-to-ride-command --verbose tag export/PlaylistName`
+- Verify TXXX frames with: `./music-porter --verbose tag export/PlaylistName`
 
 ### Feature Branch Workflow
 
@@ -346,11 +346,11 @@ git pull origin main
 # 2. Create and switch to feature branch
 git checkout -b feature/my-feature
 
-# 3. Set branch version in apple-to-ride-command (line 68)
+# 3. Set branch version in music-porter (line 68)
 VERSION = "1.5.3-my-feature"
 
 # 4. Commit the version change as first commit
-git add apple-to-ride-command
+git add music-porter
 git commit -m "Start my-feature branch"
 ```
 
@@ -384,7 +384,7 @@ Use the `/merge-to-main` skill, which automates version bump, README updates, ta
 
 **IMPORTANT: Version number strategy depends on branch context.**
 
-The version number is defined in `apple-to-ride-command` at line 68:
+The version number is defined in `music-porter` at line 68:
 ```python
 VERSION = "1.1.0"
 ```
@@ -430,7 +430,7 @@ VERSION = "1.1.0"
 git checkout -b feature/cookie-management
 
 # Update version to include branch name
-# In apple-to-ride-command line 68:
+# In music-porter line 68:
 VERSION = "1.1.0-cookie-management"
 git commit -m "Start cookie management feature"
 
@@ -442,7 +442,7 @@ git checkout main
 git merge feature/cookie-management
 
 # Update version to clean release number
-# In apple-to-ride-command line 68:
+# In music-porter line 68:
 VERSION = "1.2.0"  # MINOR bump for new feature
 git commit -m "Bump version to 1.2.0 for cookie management feature"
 
@@ -509,7 +509,7 @@ git tag v1.2.0
 
 ```
 .
-├── apple-to-ride-command            # ⭐ Unified tool (RECOMMENDED)
+├── music-porter            # ⭐ Unified tool (RECOMMENDED)
 ├── do-it-all                        # Legacy wrapper (deprecated)
 ├── ride-command-mp3-export          # Legacy wrapper (deprecated)
 ├── do-it-all.backup                 # Original bash script (backup)
@@ -524,7 +524,7 @@ git tag v1.2.0
 ├── logs/                            # Execution logs (timestamped)
 ├── .venv/                           # Python virtual environment
 ├── requirements.txt                 # All Python dependencies
-├── APPLE-TO-RIDE-COMMAND-GUIDE.md   # Complete usage guide
+├── MUSIC-PORTER-GUIDE.md   # Complete usage guide
 ├── COOKIE-MANAGEMENT-GUIDE.md       # Cookie validation and refresh guide
 ├── QUICK-REFERENCE.md               # Command cheat sheet
 └── IMPLEMENTATION-SUMMARY.md        # Technical documentation
@@ -592,7 +592,7 @@ Thumbs_Up|https://music.apple.com/us/playlist/...|Thumbs Up
 ```
 
 ### USB Drive Exclusions
-Excluded volumes are configured in `apple-to-ride-command` (constant: `EXCLUDED_USB_VOLUMES`):
+Excluded volumes are configured in `music-porter` (constant: `EXCLUDED_USB_VOLUMES`):
 ```python
 EXCLUDED_USB_VOLUMES = [
     "Macintosh HD",
@@ -604,7 +604,7 @@ EXCLUDED_USB_VOLUMES = [
 
 ### Overview
 
-The `apple-to-ride-command` script is a modern, unified Python tool (3,065 lines) that replaces both legacy scripts with a professional subcommand architecture.
+The `music-porter` script is a modern, unified Python tool (3,065 lines) that replaces both legacy scripts with a professional subcommand architecture.
 
 ### Key Components
 
@@ -655,7 +655,7 @@ The `apple-to-ride-command` script is a modern, unified Python tool (3,065 lines
 
 **Automatic migration via wrappers:**
 - Old scripts still work but show deprecation warnings
-- Internally call `apple-to-ride-command` with mapped arguments
+- Internally call `music-porter` with mapped arguments
 - No immediate changes required
 - Update scripts gradually
 
@@ -663,13 +663,13 @@ The `apple-to-ride-command` script is a modern, unified Python tool (3,065 lines
 ```bash
 # Old: do-it-all
 ./do-it-all --auto
-# New: apple-to-ride-command
-./apple-to-ride-command pipeline --auto
+# New: music-porter
+./music-porter pipeline --auto
 
 # Old: ride-command-mp3-export
 ./ride-command-mp3-export music/Pop_Workout/ --output export/Pop_Workout
-# New: apple-to-ride-command
-./apple-to-ride-command convert music/Pop_Workout --output export/Pop_Workout
+# New: music-porter
+./music-porter convert music/Pop_Workout --output export/Pop_Workout
 ```
 
 ### Benefits Over Legacy Scripts
@@ -684,7 +684,7 @@ The `apple-to-ride-command` script is a modern, unified Python tool (3,065 lines
 8. **Interactive menu** - User-friendly for occasional use
 9. **Complete documentation** - 3 comprehensive guides
 
-### Implementation Notes for apple-to-ride-command
+### Implementation Notes for music-porter
 
 **Tag Management (TaggerManager class):**
 - Implements same TXXX hard-gate protection as legacy script
@@ -751,10 +751,10 @@ The `apple-to-ride-command` script is a modern, unified Python tool (3,065 lines
 
 ```bash
 # Always use --dry-run first for new operations
-./apple-to-ride-command --dry-run --verbose convert music/NewPlaylist
+./music-porter --dry-run --verbose convert music/NewPlaylist
 
 # Verify with verbose mode
-./apple-to-ride-command --verbose tag export/NewPlaylist --album "Test"
+./music-porter --verbose tag export/NewPlaylist --album "Test"
 
 # Check logs for detailed information
 tail -100 logs/$(ls -t logs/ | head -1)
@@ -763,6 +763,6 @@ tail -100 logs/$(ls -t logs/ | head -1)
 ## Additional Resources
 
 - **README.md** - Project overview, quick start guide, and future features roadmap
-- **APPLE-TO-RIDE-COMMAND-GUIDE.md** - Complete usage guide with examples
+- **MUSIC-PORTER-GUIDE.md** - Complete usage guide with examples
 - **QUICK-REFERENCE.md** - Command cheat sheet for quick lookup
 - **IMPLEMENTATION-SUMMARY.md** - Technical implementation details

@@ -1,10 +1,10 @@
-# apple-to-ride-command - Quick Reference Card
+# music-porter - Quick Reference Card
 
 ## 🚀 Most Common Commands
 
 ### Just Starting? Use This:
 ```bash
-./apple-to-ride-command
+./music-porter
 ```
 Interactive menu - easiest way to get started!
 - **1-N**: Select a playlist by number
@@ -15,13 +15,13 @@ Interactive menu - easiest way to get started!
 
 ### Full Workflow in One Command:
 ```bash
-./apple-to-ride-command pipeline --playlist "Pop_Workout"
+./music-porter pipeline --playlist "Pop_Workout"
 ```
 Downloads, converts, tags, and prompts for USB copy.
 
 ### Process Everything:
 ```bash
-./apple-to-ride-command pipeline --auto --copy-to-usb
+./music-porter pipeline --auto --copy-to-usb
 ```
 Processes all configured playlists and copies to USB.
 
@@ -29,46 +29,46 @@ Processes all configured playlists and copies to USB.
 
 | What I Want to Do | Command |
 |-------------------|---------|
-| **Show menu** | `./apple-to-ride-command` |
-| **Full workflow** | `./apple-to-ride-command pipeline --playlist "Name"` |
-| **Download only** | `./apple-to-ride-command download --playlist "Name"` |
-| **Convert only** | `./apple-to-ride-command convert music/Name` |
-| **Convert with quality** | `./apple-to-ride-command convert music/Name --preset high` |
-| **Update tags** | `./apple-to-ride-command tag export/Name --album "Album"` |
-| **Restore tags** | `./apple-to-ride-command restore export/Name --all` |
-| **Copy to USB** | `./apple-to-ride-command sync-usb export/Name` |
+| **Show menu** | `./music-porter` |
+| **Full workflow** | `./music-porter pipeline --playlist "Name"` |
+| **Download only** | `./music-porter download --playlist "Name"` |
+| **Convert only** | `./music-porter convert music/Name` |
+| **Convert with quality** | `./music-porter convert music/Name --preset high` |
+| **Update tags** | `./music-porter tag export/Name --album "Album"` |
+| **Restore tags** | `./music-porter restore export/Name --all` |
+| **Copy to USB** | `./music-porter sync-usb export/Name` |
 | **Preview changes** | Add `--dry-run` before any command |
 | **See details** | Add `--verbose` before any command |
-| **Get help** | `./apple-to-ride-command --help` |
-| **Command help** | `./apple-to-ride-command [command] --help` |
+| **Get help** | `./music-porter --help` |
+| **Command help** | `./music-porter [command] --help` |
 
 ## 🎯 Common Workflows
 
 ### New Playlist from URL
 ```bash
-./apple-to-ride-command pipeline --url "https://music.apple.com/..."
+./music-porter pipeline --url "https://music.apple.com/..."
 # Asks to save to playlists.conf
 # Asks to copy to USB
 ```
 
 ### Update Existing Playlist
 ```bash
-./apple-to-ride-command pipeline --playlist "Pop_Workout"
+./music-porter pipeline --playlist "Pop_Workout"
 ```
 
 ### Batch Update All Playlists
 ```bash
-./apple-to-ride-command pipeline --auto
+./music-porter pipeline --auto
 ```
 
 ### Re-convert with Force
 ```bash
-./apple-to-ride-command convert music/Pop_Workout --output export/Pop_Workout --force
+./music-porter convert music/Pop_Workout --output export/Pop_Workout --force
 ```
 
 ### Quick USB Copy
 ```bash
-./apple-to-ride-command sync-usb
+./music-porter sync-usb
 # Copies entire export/ directory
 ```
 
@@ -97,16 +97,16 @@ Processes all configured playlists and copies to USB.
 ### Examples:
 ```bash
 # Default (lossless)
-./apple-to-ride-command convert music/Pop_Workout
+./music-porter convert music/Pop_Workout
 
 # High quality VBR
-./apple-to-ride-command convert music/Pop_Workout --preset high
+./music-porter convert music/Pop_Workout --preset high
 
 # Custom quality (best)
-./apple-to-ride-command convert music/Pop_Workout --preset custom --quality 0
+./music-porter convert music/Pop_Workout --preset custom --quality 0
 
 # Full pipeline with quality
-./apple-to-ride-command pipeline --playlist "Pop_Workout" --preset medium
+./music-porter pipeline --playlist "Pop_Workout" --preset medium
 ```
 
 ## 📁 Where Files Go
@@ -137,7 +137,7 @@ tail -50 logs/$(ls -t logs/ | head -1)
 
 ### Test Before Running
 ```bash
-./apple-to-ride-command --dry-run --verbose [command] [options]
+./music-porter --dry-run --verbose [command] [options]
 ```
 
 ## 💡 Pro Tips
@@ -167,10 +167,10 @@ Look for:
 
 ## 🔗 More Help
 
-- Full guide: `APPLE-TO-RIDE-COMMAND-GUIDE.md`
+- Full guide: `MUSIC-PORTER-GUIDE.md`
 - Implementation details: `IMPLEMENTATION-SUMMARY.md`
-- Built-in help: `./apple-to-ride-command --help`
-- Command help: `./apple-to-ride-command [command] --help`
+- Built-in help: `./music-porter --help`
+- Command help: `./music-porter [command] --help`
 
 ## Version
 

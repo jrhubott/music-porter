@@ -1,8 +1,8 @@
-# Implementation Summary: apple-to-ride-command
+# Implementation Summary: music-porter
 
 ## Overview
 
-Successfully created a unified Python script (`apple-to-ride-command`) that combines the functionality of both `do-it-all` (bash, 396 lines) and `ride-command-mp3-export` (Python, 1321 lines) into a single, powerful tool (1921 lines).
+Successfully created a unified Python script (`music-porter`) that combines the functionality of both `do-it-all` (bash, 396 lines) and `ride-command-mp3-export` (Python, 1321 lines) into a single, powerful tool (1921 lines).
 
 ## ✅ Completed Features
 
@@ -168,7 +168,7 @@ Successfully created a unified Python script (`apple-to-ride-command`) that comb
 - `--version` - Display version information
 
 #### Command-Specific Options
-Each subcommand has appropriate options (see APPLE-TO-RIDE-COMMAND-GUIDE.md)
+Each subcommand has appropriate options (see MUSIC-PORTER-GUIDE.md)
 
 ### Entry Point (Section 11)
 
@@ -299,7 +299,7 @@ Each subcommand has appropriate options (see APPLE-TO-RIDE-COMMAND-GUIDE.md)
 ## File Structure
 
 ```
-apple-to-ride-command          (1,921 lines)
+music-porter          (1,921 lines)
 ├── Section 1: Imports and Constants
 ├── Section 2: Logging Infrastructure
 │   └── Logger class
@@ -372,8 +372,8 @@ All features from both original scripts are implemented:
 
 ### 1. Backward Compatibility Wrappers (Optional)
 Create thin wrappers for old scripts:
-- `do-it-all` → calls `apple-to-ride-command` with mapped arguments
-- `ride-command-mp3-export` → calls `apple-to-ride-command` with mapped arguments
+- `do-it-all` → calls `music-porter` with mapped arguments
+- `ride-command-mp3-export` → calls `music-porter` with mapped arguments
 - Display deprecation warnings
 - Remove after grace period
 
@@ -404,40 +404,40 @@ Port optional flags:
 ### Basic Usage
 ```bash
 # Interactive menu (easiest)
-./apple-to-ride-command
+./music-porter
 
 # Full pipeline for one playlist
-./apple-to-ride-command pipeline --playlist "Pop_Workout"
+./music-porter pipeline --playlist "Pop_Workout"
 
 # Process all playlists automatically
-./apple-to-ride-command pipeline --auto
+./music-porter pipeline --auto
 
 # Convert only
-./apple-to-ride-command convert music/Pop_Workout --output export/Pop_Workout
+./music-porter convert music/Pop_Workout --output export/Pop_Workout
 
 # Update tags only
-./apple-to-ride-command tag export/Pop_Workout --album "Pop Workout" --artist "Various"
+./music-porter tag export/Pop_Workout --album "Pop Workout" --artist "Various"
 
 # Restore original tags
-./apple-to-ride-command restore export/Pop_Workout --all
+./music-porter restore export/Pop_Workout --all
 
 # Copy to USB
-./apple-to-ride-command sync-usb export/Pop_Workout
+./music-porter sync-usb export/Pop_Workout
 ```
 
 ### Advanced Usage
 ```bash
 # Dry-run before actual operation
-./apple-to-ride-command --dry-run pipeline --playlist "Pop_Workout"
+./music-porter --dry-run pipeline --playlist "Pop_Workout"
 
 # Verbose output for debugging
-./apple-to-ride-command --verbose convert music/Pop_Workout
+./music-porter --verbose convert music/Pop_Workout
 
 # Force re-conversion
-./apple-to-ride-command convert music/Pop_Workout --force
+./music-porter convert music/Pop_Workout --force
 
 # Pipeline with USB copy
-./apple-to-ride-command pipeline --playlist "Pop_Workout" --copy-to-usb
+./music-porter pipeline --playlist "Pop_Workout" --copy-to-usb
 ```
 
 ## Performance Characteristics
@@ -470,6 +470,6 @@ Port optional flags:
 
 ## Conclusion
 
-The `apple-to-ride-command` script successfully unifies and improves upon the original `do-it-all` and `ride-command-mp3-export` scripts. It provides a professional, extensible command-line interface with better error handling, comprehensive statistics, and a modular architecture that's easy to maintain and extend.
+The `music-porter` script successfully unifies and improves upon the original `do-it-all` and `ride-command-mp3-export` scripts. It provides a professional, extensible command-line interface with better error handling, comprehensive statistics, and a modular architecture that's easy to maintain and extend.
 
 **The implementation is production-ready and can be used immediately for all core operations.**
