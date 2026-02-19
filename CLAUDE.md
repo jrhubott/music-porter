@@ -254,6 +254,23 @@ The conversion system supports configurable quality presets to balance file size
 ./music-porter --version
 ```
 
+### Output Type Profiles
+
+Profiles control conversion behavior, tag handling, artwork, and quality defaults. Use `--output-type` to select.
+
+| Profile | ID3 | Artwork | Quality | Album Tag | Artist Tag | Description |
+|---------|-----|---------|---------|-----------|------------|-------------|
+| `ride-command` | v2.3 | 100px | lossless | playlist name | "Various" | Polaris Ride Command (default) |
+| `basic` | v2.4 | original | lossless | original | original | Standard MP3, original tags & art |
+
+**Profile fields:**
+- `artwork_size`: `>0` = resize to max px, `0` = embed original, `-1` = strip artwork
+- `quality_preset`: Default conversion quality (`lossless`, `high`, `medium`, `low`)
+- `pipeline_album`: `"playlist_name"` or `"original"` — controls album tag in pipeline
+- `pipeline_artist`: `"various"` or `"original"` — controls artist tag in pipeline
+
+**Precedence:** CLI flags override profile defaults (`--no-cover-art` > `artwork_size`, `--preset` > `quality_preset`).
+
 ### Legacy Commands (Deprecated)
 
 ⚠️ **The following commands still work but are deprecated:**
