@@ -7,6 +7,7 @@ A powerful music playlist management and conversion tool that downloads Apple Mu
 - **Download playlists** from Apple Music using gamdl
 - **Convert to MP3** with configurable quality presets (lossless, high, medium, low, custom)
 - **Multi-threaded conversion** with configurable parallel workers (`--workers N`)
+- **Progress bars** for all operations (convert, tag, restore, download, USB sync)
 - **Preserve metadata** with TXXX frame protection for original tags
 - **USB sync** with automatic drive detection and intelligent copying
 - **Pipeline orchestration** for automated multi-stage workflows
@@ -366,7 +367,7 @@ The tool uses a "hard gate" protection system for original metadata:
 ### Medium Priority
 6. **Web UI** - Browser-based interface for remote management
 7. **Automatic USB detection** - Start sync when USB drive is plugged in
-8. **Progress indicators** - Real-time progress bars for long-running operations
+8. ~~**Progress indicators** - Real-time progress bars for long-running operations~~ *(implemented in v1.4.0)*
 9. **Download resume** - Resume interrupted downloads
 10. **Cover art management** - Embed, extract, and update album artwork
 11. **Playlist merging** - Combine multiple playlists into one
@@ -394,7 +395,7 @@ The tool uses a "hard gate" protection system for original metadata:
 
 ## Version
 
-Current version: **v1.0.0**
+Current version: **v1.4.0**
 
 ## License
 
