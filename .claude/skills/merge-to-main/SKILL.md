@@ -50,7 +50,11 @@ Merge the current feature branch into main following the project's version workf
 7. **Tag the release**
    - `git tag vX.Y.Z`
 
-8. **Report**
+8. **Clean up**
+   - Ask the user if they want to delete the feature branch
+   - If yes, run `git branch -d <branch-name>`
+
+9. **Report**
    - Show the final `git log --oneline -5` so the user can verify
    - Show the tag: `git tag -l 'vX.Y.Z'`
    - Remind the user to `git push origin main --tags` when ready
