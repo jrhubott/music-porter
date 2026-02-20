@@ -66,7 +66,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 
 DEFAULT_MUSIC_DIR = "music"
 DEFAULT_EXPORT_DIR = "export"
@@ -310,6 +310,13 @@ class ProgressBar:
         self.logger = logger
         self.total = total
         self._saved_termios = None
+        self._current = 0
+        self._update_lock = threading.Lock()
+        self._progress_callback = None
+
+        # If the logger supports progress callbacks (e.g. WebLogger), wire it up
+        if logger and hasattr(logger, '_make_progress_callback'):
+            self._progress_callback = logger._make_progress_callback()
 
         if not self._disabled and total > 0:
             self._create_bar(total)
@@ -347,15 +354,19 @@ class ProgressBar:
 
     def set_total(self, total):
         """Lazily initialize the bar when total becomes known."""
+        self.total = total
         if self._bar is not None or self._disabled:
             return
-        self.total = total
         self._create_bar(total)
 
     def update(self, n=1):
         """Advance the progress bar."""
         if self._bar is not None:
             self._bar.update(n)
+        if self._progress_callback is not None:
+            with self._update_lock:
+                self._current += n
+            self._progress_callback(self._current, self.total, self._desc)
 
     def close(self):
         """Close the progress bar and unregister from logger."""

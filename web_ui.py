@@ -57,6 +57,38 @@ class WebLogger(mp.Logger):
         self._queue.put({'level': level, 'message': clean})
         self._write_file_only(level, message)
 
+    def file_info(self, message):
+        """Push per-file messages to SSE queue (visible in web UI)."""
+        if self._cancel_event and self._cancel_event.is_set():
+            return
+        clean = _ANSI_RE.sub('', message)
+        self._queue.put({'level': 'INFO', 'message': clean})
+        self._write_file_only("INFO", message)
+
+    def _make_progress_callback(self):
+        """Return a closure that pushes throttled progress events to SSE."""
+        last_pct = [-1]  # mutable container for closure
+
+        def callback(current, total, stage):
+            if self._cancel_event and self._cancel_event.is_set():
+                return
+            if total > 0:
+                pct = int(current * 100 / total)
+            else:
+                pct = -1  # indeterminate
+            if pct == last_pct[0]:
+                return  # throttle: only fire on percentage change
+            last_pct[0] = pct
+            self._queue.put({
+                'type': 'progress',
+                'current': current,
+                'total': total,
+                'stage': stage,
+                'percent': pct,
+            })
+
+        return callback
+
     def register_bar(self, bar):
         pass
 
@@ -872,7 +904,11 @@ def create_app(project_root=None):
                         # Task finished
                         yield f"data: {json.dumps({'type': 'done', 'status': task.status, 'result': task.result, 'error': task.error})}\n\n"
                         return
-                    yield f"data: {json.dumps({'type': 'log', 'level': msg['level'], 'message': msg['message']})}\n\n"
+                    if 'type' in msg:
+                        # Pre-typed messages (e.g. progress events) — pass through
+                        yield f"data: {json.dumps(msg)}\n\n"
+                    else:
+                        yield f"data: {json.dumps({'type': 'log', 'level': msg['level'], 'message': msg['message']})}\n\n"
                 except queue.Empty:
                     # Heartbeat
                     yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
