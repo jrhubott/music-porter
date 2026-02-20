@@ -15,8 +15,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Requirements vs Implementation
 - When asked to "work on requirements", **only** produce the SRS document — do not plan or begin implementation
 - Requirements work and implementation are separate phases; wait for explicit instruction to start implementation
-- SRS documents use **checkboxes** (`- [ ]`) for each requirement — check them off (`- [x]`) as they are implemented and tested
+- SRS documents use **checkboxes** (`- [ ]`) for each requirement — check them off (`- [x]`) as they are implemented and tested during development
 - Store SRS documents in the `SRS/` directory
+- **During implementation**, check off SRS requirements as each one is completed
+- **Add new SRS items** if requirements are discovered during design or implementation that weren't in the original document
 
 ## Project Overview
 

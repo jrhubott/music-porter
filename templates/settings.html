@@ -122,6 +122,8 @@ function loadSettings() {
         ['Artwork', p1.artwork_size > 0 ? p1.artwork_size + 'px' : p1.artwork_size === 0 ? 'original' : 'stripped',
                     p2.artwork_size > 0 ? p2.artwork_size + 'px' : p2.artwork_size === 0 ? 'original' : 'stripped'],
         ['ID3 Version', 'v2.' + p1.id3_version, 'v2.' + p2.id3_version],
+        ['Dir Structure', p1.directory_structure, p2.directory_structure],
+        ['Filename Format', p1.filename_format, p2.filename_format],
       ];
       document.getElementById('profileCompare').innerHTML = rows.map(r =>
         `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`

@@ -2,7 +2,7 @@
 
 **Version:** 1.0
 **Date:** 2026-02-19
-**Status:** Draft
+**Status:** Implementation Complete (pending integration testing)
 
 ---
 
@@ -26,13 +26,13 @@ The system shall support three directory structure modes, configurable per outpu
 | `nested-artist` | Subdirectories per artist | `export/ride-command/Pop_Workout/Taylor Swift/Title.mp3` |
 | `nested-artist-album` | Subdirectories per artist and album | `export/ride-command/Pop_Workout/Taylor Swift/1989/Title.mp3` |
 
-- [ ] `flat` directory structure works (existing behavior)
-- [ ] `nested-artist` directory structure creates artist subdirectories
-- [ ] `nested-artist-album` directory structure creates artist/album subdirectories
-- [ ] Artist and album directory names sanitized using existing `sanitize_filename()`
-- [ ] Subdirectories created automatically during conversion
-- [ ] Unknown artist defaults to `"Unknown Artist"` directory name
-- [ ] Unknown album defaults to `"Unknown Album"` directory name
+- [x] `flat` directory structure works (existing behavior)
+- [x] `nested-artist` directory structure creates artist subdirectories
+- [x] `nested-artist-album` directory structure creates artist/album subdirectories
+- [x] Artist and album directory names sanitized using existing `sanitize_filename()`
+- [x] Subdirectories created automatically during conversion
+- [x] Unknown artist defaults to `"Unknown Artist"` directory name
+- [x] Unknown album defaults to `"Unknown Album"` directory name
 
 ### 3.2 Filename Formats
 
@@ -43,8 +43,8 @@ The system shall support two filename format modes, configurable per output prof
 | `artist_title` | `Artist - Title.mp3` | `Taylor Swift - Shake It Off.mp3` |
 | `title_only` | `Title.mp3` | `Shake It Off.mp3` |
 
-- [ ] `artist_title` filename format works (existing behavior)
-- [ ] `title_only` filename format produces title-only filenames
+- [x] `artist_title` filename format works (existing behavior)
+- [x] `title_only` filename format produces title-only filenames
 
 ### 3.3 Configuration
 
@@ -59,10 +59,10 @@ Settings shall follow the existing precedence chain:
 | `--dir-structure` | `flat`, `nested-artist`, `nested-artist-album` | Profile default |
 | `--filename-format` | `artist_title`, `title_only` | Profile default |
 
-- [ ] `--dir-structure` flag added to `pipeline` subcommand
-- [ ] `--dir-structure` flag added to `convert` subcommand
-- [ ] `--filename-format` flag added to `pipeline` subcommand
-- [ ] `--filename-format` flag added to `convert` subcommand
+- [x] `--dir-structure` flag added to `pipeline` subcommand
+- [x] `--dir-structure` flag added to `convert` subcommand
+- [x] `--filename-format` flag added to `pipeline` subcommand
+- [x] `--filename-format` flag added to `convert` subcommand
 
 #### 3.3.2 config.yaml Settings
 
@@ -72,9 +72,9 @@ settings:
   filename_format: artist_title    # optional
 ```
 
-- [ ] `dir_structure` setting read from config.yaml
-- [ ] `filename_format` setting read from config.yaml
-- [ ] Omitted settings fall back to profile default
+- [x] `dir_structure` setting read from config.yaml
+- [x] `filename_format` setting read from config.yaml
+- [x] Omitted settings fall back to profile default
 
 #### 3.3.3 Profile Defaults
 
@@ -85,54 +85,56 @@ Both existing profiles shall retain their current defaults:
 | `ride-command` | `flat` | `artist_title` |
 | `basic` | `flat` | `artist_title` |
 
-- [ ] `ride-command` profile defaults unchanged
-- [ ] `basic` profile defaults unchanged
+- [x] `ride-command` profile defaults unchanged
+- [x] `basic` profile defaults unchanged
 
 ### 3.4 Backward Compatibility
 
-- [ ] Default behavior identical to current behavior (zero regression)
-- [ ] `summary` command works with nested export directories
-- [ ] `cover-art` commands work with nested export directories
-- [ ] `sync-usb` preserves nested directory structure on target drive
-- [ ] `tag` command works with nested export directories
-- [ ] `restore` command works with nested export directories
+- [x] Default behavior identical to current behavior (zero regression)
+- [x] `summary` command works with nested export directories
+- [x] `cover-art` commands work with nested export directories
+- [x] `sync-usb` preserves nested directory structure on target drive
+- [x] `tag` command works with nested export directories
+- [x] `restore` command works with nested export directories
 
 ### 3.5 Feature Parity (CLI & Web)
 
 **CLI:**
-- [ ] `--dir-structure` flag on `pipeline` command
-- [ ] `--dir-structure` flag on `convert` command
-- [ ] `--filename-format` flag on `pipeline` command
-- [ ] `--filename-format` flag on `convert` command
+- [x] `--dir-structure` flag on `pipeline` command
+- [x] `--dir-structure` flag on `convert` command
+- [x] `--filename-format` flag on `pipeline` command
+- [x] `--filename-format` flag on `convert` command
 
 **Web Dashboard:**
-- [ ] Convert page: Directory Layout dropdown
-- [ ] Convert page: Filename Format dropdown
-- [ ] Pipeline page: Directory Layout dropdown
-- [ ] Pipeline page: Filename Format dropdown
-- [ ] Settings page: Profile comparison table includes directory structure
-- [ ] Settings page: Profile comparison table includes filename format
-- [ ] `/api/pipeline/run` accepts `dir_structure` parameter
-- [ ] `/api/pipeline/run` accepts `filename_format` parameter
-- [ ] `/api/convert/run` accepts `dir_structure` parameter
-- [ ] `/api/convert/run` accepts `filename_format` parameter
+- [x] Convert page: Directory Layout dropdown
+- [x] Convert page: Filename Format dropdown
+- [x] Pipeline page: Directory Layout dropdown
+- [x] Pipeline page: Filename Format dropdown
+- [x] Settings page: Profile comparison table includes directory structure
+- [x] Settings page: Profile comparison table includes filename format
+- [x] `/api/pipeline/run` accepts `dir_structure` parameter
+- [x] `/api/pipeline/run` accepts `filename_format` parameter
+- [x] `/api/convert/run` accepts `dir_structure` parameter
+- [x] `/api/convert/run` accepts `filename_format` parameter
+- [x] `/api/settings` GET returns valid dir_structures and filename_formats lists
+- [x] `/api/directories/export` uses rglob for nested directory file counts
 
 ### 3.6 Display
 
-- [ ] Startup banner displays active directory structure
-- [ ] Startup banner displays active filename format
-- [ ] Log files record active directory structure and filename format
-- [ ] `--dry-run` output shows full output path (including subdirectories for nested structures)
+- [x] Startup banner displays active directory structure
+- [x] Startup banner displays active filename format
+- [x] Log files record active directory structure and filename format
+- [x] `--dry-run` output shows full output path (including subdirectories for nested structures)
 
 ## 4. Edge Cases
 
 ### 4.1 Filename Collisions
 
-- [ ] `title_only` format with duplicate titles: skip-if-exists behavior with warning suggesting `artist_title` format
+- [x] `title_only` format with duplicate titles: skip-if-exists behavior with warning suggesting `artist_title` format
 
 ### 4.2 Special Characters in Directory Names
 
-- [ ] Artist/album directory names sanitized by `sanitize_filename()` (strips `/\:*?"<>|`)
+- [x] Artist/album directory names sanitized by `sanitize_filename()` (strips `/\:*?"<>|`)
 
 ### 4.3 Deeply Nested Paths
 
@@ -140,17 +142,17 @@ Very long artist + album + title combinations could exceed filesystem path lengt
 
 ## 5. Validation
 
-- [ ] Invalid `--dir-structure` value produces clear error with valid choices and non-zero exit
-- [ ] Invalid `--filename-format` value produces clear error with valid choices and non-zero exit
-- [ ] Invalid config.yaml values validated and rejected with clear error
+- [x] Invalid `--dir-structure` value produces clear error with valid choices and non-zero exit
+- [x] Invalid `--filename-format` value produces clear error with valid choices and non-zero exit
+- [x] Invalid config.yaml values validated and rejected with clear error
 
 ## 6. Testing
 
-- [ ] All 6 combinations (3 structures x 2 formats) tested with `--dry-run --verbose`
-- [ ] Default behavior unchanged (flat + artist_title)
+- [x] All 6 combinations (3 structures x 2 formats) tested with `--dry-run --verbose`
+- [x] Default behavior unchanged (flat + artist_title)
 - [ ] CLI flag overrides config.yaml
 - [ ] config.yaml overrides profile default
-- [ ] `summary` command works with nested export directories
+- [x] `summary` command works with nested export directories
 - [ ] `cover-art embed` correctly matches files with non-default formats
 - [ ] `sync-usb` preserves nested structure on target drive
 - [ ] Filename collisions with `title_only` format handled correctly

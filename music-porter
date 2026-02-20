@@ -139,8 +139,8 @@ APPLE_COOKIE_DOMAIN = 'apple.com'
 class OutputProfile:
     name: str
     description: str
-    directory_structure: str  # "flat" — extensible to "nested"
-    filename_format: str      # "artist_title" → "Artist - Title.mp3"
+    directory_structure: str  # "flat", "nested-artist", "nested-artist-album"
+    filename_format: str      # "artist_title", "title_only"
     id3_version: int          # 3 = ID3v2.3, 4 = ID3v2.4
     strip_id3v1: bool         # Remove ID3v1 tags
     title_tag_format: str     # "artist_title" → tag as "Artist - Title"
@@ -179,6 +179,10 @@ OUTPUT_PROFILES: dict = {
     ),
 }
 DEFAULT_OUTPUT_TYPE = "ride-command"
+
+# Valid choices for directory structure and filename format
+VALID_DIR_STRUCTURES = ("flat", "nested-artist", "nested-artist-album")
+VALID_FILENAME_FORMATS = ("artist_title", "title_only")
 
 
 def get_export_dir(profile_name, playlist_key=None):
@@ -1094,6 +1098,7 @@ class TaggerManager:
 
     def __init__(self, logger=None, cleanup_options=None, output_profile=None):
         self.logger = logger or Logger()
+        self.output_profile = output_profile or OUTPUT_PROFILES[DEFAULT_OUTPUT_TYPE]
         if output_profile is not None:
             self.cleanup_options = {
                 "remove_id3v1": output_profile.strip_id3v1,
@@ -1534,11 +1539,22 @@ class TaggerManager:
                 # Read M4A tags
                 title, artist, album = read_m4a_tags(input_file)
 
-                # Find matching MP3
+                # Find matching MP3 using profile-aware filename and path
                 safe_title = self._sanitize_filename(title)
                 safe_artist = self._sanitize_filename(artist)
-                mp3_filename = f"{safe_artist} - {safe_title}.mp3"
-                mp3_path = output_path / mp3_filename
+                safe_album = self._sanitize_filename(album)
+                fmt = self.output_profile.filename_format
+                if fmt == "title_only":
+                    mp3_filename = f"{safe_title}.mp3"
+                else:
+                    mp3_filename = f"{safe_artist} - {safe_title}.mp3"
+                structure = self.output_profile.directory_structure
+                if structure == "nested-artist":
+                    mp3_path = output_path / safe_artist / mp3_filename
+                elif structure == "nested-artist-album":
+                    mp3_path = output_path / safe_artist / safe_album / mp3_filename
+                else:
+                    mp3_path = output_path / mp3_filename
 
                 if not mp3_path.exists():
                     self.logger.skip(f"No matching MP3 found: '{mp3_filename}'")
@@ -1713,16 +1729,22 @@ class Converter:
 
     def _build_output_filename(self, artist: str, title: str) -> str:
         """Build output filename based on the active output profile."""
-        if self.output_profile.filename_format == "artist_title":
-            return f"{artist} - {title}.mp3"
-        # Future formats: "title_only", "numbered", etc.
+        if self.output_profile.filename_format == "title_only":
+            return f"{title}.mp3"
+        # Default: artist_title
         return f"{artist} - {title}.mp3"
 
-    def _build_output_path(self, base_path: Path, filename: str, artist: str = None) -> Path:
+    def _build_output_path(self, base_path: Path, filename: str, artist: str = None, album: str = None) -> Path:
         """Build output file path based on the active output profile."""
-        if self.output_profile.directory_structure == "flat":
-            return base_path / filename
-        # Future structures: "nested" (artist/album subdirs), etc.
+        structure = self.output_profile.directory_structure
+        if structure == "nested-artist":
+            safe_artist = artist or "Unknown Artist"
+            return base_path / safe_artist / filename
+        elif structure == "nested-artist-album":
+            safe_artist = artist or "Unknown Artist"
+            safe_album = album or "Unknown Album"
+            return base_path / safe_artist / safe_album / filename
+        # Default: flat
         return base_path / filename
 
     def _convert_single_file(self, input_file, input_path, output_path, force, dry_run, verbose, progress_bar=None):
@@ -1740,13 +1762,17 @@ class Converter:
             # Create output filename based on active output profile
             safe_title = self._sanitize_filename(title)
             safe_artist = self._sanitize_filename(artist)
+            safe_album = self._sanitize_filename(album)
             output_filename = self._build_output_filename(safe_artist, safe_title)
-            output_file = self._build_output_path(output_path, output_filename, safe_artist)
+            output_file = self._build_output_path(output_path, output_filename, safe_artist, safe_album)
             already_exists = output_file.exists()
 
             if already_exists and not force:
                 self.stats.increment('skipped')
-                msg = f"[{count}/{self.stats.total_found}] Skipping (already exists): {output_filename}"
+                collision_hint = ""
+                if self.output_profile.filename_format != "artist_title":
+                    collision_hint = " (possible filename collision — try artist_title format)"
+                msg = f"[{count}/{self.stats.total_found}] Skipping (already exists): {output_filename}{collision_hint}"
                 if progress_bar and not verbose:
                     self.logger.file_info(msg)
                 else:
@@ -1777,7 +1803,8 @@ class Converter:
                     self.logger.dry_run(f"Would overwrite: '{output_filename}'")
                 else:
                     self.logger.dry_run(f"Would convert:   '{display_name}'")
-                self.logger.dry_run(f"  → Output:     '{output_filename}'")
+                output_display = str(output_file.relative_to(output_path)) if self.output_profile.directory_structure != "flat" else output_filename
+                self.logger.dry_run(f"  → Output:     '{output_display}'")
                 self.logger.dry_run(f"  → Title:      '{title}'")
                 self.logger.dry_run(f"  → Artist:     '{artist}'")
                 self.logger.dry_run(f"  → Album:      '{album}'")
@@ -1795,6 +1822,9 @@ class Converter:
                     reason = "stripped by profile" if artwork_size == -1 else "disabled"
                     self.logger.dry_run(f"  → Cover art:  ({reason})")
                 return
+
+            # Ensure parent directories exist (needed for nested structures)
+            output_file.parent.mkdir(parents=True, exist_ok=True)
 
             # Run ffmpeg conversion
             import ffmpeg as _ffmpeg
@@ -1916,7 +1946,7 @@ class Converter:
 
         self.stats.total_found = len(m4a_files)
         self.logger.info(f"Found {self.stats.total_found} .m4a file(s) (recursive)")
-        self.logger.info(f"Output directory: '{output_dir}' (flat)")
+        self.logger.info(f"Output directory: '{output_dir}' ({self.output_profile.directory_structure})")
 
         if force:
             self.logger.info("Force mode enabled — existing files will be overwritten")
@@ -3633,7 +3663,7 @@ class SummaryManager:
     def _analyze_playlist(self, playlist_dir):
         """Analyze statistics for a single playlist directory."""
         try:
-            mp3_files = list(playlist_dir.glob("*.mp3"))
+            mp3_files = list(playlist_dir.rglob("*.mp3"))
 
             if not mp3_files:
                 return None  # Skip empty playlists
@@ -3677,7 +3707,7 @@ class SummaryManager:
 
         for playlist in self.stats.playlists:
             playlist_path = Path(playlist.path)
-            mp3_files = list(playlist_path.glob("*.mp3"))
+            mp3_files = list(playlist_path.rglob("*.mp3"))
 
             # Check all files in this playlist
             for mp3_file in mp3_files:
@@ -3966,7 +3996,7 @@ class SummaryManager:
                 if export_profile:
                     export_path = Path(get_export_dir(export_profile, playlist_name))
                     if export_path.exists():
-                        exported_count = len(list(export_path.glob('*.mp3')))
+                        exported_count = len(list(export_path.rglob('*.mp3')))
 
                 unconverted_count = max(0, m4a_count - exported_count)
 
@@ -4035,8 +4065,9 @@ class SummaryManager:
 class CoverArtManager:
     """Manages cover art operations: embed, extract, update, strip."""
 
-    def __init__(self, logger=None):
+    def __init__(self, logger=None, output_profile=None):
         self.logger = logger or Logger()
+        self.output_profile = output_profile or OUTPUT_PROFILES[DEFAULT_OUTPUT_TYPE]
 
     def embed(self, directory, source_dir=None, force=False, dry_run=False, verbose=False):
         """
@@ -4075,12 +4106,12 @@ class CoverArtManager:
             self.logger.error(f"Source directory not found: '{source_dir}'")
             return False
 
-        mp3_files = sorted(dir_path.glob("*.mp3"))
+        mp3_files = sorted(dir_path.rglob("*.mp3"))
         if not mp3_files:
             self.logger.info(f"No MP3 files found in '{directory}'")
             return True
 
-        # Build lookup of M4A files by artist-title
+        # Build lookup of M4A files by profile-aware filename
         m4a_lookup = {}
         for m4a_file in source_path.rglob("*.m4a"):
             if m4a_file.name.startswith('._'):
@@ -4089,7 +4120,11 @@ class CoverArtManager:
                 title, artist, _ = read_m4a_tags(m4a_file)
                 safe_artist = sanitize_filename(artist)
                 safe_title = sanitize_filename(title)
-                key = f"{safe_artist} - {safe_title}.mp3"
+                fmt = self.output_profile.filename_format
+                if fmt == "title_only":
+                    key = f"{safe_title}.mp3"
+                else:
+                    key = f"{safe_artist} - {safe_title}.mp3"
                 m4a_lookup[key] = m4a_file
             except Exception:
                 continue
@@ -4225,7 +4260,7 @@ class CoverArtManager:
         else:
             out_path = Path(output_dir)
 
-        mp3_files = sorted(dir_path.glob("*.mp3"))
+        mp3_files = sorted(dir_path.rglob("*.mp3"))
         if not mp3_files:
             self.logger.info(f"No MP3 files found in '{directory}'")
             return True
@@ -4333,7 +4368,7 @@ class CoverArtManager:
         cover_data = img_path.read_bytes()
         self.logger.info(f"Image: {img_path.name} ({len(cover_data) / 1024:.1f} KB, {mime_type})")
 
-        mp3_files = sorted(dir_path.glob("*.mp3"))
+        mp3_files = sorted(dir_path.rglob("*.mp3"))
         if not mp3_files:
             self.logger.info(f"No MP3 files found in '{directory}'")
             return True
@@ -4410,7 +4445,7 @@ class CoverArtManager:
             self.logger.error(f"Directory not found: '{directory}'")
             return False
 
-        mp3_files = sorted(dir_path.glob("*.mp3"))
+        mp3_files = sorted(dir_path.rglob("*.mp3"))
         if not mp3_files:
             self.logger.info(f"No MP3 files found in '{directory}'")
             return True
@@ -4491,7 +4526,7 @@ class CoverArtManager:
             self.logger.error(f"Directory not found: '{directory}'")
             return False
 
-        mp3_files = sorted(dir_path.glob("*.mp3"))
+        mp3_files = sorted(dir_path.rglob("*.mp3"))
         if not mp3_files:
             self.logger.info(f"No MP3 files found in '{directory}'")
             return True
@@ -5010,7 +5045,7 @@ class PipelineOrchestrator:
         if not export_path.exists():
             return
 
-        mp3_files = list(export_path.glob("*.mp3"))
+        mp3_files = list(export_path.rglob("*.mp3"))
         if not mp3_files:
             return
 
@@ -5052,7 +5087,7 @@ class PipelineOrchestrator:
                 return
 
         if should_embed:
-            cam = CoverArtManager(self.logger)
+            cam = CoverArtManager(self.logger, output_profile=self.output_profile)
             cam.embed(export_dir, dry_run=False, verbose=verbose)
             # Resize newly-embedded art if profile specifies a max dimension
             artwork_size = self.output_profile.artwork_size
@@ -5622,7 +5657,7 @@ class InteractiveMenu:
             self.logger.error("No export directories found for configured playlists")
             return False
 
-        cam = CoverArtManager(self.logger)
+        cam = CoverArtManager(self.logger, output_profile=self.output_profile)
         all_success = True
 
         if max_size == -1:
@@ -5765,8 +5800,9 @@ def resolve_quality_preset(args, logger, output_profile=None):
 
 def resolve_config_settings(args, config):
     """
-    Resolve output_type, usb_dir, and workers from CLI > config.yaml > constant.
-    Returns (output_type, usb_dir, workers) tuple.
+    Resolve output_type, usb_dir, workers, dir_structure, and filename_format
+    from CLI > config.yaml > constant/profile default.
+    Returns (output_type, usb_dir, workers, dir_structure, filename_format) tuple.
     """
     # output_type: CLI > config > DEFAULT_OUTPUT_TYPE
     output_type = args.output_type
@@ -5783,7 +5819,17 @@ def resolve_config_settings(args, config):
     if workers is None:
         workers = config.get_setting('workers', DEFAULT_WORKERS)
 
-    return output_type, usb_dir, workers
+    # dir_structure: CLI > config > None (profile default used later)
+    dir_structure = getattr(args, 'dir_structure', None)
+    if dir_structure is None:
+        dir_structure = config.get_setting('dir_structure', None)
+
+    # filename_format: CLI > config > None (profile default used later)
+    filename_format = getattr(args, 'filename_format', None)
+    if filename_format is None:
+        filename_format = config.get_setting('filename_format', None)
+
+    return output_type, usb_dir, workers, dir_structure, filename_format
 
 
 def _create_quality_args_parser():
@@ -5882,9 +5928,22 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
     cookie_parent = _create_cookie_args_parser()
     usb_parent = _create_usb_args_parser()
 
+    # Shared parent for directory structure and filename format
+    structure_parent = argparse.ArgumentParser(add_help=False)
+    structure_parent.add_argument('--dir-structure', default=None,
+                                  choices=list(VALID_DIR_STRUCTURES),
+                                  metavar='STRUCTURE',
+                                  help='Directory structure for output files '
+                                       f'(choices: {", ".join(VALID_DIR_STRUCTURES)})')
+    structure_parent.add_argument('--filename-format', default=None,
+                                  choices=list(VALID_FILENAME_FORMATS),
+                                  metavar='FORMAT',
+                                  help='Filename format for output files '
+                                       f'(choices: {", ".join(VALID_FILENAME_FORMATS)})')
+
     # ── pipeline (default) ────────────────────────────────────────
     pipeline_parser = subparsers.add_parser('pipeline',
-        parents=[quality_parent, cookie_parent, usb_parent],
+        parents=[quality_parent, cookie_parent, usb_parent, structure_parent],
         help='Full download + convert + tag workflow (default)')
     pipeline_parser.add_argument('--playlist', help='Playlist name or number')
     pipeline_parser.add_argument('--url', help='Apple Music playlist URL')
@@ -5905,7 +5964,7 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
 
     # ── convert ───────────────────────────────────────────────────
     convert_parser = subparsers.add_parser('convert',
-        parents=[quality_parent],
+        parents=[quality_parent, structure_parent],
         help='Convert M4A → MP3 with tag preservation')
     convert_parser.add_argument('input_dir', help='Input directory with M4A files')
     convert_parser.add_argument('--output', help='Output directory')
@@ -6028,8 +6087,26 @@ def main():
     config = ConfigManager(logger=logger)
 
     # Resolve settings: CLI > config.yaml > hardcoded constant
-    output_type, usb_dir, workers = resolve_config_settings(args, config)
+    output_type, usb_dir, workers, dir_structure, filename_format = resolve_config_settings(args, config)
     output_profile = OUTPUT_PROFILES[output_type]
+
+    # Apply CLI/config overrides to profile (creates a modified copy if needed)
+    if dir_structure is not None or filename_format is not None:
+        from dataclasses import replace
+        overrides = {}
+        if dir_structure is not None:
+            if dir_structure not in VALID_DIR_STRUCTURES:
+                logger.error(f"Invalid dir_structure in config.yaml: '{dir_structure}'. "
+                             f"Valid: {', '.join(VALID_DIR_STRUCTURES)}")
+                sys.exit(1)
+            overrides['directory_structure'] = dir_structure
+        if filename_format is not None:
+            if filename_format not in VALID_FILENAME_FORMATS:
+                logger.error(f"Invalid filename_format in config.yaml: '{filename_format}'. "
+                             f"Valid: {', '.join(VALID_FILENAME_FORMATS)}")
+                sys.exit(1)
+            overrides['filename_format'] = filename_format
+        output_profile = replace(output_profile, **overrides)
 
     # Display startup banner
     banner_text = f"  Music Porter v{VERSION}  "
@@ -6070,6 +6147,8 @@ def main():
     print(f"  Output type: {output_type} ({output_type_desc})")
     print(f"  Quality:     {quality_desc}")
     print(f"  Artwork:     {artwork_desc}")
+    print(f"  Dir layout:  {output_profile.directory_structure}")
+    print(f"  File names:  {output_profile.filename_format}")
 
     # Log to file
     logger.file_info(f"Platform: {platform_str}")
@@ -6077,6 +6156,8 @@ def main():
     logger.file_info(f"Output type: {output_type}")
     logger.file_info(f"Quality: {quality_desc}")
     logger.file_info(f"Artwork: {artwork_desc}")
+    logger.file_info(f"Dir structure: {output_profile.directory_structure}")
+    logger.file_info(f"Filename format: {output_profile.filename_format}")
 
     if workers > 1:
         print(f"  Workers:     {workers} (parallel conversion)")
@@ -6295,7 +6376,7 @@ def main():
         if not deps.check_python_packages():
             sys.exit(1)
 
-        cam = CoverArtManager(logger)
+        cam = CoverArtManager(logger, output_profile=output_profile)
 
         if args.cover_art_action == 'embed':
             if getattr(args, 'all_playlists', False) and args.directory:

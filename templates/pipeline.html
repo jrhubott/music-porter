@@ -45,6 +45,27 @@
         </div>
       </div>
 
+      <!-- Directory & Filename Options -->
+      <div class="row g-3 mt-1">
+        <div class="col-md-4">
+          <label class="form-label">Directory Layout</label>
+          <select class="form-select form-select-sm" id="pipelineDirStructure">
+            <option value="">Profile Default</option>
+            <option value="flat">Flat</option>
+            <option value="nested-artist">Nested by Artist</option>
+            <option value="nested-artist-album">Nested by Artist/Album</option>
+          </select>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Filename Format</label>
+          <select class="form-select form-select-sm" id="pipelineFilenameFormat">
+            <option value="">Profile Default</option>
+            <option value="artist_title">Artist - Title</option>
+            <option value="title_only">Title Only</option>
+          </select>
+        </div>
+      </div>
+
       <!-- Options -->
       <div class="d-flex gap-3 mt-3">
         <div class="form-check">
@@ -107,6 +128,10 @@ document.getElementById('pipelineForm').addEventListener('submit', function(e) {
   };
   const preset = document.getElementById('pipelinePreset').value;
   if (preset) data.preset = preset;
+  const dirStructure = document.getElementById('pipelineDirStructure').value;
+  if (dirStructure) data.dir_structure = dirStructure;
+  const filenameFormat = document.getElementById('pipelineFilenameFormat').value;
+  if (filenameFormat) data.filename_format = filenameFormat;
 
   if (mode === 'auto') {
     data.auto = true;
