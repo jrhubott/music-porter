@@ -553,6 +553,11 @@ git tag v1.2.0
 
 ## Important Implementation Notes
 
+### CLI / Web Feature Parity
+- Any feature added to the CLI **must** also be added to the Web dashboard (API endpoint + UI)
+- Any feature added to the Web dashboard **must** also be added to the CLI
+- Both interfaces should expose the same functionality — neither should have exclusive features
+
 ### TXXX Frame Handling
 - Always iterate through `tags.values()` to check frame types with `isinstance(frame, TXXX)`
 - Never rely on string key format like `TXXX:OriginalTitle` for existence checks
