@@ -66,7 +66,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 
 DEFAULT_MUSIC_DIR = "music"
 DEFAULT_EXPORT_DIR = "export"
@@ -3463,6 +3463,19 @@ class PlaylistSummary:
         self.files_with_resized_cover_art = 0
 
 
+class MusicLibraryStats:
+    """Statistics for the source music/ directory (M4A library)."""
+
+    def __init__(self):
+        self.total_playlists = 0
+        self.total_files = 0
+        self.total_size_bytes = 0
+        self.total_exported = 0
+        self.total_unconverted = 0
+        self.scan_duration = 0.0
+        self.playlists = []  # List of dicts: {name, m4a_count, size_bytes, exported_count, unconverted_count}
+
+
 class LibrarySummaryStatistics:
     """Statistics for the entire export library."""
 
@@ -3495,19 +3508,33 @@ class SummaryManager:
         self.logger = logger or Logger()
         self.stats = LibrarySummaryStatistics()
 
-    def generate_summary(self, export_dir='export/', detailed=False, quick=False, dry_run=False):
+    def generate_summary(self, export_dir='export/', detailed=False, quick=False,
+                         dry_run=False, music_dir=None, export_profile=None,
+                         no_library=False):
         """
-        Generate and display export library summary.
+        Generate and display library stats and playlist summary.
 
         Args:
             export_dir: Directory to analyze
             detailed: Show detailed statistics
             quick: Show only aggregate statistics
             dry_run: Preview mode (not applicable for summary)
+            music_dir: Music source directory for library stats
+            export_profile: Profile name for conversion status comparison
+            no_library: Skip music directory scan
 
         Returns:
             bool: True if successful
         """
+        # Print library stats first (unless skipped)
+        if not no_library:
+            music_stats = self.scan_music_library(
+                music_dir=music_dir,
+                export_profile=export_profile,
+            )
+            if music_stats and music_stats.total_files > 0:
+                self._print_music_library_stats(music_stats)
+
         start_time = time.time()
 
         # Check if directory exists
@@ -3515,7 +3542,7 @@ class SummaryManager:
         if not export_path.exists():
             print()
             print("╔" + "═" * 60 + "╗")
-            print("║" + "EXPORT LIBRARY SUMMARY".center(60) + "║")
+            print("║" + "PLAYLIST SUMMARY".center(60) + "║")
             print("╚" + "═" * 60 + "╝")
             print()
             print("  ℹ️  Export directory not found")
@@ -3533,7 +3560,7 @@ class SummaryManager:
         if not playlist_dirs:
             print()
             print("╔" + "═" * 60 + "╗")
-            print("║" + "EXPORT LIBRARY SUMMARY".center(60) + "║")
+            print("║" + "PLAYLIST SUMMARY".center(60) + "║")
             print("╚" + "═" * 60 + "╝")
             print()
             print(f"  Directory:               '{export_dir}'")
@@ -3703,7 +3730,7 @@ class SummaryManager:
         """Print default balanced summary."""
         print()
         print("╔" + "═" * 60 + "╗")
-        print("║" + "EXPORT LIBRARY SUMMARY".center(60) + "║")
+        print("║" + "PLAYLIST SUMMARY".center(60) + "║")
         print("╚" + "═" * 60 + "╝")
         print()
         print(f"  Directory:               '{export_dir}'")
@@ -3790,7 +3817,7 @@ class SummaryManager:
         """Print minimal aggregate-only summary."""
         print()
         print("╔" + "═" * 60 + "╗")
-        print("║" + "EXPORT LIBRARY SUMMARY (QUICK)".center(60) + "║")
+        print("║" + "PLAYLIST SUMMARY (QUICK)".center(60) + "║")
         print("╚" + "═" * 60 + "╝")
         print()
         print(f"  Directory:               '{export_dir}'")
@@ -3880,6 +3907,103 @@ class SummaryManager:
             print(f"  {name:<25} {files:>6}  {art:>9}  {size:>10}  {updated:<10}")
 
         print("  " + "─" * 62)
+
+    def scan_music_library(self, music_dir=None, export_profile=None):
+        """
+        Scan the music/ directory for source M4A library stats.
+
+        Args:
+            music_dir: Path to music directory (default: DEFAULT_MUSIC_DIR)
+            export_profile: Profile name to check export status against
+
+        Returns:
+            MusicLibraryStats or None if directory doesn't exist
+        """
+        music_dir = music_dir or DEFAULT_MUSIC_DIR
+        music_path = Path(music_dir)
+
+        if not music_path.exists():
+            return None
+
+        stats = MusicLibraryStats()
+        start_time = time.time()
+
+        try:
+            for item in sorted(music_path.iterdir(), key=lambda p: p.name):
+                if not item.is_dir() or item.name.startswith('.'):
+                    continue
+
+                playlist_name = item.name
+                m4a_count = 0
+                size_bytes = 0
+
+                # Walk recursively — music/ has nested Artist/Album/Track.m4a structure
+                for root, _dirs, files in os.walk(item):
+                    for f in files:
+                        if f.lower().endswith('.m4a'):
+                            m4a_count += 1
+                            try:
+                                size_bytes += os.path.getsize(os.path.join(root, f))
+                            except OSError:
+                                pass
+
+                if m4a_count == 0:
+                    continue
+
+                # Check export status
+                exported_count = 0
+                if export_profile:
+                    export_path = Path(get_export_dir(export_profile, playlist_name))
+                    if export_path.exists():
+                        exported_count = len(list(export_path.glob('*.mp3')))
+
+                unconverted_count = max(0, m4a_count - exported_count)
+
+                stats.playlists.append({
+                    'name': playlist_name,
+                    'm4a_count': m4a_count,
+                    'size_bytes': size_bytes,
+                    'exported_count': exported_count,
+                    'unconverted_count': unconverted_count,
+                })
+
+                stats.total_files += m4a_count
+                stats.total_size_bytes += size_bytes
+                stats.total_exported += exported_count
+                stats.total_unconverted += unconverted_count
+
+        except PermissionError as e:
+            self.logger.warn(f"Permission denied accessing music directory: {e}")
+        except Exception as e:
+            self.logger.warn(f"Error scanning music directory: {e}")
+
+        stats.total_playlists = len(stats.playlists)
+        stats.scan_duration = time.time() - start_time
+
+        return stats
+
+    def _print_music_library_stats(self, music_stats):
+        """Print the LIBRARY STATS section for the music/ directory."""
+        print()
+        print("╔" + "═" * 60 + "╗")
+        print("║" + "LIBRARY STATS".center(60) + "║")
+        print("╚" + "═" * 60 + "╝")
+        print()
+        print(f"  Directory:               '{DEFAULT_MUSIC_DIR}/'")
+        print(f"  Total playlists:         {music_stats.total_playlists}")
+        print(f"  Total M4A files:         {music_stats.total_files}")
+        print(f"  Total library size:      {self._format_size(music_stats.total_size_bytes)}")
+
+        if music_stats.total_files > 0:
+            pct = (music_stats.total_exported / music_stats.total_files) * 100
+            print(f"  Exported:                {music_stats.total_exported}/{music_stats.total_files} ({pct:.0f}%)")
+            if music_stats.total_unconverted > 0:
+                print(f"  Unconverted:             {music_stats.total_unconverted}")
+            else:
+                print(f"  Unconverted:             0  ✅")
+
+        print(f"  Scan duration:           {music_stats.scan_duration:.1f}s")
+        print()
 
     def _format_size(self, bytes_size):
         """Format bytes to human-readable size."""
@@ -5430,14 +5554,16 @@ class InteractiveMenu:
 
     def _handle_summary(self, dry_run):
         """Handle 'Show library summary' selection."""
-        self.logger.info("Displaying export library summary...")
+        self.logger.info("Displaying library summary...")
 
         summary_manager = SummaryManager(self.logger)
         success = summary_manager.generate_summary(
             export_dir=get_export_dir(self.output_profile.name),
             detailed=False,
             quick=False,
-            dry_run=dry_run
+            dry_run=dry_run,
+            music_dir=DEFAULT_MUSIC_DIR,
+            export_profile=self.output_profile.name,
         )
 
         # Pause for user to review before returning to menu
@@ -5854,13 +5980,15 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
 
     # ── summary ───────────────────────────────────────────────────
     summary_parser = subparsers.add_parser('summary',
-        help='Display export library statistics')
+        help='Display library stats and playlist summary')
     summary_parser.add_argument('--export-dir', default=None,
                                help='Export directory to analyze (default: export/<profile>/)')
     summary_parser.add_argument('--detailed', action='store_true',
                                help='Show detailed statistics and breakdowns')
     summary_parser.add_argument('--quick', action='store_true',
                                help='Show only aggregate statistics')
+    summary_parser.add_argument('--no-library', action='store_true',
+                               help='Skip music directory scan (only show playlist summary)')
 
     # ── web ────────────────────────────────────────────────────────
     web_parser = subparsers.add_parser('web',
@@ -6126,7 +6254,7 @@ def main():
         sys.exit(0 if success else 1)
 
     elif args.command == 'summary':
-        # Display export library summary
+        # Display library stats and playlist summary
         deps = DependencyChecker(logger)
         if not deps.check_python_packages():
             sys.exit(1)
@@ -6143,7 +6271,10 @@ def main():
             export_dir=export_dir,
             detailed=args.detailed,
             quick=args.quick,
-            dry_run=args.dry_run
+            dry_run=args.dry_run,
+            music_dir=DEFAULT_MUSIC_DIR,
+            export_profile=output_profile.name,
+            no_library=args.no_library,
         )
         sys.exit(0 if success else 1)
 

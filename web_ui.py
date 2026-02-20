@@ -409,6 +409,36 @@ def create_app(project_root=None):
             'profile': profile.name,
         })
 
+    # ── API: Library Stats (music/ directory) ───────────────────
+
+    @app.route('/api/library-stats')
+    def api_library_stats():
+        config = _get_config()
+        profile = _get_output_profile(config)
+
+        quiet_logger = mp.Logger(verbose=False)
+        mgr = mp.SummaryManager(logger=quiet_logger)
+        stats = mgr.scan_music_library(
+            music_dir=mp.DEFAULT_MUSIC_DIR,
+            export_profile=profile.name,
+        )
+
+        if stats is None:
+            return jsonify({
+                'total_playlists': 0, 'total_files': 0,
+                'total_size_bytes': 0, 'total_exported': 0,
+                'total_unconverted': 0, 'scan_duration': 0,
+            })
+
+        return jsonify({
+            'total_playlists': stats.total_playlists,
+            'total_files': stats.total_files,
+            'total_size_bytes': stats.total_size_bytes,
+            'total_exported': stats.total_exported,
+            'total_unconverted': stats.total_unconverted,
+            'scan_duration': round(stats.scan_duration, 2),
+        })
+
     # ── API: Playlists CRUD ──────────────────────────────────────
 
     @app.route('/api/playlists', methods=['GET'])

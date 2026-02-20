@@ -430,7 +430,7 @@ The tool uses a "hard gate" protection system for original metadata:
 
 ## Version
 
-Current version: **v1.8.0**
+Current version: **v2.1.0**
 
 ## License
 
