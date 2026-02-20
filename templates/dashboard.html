@@ -61,9 +61,70 @@
   </div>
 </div>
 
-<!-- Library Summary -->
+<!-- Library Stats (music/ directory) -->
 <div class="d-flex justify-content-between align-items-center mt-4 mb-3">
-  <h5 class="mb-0"><i class="bi bi-bar-chart"></i> Library Summary</h5>
+  <h5 class="mb-0"><i class="bi bi-collection"></i> Library Stats</h5>
+  <button class="btn btn-outline-primary btn-sm" id="libStatsRefreshBtn" onclick="loadLibraryStats()">
+    <i class="bi bi-arrow-clockwise"></i> Refresh
+  </button>
+</div>
+
+<div id="libStatsLoading" class="text-center py-4">
+  <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+  <span class="text-muted ms-2">Scanning music library...</span>
+</div>
+
+<div id="libStatsEmpty" class="d-none text-center py-4">
+  <i class="bi bi-folder fs-3 text-muted"></i>
+  <p class="text-muted mt-2 mb-0">No source files found in music/</p>
+</div>
+
+<div id="libStatsContent" class="d-none">
+  <div class="row g-3 mb-3">
+    <div class="col-md-3">
+      <div class="card h-100">
+        <div class="card-body text-center">
+          <div class="text-muted small">Source Files</div>
+          <div class="fs-2 fw-bold" id="libStatFiles">-</div>
+          <div class="text-muted small" id="libStatPlaylists">- playlists</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card h-100">
+        <div class="card-body text-center">
+          <div class="text-muted small">Source Size</div>
+          <div class="fs-2 fw-bold" id="libStatSize">-</div>
+          <div class="text-muted small" id="libStatScanTime">scanned in -s</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card h-100">
+        <div class="card-body text-center">
+          <div class="text-muted small">Exported</div>
+          <div class="fs-2 fw-bold text-success" id="libStatExported">-</div>
+          <div class="progress mt-2" style="height: 6px;">
+            <div class="progress-bar bg-success" id="libStatExportedBar" style="width: 0%"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card h-100">
+        <div class="card-body text-center">
+          <div class="text-muted small">Unconverted</div>
+          <div class="fs-2 fw-bold" id="libStatUnconverted">-</div>
+          <div class="text-muted small" id="libStatUnconvertedLabel">&nbsp;</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Playlist Summary -->
+<div class="d-flex justify-content-between align-items-center mt-4 mb-3">
+  <h5 class="mb-0"><i class="bi bi-bar-chart"></i> Playlist Summary</h5>
   <button class="btn btn-outline-primary btn-sm" id="summaryRefreshBtn" onclick="loadSummary()">
     <i class="bi bi-arrow-clockwise"></i> Refresh
   </button>
@@ -72,7 +133,7 @@
 <!-- Loading spinner -->
 <div id="summaryLoading" class="text-center py-4">
   <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
-  <span class="text-muted ms-2">Scanning library...</span>
+  <span class="text-muted ms-2">Scanning exports...</span>
 </div>
 
 <!-- Empty state -->
@@ -269,7 +330,61 @@ document.getElementById('dashRefreshCookies').addEventListener('click', function
   });
 });
 
-// ── Library Summary ──
+// ── Library Stats (music/ directory) ──
+function loadLibraryStats() {
+  const spinner = document.getElementById('libStatsLoading');
+  const content = document.getElementById('libStatsContent');
+  const empty = document.getElementById('libStatsEmpty');
+  const btn = document.getElementById('libStatsRefreshBtn');
+
+  spinner.classList.remove('d-none');
+  content.classList.add('d-none');
+  empty.classList.add('d-none');
+  btn.disabled = true;
+
+  fetch('/api/library-stats')
+    .then(r => r.json())
+    .then(data => {
+      spinner.classList.add('d-none');
+      btn.disabled = false;
+
+      if (data.total_files === 0) {
+        empty.classList.remove('d-none');
+        return;
+      }
+
+      content.classList.remove('d-none');
+
+      document.getElementById('libStatFiles').textContent = data.total_files.toLocaleString();
+      document.getElementById('libStatPlaylists').textContent = data.total_playlists + ' playlist' + (data.total_playlists !== 1 ? 's' : '');
+      document.getElementById('libStatSize').textContent = formatBytes(data.total_size_bytes);
+      document.getElementById('libStatScanTime').textContent = 'scanned in ' + data.scan_duration + 's';
+
+      const exportPct = data.total_files > 0 ? Math.round((data.total_exported / data.total_files) * 100) : 0;
+      document.getElementById('libStatExported').textContent = data.total_exported.toLocaleString();
+      document.getElementById('libStatExportedBar').style.width = exportPct + '%';
+
+      const unconvEl = document.getElementById('libStatUnconverted');
+      unconvEl.textContent = data.total_unconverted.toLocaleString();
+      if (data.total_unconverted === 0) {
+        unconvEl.classList.remove('text-danger');
+        unconvEl.classList.add('text-success');
+        document.getElementById('libStatUnconvertedLabel').innerHTML = '&#10003; all converted';
+      } else {
+        unconvEl.classList.remove('text-success');
+        unconvEl.classList.add('text-danger');
+        document.getElementById('libStatUnconvertedLabel').textContent = 'files need conversion';
+      }
+    })
+    .catch(err => {
+      spinner.classList.add('d-none');
+      btn.disabled = false;
+      showToast('Failed to load library stats: ' + err, 'error');
+    });
+}
+loadLibraryStats();
+
+// ── Playlist Summary ──
 let summaryData = null;
 let currentSort = { key: 'name', asc: true };
 
