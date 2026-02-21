@@ -88,8 +88,12 @@ Merge the current feature branch into main following the project's version workf
 
 10. **Archive SRS document**
     - If an SRS file was found in step 5, archive it into `SRS.md` (root of repo)
+    - **Read `SRS.md` first** to understand its existing format and structure before making changes
     - If `SRS.md` does not exist, create it with a `# Completed SRS Documents` heading
-    - Append the full contents of the SRS file to `SRS.md` under a new `---` separator
+    - If `SRS.md` already exists, match its existing format:
+      - Use the same heading style, separator style (`---`), and metadata fields as existing entries
+      - Add an `**Implemented in:** vX.Y.Z` metadata line to the new entry's header block
+      - Append the new entry after the last existing entry, separated by `---`
     - Delete the individual SRS file from the `SRS/` directory
     - If the `SRS/` directory is now empty, delete it
     - Stage and commit: `Archive SRS: <feature-name> into SRS.md`
