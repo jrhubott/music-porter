@@ -126,7 +126,9 @@ Both existing profiles shall retain their current defaults:
 - [x] Startup banner displays active filename format
 - [x] Log files record active directory structure and filename format
 - [x] `--dry-run` output shows full output path (including subdirectories for nested structures)
-- [x] Display values are title-cased with spaces (e.g., "Nested Artist Album", "Title Only") via `display_name()` helper
+- [x] Display values are human-readable via `display_name()` helper with `DISPLAY_NAMES` lookup and title-case fallback
+- [x] `full` format displays as "Artist - Title" (custom override via `DISPLAY_NAMES`)
+- [x] Other values display as title-cased with spaces (e.g., "Nested Artist Album", "Title Only")
 - [x] CLI flag values remain hyphenated (e.g., `nested-artist-album`, `title-only`)
 
 ## 4. Edge Cases
