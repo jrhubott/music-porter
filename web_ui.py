@@ -518,13 +518,17 @@ def create_app(project_root=None):
         config = _get_config()
         profiles = {
             name: {'description': p.description, 'quality_preset': p.quality_preset,
-                   'artwork_size': p.artwork_size, 'id3_version': p.id3_version}
+                   'artwork_size': p.artwork_size, 'id3_version': p.id3_version,
+                   'directory_structure': p.directory_structure,
+                   'filename_format': p.filename_format}
             for name, p in mp.OUTPUT_PROFILES.items()
         }
         return jsonify({
             'settings': config.settings,
             'profiles': profiles,
             'quality_presets': list(mp.QUALITY_PRESETS.keys()),
+            'dir_structures': list(mp.VALID_DIR_STRUCTURES),
+            'filename_formats': list(mp.VALID_FILENAME_FORMATS),
         })
 
     @app.route('/api/settings', methods=['POST'])
@@ -556,7 +560,7 @@ def create_app(project_root=None):
         if export_dir.exists():
             for d in sorted(export_dir.iterdir()):
                 if d.is_dir() and not d.name.startswith('.'):
-                    file_count = len(list(d.glob('*.mp3')))
+                    file_count = len(list(d.rglob('*.mp3')))
                     dirs.append({'name': d.name, 'files': file_count})
         return jsonify(dirs)
 
@@ -572,6 +576,8 @@ def create_app(project_root=None):
         verbose = data.get('verbose', False)
         preset = data.get('preset')
         copy_to_usb = data.get('copy_to_usb', False)
+        dir_structure = data.get('dir_structure')
+        filename_format = data.get('filename_format')
 
         if not auto and not playlist_key and not url:
             return jsonify({'error': 'Specify playlist, url, or auto'}), 400
@@ -582,6 +588,15 @@ def create_app(project_root=None):
             logger = _make_logger(task_id, verbose=verbose)
             config = mp.ConfigManager(logger=logger)
             profile = _get_output_profile(config)
+            # Apply dir_structure/filename_format overrides
+            if dir_structure or filename_format:
+                from dataclasses import replace
+                overrides = {}
+                if dir_structure:
+                    overrides['directory_structure'] = dir_structure
+                if filename_format:
+                    overrides['filename_format'] = filename_format
+                profile = replace(profile, **overrides)
             usb_dir = config.get_setting('usb_dir', mp.DEFAULT_USB_DIR)
             workers = config.get_setting('workers', mp.DEFAULT_WORKERS)
 
@@ -638,6 +653,8 @@ def create_app(project_root=None):
         verbose = data.get('verbose', False)
         preset = data.get('preset', 'lossless')
         no_cover_art = data.get('no_cover_art', False)
+        dir_structure = data.get('dir_structure')
+        filename_format = data.get('filename_format')
 
         if not input_dir:
             return jsonify({'error': 'input_dir is required'}), 400
@@ -652,6 +669,15 @@ def create_app(project_root=None):
             logger = _make_logger(task_id, verbose=verbose)
             config = mp.ConfigManager(logger=logger)
             profile = _get_output_profile(config)
+            # Apply dir_structure/filename_format overrides
+            if dir_structure or filename_format:
+                from dataclasses import replace
+                overrides = {}
+                if dir_structure:
+                    overrides['directory_structure'] = dir_structure
+                if filename_format:
+                    overrides['filename_format'] = filename_format
+                profile = replace(profile, **overrides)
             workers = config.get_setting('workers', mp.DEFAULT_WORKERS)
 
             out = output_dir if output_dir else mp.get_export_dir(profile.name)
@@ -796,7 +822,9 @@ def create_app(project_root=None):
 
         def _run(task_id):
             logger = _make_logger(task_id, verbose=verbose)
-            cam = mp.CoverArtManager(logger)
+            config = mp.ConfigManager(logger=logger)
+            profile = _get_output_profile(config)
+            cam = mp.CoverArtManager(logger, output_profile=profile)
 
             if action == 'embed':
                 source = data.get('source')

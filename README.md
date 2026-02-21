@@ -423,14 +423,14 @@ The tool uses a "hard gate" protection system for original metadata:
 26. **Mobile app** - iOS/Android app for remote control
 27. **Scheduling** - Automatic periodic syncing on schedule
 28. **Notification system** - Email/SMS alerts for completed operations
-29. **Custom filename templates** - Configurable output filename patterns
+29. ~~**Custom filename templates** - Configurable output filename patterns~~ *(implemented in v2.3.0)*
 30. **Equalizer presets** - Apply audio processing (normalization, compression)
 31. **Collaborative playlists** - Share playlists with others for collaborative management
 32. ~~**Additional output type profiles** - Add device-specific profiles beyond Ride Command (e.g., generic car stereo, nested directory structures, alternative filename formats)~~ *(implemented in v1.7.0)*
 
 ## Version
 
-Current version: **v2.2.0**
+Current version: **v2.3.0**
 
 ## License
 

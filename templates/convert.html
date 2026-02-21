@@ -27,6 +27,25 @@
           </select>
         </div>
       </div>
+      <div class="row g-3 mt-1">
+        <div class="col-md-4">
+          <label class="form-label">Directory Layout</label>
+          <select class="form-select form-select-sm" id="convertDirStructure">
+            <option value="">Profile Default</option>
+            <option value="flat">Flat</option>
+            <option value="nested-artist">Nested by Artist</option>
+            <option value="nested-artist-album">Nested by Artist/Album</option>
+          </select>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Filename Format</label>
+          <select class="form-select form-select-sm" id="convertFilenameFormat">
+            <option value="">Profile Default</option>
+            <option value="full">Full (Artist - Title)</option>
+            <option value="title-only">Title Only</option>
+          </select>
+        </div>
+      </div>
       <div class="d-flex gap-3 mt-3">
         <div class="form-check">
           <input class="form-check-input" type="checkbox" id="convertForce">
@@ -82,6 +101,10 @@ document.getElementById('convertForm').addEventListener('submit', function(e) {
     dry_run: document.getElementById('convertDryRun').checked,
     verbose: document.getElementById('convertVerbose').checked,
   };
+  const dirStructure = document.getElementById('convertDirStructure').value;
+  if (dirStructure) data.dir_structure = dirStructure;
+  const filenameFormat = document.getElementById('convertFilenameFormat').value;
+  if (filenameFormat) data.filename_format = filenameFormat;
   if (!data.input_dir) { showToast('Select a source directory', 'warning'); return; }
 
   document.getElementById('convertStatus').textContent = 'Running';

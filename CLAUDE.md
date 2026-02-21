@@ -12,6 +12,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - When implementing a future feature from the README list, **strikethrough** the item (~~text~~) with a note like "*(implemented in vX.Y.Z)*" instead of removing it
 - Keep the original numbering intact
 
+### Requirements vs Implementation
+- When asked to "work on requirements", **only** produce the SRS document — do not plan or begin implementation
+- Requirements work and implementation are separate phases; wait for explicit instruction to start implementation
+- SRS documents use **checkboxes** (`- [ ]`) for each requirement — check them off (`- [x]`) as they are implemented and tested during development
+- Store SRS documents in the `SRS/` directory
+- **During implementation**, check off SRS requirements as each one is completed
+- **Add new SRS items** if requirements are discovered during design or implementation that weren't in the original document
+- **Update the SRS** whenever the user requests changes — keep the SRS in sync with the current implementation
+
 ## Project Overview
 
 RideCommandMP3Export is a music playlist management and conversion tool that downloads Apple Music playlists, converts them to MP3 format, and optionally copies them to USB drives. The system preserves original tag metadata while allowing customization for device compatibility.
