@@ -6014,6 +6014,7 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
 
     # cover-art embed
     ca_embed = coverart_sub.add_parser('embed',
+        parents=[structure_parent],
         help='Embed cover art from M4A sources into MP3s')
     ca_embed.add_argument('directory', nargs='?', help='Directory with MP3 files')
     ca_embed.add_argument('--all', action='store_true', dest='all_playlists',

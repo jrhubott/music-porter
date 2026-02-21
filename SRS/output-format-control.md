@@ -2,7 +2,7 @@
 
 **Version:** 1.0
 **Date:** 2026-02-19
-**Status:** Implementation Complete (pending integration testing)
+**Status:** Complete
 
 ---
 
@@ -118,6 +118,7 @@ Both existing profiles shall retain their current defaults:
 - [x] `/api/convert/run` accepts `filename_format` parameter
 - [x] `/api/settings` GET returns valid dir_structures and filename_formats lists
 - [x] `/api/directories/export` uses rglob for nested directory file counts
+- [x] `cover-art embed` subcommand accepts `--dir-structure` and `--filename-format` flags (discovered during testing)
 
 ### 3.6 Display
 
@@ -150,10 +151,10 @@ Very long artist + album + title combinations could exceed filesystem path lengt
 
 - [x] All 6 combinations (3 structures x 2 formats) tested with `--dry-run --verbose`
 - [x] Default behavior unchanged (flat + artist_title)
-- [ ] CLI flag overrides config.yaml
-- [ ] config.yaml overrides profile default
+- [x] CLI flag overrides config.yaml
+- [x] config.yaml overrides profile default
 - [x] `summary` command works with nested export directories
-- [ ] `cover-art embed` correctly matches files with non-default formats
-- [ ] `sync-usb` preserves nested structure on target drive
-- [ ] Filename collisions with `title_only` format handled correctly
-- [ ] Web UI dropdowns submit correct API parameters
+- [x] `cover-art embed` correctly matches files with non-default formats
+- [x] `sync-usb` preserves nested structure on target drive
+- [x] Filename collisions with `title_only` format handled correctly
+- [x] Web UI dropdowns submit correct API parameters
