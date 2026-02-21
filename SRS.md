@@ -1,8 +1,13 @@
+# Completed SRS Documents
+
+---
+
 # SRS: Configurable Output Directory Structure & Filename Format
 
 **Version:** 1.0
 **Date:** 2026-02-19
 **Status:** Complete
+**Implemented in:** v2.3.0
 
 ---
 

@@ -37,7 +37,14 @@ Merge the current feature branch into main following the project's version workf
    - If a match is found, strikethrough the item with `~~text~~` and add "*(implemented in vX.Y.Z)*" — keep original numbering intact
    - Only ask the user if a plausible match exists; skip this step silently if no items relate to the branch
 
-5. **Add unfinished work to README**
+5. **Validate SRS requirements**
+   - Check the `SRS/` directory for any `.md` files related to this branch's feature
+   - If an SRS file exists, scan for unchecked checkboxes (`- [ ]`)
+   - If ANY requirements are unchecked, **abort the merge** — list the incomplete requirements and tell the user they must be completed before merging
+   - If all requirements are checked (`- [x]`), proceed to the next step
+   - If no SRS file exists for this branch, skip this step silently
+
+5b. **Add unfinished work to README**
    - Review the branch's commits and diffs for TODOs, FIXMEs, partial implementations, known limitations, or follow-up work that was deferred
    - Also check for any comments in the code mentioning future improvements related to this branch's changes
    - Also check `todos.md` (via `/todo list`) for active items that represent future work related to this branch — these may belong in the README "Future Features" list even if they weren't completed
@@ -45,7 +52,7 @@ Merge the current feature branch into main following the project's version workf
    - Append new items to the appropriate priority section (High / Medium / Low), continuing the existing numbering
    - Keep descriptions concise and consistent with the existing list style: `**Bold title** - Description`
 
-5b. **Update todos.md**
+5c. **Update todos.md**
    - Use `/todo list` (via the Skill tool) to view current todos
    - Identify any active todos that match the work completed on this branch
    - For each matching active todo, use `/todo complete` (via the Skill tool) with the todo text to mark it done
@@ -79,11 +86,20 @@ Merge the current feature branch into main following the project's version workf
 9. **Tag the release**
    - `git tag vX.Y.Z`
 
-10. **Clean up**
+10. **Archive SRS document**
+    - If an SRS file was found in step 5, archive it into `SRS.md` (root of repo)
+    - If `SRS.md` does not exist, create it with a `# Completed SRS Documents` heading
+    - Append the full contents of the SRS file to `SRS.md` under a new `---` separator
+    - Delete the individual SRS file from the `SRS/` directory
+    - If the `SRS/` directory is now empty, delete it
+    - Stage and commit: `Archive SRS: <feature-name> into SRS.md`
+    - Do NOT include Co-Authored-By lines
+
+11. **Clean up**
     - Ask the user if they want to delete the feature branch
     - If yes, run `git branch -d <branch-name>`
 
-11. **Report**
+12. **Report**
     - Show the final `git log --oneline -5` so the user can verify
     - Show the tag: `git tag -l 'vX.Y.Z'`
     - Remind the user to `git push origin main --tags` when ready
