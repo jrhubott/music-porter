@@ -185,8 +185,14 @@ VALID_DIR_STRUCTURES = ("flat", "nested-artist", "nested-artist-album")
 VALID_FILENAME_FORMATS = ("full", "title-only")
 
 
+DISPLAY_NAMES = {
+    "full": "Artist - Title",
+}
+
 def display_name(value):
-    """Convert a hyphenated flag value to a title-cased display name."""
+    """Convert a flag value to a human-readable display name."""
+    if value in DISPLAY_NAMES:
+        return DISPLAY_NAMES[value]
     return value.replace("-", " ").title()
 
 
