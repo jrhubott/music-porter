@@ -140,7 +140,7 @@ class OutputProfile:
     name: str
     description: str
     directory_structure: str  # "flat", "nested-artist", "nested-artist-album"
-    filename_format: str      # "artist_title", "title_only"
+    filename_format: str      # "full", "title-only"
     id3_version: int          # 3 = ID3v2.3, 4 = ID3v2.4
     strip_id3v1: bool         # Remove ID3v1 tags
     title_tag_format: str     # "artist_title" → tag as "Artist - Title"
@@ -155,7 +155,7 @@ OUTPUT_PROFILES: dict = {
         name="ride-command",
         description="Polaris Ride Command infotainment system",
         directory_structure="flat",
-        filename_format="artist_title",
+        filename_format="full",
         id3_version=3,
         strip_id3v1=True,
         title_tag_format="artist_title",
@@ -168,7 +168,7 @@ OUTPUT_PROFILES: dict = {
         name="basic",
         description="Standard MP3 with original tags and artwork",
         directory_structure="flat",
-        filename_format="artist_title",
+        filename_format="full",
         id3_version=4,
         strip_id3v1=True,
         title_tag_format="artist_title",
@@ -182,7 +182,12 @@ DEFAULT_OUTPUT_TYPE = "ride-command"
 
 # Valid choices for directory structure and filename format
 VALID_DIR_STRUCTURES = ("flat", "nested-artist", "nested-artist-album")
-VALID_FILENAME_FORMATS = ("artist_title", "title_only")
+VALID_FILENAME_FORMATS = ("full", "title-only")
+
+
+def display_name(value):
+    """Convert a hyphenated flag value to a title-cased display name."""
+    return value.replace("-", " ").title()
 
 
 def get_export_dir(profile_name, playlist_key=None):
@@ -1544,7 +1549,7 @@ class TaggerManager:
                 safe_artist = self._sanitize_filename(artist)
                 safe_album = self._sanitize_filename(album)
                 fmt = self.output_profile.filename_format
-                if fmt == "title_only":
+                if fmt == "title-only":
                     mp3_filename = f"{safe_title}.mp3"
                 else:
                     mp3_filename = f"{safe_artist} - {safe_title}.mp3"
@@ -1729,7 +1734,7 @@ class Converter:
 
     def _build_output_filename(self, artist: str, title: str) -> str:
         """Build output filename based on the active output profile."""
-        if self.output_profile.filename_format == "title_only":
+        if self.output_profile.filename_format == "title-only":
             return f"{title}.mp3"
         # Default: artist_title
         return f"{artist} - {title}.mp3"
@@ -1770,8 +1775,8 @@ class Converter:
             if already_exists and not force:
                 self.stats.increment('skipped')
                 collision_hint = ""
-                if self.output_profile.filename_format != "artist_title":
-                    collision_hint = " (possible filename collision — try artist_title format)"
+                if self.output_profile.filename_format != "full":
+                    collision_hint = " (possible filename collision — try 'full' format)"
                 msg = f"[{count}/{self.stats.total_found}] Skipping (already exists): {output_filename}{collision_hint}"
                 if progress_bar and not verbose:
                     self.logger.file_info(msg)
@@ -1946,7 +1951,7 @@ class Converter:
 
         self.stats.total_found = len(m4a_files)
         self.logger.info(f"Found {self.stats.total_found} .m4a file(s) (recursive)")
-        self.logger.info(f"Output directory: '{output_dir}' ({self.output_profile.directory_structure})")
+        self.logger.info(f"Output directory: '{output_dir}' ({display_name(self.output_profile.directory_structure)})")
 
         if force:
             self.logger.info("Force mode enabled — existing files will be overwritten")
@@ -4121,7 +4126,7 @@ class CoverArtManager:
                 safe_artist = sanitize_filename(artist)
                 safe_title = sanitize_filename(title)
                 fmt = self.output_profile.filename_format
-                if fmt == "title_only":
+                if fmt == "title-only":
                     key = f"{safe_title}.mp3"
                 else:
                     key = f"{safe_artist} - {safe_title}.mp3"
@@ -6148,8 +6153,8 @@ def main():
     print(f"  Output type: {output_type} ({output_type_desc})")
     print(f"  Quality:     {quality_desc}")
     print(f"  Artwork:     {artwork_desc}")
-    print(f"  Dir layout:  {output_profile.directory_structure}")
-    print(f"  File names:  {output_profile.filename_format}")
+    print(f"  Dir layout:  {display_name(output_profile.directory_structure)}")
+    print(f"  File names:  {display_name(output_profile.filename_format)}")
 
     # Log to file
     logger.file_info(f"Platform: {platform_str}")
@@ -6157,8 +6162,8 @@ def main():
     logger.file_info(f"Output type: {output_type}")
     logger.file_info(f"Quality: {quality_desc}")
     logger.file_info(f"Artwork: {artwork_desc}")
-    logger.file_info(f"Dir structure: {output_profile.directory_structure}")
-    logger.file_info(f"Filename format: {output_profile.filename_format}")
+    logger.file_info(f"Dir structure: {display_name(output_profile.directory_structure)}")
+    logger.file_info(f"Filename format: {display_name(output_profile.filename_format)}")
 
     if workers > 1:
         print(f"  Workers:     {workers} (parallel conversion)")

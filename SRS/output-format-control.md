@@ -40,11 +40,11 @@ The system shall support two filename format modes, configurable per output prof
 
 | Value | Pattern | Example |
 |-------|---------|---------|
-| `artist_title` | `Artist - Title.mp3` | `Taylor Swift - Shake It Off.mp3` |
-| `title_only` | `Title.mp3` | `Shake It Off.mp3` |
+| `full` | `Artist - Title.mp3` | `Taylor Swift - Shake It Off.mp3` |
+| `title-only` | `Title.mp3` | `Shake It Off.mp3` |
 
-- [x] `artist_title` filename format works (existing behavior)
-- [x] `title_only` filename format produces title-only filenames
+- [x] `full` filename format works (existing behavior)
+- [x] `title-only` filename format produces title-only filenames
 
 ### 3.3 Configuration
 
@@ -57,7 +57,7 @@ Settings shall follow the existing precedence chain:
 | Flag | Values | Default |
 |------|--------|---------|
 | `--dir-structure` | `flat`, `nested-artist`, `nested-artist-album` | Profile default |
-| `--filename-format` | `artist_title`, `title_only` | Profile default |
+| `--filename-format` | `full`, `title-only` | Profile default |
 
 - [x] `--dir-structure` flag added to `pipeline` subcommand
 - [x] `--dir-structure` flag added to `convert` subcommand
@@ -82,8 +82,8 @@ Both existing profiles shall retain their current defaults:
 
 | Profile | directory_structure | filename_format |
 |---------|-------------------|-----------------|
-| `ride-command` | `flat` | `artist_title` |
-| `basic` | `flat` | `artist_title` |
+| `ride-command` | `flat` | `full` |
+| `basic` | `flat` | `full` |
 
 - [x] `ride-command` profile defaults unchanged
 - [x] `basic` profile defaults unchanged
@@ -126,12 +126,14 @@ Both existing profiles shall retain their current defaults:
 - [x] Startup banner displays active filename format
 - [x] Log files record active directory structure and filename format
 - [x] `--dry-run` output shows full output path (including subdirectories for nested structures)
+- [x] Display values are title-cased with spaces (e.g., "Nested Artist Album", "Title Only") via `display_name()` helper
+- [x] CLI flag values remain hyphenated (e.g., `nested-artist-album`, `title-only`)
 
 ## 4. Edge Cases
 
 ### 4.1 Filename Collisions
 
-- [x] `title_only` format with duplicate titles: skip-if-exists behavior with warning suggesting `artist_title` format
+- [x] `title-only` format with duplicate titles: skip-if-exists behavior with warning suggesting `full` format
 
 ### 4.2 Special Characters in Directory Names
 
@@ -156,5 +158,5 @@ Very long artist + album + title combinations could exceed filesystem path lengt
 - [x] `summary` command works with nested export directories
 - [x] `cover-art embed` correctly matches files with non-default formats
 - [x] `sync-usb` preserves nested structure on target drive
-- [x] Filename collisions with `title_only` format handled correctly
+- [x] Filename collisions with `title-only` format handled correctly
 - [x] Web UI dropdowns submit correct API parameters

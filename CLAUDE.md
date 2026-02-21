@@ -19,6 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Store SRS documents in the `SRS/` directory
 - **During implementation**, check off SRS requirements as each one is completed
 - **Add new SRS items** if requirements are discovered during design or implementation that weren't in the original document
+- **Update the SRS** whenever the user requests changes — keep the SRS in sync with the current implementation
 
 ## Project Overview
 
