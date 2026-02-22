@@ -9,8 +9,11 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import platform
 import queue
 import re
+import signal
+import subprocess
 import threading
 import time
 import uuid
@@ -960,8 +963,48 @@ def create_app(project_root=None):
 # Server Entry Point
 # ══════════════════════════════════════════════════════════════════
 
+def _kill_port_process(port):
+    """Kill any existing process listening on the given port (best-effort)."""
+    try:
+        system = platform.system()
+        if system in ('Darwin', 'Linux'):
+            result = subprocess.run(
+                ['lsof', '-ti', f':{port}'],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode != 0 or not result.stdout.strip():
+                return
+            for pid_str in result.stdout.strip().splitlines():
+                pid = int(pid_str)
+                if pid == os.getpid():
+                    continue
+                print(f"  Killing existing process on port {port} (PID {pid})...")
+                os.kill(pid, signal.SIGTERM)
+        elif system == 'Windows':
+            result = subprocess.run(
+                ['netstat', '-ano'],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode != 0:
+                return
+            for line in result.stdout.splitlines():
+                if 'LISTENING' in line and f':{port}' in line:
+                    parts = line.split()
+                    pid = int(parts[-1])
+                    if pid == os.getpid():
+                        continue
+                    print(f"  Killing existing process on port {port} (PID {pid})...")
+                    subprocess.run(
+                        ['taskkill', '/PID', str(pid), '/F'],
+                        capture_output=True, timeout=5,
+                    )
+    except Exception as e:
+        print(f"  Warning: could not free port {port}: {e}")
+
+
 def start_server(host='127.0.0.1', port=5555):
     """Start the Flask development server."""
+    _kill_port_process(port)
     print(f"\n  Web Dashboard: http://{host}:{port}")
     print(f"  Press Ctrl+C to stop\n")
     app = create_app()
