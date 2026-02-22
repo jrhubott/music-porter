@@ -15,13 +15,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Requirements vs Implementation
 - When asked to "work on requirements", **only** produce the SRS document — do not plan or begin implementation
 - Requirements work and implementation are separate phases; wait for explicit instruction to start implementation
-- SRS documents use **checkboxes** (`- [ ]`) for each requirement — check them off (`- [x]`) as they are implemented and tested during development
+- SRS requirements use **tables** with columns: ID, Requirement, Version, Tested
+- New requirements start with `[ ]` in the Tested column — mark `[x]` as each is implemented and tested
+- Edge cases are the last subsection under Requirements (not a separate top-level section)
 - Store SRS documents in the `SRS/` directory
-- **During implementation**, check off SRS requirements as each one is completed
+- **During implementation**, mark Tested cells `[x]` as each requirement is completed
 - **Add new SRS items** if requirements are discovered during design or implementation that weren't in the original document
 - **Update the SRS** whenever the user requests changes — keep the SRS in sync with the current implementation
-- **Merge gate:** All SRS checkboxes must be checked (`- [x]`) before merging to main — the `/merge-to-main` skill enforces this
-- **Archive on merge:** Completed SRS documents are appended to `SRS.md` (root of repo) and the individual file in `SRS/` is deleted during the merge workflow
+- **Merge gate:** All Tested cells must be `[x]` before merging to main — the `/merge-to-main` skill enforces this
+- **Archive on merge:** Completed SRS documents are appended to `SRS/SRS.md` and the individual file in `SRS/` is deleted during the merge workflow
 
 ## Project Overview
 
