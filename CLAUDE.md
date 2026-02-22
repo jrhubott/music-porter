@@ -15,7 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Requirements vs Implementation
 - When asked to "work on requirements", **only** produce the SRS document — do not plan or begin implementation
 - Requirements work and implementation are separate phases; wait for explicit instruction to start implementation
-- SRS requirements use **tables** with columns: ID, Requirement, Version, Tested
+- SRS requirements use **tables** with columns: ID, Version, Tested, Requirement
 - New requirements start with `[ ]` in the Tested column — mark `[x]` as each is implemented and tested
 - Edge cases are the last subsection under Requirements (not a separate top-level section)
 - Store SRS documents in the `SRS/` directory
