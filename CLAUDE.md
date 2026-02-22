@@ -24,6 +24,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Update the SRS** whenever the user requests changes — keep the SRS in sync with the current implementation
 - **Merge gate:** All Tested cells must be `[x]` before merging to main — the `/merge-to-main` skill enforces this
 - **Archive on merge:** Completed SRS documents are appended to `SRS/SRS.md` and the individual file in `SRS/` is deleted during the merge workflow
+- SRS entries are organized by **user feature** (not by internal class or module)
+- Each entry maps to a user-facing capability, aligned with CLI subcommands where applicable
+- Cross-cutting concerns (logging, progress, CLI flags) go in the "CLI & Runtime" entry
+- Related features may be merged (e.g., cookie management is part of "Download & Authentication")
+- Requirements must be detailed enough to **reimplement the software** from the SRS alone
 
 ## Project Overview
 
