@@ -614,11 +614,10 @@ git tag v1.2.0
 
 ```text
 .
-├── music-porter            # ⭐ Unified tool (RECOMMENDED)
-├── do-it-all                        # Legacy wrapper (deprecated)
-├── ride-command-mp3-export          # Legacy wrapper (deprecated)
-├── do-it-all.backup                 # Original bash script (backup)
-├── ride-command-mp3-export.backup   # Original Python script (backup)
+├── music-porter                     # ⭐ Unified CLI tool (RECOMMENDED)
+├── porter_core.py                   # Business logic (all classes and utilities)
+├── web_ui.py                        # Web dashboard (Flask API + UI)
+├── templates/                       # Jinja2 HTML templates for web UI
 ├── config.yaml                      # Configuration file (playlists + settings)
 ├── cookies.txt                      # Apple Music authentication cookies
 ├── cookies.txt.backup               # Automatic backup before refresh
@@ -630,14 +629,17 @@ git tag v1.2.0
 │   └── basic/                       # Profile: basic
 │       └── Pop_Workout/            # Flat: "Artist - Title.mp3"
 ├── logs/                            # Execution logs (timestamped)
+├── SRS/                             # Software Requirements Specifications
+│   └── SRS.md                       # Master SRS archive
 ├── .venv/                           # Python virtual environment
+├── .claude/                         # Claude Code project settings
 ├── pyproject.toml                   # Lint config (Ruff + PyMarkdown)
 ├── requirements.txt                 # All Python dependencies
 ├── requirements-dev.txt             # Dev dependencies (ruff, pymarkdownlnt)
-├── MUSIC-PORTER-GUIDE.md   # Complete usage guide
-├── COOKIE-MANAGEMENT-GUIDE.md       # Cookie validation and refresh guide
-├── QUICK-REFERENCE.md               # Command cheat sheet
-└── IMPLEMENTATION-SUMMARY.md        # Technical documentation
+├── todos.md                         # Project task tracking
+├── CLAUDE.md                        # Developer guide and AI assistant context
+├── MUSIC-PORTER-GUIDE.md            # Complete usage guide
+└── COOKIE-MANAGEMENT-GUIDE.md       # Cookie validation and refresh guide
 ```
 
 ## Important Implementation Notes
@@ -945,5 +947,4 @@ tail -100 logs/$(ls -t logs/ | head -1)
 
 - **README.md** - Project overview, quick start guide, and future features roadmap
 - **MUSIC-PORTER-GUIDE.md** - Complete usage guide with examples
-- **QUICK-REFERENCE.md** - Command cheat sheet for quick lookup
-- **IMPLEMENTATION-SUMMARY.md** - Technical implementation details
+- **COOKIE-MANAGEMENT-GUIDE.md** - Cookie validation, auto-refresh, and troubleshooting
