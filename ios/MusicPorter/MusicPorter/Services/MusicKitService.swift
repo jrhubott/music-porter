@@ -19,7 +19,7 @@ final class MusicKitService {
     func fetchLibraryPlaylists() async throws -> [MusicKit.Playlist] {
         guard isAuthorized else { return [] }
         var request = MusicLibraryRequest<MusicKit.Playlist>()
-        request.sort(by: \.name)
+        request.sort(by: \.name, ascending: true)
         let response = try await request.response()
         return Array(response.items)
     }
