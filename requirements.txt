@@ -26,3 +26,6 @@ PyYAML>=6.0
 
 # Web dashboard UI
 Flask>=3.0.0
+
+# mDNS/Bonjour service discovery for iOS companion app
+zeroconf>=0.131.0

@@ -23,6 +23,7 @@ import platform
 import queue
 import re
 import signal
+import socket
 import subprocess
 import threading
 import time
@@ -278,7 +279,7 @@ def _get_freshness_level(last_modified: datetime | None, today: date) -> str:
 # Flask Application Factory
 # ══════════════════════════════════════════════════════════════════
 
-def create_app(project_root=None):
+def create_app(project_root=None, no_auth=False):
     """Create and configure the Flask application."""
     if project_root is None:
         project_root = Path(__file__).resolve().parent
@@ -288,8 +289,41 @@ def create_app(project_root=None):
 
     app = Flask(__name__, template_folder=str(template_dir))
     app.config['PROJECT_ROOT'] = str(project_root)
+    app.config['NO_AUTH'] = no_auth
 
     task_manager = TaskManager()
+
+    # ── CORS headers for iOS companion app ───────────────────
+    @app.after_request
+    def _add_cors_headers(response):
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+        return response
+
+    # ── API key authentication middleware ─────────────────────
+    # Ensure an API key exists in config.yaml
+    _boot_config = mp.ConfigManager(logger=mp.Logger(verbose=False))
+    _api_key = _boot_config.ensure_api_key()
+
+    @app.before_request
+    def _check_api_auth():
+        # Skip auth for non-API routes (HTML pages, static files)
+        if not request.path.startswith('/api/'):
+            return
+        # Skip auth for CORS preflight
+        if request.method == 'OPTIONS':
+            return
+        # Skip auth when --no-auth is set (browser-only mode)
+        if app.config.get('NO_AUTH'):
+            return
+        # Validate Bearer token
+        auth_header = request.headers.get('Authorization', '')
+        if auth_header.startswith('Bearer '):
+            token = auth_header[7:]
+            if token == _api_key:
+                return
+        return jsonify({'error': 'Unauthorized — provide Authorization: Bearer <api_key>'}), 401
 
     # ── Helper to create a WebLogger for a task ──────────────────
     def _make_logger(task_id, verbose=False):
@@ -322,6 +356,30 @@ def create_app(project_root=None):
             return str(resolved)
         except Exception:
             return None
+
+    # ── API: Auth & Server Info ──────────────────────────────────
+
+    @app.route('/api/auth/validate', methods=['POST'])
+    def api_auth_validate():
+        """Validate API key and return server identity."""
+        return jsonify({
+            'valid': True,
+            'version': mp.VERSION,
+            'server_name': socket.gethostname(),
+        })
+
+    @app.route('/api/server-info')
+    def api_server_info():
+        """Return server metadata for client discovery."""
+        config = _get_config()
+        mp.load_output_profiles(config)
+        return jsonify({
+            'name': socket.gethostname(),
+            'version': mp.VERSION,
+            'platform': mp.get_os_display_name(),
+            'profiles': list(mp.OUTPUT_PROFILES.keys()),
+            'api_version': 1,
+        })
 
     # ── Page Routes ──────────────────────────────────────────────
 
@@ -1120,13 +1178,114 @@ def _kill_port_process(port):
         print(f"  Warning: could not free port {port}: {e}")
 
 
-def start_server(host='127.0.0.1', port=5555):
-    """Start the Flask development server."""
+def start_server(host='127.0.0.1', port=5555, no_auth=False,
+                  show_api_key=False, enable_bonjour=False):
+    """Start the Flask development server.
+
+    Args:
+        host: Host to bind.
+        port: Port to bind.
+        no_auth: If True, skip API key authentication on /api/* routes.
+        show_api_key: If True, print the API key at startup.
+        enable_bonjour: If True, advertise via mDNS/Bonjour.
+    """
     _kill_port_process(port)
-    print(f"\n  Web Dashboard: http://{host}:{port}")
+
+    # Show API key if requested or if auth is enabled (server mode)
+    if not no_auth:
+        config = mp.ConfigManager(logger=mp.Logger(verbose=False))
+        api_key = config.ensure_api_key()
+        if show_api_key:
+            print(f"\n  API Key: {api_key}")
+        else:
+            print(f"\n  API Key: {api_key[:8]}... (use --show-api-key to reveal)")
+        print("  Auth:    Required (Bearer token)")
+    else:
+        print("\n  Auth:    Disabled (--no-auth)")
+
+    print(f"  Server:  http://{host}:{port}")
     print("  Press Ctrl+C to stop\n")
-    app = create_app()
-    app.run(host=host, port=port, debug=False, threaded=True)
+
+    app = create_app(no_auth=no_auth)
+
+    # Bonjour/mDNS advertisement
+    bonjour = None
+    if enable_bonjour and host != '127.0.0.1':
+        bonjour = BonjourAdvertiser(port)
+        bonjour.start()
+
+    try:
+        app.run(host=host, port=port, debug=False, threaded=True)
+    finally:
+        if bonjour:
+            bonjour.stop()
+
+
+# ══════════════════════════════════════════════════════════════════
+# Bonjour/mDNS Service Advertisement
+# ══════════════════════════════════════════════════════════════════
+
+class BonjourAdvertiser:
+    """Advertises the music-porter server via mDNS/Bonjour.
+
+    Uses zeroconf to register a _music-porter._tcp.local. service so
+    iOS companion apps can discover the server on the local network.
+    """
+
+    SERVICE_TYPE = "_music-porter._tcp.local."
+
+    def __init__(self, port):
+        self._port = port
+        self._zeroconf = None
+        self._info = None
+
+    def start(self):
+        """Register the mDNS service."""
+        try:
+            from zeroconf import ServiceInfo, Zeroconf
+        except ImportError:
+            print("  Bonjour: skipped (zeroconf not installed)")
+            return
+
+        hostname = socket.gethostname()
+        # Get local IP for service registration
+        local_ip = self._get_local_ip()
+        if not local_ip:
+            print("  Bonjour: skipped (could not determine local IP)")
+            return
+
+        self._info = ServiceInfo(
+            self.SERVICE_TYPE,
+            f"Music Porter ({hostname}).{self.SERVICE_TYPE}",
+            addresses=[socket.inet_aton(local_ip)],
+            port=self._port,
+            properties={
+                'version': mp.VERSION,
+                'platform': mp.get_os_display_name(),
+                'api_version': '1',
+            },
+        )
+        self._zeroconf = Zeroconf()
+        self._zeroconf.register_service(self._info)
+        print(f"  Bonjour: advertising as _music-porter._tcp on {local_ip}:{self._port}")
+
+    def stop(self):
+        """Unregister the mDNS service."""
+        if self._zeroconf and self._info:
+            self._zeroconf.unregister_service(self._info)
+            self._zeroconf.close()
+
+    @staticmethod
+    def _get_local_ip():
+        """Get the local network IP address."""
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(('10.255.255.255', 1))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return None
 
 
 if __name__ == '__main__':
