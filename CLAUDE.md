@@ -434,11 +434,11 @@ git pull origin main
 # 2. Create and switch to feature branch
 git checkout -b feature/my-feature
 
-# 3. Set branch version in music-porter (line 68)
+# 3. Set branch version in porter_core.py (line 48)
 VERSION = "1.5.3-my-feature"
 
 # 4. Commit the version change as first commit
-git add music-porter
+git add porter_core.py
 git commit -m "Start my-feature branch"
 ```
 
@@ -476,7 +476,7 @@ Use the `/merge-to-main` skill, which automates version bump, README updates, ta
 
 **IMPORTANT: Version number strategy depends on branch context.**
 
-The version number is defined in `music-porter` at line 68:
+The version number is defined in `porter_core.py` at line 48:
 
 ```python
 VERSION = "1.1.0"
@@ -528,7 +528,7 @@ VERSION = "1.1.0"
 git checkout -b feature/cookie-management
 
 # Update version to include branch name
-# In music-porter line 68:
+# In porter_core.py line 48:
 VERSION = "1.1.0-cookie-management"
 git commit -m "Start cookie management feature"
 
@@ -540,7 +540,7 @@ git checkout main
 git merge feature/cookie-management
 
 # Update version to clean release number
-# In music-porter line 68:
+# In porter_core.py line 48:
 VERSION = "1.2.0"  # MINOR bump for new feature
 git commit -m "Bump version to 1.2.0 for cookie management feature"
 
@@ -631,7 +631,9 @@ git tag v1.2.0
 │       └── Pop_Workout/            # Flat: "Artist - Title.mp3"
 ├── logs/                            # Execution logs (timestamped)
 ├── .venv/                           # Python virtual environment
+├── pyproject.toml                   # Lint config (Ruff + PyMarkdown)
 ├── requirements.txt                 # All Python dependencies
+├── requirements-dev.txt             # Dev dependencies (ruff, pymarkdownlnt)
 ├── MUSIC-PORTER-GUIDE.md   # Complete usage guide
 ├── COOKIE-MANAGEMENT-GUIDE.md       # Cookie validation and refresh guide
 ├── QUICK-REFERENCE.md               # Command cheat sheet
