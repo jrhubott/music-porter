@@ -41,6 +41,11 @@ import porter_core as mp
 # This avoids DependencyChecker's pip/os.execv() in background threads.
 mp._init_third_party()
 
+# Load output profiles from config at import time so OUTPUT_PROFILES is
+# populated before any request handler accesses it.
+_startup_config = mp.ConfigManager(logger=mp.Logger(verbose=False))
+mp.load_output_profiles(_startup_config)
+
 
 # ══════════════════════════════════════════════════════════════════
 # WebLogger — routes log output to SSE queue + log file
@@ -282,6 +287,7 @@ def create_app(project_root=None):
         return mp.ConfigManager(logger=logger)
 
     def _get_output_profile(config):
+        mp.load_output_profiles(config)  # refresh from config.yaml
         output_type = config.get_setting('output_type', mp.DEFAULT_OUTPUT_TYPE)
         if output_type not in mp.OUTPUT_PROFILES:
             output_type = mp.DEFAULT_OUTPUT_TYPE
