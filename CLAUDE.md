@@ -642,6 +642,16 @@ git tag v1.2.0
 ├── pyproject.toml                   # Lint config (Ruff + PyMarkdown)
 ├── requirements.txt                 # All Python dependencies
 ├── requirements-dev.txt             # Dev dependencies (ruff, pymarkdownlnt)
+├── ios/                             # iOS companion app (Xcode project)
+│   └── MusicPorter/                 # Xcode project root
+│       ├── MusicPorter.xcodeproj/   # Xcode project file
+│       └── MusicPorter/             # Swift source files
+│           ├── Models/              # Data models (Codable structs)
+│           ├── Services/            # API client, SSE, Bonjour, MusicKit
+│           ├── ViewModels/          # Observable view models
+│           ├── Views/               # SwiftUI views
+│           │   └── Components/      # Reusable UI components
+│           └── Extensions/          # Swift extensions
 ├── todos.md                         # Project task tracking
 ├── CLAUDE.md                        # Developer guide and AI assistant context
 ├── MUSIC-PORTER-GUIDE.md            # Complete usage guide
@@ -657,12 +667,35 @@ The web dashboard (`web_ui.py`) provides a browser-based interface with full fea
 ### Launch
 
 ```bash
-# Start web dashboard (default: http://127.0.0.1:5555)
+# Start web dashboard (default: http://127.0.0.1:5555, no auth)
 ./music-porter web
 
 # Custom host/port
 ./music-porter web --host 0.0.0.0 --port 8080
+
+# Start API server with authentication (for iOS companion app)
+./music-porter server
+
+# Server with all options
+./music-porter server --host 0.0.0.0 --port 5555 --show-api-key
+
+# Server without auth (not recommended)
+./music-porter server --no-auth
+
+# Server without Bonjour discovery
+./music-porter server --no-bonjour
 ```
+
+**`web` vs `server` commands:**
+
+| Feature | `web` | `server` |
+|---------|-------|----------|
+| Default host | `127.0.0.1` (local only) | `0.0.0.0` (network) |
+| API key auth | Disabled | Required |
+| Bonjour/mDNS | Disabled | Enabled |
+| QR code pairing | No | Yes |
+| iOS app support | No | Yes |
+| Use case | Local browser UI | iOS companion + browser |
 
 ### Pages (10 templates)
 
@@ -679,7 +712,14 @@ The web dashboard (`web_ui.py`) provides a browser-based interface with full fea
 | `GET /operations` | `operations.html` | Task history and status |
 | — | `base.html` | Base layout with sidebar, log panel, SSE handler |
 
-### API Endpoints (~26 endpoints)
+### API Endpoints (~32 endpoints)
+
+**Auth & Server Info (server mode only):**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/auth/validate` | Validate API key, returns server identity |
+| GET | `/api/server-info` | Server metadata (name, version, platform, profiles) |
 
 **Status & Info:**
 
@@ -731,6 +771,15 @@ The web dashboard (`web_ui.py`) provides a browser-based interface with full fea
 | POST | `/api/cover-art/<action>` | Cover art: embed, extract, update, strip, resize |
 | POST | `/api/usb/sync` | Sync files to USB drive |
 
+**File Serving (for iOS companion app):**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/files/<playlist_key>` | File listing with ID3 metadata |
+| GET | `/api/files/<playlist_key>/<filename>` | Download single MP3 file |
+| GET | `/api/files/<playlist_key>/<filename>/artwork` | Extract cover art image |
+| GET | `/api/files/<playlist_key>/download-all` | Streaming ZIP of all MP3s |
+
 **USB:**
 
 | Method | Path | Description |
@@ -773,10 +822,45 @@ The web dashboard (`web_ui.py`) provides a browser-based interface with full fea
 
 ### Limitations
 
-- No authentication — intended for local/trusted-network use only
+- No authentication on `web` command — use `server` command for API key auth
 - No concurrent operations — one background task at a time (HTTP 409 if busy)
 - No custom VBR quality via web UI (only named presets: lossless, high, medium, low)
 - Local-only by default (`127.0.0.1`); use `--host 0.0.0.0` for network access
+
+## iOS Companion App
+
+### Overview
+
+The iOS companion app (`ios/MusicPorter/`) is a native SwiftUI app that connects to the music-porter server over the local network. It provides a mobile interface for browsing playlists, triggering server-side operations, downloading MP3s, and exporting to USB drives.
+
+### Requirements
+
+- iOS 17+ (uses `@Observable` macro)
+- Xcode 15+
+- Apple Developer Program membership for MusicKit entitlement and device testing
+- Server running with `./music-porter server` (not `web`)
+
+### Architecture
+
+- **Models** (8 files): Codable structs matching server JSON responses
+- **Services** (7 files): APIClient (REST), SSEClient (real-time streaming), ServerDiscovery (Bonjour), MusicKitService, FileDownloadManager, USBExportService, KeychainService
+- **ViewModels** (5 files): Observable state management with async API calls
+- **Views** (13 files + 3 components): SwiftUI views with dark theme
+
+### Connection Flow
+
+1. App launches → `ServerDiscoveryView` browses for `_music-porter._tcp` via Bonjour
+2. User selects discovered server (or enters IP manually)
+3. `PairingView` — enter API key (displayed on server startup) or scan QR code
+4. Key validated via `POST /api/auth/validate`, stored in iOS Keychain
+5. Auto-reconnect on next launch using saved server + Keychain key
+
+### Key Constraints
+
+- **DRM protection**: MusicKit can browse playlists/metadata but CANNOT export audio. All downloads and conversions must happen on the server.
+- **USB drives**: iOS supports USB drives since iOS 13 via `UIDocumentPickerViewController` (FAT, ExFAT, HFS+, APFS).
+- **Background downloads**: Uses `URLSession` for file downloads with progress tracking.
+- **One operation at a time**: Server enforces single background task (HTTP 409 if busy).
 
 ## Important Implementation Notes
 
