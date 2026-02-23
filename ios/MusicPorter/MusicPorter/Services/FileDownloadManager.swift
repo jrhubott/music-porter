@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// Manages downloading MP3 files from the server to the device.
 @Observable
@@ -6,13 +7,18 @@ final class FileDownloadManager: NSObject {
     var downloads: [String: DownloadState] = [:]  // keyed by filename
     var downloadedFiles: [URL] = []
 
-    private var apiClient: APIClient?
-    private lazy var downloadSession: URLSession = {
+    @ObservationIgnored private var apiClient: APIClient?
+    @ObservationIgnored private var _downloadSession: URLSession?
+    @ObservationIgnored private var completionHandlers: [String: (URL?, Error?) -> Void] = [:]
+
+    private var downloadSession: URLSession {
+        if let session = _downloadSession { return session }
         let config = URLSessionConfiguration.background(withIdentifier: "com.musicporter.downloads")
         config.isDiscretionary = false
-        return URLSession(configuration: config, delegate: self, delegateQueue: nil)
-    }()
-    private var completionHandlers: [String: (URL?, Error?) -> Void] = [:]
+        let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        _downloadSession = session
+        return session
+    }
 
     func configure(apiClient: APIClient) {
         self.apiClient = apiClient
