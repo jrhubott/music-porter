@@ -1421,9 +1421,11 @@ class BonjourAdvertiser:
             print("  Bonjour: skipped (could not determine local IP)")
             return
 
+        # Service name must be unique; use hostname without special chars
+        safe_name = hostname.replace('.', '-')
         self._info = ServiceInfo(
             self.SERVICE_TYPE,
-            f"Music Porter ({hostname}).{self.SERVICE_TYPE}",
+            f"Music Porter on {safe_name}.{self.SERVICE_TYPE}",
             addresses=[socket.inet_aton(local_ip)],
             port=self._port,
             properties={
@@ -1432,9 +1434,14 @@ class BonjourAdvertiser:
                 'api_version': '1',
             },
         )
-        self._zeroconf = Zeroconf()
-        self._zeroconf.register_service(self._info)
-        print(f"  Bonjour: advertising as _music-porter._tcp on {local_ip}:{self._port}")
+        try:
+            self._zeroconf = Zeroconf()
+            self._zeroconf.register_service(self._info, allow_name_change=True)
+            print(f"  Bonjour: advertising as _music-porter._tcp on {local_ip}:{self._port}")
+        except Exception as e:
+            print(f"  Bonjour: failed to register ({e})")
+            self._zeroconf = None
+            self._info = None
 
     def stop(self):
         """Unregister the mDNS service."""

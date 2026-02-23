@@ -4,7 +4,7 @@
 <dict>
 	<key>NSBonjourServices</key>
 	<array>
-		<string>_music-porter._tcp</string>
+		<string>_music-porter._tcp.</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Music Porter needs local network access to discover and connect to the music-porter server on your network.</string>
