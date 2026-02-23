@@ -83,10 +83,7 @@ Merge the current feature branch into main following the project's version workf
    - Verify VERSION matches the expected clean `X.Y.Z`: read line 68 of `music-porter`
    - If any check fails, warn the user and ask whether to proceed with tagging or abort
 
-9. **Tag the release**
-   - `git tag vX.Y.Z`
-
-10. **Archive SRS document**
+9. **Archive SRS document**
     - If an SRS file was found in step 5, archive it into `SRS.md` (root of repo)
     - **Read `SRS.md` first** to understand its existing format and structure before making changes
     - If `SRS.md` does not exist, create it with a `# Completed SRS Documents` heading
@@ -98,6 +95,10 @@ Merge the current feature branch into main following the project's version workf
     - If the `SRS/` directory is now empty, delete it
     - Stage and commit: `Archive SRS: <feature-name> into SRS.md`
     - Do NOT include Co-Authored-By lines
+
+10. **Tag the release**
+    - `git tag vX.Y.Z`
+    - The tag is placed after the SRS archive commit so the tagged release includes the archived SRS content
 
 11. **Clean up**
     - Ask the user if they want to delete the feature branch
