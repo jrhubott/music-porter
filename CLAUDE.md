@@ -12,23 +12,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - When implementing a future feature from the README list, **strikethrough** the item (~~text~~) with a note like "*(implemented in vX.Y.Z)*" instead of removing it
 - Keep the original numbering intact
 
-### Requirements vs Implementation
+## Requirements Handling
+
+### Workflow
+- Requirements (SRS) **must** be written and reviewed **before** implementation begins
 - When asked to "work on requirements", **only** produce the SRS document — do not plan or begin implementation
-- Requirements work and implementation are separate phases; wait for explicit instruction to start implementation
-- SRS requirements use **tables** with columns: ID, Version, Tested, Requirement
-- New requirements start with `[ ]` in the Tested column — mark `[x]` as each is implemented and tested
-- Edge cases are the last subsection under Requirements (not a separate top-level section)
-- Store SRS documents in the `SRS/` directory
-- **During implementation**, mark Tested cells `[x]` as each requirement is completed
-- **Add new SRS items** if requirements are discovered during design or implementation that weren't in the original document
-- **Update the SRS** whenever the user requests changes — keep the SRS in sync with the current implementation
-- **Merge gate:** All Tested cells must be `[x]` before merging to main — the `/merge-to-main` skill enforces this
-- **Archive on merge:** Completed SRS documents are appended to `SRS/SRS.md` and the individual file in `SRS/` is deleted during the merge workflow
-- SRS entries are organized by **user feature** (not by internal class or module)
+- Implementation starts only after explicit user instruction
+- These are separate phases — never combine them
+
+### SRS Document Format
+- Tables with columns: ID, Version, Tested, Requirement
+- New requirements start with `[ ]` in the Tested column — mark `[x]` when implemented and tested
+- **IDs must be globally unique** across all SRS documents in `SRS/SRS.md` — use the entry's sequential number as the first digit (e.g., entry 8 uses IDs `8.1.1`, `8.2.1`, etc.)
+- When creating a new SRS, check `SRS/SRS.md` for the highest entry number and use the next one
+- Edge cases are the last subsection under Requirements
+- Store individual SRS files in the `SRS/` directory
+- Organized by **user feature** (not by internal class or module)
 - Each entry maps to a user-facing capability, aligned with CLI subcommands where applicable
 - Cross-cutting concerns (logging, progress, CLI flags) go in the "CLI & Runtime" entry
 - Related features may be merged (e.g., cookie management is part of "Download & Authentication")
 - Requirements must be detailed enough to **reimplement the software** from the SRS alone
+
+### During Implementation
+- Mark Tested cells `[x]` as each requirement is completed
+- Add new SRS items if requirements are discovered during design or implementation
+- Update the SRS whenever the user requests changes — keep in sync with the current implementation
+
+### Merge Gate
+- **All** Tested cells must be `[x]` before merging to main — `/merge-to-main` enforces this
+- **Archive on merge:** completed SRS merged into `SRS/SRS.md` under the appropriate existing section. If no existing section fits, ask the user before creating one. Delete the individual SRS file from `SRS/` after archiving.
 
 ## Project Overview
 
@@ -412,6 +424,7 @@ git commit -m "Start my-feature branch"
 - [ ] Commit history is clean and descriptive
 - [ ] Branch is up to date with main
 - [ ] README future features updated if applicable (strikethrough implemented items)
+- [ ] All SRS requirements marked `[x]` (if SRS exists for this branch)
 
 **Merging to main:**
 Use the `/merge-to-main` skill, which automates version bump, README updates, tagging, and branch cleanup. See the Version Management section below for version numbering details.
