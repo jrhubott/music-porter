@@ -3,6 +3,7 @@
 ## Active
 
 - [ ] Document web UI (web_ui.py and templates/) — API endpoints, setup instructions, and usage guide
+- [ ] Refactor web_ui.py — extract API route definitions into a separate module (e.g., `web_api.py`)
 
 ## Completed
 

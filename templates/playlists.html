@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Playlists - Music Porter{% endblock %}
+{% block title %}Playlists - Music Porter{% endblock title %}
 {% block content %}
 <h4 class="mb-4">Playlists</h4>
 
@@ -72,7 +72,7 @@
     </div>
   </div>
 </div>
-{% endblock %}
+{% endblock content %}
 
 {% block scripts %}
 <script>
@@ -151,4 +151,4 @@ function removePlaylist(key) {
 
 loadPlaylists();
 </script>
-{% endblock %}
+{% endblock scripts %}

@@ -1748,7 +1748,7 @@ Replace the binary today/not-today update check in the library summary playlist 
 |----|---------|--------|-------------|
 | 14.2.1 | v2.6.0 | [x] | The "Updated" column in `_render_playlist_table()` uses the freshness icon instead of the old binary ⚠️ check |
 | 14.2.2 | v2.6.0 | [x] | Format: `{icon} {MMM DD}` (e.g., `✅ Feb 23`, `⚠️ Feb 10`, `❌ Jan 05`) |
-| 14.2.3 | v2.6.0 | [x] | Recent level shows no icon — just the date (e.g., `  Feb 20`) |
+| 14.2.3 | v2.6.0 | [x] | Recent level shows no icon — just the date (e.g., `Feb 20`) |
 | 14.2.4 | v2.6.0 | [x] | Missing `last_modified` displays `❌ N/A` |
 
 ##### 14.3 Aggregate Freshness Statistics

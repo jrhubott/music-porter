@@ -1,2 +1,3 @@
 ruff>=0.11.0
 pymarkdownlnt>=0.9.25
+djlint>=1.36.4

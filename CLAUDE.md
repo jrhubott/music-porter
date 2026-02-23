@@ -385,7 +385,7 @@ pip install -r requirements.txt
 
 ### Linting
 
-The project uses **Ruff** (Python) and **PyMarkdown** (Markdown) for linting. All config lives in `pyproject.toml`.
+The project uses **Ruff** (Python), **PyMarkdown** (Markdown), and **djLint** (Jinja2/HTML templates) for linting. All config lives in `pyproject.toml`.
 
 ```bash
 # Install dev dependencies (once)
@@ -396,11 +396,16 @@ ruff check .                # Check for issues
 ruff check --fix .          # Auto-fix safe issues
 
 # Markdown linting
-pymarkdown scan -r .        # Check for issues
-pymarkdown fix -r .         # Auto-fix safe issues
+pymarkdown scan -r --respect-gitignore .        # Check for issues
+pymarkdown fix -r --respect-gitignore .         # Auto-fix safe issues
+
+# Template linting (Jinja2/HTML)
+djlint templates/ --lint    # Check for issues
+djlint templates/ --check   # Check formatting
+djlint templates/ --reformat  # Auto-fix formatting
 ```
 
-Both linters should pass clean before merging to main.
+All three linters should pass clean before merging to main.
 
 ### Feature Branch Workflow
 
@@ -642,6 +647,136 @@ git tag v1.2.0
 ├── MUSIC-PORTER-GUIDE.md            # Complete usage guide
 └── COOKIE-MANAGEMENT-GUIDE.md       # Cookie validation and refresh guide
 ```
+
+## Web Dashboard
+
+### Overview
+
+The web dashboard (`web_ui.py`) provides a browser-based interface with full feature parity to the CLI. Built with Flask and Bootstrap 5.3.3 (dark theme), it uses Server-Sent Events (SSE) for real-time progress streaming and a background task model that runs one major operation at a time.
+
+### Launch
+
+```bash
+# Start web dashboard (default: http://127.0.0.1:5555)
+./music-porter web
+
+# Custom host/port
+./music-porter web --host 0.0.0.0 --port 8080
+```
+
+### Pages (10 templates)
+
+| Route | Template | Purpose |
+|-------|----------|---------|
+| `GET /` | `dashboard.html` | Library stats, cookie status, sortable playlist table |
+| `GET /playlists` | `playlists.html` | Playlist CRUD management |
+| `GET /pipeline` | `pipeline.html` | Full pipeline workflow (download + convert + tag) |
+| `GET /convert` | `convert.html` | M4A to MP3 conversion |
+| `GET /tags` | `tags.html` | Tag update, restore, and reset operations |
+| `GET /cover-art` | `cover_art.html` | Cover art embed, extract, strip, resize |
+| `GET /usb` | `usb_sync.html` | USB drive sync |
+| `GET /settings` | `settings.html` | Profile, settings, and cookie management |
+| `GET /operations` | `operations.html` | Task history and status |
+| — | `base.html` | Base layout with sidebar, log panel, SSE handler |
+
+### API Endpoints (~26 endpoints)
+
+**Status & Info:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/status` | System status, cookies, library stats, profile, busy flag |
+| GET | `/api/summary` | Export library statistics with per-playlist breakdown |
+| GET | `/api/library-stats` | Source `music/` directory statistics |
+
+**Cookie Management:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/cookies/browsers` | Available browsers (default + installed list) |
+| POST | `/api/cookies/refresh` | Auto-refresh cookies from browser (background task) |
+
+**Playlist CRUD:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/playlists` | List all playlists |
+| POST | `/api/playlists` | Add new playlist (key, url, name) |
+| PUT | `/api/playlists/<key>` | Update playlist url/name |
+| DELETE | `/api/playlists/<key>` | Remove playlist |
+
+**Settings:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/settings` | Get settings, profiles, valid presets/structures/formats |
+| POST | `/api/settings` | Update settings (output\_type, usb\_dir, workers) |
+
+**Directory Listings:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/directories/music` | List `music/` subdirectories |
+| GET | `/api/directories/export` | List `export/<profile>/` playlists with file counts |
+
+**Operations (background tasks):**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/pipeline/run` | Execute full pipeline (playlist/url/auto mode) |
+| POST | `/api/convert/run` | Convert M4A to MP3 |
+| POST | `/api/tags/update` | Update album/artist tags |
+| POST | `/api/tags/restore` | Restore original tags from TXXX frames |
+| POST | `/api/tags/reset` | Reset tags from source M4A files |
+| POST | `/api/cover-art/<action>` | Cover art: embed, extract, update, strip, resize |
+| POST | `/api/usb/sync` | Sync files to USB drive |
+
+**USB:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/usb/drives` | List connected USB drives |
+
+**Task Management & Streaming:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/tasks` | List all background tasks |
+| GET | `/api/tasks/<task_id>` | Get task details |
+| POST | `/api/tasks/<task_id>/cancel` | Cancel running task |
+| GET | `/api/stream/<task_id>` | SSE live log/progress stream |
+
+### Architecture
+
+**Key classes in `web_ui.py`:**
+
+- `WebLogger` — Subclass of `Logger` that routes messages to SSE queue (strips ANSI codes)
+- `WebDisplayHandler` — Implements DisplayHandler protocol for SSE progress events
+- `TaskState` — Dataclass holding task id, status, result, thread, cancel\_event, log\_queue
+- `TaskManager` — Manages one background operation at a time with `threading.RLock()`
+
+**Background task model:**
+
+1. POST request submits task → `task_manager.submit()` → returns `task_id` (or 409 if busy)
+2. Background thread runs operation with `WebLogger` wired to SSE queue
+3. Frontend subscribes to `GET /api/stream/<task_id>` for real-time `log`/`progress`/`heartbeat`/`done` events
+4. Sentinel (`None`) in queue signals task completion
+
+**Security:**
+
+- `_safe_dir()` validates all directory parameters are within project root (prevents path traversal)
+- No authentication or CORS (local development/trusted-network tool)
+
+### Template Structure
+
+10 Jinja2 templates in `templates/` using Bootstrap 5.3.3 dark theme (CDN-served from jsDelivr). `base.html` provides the shared layout with sidebar navigation, log panel, toast notifications, and SSE handler. All page templates extend `base.html`.
+
+### Limitations
+
+- No authentication — intended for local/trusted-network use only
+- No concurrent operations — one background task at a time (HTTP 409 if busy)
+- No custom VBR quality via web UI (only named presets: lossless, high, medium, low)
+- Local-only by default (`127.0.0.1`); use `--host 0.0.0.0` for network access
 
 ## Important Implementation Notes
 

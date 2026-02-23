@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}USB Sync - Music Porter{% endblock %}
+{% block title %}USB Sync - Music Porter{% endblock title %}
 {% block content %}
 <h4 class="mb-4">USB Sync</h4>
 
@@ -53,7 +53,7 @@
     </div>
   </div>
 </div>
-{% endblock %}
+{% endblock content %}
 
 {% block scripts %}
 <script>
@@ -114,4 +114,4 @@ document.getElementById('usbForm').addEventListener('submit', function(e) {
 loadSources();
 loadDrives();
 </script>
-{% endblock %}
+{% endblock scripts %}

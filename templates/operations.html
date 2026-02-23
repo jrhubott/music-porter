@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Operations - Music Porter{% endblock %}
+{% block title %}Operations - Music Porter{% endblock title %}
 {% block content %}
 <h4 class="mb-4">Operations</h4>
 
@@ -38,7 +38,7 @@
     <div class="log-panel" id="taskLog"></div>
   </div>
 </div>
-{% endblock %}
+{% endblock content %}
 
 {% block scripts %}
 <script>
@@ -123,4 +123,4 @@ document.getElementById('refreshTasks').addEventListener('click', loadTasks);
 loadTasks();
 setInterval(loadTasks, 5000);
 </script>
-{% endblock %}
+{% endblock scripts %}

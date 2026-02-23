@@ -73,3 +73,13 @@ md046.enabled = false   # Code block style — mixed fenced/indented
 md003.style = "atx"            # ATX-style headings (# Heading)
 md004.style = "dash"           # Dash for unordered lists
 md029.style = "ordered"        # Ordered list numbering (1. 2. 3.)
+
+# ── djLint ──────────────────────────────────────────────────────
+[tool.djlint]
+profile = "jinja"
+ignore = "H021,H023,H030,H031,J018"
+# H021 — inline styles: Bootstrap progress bars require inline width
+# H023 — entity references: &rarr; etc. are valid HTML
+# H030 — meta description: not needed for local dev tool
+# H031 — meta keywords: not needed for local dev tool
+# J018 — url_for(): routes are simple fixed paths, not dynamic
