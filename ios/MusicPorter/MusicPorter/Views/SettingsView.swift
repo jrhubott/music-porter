@@ -40,9 +40,6 @@ struct SettingsView: View {
                     NavigationLink("Apple Music") {
                         AppleMusicBrowserView()
                     }
-                    NavigationLink("USB Export") {
-                        USBSyncView()
-                    }
                 }
 
                 Section("About") {

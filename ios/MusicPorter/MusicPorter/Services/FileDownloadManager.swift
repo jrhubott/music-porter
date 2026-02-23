@@ -12,10 +12,18 @@ struct DownloadProgress {
     }
 }
 
+/// Progress state for a multi-playlist download-all operation.
+struct BulkDownloadProgress {
+    var completedPlaylists: Int
+    var totalPlaylists: Int
+    var currentPlaylistName: String
+}
+
 /// Manages downloading MP3 files from the server to the device.
 @MainActor @Observable
 final class FileDownloadManager {
     var downloadProgress: DownloadProgress?
+    var bulkProgress: BulkDownloadProgress?
 
     @ObservationIgnored private var apiClient: APIClient?
 
@@ -45,6 +53,7 @@ final class FileDownloadManager {
     }
 
     /// Download all files in a playlist individually, skipping files that already exist locally.
+    /// Respects cooperative cancellation — checks `Task.isCancelled` between files.
     func downloadAll(playlist: String) async throws {
         guard let apiClient else {
             throw FileDownloadError.notConfigured
@@ -66,6 +75,8 @@ final class FileDownloadManager {
         try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
 
         for (index, track) in toDownload.enumerated() {
+            try Task.checkCancellation()
+
             downloadProgress = DownloadProgress(
                 completed: index, total: total, currentFile: track.filename)
 
@@ -88,6 +99,8 @@ final class FileDownloadManager {
                     try FileManager.default.removeItem(at: destFile)
                 }
                 try FileManager.default.moveItem(at: tempURL, to: destFile)
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
                 // Skip failed files and continue with the rest
                 continue
@@ -97,9 +110,35 @@ final class FileDownloadManager {
         downloadProgress = DownloadProgress(completed: total, total: total, currentFile: "")
     }
 
+    /// Download all playlists sequentially.
+    /// Respects cooperative cancellation between playlists.
+    func downloadAllPlaylists(dirs: [ExportDirectory]) async throws {
+        let total = dirs.count
+        guard total > 0 else { return }
+
+        for (index, dir) in dirs.enumerated() {
+            try Task.checkCancellation()
+
+            bulkProgress = BulkDownloadProgress(
+                completedPlaylists: index,
+                totalPlaylists: total,
+                currentPlaylistName: dir.displayName
+            )
+
+            try await downloadAll(playlist: dir.name)
+        }
+
+        bulkProgress = BulkDownloadProgress(
+            completedPlaylists: total,
+            totalPlaylists: total,
+            currentPlaylistName: ""
+        )
+    }
+
     /// Clear download progress (call after download completes).
     func clearProgress() {
         downloadProgress = nil
+        bulkProgress = nil
     }
 
     /// Get the local directory for a playlist's downloads.

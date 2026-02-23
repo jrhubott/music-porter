@@ -2,47 +2,32 @@ import Foundation
 import UIKit
 import UniformTypeIdentifiers
 
-/// Handles exporting downloaded MP3 files to USB drives via UIDocumentPickerViewController.
+/// Handles exporting downloaded MP3 files to a user-selected folder (USB drive, external storage, etc.).
 @Observable
 final class USBExportService {
     var isExporting = false
     var exportProgress: Double = 0
+    var currentFileName: String?
     var lastExportResult: ExportResult?
 
-    /// Present a folder picker and copy files to the selected location.
+    /// Copy files to a destination directory selected via DocumentExportPicker.
     @MainActor
-    func exportFiles(urls: [URL], from viewController: UIViewController) async -> ExportResult {
+    func exportFiles(urls: [URL], to destDir: URL) async -> ExportResult {
         isExporting = true
         exportProgress = 0
+        currentFileName = nil
+        lastExportResult = nil
 
-        return await withCheckedContinuation { continuation in
-            let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder])
-            picker.allowsMultipleSelection = false
+        let result = await copyFiles(urls, to: destDir)
+        isExporting = false
+        lastExportResult = result
+        return result
+    }
 
-            let delegate = PickerDelegate { [weak self] selectedURL in
-                guard let self, let destDir = selectedURL else {
-                    let result = ExportResult(success: false, filesCopied: 0, message: "Export cancelled")
-                    self?.isExporting = false
-                    self?.lastExportResult = result
-                    continuation.resume(returning: result)
-                    return
-                }
-
-                Task {
-                    let result = await self.copyFiles(urls, to: destDir)
-                    await MainActor.run {
-                        self.isExporting = false
-                        self.lastExportResult = result
-                    }
-                    continuation.resume(returning: result)
-                }
-            }
-
-            picker.delegate = delegate
-            // Keep delegate alive
-            objc_setAssociatedObject(picker, "delegate", delegate, .OBJC_ASSOCIATION_RETAIN)
-            viewController.present(picker, animated: true)
-        }
+    @MainActor
+    func reset() {
+        lastExportResult = nil
+        currentFileName = nil
     }
 
     private func copyFiles(_ urls: [URL], to destDir: URL) async -> ExportResult {
@@ -54,7 +39,13 @@ final class USBExportService {
         let total = urls.count
 
         for (index, source) in urls.enumerated() {
-            let dest = destDir.appendingPathComponent(source.lastPathComponent)
+            let name = source.lastPathComponent
+            await MainActor.run {
+                self.currentFileName = name
+                self.exportProgress = Double(index) / Double(total)
+            }
+
+            let dest = destDir.appendingPathComponent(name)
             do {
                 if FileManager.default.fileExists(atPath: dest.path) {
                     try FileManager.default.removeItem(at: dest)
@@ -64,14 +55,17 @@ final class USBExportService {
             } catch {
                 failed += 1
             }
-            await MainActor.run {
-                self.exportProgress = Double(index + 1) / Double(total)
-            }
+        }
+
+        await MainActor.run {
+            self.exportProgress = 1.0
+            self.currentFileName = nil
         }
 
         return ExportResult(
             success: failed == 0,
             filesCopied: copied,
+            totalFiles: total,
             message: failed == 0
                 ? "Exported \(copied) files"
                 : "Exported \(copied) files, \(failed) failed"
@@ -82,22 +76,6 @@ final class USBExportService {
 struct ExportResult {
     let success: Bool
     let filesCopied: Int
+    let totalFiles: Int
     let message: String
-}
-
-/// Internal delegate for UIDocumentPickerViewController.
-private class PickerDelegate: NSObject, UIDocumentPickerDelegate {
-    let completion: (URL?) -> Void
-
-    init(completion: @escaping (URL?) -> Void) {
-        self.completion = completion
-    }
-
-    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-        completion(urls.first)
-    }
-
-    func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
-        completion(nil)
-    }
 }

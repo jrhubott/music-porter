@@ -7,47 +7,46 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A10000001 /* MusicPorterApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000001; };
-		A10000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000002; };
-		A10000003 /* ServerDiscoveryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000003; };
-		A10000004 /* PairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000004; };
-		A10000005 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000005; };
-		A10000006 /* PlaylistsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000006; };
-		A10000007 /* PlaylistDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000007; };
-		A10000008 /* PipelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000008; };
-		A10000009 /* DownloadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000009; };
-		A1000000A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000A; };
-		A1000000B /* OperationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000B; };
-		A1000000C /* AppleMusicBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000C; };
-		A1000000D /* USBSyncView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000D; };
-		A1000000E /* ProgressPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000E; };
-		A1000000F /* StatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000F; };
-		A10000010 /* TrackRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010; };
-		A10000011 /* Color+Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000011; };
-		A10000012 /* ServerConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000012; };
-		A10000013 /* Playlist.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000013; };
-		A10000014 /* Track.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000014; };
-		A10000015 /* ServerStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000015; };
-		A10000016 /* TaskInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000016; };
-		A10000017 /* SSEEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000017; };
-		A10000018 /* FileListResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000018; };
-		A10000019 /* ExportDirectory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000019; };
-		A1000001A /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001A; };
-		A1000001B /* ServerDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001B; };
-		A1000001C /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001C; };
-		A1000001D /* SSEClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001D; };
-		A1000001E /* MusicKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001E; };
-		A1000001F /* FileDownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001F; };
-		A10000020 /* USBExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000020; };
-		A10000021 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000021; };
-		A10000022 /* DashboardViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000022; };
-		A10000023 /* PlaylistsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000023; };
-		A10000024 /* PlaylistDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000024; };
-		A10000025 /* OperationViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000025; };
+		A10000001 /* MusicPorterApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000001 /* MusicPorterApp.swift */; };
+		A10000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000002 /* ContentView.swift */; };
+		A10000003 /* ServerDiscoveryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000003 /* ServerDiscoveryView.swift */; };
+		A10000004 /* PairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000004 /* PairingView.swift */; };
+		A10000005 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000005 /* DashboardView.swift */; };
+		A10000006 /* PlaylistsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000006 /* PlaylistsView.swift */; };
+		A10000007 /* PlaylistDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000007 /* PlaylistDetailView.swift */; };
+		A10000008 /* PipelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000008 /* PipelineView.swift */; };
+		A10000009 /* DownloadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000009 /* DownloadView.swift */; };
+		A1000000A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000A /* SettingsView.swift */; };
+		A1000000B /* OperationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000B /* OperationsView.swift */; };
+		A1000000C /* AppleMusicBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000C /* AppleMusicBrowserView.swift */; };
+		A10000026 /* DocumentExportPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000026 /* DocumentExportPicker.swift */; };
+		A1000000E /* ProgressPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000E /* ProgressPanel.swift */; };
+		A1000000F /* StatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000F /* StatusBadge.swift */; };
+		A10000010 /* TrackRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010 /* TrackRow.swift */; };
+		A10000011 /* Color+Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000011 /* Color+Theme.swift */; };
+		A10000012 /* ServerConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000012 /* ServerConnection.swift */; };
+		A10000013 /* Playlist.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000013 /* Playlist.swift */; };
+		A10000014 /* Track.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000014 /* Track.swift */; };
+		A10000015 /* ServerStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000015 /* ServerStatus.swift */; };
+		A10000016 /* TaskInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000016 /* TaskInfo.swift */; };
+		A10000017 /* SSEEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000017 /* SSEEvent.swift */; };
+		A10000018 /* FileListResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000018 /* FileListResponse.swift */; };
+		A10000019 /* ExportDirectory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000019 /* ExportDirectory.swift */; };
+		A1000001A /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001A /* KeychainService.swift */; };
+		A1000001B /* ServerDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001B /* ServerDiscovery.swift */; };
+		A1000001C /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001C /* APIClient.swift */; };
+		A1000001D /* SSEClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001D /* SSEClient.swift */; };
+		A1000001E /* MusicKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001E /* MusicKitService.swift */; };
+		A1000001F /* FileDownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001F /* FileDownloadManager.swift */; };
+		A10000020 /* USBExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000020 /* USBExportService.swift */; };
+		A10000021 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000021 /* AppState.swift */; };
+		A10000022 /* DashboardViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000022 /* DashboardViewModel.swift */; };
+		A10000023 /* PlaylistsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000023 /* PlaylistsViewModel.swift */; };
+		A10000024 /* PlaylistDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000024 /* PlaylistDetailViewModel.swift */; };
+		A10000025 /* OperationViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000025 /* OperationViewModel.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		A30000001 /* MusicPorter.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MusicPorter.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000001 /* MusicPorterApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicPorterApp.swift; sourceTree = "<group>"; };
 		A20000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A20000003 /* ServerDiscoveryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDiscoveryView.swift; sourceTree = "<group>"; };
@@ -60,7 +59,7 @@
 		A2000000A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A2000000B /* OperationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationsView.swift; sourceTree = "<group>"; };
 		A2000000C /* AppleMusicBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicBrowserView.swift; sourceTree = "<group>"; };
-		A2000000D /* USBSyncView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = USBSyncView.swift; sourceTree = "<group>"; };
+		A20000026 /* DocumentExportPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentExportPicker.swift; sourceTree = "<group>"; };
 		A2000000E /* ProgressPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressPanel.swift; sourceTree = "<group>"; };
 		A2000000F /* StatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBadge.swift; sourceTree = "<group>"; };
 		A20000010 /* TrackRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackRow.swift; sourceTree = "<group>"; };
@@ -87,6 +86,7 @@
 		A20000025 /* OperationViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationViewModel.swift; sourceTree = "<group>"; };
 		A20000030 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A20000031 /* MusicPorter.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MusicPorter.entitlements; sourceTree = "<group>"; };
+		A30000001 /* MusicPorter.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MusicPorter.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -178,7 +178,6 @@
 				A2000000A /* SettingsView.swift */,
 				A2000000B /* OperationsView.swift */,
 				A2000000C /* AppleMusicBrowserView.swift */,
-				A2000000D /* USBSyncView.swift */,
 				A50000007 /* Components */,
 			);
 			path = Views;
@@ -187,6 +186,7 @@
 		A50000007 /* Components */ = {
 			isa = PBXGroup;
 			children = (
+				A20000026 /* DocumentExportPicker.swift */,
 				A2000000E /* ProgressPanel.swift */,
 				A2000000F /* StatusBadge.swift */,
 				A20000010 /* TrackRow.swift */,
@@ -279,7 +279,7 @@
 				A1000000A /* SettingsView.swift in Sources */,
 				A1000000B /* OperationsView.swift in Sources */,
 				A1000000C /* AppleMusicBrowserView.swift in Sources */,
-				A1000000D /* USBSyncView.swift in Sources */,
+				A10000026 /* DocumentExportPicker.swift in Sources */,
 				A1000000E /* ProgressPanel.swift in Sources */,
 				A1000000F /* StatusBadge.swift in Sources */,
 				A10000010 /* TrackRow.swift in Sources */,
@@ -369,6 +369,7 @@
 				CODE_SIGN_ENTITLEMENTS = MusicPorter/MusicPorter.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 87NLB3L2H3;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MusicPorter/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -397,6 +398,7 @@
 				CODE_SIGN_ENTITLEMENTS = MusicPorter/MusicPorter.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 87NLB3L2H3;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MusicPorter/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -439,7 +441,6 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-
 	};
 	rootObject = A90000001 /* Project object */;
 }
