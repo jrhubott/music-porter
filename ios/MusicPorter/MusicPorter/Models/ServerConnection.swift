@@ -10,7 +10,11 @@ struct ServerConnection: Identifiable, Codable, Hashable {
     var platform: String?
 
     var baseURL: URL? {
-        URL(string: "http://\(host):\(port)")
+        // IPv6 addresses contain colons and must be bracketed in URLs
+        if host.contains(":") {
+            return URL(string: "http://[\(host)]:\(port)")
+        }
+        return URL(string: "http://\(host):\(port)")
     }
 
     func apiURL(path: String) -> URL? {

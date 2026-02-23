@@ -46,12 +46,27 @@ final class AppState {
     }
 
     /// Try to reconnect using saved server and keychain API key.
+    /// Times out after 3 seconds to avoid blocking the UI.
     func attemptAutoReconnect() async -> Bool {
         guard let server = savedServer, let apiKey = KeychainService.load() else { return false }
         do {
-            try await connect(server: server, apiKey: apiKey)
+            try await withThrowingTaskGroup(of: Bool.self) { group in
+                group.addTask {
+                    try await self.connect(server: server, apiKey: apiKey)
+                    return true
+                }
+                group.addTask {
+                    try await Task.sleep(for: .seconds(3))
+                    throw CancellationError()
+                }
+                let result = try await group.next() ?? false
+                group.cancelAll()
+                return result
+            }
             return true
         } catch {
+            // Clear stale saved connection on failure
+            savedServer = nil
             return false
         }
     }
