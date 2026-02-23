@@ -3,6 +3,18 @@ web_ui.py - Flask web dashboard for music-porter
 
 Provides a browser-based UI for all music-porter operations with
 live log streaming via Server-Sent Events (SSE).
+
+User Prompt Handling (SRS 2.4.3):
+    Web operations intentionally use NonInteractivePromptHandler (the default
+    when no handler is passed to business classes).  All web tasks are
+    fire-and-forget background jobs — there is no modal dialog infrastructure
+    for mid-operation prompts.  NonInteractivePromptHandler returns safe
+    defaults: deny destructive actions, skip optional prompts, return
+    default values for text input.
+
+Display Handling (SRS 2.6.4):
+    WebDisplayHandler translates show_progress() / show_status() calls into
+    SSE events pushed to the frontend via /api/stream/<task_id>.
 """
 
 import json
@@ -90,6 +102,50 @@ class WebLogger(mp.Logger):
 
     def unregister_bar(self, bar):
         pass
+
+
+# ══════════════════════════════════════════════════════════════════
+# WebDisplayHandler — DisplayHandler for SSE progress events
+# ══════════════════════════════════════════════════════════════════
+
+
+class WebDisplayHandler:
+    """DisplayHandler that pushes progress to SSE queue for web UI.
+
+    Implements the DisplayHandler protocol (porter_core) so that business
+    classes route show_progress / show_status calls here instead of the
+    NullDisplayHandler default.  Each call enqueues an SSE event that the
+    frontend receives via /api/stream/<task_id>.
+    """
+
+    def __init__(self, log_queue, cancel_event=None):
+        self._queue = log_queue
+        self._cancel_event = cancel_event
+        self._last_pct = -1
+
+    def show_progress(self, current, total, message):
+        if self._cancel_event and self._cancel_event.is_set():
+            return
+        if total > 0:
+            pct = int(current * 100 / total)
+            if pct != self._last_pct:
+                self._last_pct = pct
+                self._queue.put({
+                    'type': 'progress',
+                    'current': current,
+                    'total': total,
+                    'percent': pct,
+                    'stage': message,
+                })
+
+    def finish_progress(self):
+        self._last_pct = -1
+
+    def show_status(self, message, level="info"):
+        self._queue.put({'level': level.upper(), 'message': message})
+
+    def show_banner(self, title, subtitle=None):
+        pass  # Web UI has its own page headers
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -215,6 +271,11 @@ def create_app(project_root=None):
     def _make_logger(task_id, verbose=False):
         task = task_manager.get(task_id)
         return WebLogger(task.log_queue, task.cancel_event, verbose=verbose)
+
+    def _make_display_handler(task_id):
+        """Create a WebDisplayHandler wired to the task's SSE queue."""
+        task = task_manager.get(task_id)
+        return WebDisplayHandler(task.log_queue, task.cancel_event)
 
     def _get_config():
         logger = mp.Logger(verbose=False)
@@ -601,11 +662,13 @@ def create_app(project_root=None):
             deps = mp.DependencyChecker(logger)
 
             quality_preset = preset or profile.quality_preset
+            display = _make_display_handler(task_id)
             orchestrator = mp.PipelineOrchestrator(
                 logger, deps, config,
                 quality_preset=quality_preset,
                 workers=workers,
                 output_profile=profile,
+                display_handler=display,
             )
 
             if auto:
@@ -677,9 +740,11 @@ def create_app(project_root=None):
             workers = config.get_setting('workers', mp.DEFAULT_WORKERS)
 
             out = output_dir if output_dir else mp.get_export_dir(profile.name)
+            display = _make_display_handler(task_id)
             converter = mp.Converter(
                 logger, quality_preset=preset, workers=workers,
                 embed_cover_art=not no_cover_art, output_profile=profile,
+                display_handler=display,
             )
             convert_result = converter.convert(safe_input, out, force=force,
                                                dry_run=dry_run, verbose=verbose)
@@ -714,7 +779,9 @@ def create_app(project_root=None):
             logger = _make_logger(task_id, verbose=verbose)
             config = mp.ConfigManager(logger=logger)
             profile = _get_output_profile(config)
-            tagger = mp.TaggerManager(logger, output_profile=profile)
+            display = _make_display_handler(task_id)
+            tagger = mp.TaggerManager(logger, output_profile=profile,
+                                      display_handler=display)
             tag_result = tagger.update_tags(safe, new_album=album, new_artist=artist,
                                             dry_run=dry_run, verbose=verbose)
             return {'success': tag_result.success}
@@ -748,7 +815,9 @@ def create_app(project_root=None):
             logger = _make_logger(task_id, verbose=verbose)
             config = mp.ConfigManager(logger=logger)
             profile = _get_output_profile(config)
-            tagger = mp.TaggerManager(logger, output_profile=profile)
+            display = _make_display_handler(task_id)
+            tagger = mp.TaggerManager(logger, output_profile=profile,
+                                      display_handler=display)
             restore_result = tagger.restore_tags(
                 safe,
                 restore_album=restore_all or restore_album,
@@ -785,7 +854,9 @@ def create_app(project_root=None):
             logger = _make_logger(task_id, verbose=verbose)
             config = mp.ConfigManager(logger=logger)
             profile = _get_output_profile(config)
-            tagger = mp.TaggerManager(logger, output_profile=profile)
+            display = _make_display_handler(task_id)
+            tagger = mp.TaggerManager(logger, output_profile=profile,
+                                      display_handler=display)
             success = tagger.reset_tags_from_source(safe_in, safe_out,
                                                      dry_run=dry_run, verbose=verbose)
             return {'success': success}
@@ -820,7 +891,9 @@ def create_app(project_root=None):
             logger = _make_logger(task_id, verbose=verbose)
             config = mp.ConfigManager(logger=logger)
             profile = _get_output_profile(config)
-            cam = mp.CoverArtManager(logger, output_profile=profile)
+            display = _make_display_handler(task_id)
+            cam = mp.CoverArtManager(logger, output_profile=profile,
+                                     display_handler=display)
 
             if action == 'embed':
                 source = data.get('source')
@@ -881,7 +954,8 @@ def create_app(project_root=None):
 
         def _run(task_id):
             logger = _make_logger(task_id, verbose=verbose)
-            usb_mgr = mp.USBManager(logger)
+            display = _make_display_handler(task_id)
+            usb_mgr = mp.USBManager(logger, display_handler=display)
             usb_result = usb_mgr.sync_to_usb(
                 source_dir, usb_dir=usb_dir, dry_run=dry_run, volume=volume,
             )
