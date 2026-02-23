@@ -430,7 +430,7 @@ The tool uses a "hard gate" protection system for original metadata:
 7. **Tag history** - Track changes to tags over time
 8. **Backup and restore** - Backup entire library with metadata
 9. **Cloud storage sync** - Sync to Dropbox, Google Drive, etc.
-10. **Mobile app** - iOS/Android app for remote control
+10. ~~**Mobile app** - iOS/Android app for remote control~~ *(implemented in v2.8.0)*
 11. **Scheduling** - Automatic periodic syncing on schedule
 12. **Notification system** - Email/SMS alerts for completed operations
 13. ~~**Custom filename templates** - Configurable output filename patterns~~ *(implemented in v2.3.0)*
