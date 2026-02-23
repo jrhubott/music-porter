@@ -396,8 +396,8 @@ ruff check .                # Check for issues
 ruff check --fix .          # Auto-fix safe issues
 
 # Markdown linting
-pymarkdown scan -r .        # Check for issues
-pymarkdown fix -r .         # Auto-fix safe issues
+pymarkdown scan -r --respect-gitignore .        # Check for issues
+pymarkdown fix -r --respect-gitignore .         # Auto-fix safe issues
 
 # Template linting (Jinja2/HTML)
 djlint templates/ --lint    # Check for issues
