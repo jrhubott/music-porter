@@ -1421,8 +1421,10 @@ class DependencyCheckResult:
 class TaggerManager:
     """Manages MP3 tag operations (update, restore, reset)."""
 
-    def __init__(self, logger=None, cleanup_options=None, output_profile=None):
+    def __init__(self, logger=None, cleanup_options=None, output_profile=None,
+                 prompt_handler=None):
         self.logger = logger or Logger()
+        self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
         self.output_profile = output_profile or OUTPUT_PROFILES[DEFAULT_OUTPUT_TYPE]
         if output_profile is not None:
             self.cleanup_options = {
@@ -1839,19 +1841,12 @@ class TaggerManager:
 
         # Confirmation prompt (unless dry-run)
         if not dry_run:
-            self.logger.warn("⚠️  WARNING: --reset-tags will permanently overwrite all")
-            self.logger.warn(f"   TXXX:Original* protection tags in '{output_path}'")
-            self.logger.warn(f"   with values read fresh from '{input_path}'.")
-            self.logger.warn("   This cannot be undone.")
-            print()
-            try:
-                confirm = input("   Type 'yes' to continue, anything else to cancel: ").strip().lower()
-                if confirm != "yes":
-                    self.logger.info("Cancelled. No files were modified.")
-                    return False
-                print()
-            except KeyboardInterrupt:
-                print("\n\nCancelled by user")
+            msg = (f"WARNING: --reset-tags will permanently overwrite all "
+                   f"TXXX:Original* protection tags in '{output_path}' "
+                   f"with values read fresh from '{input_path}'. "
+                   f"This cannot be undone.")
+            if not self.prompt_handler.confirm_destructive(msg):
+                self.logger.info("Cancelled. No files were modified.")
                 return False
 
         for input_file in m4a_files:
@@ -2386,10 +2381,13 @@ class DownloadStatistics:
 class Downloader:
     """Manages downloads from Apple Music using gamdl."""
 
-    def __init__(self, logger=None, venv_python=None, cookie_path='cookies.txt'):
+    def __init__(self, logger=None, venv_python=None, cookie_path='cookies.txt',
+                 prompt_handler=None):
         self.logger = logger or Logger()
+        self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
         self.venv_python = venv_python or sys.executable
-        self.cookie_manager = CookieManager(cookie_path, logger=self.logger)
+        self.cookie_manager = CookieManager(cookie_path, logger=self.logger,
+                                            prompt_handler=self.prompt_handler)
 
     def extract_url_info(self, url):
         """
@@ -2482,8 +2480,7 @@ class Downloader:
 
                     # In interactive mode, offer auto-refresh first
                     if confirm:
-                        response = input("Attempt automatic cookie refresh? [Y/n] ").strip().lower()
-                        if response in ['', 'y', 'yes']:
+                        if self.prompt_handler.confirm("Attempt automatic cookie refresh?", default=True):
                             # User wants to try auto-refresh
                             if self.cookie_manager.auto_refresh():
                                 # Refresh succeeded, re-validate
@@ -2496,14 +2493,12 @@ class Downloader:
                             else:
                                 self.logger.error("Automatic cookie refresh failed")
                                 # Ask if they want to continue anyway
-                                response = input("Continue without valid cookies? [y/N] ").strip().lower()
-                                if response != 'y':
+                                if not self.prompt_handler.confirm("Continue without valid cookies?", default=False):
                                     self.logger.info("Aborted")
                                     return False, None, None, None
                         else:
                             # User declined auto-refresh, ask if they want to continue
-                            response = input("Continue without valid cookies? [y/N] ").strip().lower()
-                            if response != 'y':
+                            if not self.prompt_handler.confirm("Continue without valid cookies?", default=False):
                                 self.logger.info("Aborted")
                                 return False, None, None, None
                     else:
@@ -2513,8 +2508,7 @@ class Downloader:
 
         # Confirmation prompt (unless auto mode)
         if confirm:
-            response = input(f"Download {key}? [y/N] ").strip().lower()
-            if response != 'y':
+            if not self.prompt_handler.confirm(f"Download {key}?", default=False):
                 self.logger.info(f"Skipping download for {key}")
                 return False, key, album_name, None
 
@@ -2670,9 +2664,10 @@ class CookieStatus:
 class CookieManager:
     """Manages Apple Music cookie validation and refresh."""
 
-    def __init__(self, cookie_path='cookies.txt', logger=None):
+    def __init__(self, cookie_path='cookies.txt', logger=None, prompt_handler=None):
         self.cookie_path = Path(cookie_path)
         self.logger = logger or Logger()
+        self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
         self.required_domain = '.music.apple.com'
         self.required_cookie_name = 'media-user-token'
 
@@ -2885,62 +2880,27 @@ class CookieManager:
             # Only one browser available, use it automatically
             return available_browsers
 
-        try:
-            print("\n" + "=" * 60)
-            print("Select Browser for Cookie Extraction")
-            print("=" * 60)
-            print("\nDetected browsers:\n")
+        # Build options: each browser + "Try all browsers"
+        options = [
+            f"{b.capitalize()}{' (default)' if b == default_browser else ''}"
+            for b in available_browsers
+        ]
+        options.append("Try all browsers")
 
-            for i, browser in enumerate(available_browsers, 1):
-                default_marker = " (default)" if browser == default_browser else ""
-                print(f"  {i}. {browser.capitalize()}{default_marker}")
+        selection = self.prompt_handler.select_from_list(
+            "Select browser for cookie extraction", options, allow_cancel=True)
 
-            print(f"\n  A. Try all browsers (recommended if issues occur)")
-            print(f"  X. Cancel\n")
-
-            response = input("Select browser [1] or press Enter for default: ").strip()
-
-            # Empty = use default browser only
-            if response == "":
-                if default_browser:
-                    self.logger.info(f"Using default browser: {default_browser.capitalize()}")
-                    return [default_browser]
-                else:
-                    # No default, use first available
-                    self.logger.info(f"Using: {available_browsers[0].capitalize()}")
-                    return [available_browsers[0]]
-
-            # X = cancel
-            if response.upper() == 'X':
-                return None
-
-            # A = try all browsers
-            if response.upper() == 'A':
-                self.logger.info("Will try all browsers if needed")
-                return available_browsers
-
-            # Number = specific browser
-            if response.isdigit():
-                idx = int(response) - 1
-                if 0 <= idx < len(available_browsers):
-                    selected = available_browsers[idx]
-                    self.logger.info(f"Using: {selected.capitalize()}")
-                    return [selected]
-                else:
-                    self.logger.error(f"Invalid selection: {response}")
-                    return self._prompt_browser_selection(available_browsers, default_browser)
-
-            # Invalid input
-            self.logger.error(f"Invalid selection: {response}")
-            return self._prompt_browser_selection(available_browsers, default_browser)
-
-        except KeyboardInterrupt:
-            print("\n\nCancelled by user")
+        if selection is None:
             return None
-        except Exception as e:
-            self.logger.error(f"Error in browser selection: {e}")
-            # Fallback to all browsers
+
+        # Last option = "Try all browsers"
+        if selection == len(available_browsers):
+            self.logger.info("Will try all browsers if needed")
             return available_browsers
+
+        selected = available_browsers[selection]
+        self.logger.info(f"Using: {selected.capitalize()}")
+        return [selected]
 
     def _extract_with_selenium(self, browser=None):
         """
@@ -3153,7 +3113,7 @@ class CookieManager:
     def _extract_cookies_from_driver(self, driver, browser_name, interactive=True):
         """Extract cookies from Selenium driver. Returns cookie_jar or None.
 
-        interactive: True = prompt with input() after login (CLI mode),
+        interactive: True = prompt via prompt_handler after login (CLI mode),
                      False = poll for login automatically (web UI mode).
         """
         import http.cookiejar
@@ -3177,7 +3137,7 @@ class CookieManager:
                 self.logger.warn("Not logged in to Apple Music")
 
                 if interactive:
-                    # CLI mode: quit headless, relaunch visible, wait for input()
+                    # CLI mode: quit headless, relaunch visible, wait for user
                     driver.quit()
                     self.logger.info(f"Launching visible {browser_name.capitalize()} for login...")
                     driver = self._launch_browser(browser_name, headless=False)
@@ -3194,7 +3154,7 @@ class CookieManager:
                     self.logger.info("3. Once logged in, press Enter here to continue")
                     self.logger.info("=" * 60 + "\n")
 
-                    input("Press Enter after logging in...")
+                    self.prompt_handler.wait_for_continue("Press Enter after logging in...")
                     time.sleep(2)  # Let cookies settle
                 else:
                     # Web UI mode: browser is already visible, poll for login
@@ -3401,8 +3361,9 @@ class USBSyncStatistics:
 class USBManager:
     """Manages USB drive detection and file copying."""
 
-    def __init__(self, logger=None, excluded_volumes=None):
+    def __init__(self, logger=None, excluded_volumes=None, prompt_handler=None):
         self.logger = logger or Logger()
+        self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
         self.excluded_volumes = excluded_volumes or EXCLUDED_USB_VOLUMES
 
     def find_usb_drives(self):
@@ -3515,22 +3476,12 @@ class USBManager:
             return volumes[0]
 
         # Multiple drives found - prompt user
-        print("Multiple drives found:")
-        for i, vol in enumerate(volumes, 1):
-            print(f"  {i}. {vol}")
+        selection = self.prompt_handler.select_from_list(
+            "Select USB drive", volumes, allow_cancel=True)
 
-        try:
-            selection = input("Select drive: ").strip()
-            index = int(selection) - 1
-
-            if 0 <= index < len(volumes):
-                return volumes[index]
-            else:
-                self.logger.error("Invalid selection")
-                return None
-        except (ValueError, KeyboardInterrupt):
-            self.logger.error("Invalid input")
-            return None
+        if selection is not None:
+            return volumes[selection]
+        return None
 
     def _should_copy_file(self, src_path, dst_path):
         """
@@ -3721,15 +3672,11 @@ class USBManager:
         Returns:
             bool: True if eject succeeded or was skipped, False if failed
         """
-        print()  # Spacing before prompt
+        if not self.prompt_handler.confirm(f"Eject USB drive '{volume_name}'?", default=False):
+            self.logger.info("Skipping USB eject")
+            return True
 
         try:
-            response = input(f"Eject USB drive '{volume_name}'? [y/N] ").strip().lower()
-
-            if response != 'y':
-                self.logger.info("Skipping USB eject")
-                return True
-
             self.logger.info(f"Ejecting USB drive: {volume_name}")
 
             if IS_MACOS:
@@ -3743,8 +3690,6 @@ class USBManager:
                 return True
 
         except KeyboardInterrupt:
-            # User pressed Ctrl+C during prompt
-            print()
             self.logger.info("Eject cancelled by user")
             return True
 
@@ -5123,8 +5068,10 @@ class PipelineOrchestrator:
     """Coordinates multi-stage workflows: download → convert → tag → USB sync."""
 
     def __init__(self, logger=None, deps=None, config=None, quality_preset='lossless',
-                 cookie_path='cookies.txt', workers=None, embed_cover_art=True, output_profile=None):
+                 cookie_path='cookies.txt', workers=None, embed_cover_art=True,
+                 output_profile=None, prompt_handler=None):
         self.logger = logger or Logger()
+        self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
         self.deps = deps or DependencyChecker(self.logger)
         self.config = config or ConfigManager(logger=self.logger)
         self.stats = PipelineStatistics()
@@ -5230,7 +5177,7 @@ class PipelineOrchestrator:
         # ── Stage 4: USB sync (optional) ───────────────────────────────
         if copy_to_usb:
             self.logger.info("\n=== STAGE 4: Copy to USB ===")
-            usb_manager = USBManager(self.logger)
+            usb_manager = USBManager(self.logger, prompt_handler=self.prompt_handler)
             success, usb_stats = usb_manager.sync_to_usb(
                 export_dir,
                 usb_dir=usb_dir,
@@ -5260,7 +5207,9 @@ class PipelineOrchestrator:
     def _download_from_url(self, url, auto, dry_run, verbose,
                            validate_cookies=True, auto_refresh_cookies=False):
         """Download playlist from URL."""
-        downloader = Downloader(self.logger, self.deps.venv_python, cookie_path=self.cookie_path)
+        downloader = Downloader(self.logger, self.deps.venv_python,
+                               cookie_path=self.cookie_path,
+                               prompt_handler=self.prompt_handler)
 
         key, album_name = downloader.extract_url_info(url)
         if not key:
@@ -5325,7 +5274,9 @@ class PipelineOrchestrator:
 
         output_dir = f"{DEFAULT_MUSIC_DIR}/{playlist.key}"
 
-        downloader = Downloader(self.logger, self.deps.venv_python, cookie_path=self.cookie_path)
+        downloader = Downloader(self.logger, self.deps.venv_python,
+                               cookie_path=self.cookie_path,
+                               prompt_handler=self.prompt_handler)
         success, _, _, download_stats = downloader.download(
             playlist.url,
             output_dir,
@@ -5354,13 +5305,8 @@ class PipelineOrchestrator:
 
     def _ask_save_to_config(self, key, url, album_name):
         """Ask user if they want to save a new playlist to config."""
-        try:
-            response = input(f"\nSave '{album_name}' to {DEFAULT_CONFIG_FILE}? [y/N] ").strip().lower()
-            if response == 'y':
-                self.config.add_playlist(key, url, album_name)
-        except KeyboardInterrupt:
-            print()
-            pass
+        if self.prompt_handler.confirm(f"Save '{album_name}' to {DEFAULT_CONFIG_FILE}?", default=False):
+            self.config.add_playlist(key, url, album_name)
 
     def _check_and_embed_cover_art(self, export_dir, auto, dry_run, verbose):
         """Check for missing cover art and embed if needed."""
@@ -5403,13 +5349,9 @@ class PipelineOrchestrator:
             self.logger.info(f"\n  {playlist_name}: {missing}/{total} files missing cover art — auto-embedding")
             should_embed = True
         else:
-            try:
-                self.logger.info(f"\n  {playlist_name}: {missing}/{total} files missing cover art")
-                response = input("Embed cover art from source files? [Y/n] ").strip().lower()
-                should_embed = response in ('', 'y', 'yes')
-            except KeyboardInterrupt:
-                print()
-                return
+            self.logger.info(f"\n  {playlist_name}: {missing}/{total} files missing cover art")
+            should_embed = self.prompt_handler.confirm(
+                "Embed cover art from source files?", default=True)
 
         if should_embed:
             cam = CoverArtManager(self.logger, output_profile=self.output_profile)
