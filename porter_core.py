@@ -1160,6 +1160,42 @@ class NullDisplayHandler:
         pass
 
 
+class LegacyDisplayHandler:
+    """Backward-compatible DisplayHandler that reproduces original print() behavior.
+
+    During the service layer migration, this was available for classes not yet
+    migrated to the DisplayHandler protocol. Now that migration is complete,
+    CLIDisplayHandler is the recommended handler for CLI use. This class
+    remains for backward compatibility.
+    """
+
+    def __init__(self, logger=None):
+        self._logger = logger
+        self._bar = None
+
+    def show_progress(self, current, total, message):
+        if self._bar is None or self._bar.total != total:
+            if self._bar is not None:
+                self._bar.close()
+            self._bar = ProgressBar(total=total, desc=message, logger=self._logger)
+        self._bar.update(1)
+
+    def finish_progress(self):
+        if self._bar is not None:
+            self._bar.close()
+            self._bar = None
+
+    def show_status(self, message, level="info"):
+        print(message)
+
+    def show_banner(self, title, subtitle=None):
+        print(f"\n{'=' * 60}")
+        print(f"  {title}")
+        if subtitle:
+            print(f"  {subtitle}")
+        print(f"{'=' * 60}\n")
+
+
 def _is_cancelled(event):
     """Check if a cancellation event has been signalled."""
     return event is not None and event.is_set()
