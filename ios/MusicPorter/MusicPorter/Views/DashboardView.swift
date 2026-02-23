@@ -8,6 +8,7 @@ struct DashboardView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
+                    apiVersionWarningSection
                     serverStatusSection
                     activeOperationsSection
                     sourceLibrarySection
@@ -27,6 +28,19 @@ struct DashboardView: View {
             .navigationTitle("Dashboard")
             .refreshable { await vm.load(api: appState.apiClient) }
             .task { await vm.load(api: appState.apiClient) }
+        }
+    }
+
+    // MARK: - API Version Warning
+
+    @ViewBuilder
+    private var apiVersionWarningSection: some View {
+        if let warning = appState.apiVersionWarning {
+            GroupBox {
+                Label(warning, systemImage: "exclamationmark.triangle.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(.yellow)
+            }
         }
     }
 

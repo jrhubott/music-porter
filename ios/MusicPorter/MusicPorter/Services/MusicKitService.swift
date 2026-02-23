@@ -7,6 +7,12 @@ final class MusicKitService {
     var isAuthorized = false
     var authorizationStatus: MusicAuthorization.Status = .notDetermined
 
+    init() {
+        let status = MusicAuthorization.currentStatus
+        authorizationStatus = status
+        isAuthorized = (status == .authorized)
+    }
+
     func requestAuthorization() async {
         let status = await MusicAuthorization.request()
         self.authorizationStatus = status

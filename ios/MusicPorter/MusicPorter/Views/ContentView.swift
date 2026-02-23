@@ -32,11 +32,11 @@ struct MainTabView: View {
             PlaylistsView()
                 .tabItem { Label("Playlists", systemImage: "music.note.list") }
 
+            AppleMusicView()
+                .tabItem { Label("Apple Music", systemImage: "music.quarternote.3") }
+
             PipelineView()
                 .tabItem { Label("Pipeline", systemImage: "arrow.triangle.2.circlepath") }
-
-            DownloadView()
-                .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
 
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gear") }

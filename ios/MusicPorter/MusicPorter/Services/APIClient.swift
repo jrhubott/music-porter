@@ -23,10 +23,10 @@ final class APIClient {
     }
 
     /// Validate the API key against the server.
-    func validateConnection() async throws -> Bool {
+    func validateConnection() async throws -> AuthValidateResponse {
         let response: AuthValidateResponse = try await post("/api/auth/validate", body: [:] as [String: String])
         isConnected = response.valid
-        return response.valid
+        return response
     }
 
     func disconnect() {
@@ -293,10 +293,12 @@ struct AuthValidateResponse: Codable {
     let valid: Bool
     let version: String
     let serverName: String
+    let apiVersion: Int?
 
     enum CodingKeys: String, CodingKey {
         case valid, version
         case serverName = "server_name"
+        case apiVersion = "api_version"
     }
 }
 

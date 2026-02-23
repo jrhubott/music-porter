@@ -15,7 +15,7 @@
 		A10000006 /* PlaylistsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000006 /* PlaylistsView.swift */; };
 		A10000007 /* PlaylistDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000007 /* PlaylistDetailView.swift */; };
 		A10000008 /* PipelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000008 /* PipelineView.swift */; };
-		A10000009 /* DownloadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000009 /* DownloadView.swift */; };
+		A10000027 /* AppleMusicView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000027 /* AppleMusicView.swift */; };
 		A1000000A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000A /* SettingsView.swift */; };
 		A1000000B /* OperationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000B /* OperationsView.swift */; };
 		A10000026 /* DocumentExportPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000026 /* DocumentExportPicker.swift */; };
@@ -54,7 +54,7 @@
 		A20000006 /* PlaylistsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistsView.swift; sourceTree = "<group>"; };
 		A20000007 /* PlaylistDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistDetailView.swift; sourceTree = "<group>"; };
 		A20000008 /* PipelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipelineView.swift; sourceTree = "<group>"; };
-		A20000009 /* DownloadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadView.swift; sourceTree = "<group>"; };
+		A20000027 /* AppleMusicView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicView.swift; sourceTree = "<group>"; };
 		A2000000A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A2000000B /* OperationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationsView.swift; sourceTree = "<group>"; };
 		A20000026 /* DocumentExportPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentExportPicker.swift; sourceTree = "<group>"; };
@@ -172,7 +172,7 @@
 				A20000006 /* PlaylistsView.swift */,
 				A20000007 /* PlaylistDetailView.swift */,
 				A20000008 /* PipelineView.swift */,
-				A20000009 /* DownloadView.swift */,
+				A20000027 /* AppleMusicView.swift */,
 				A2000000A /* SettingsView.swift */,
 				A2000000B /* OperationsView.swift */,
 				A50000007 /* Components */,
@@ -272,7 +272,7 @@
 				A10000006 /* PlaylistsView.swift in Sources */,
 				A10000007 /* PlaylistDetailView.swift in Sources */,
 				A10000008 /* PipelineView.swift in Sources */,
-				A10000009 /* DownloadView.swift in Sources */,
+				A10000027 /* AppleMusicView.swift in Sources */,
 				A1000000A /* SettingsView.swift in Sources */,
 				A1000000B /* OperationsView.swift in Sources */,
 				A10000026 /* DocumentExportPicker.swift in Sources */,

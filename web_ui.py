@@ -365,6 +365,7 @@ def create_app(project_root=None, no_auth=False):
             'valid': True,
             'version': mp.VERSION,
             'server_name': socket.gethostname(),
+            'api_version': 1,
         })
 
     @app.route('/api/server-info')

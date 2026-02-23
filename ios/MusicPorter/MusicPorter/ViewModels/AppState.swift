@@ -3,6 +3,9 @@ import Foundation
 /// Global app state shared across all views.
 @MainActor @Observable
 final class AppState {
+    /// The API version this iOS app expects from the server.
+    static let supportedAPIVersion = 1
+
     // Services
     let apiClient = APIClient()
     let discovery = ServerDiscovery()
@@ -13,6 +16,9 @@ final class AppState {
     // Connection state
     var isConnected: Bool { apiClient.isConnected }
     var currentServer: ServerConnection? { apiClient.server }
+
+    /// Non-nil when the server's API version doesn't match what this app expects.
+    var apiVersionWarning: String?
 
     // Saved connection for auto-reconnect
     var savedServer: ServerConnection? {
@@ -32,17 +38,35 @@ final class AppState {
     func connect(server: ServerConnection, apiKey: String) async throws {
         apiClient.configure(server: server, apiKey: apiKey)
         downloadManager.configure(apiClient: apiClient)
-        let valid = try await apiClient.validateConnection()
-        if valid {
+        let response = try await apiClient.validateConnection()
+        if response.valid {
             savedServer = server
+            checkAPIVersion(response.apiVersion)
         } else {
             throw APIError.unauthorized
+        }
+    }
+
+    private func checkAPIVersion(_ serverVersion: Int?) {
+        guard let serverVersion else {
+            apiVersionWarning = "Server does not report an API version. Some features may not work correctly. Update the server."
+            return
+        }
+        if serverVersion != Self.supportedAPIVersion {
+            if serverVersion > Self.supportedAPIVersion {
+                apiVersionWarning = "Server API version (\(serverVersion)) is newer than this app supports (\(Self.supportedAPIVersion)). Update the app for full compatibility."
+            } else {
+                apiVersionWarning = "Server API version (\(serverVersion)) is older than this app expects (\(Self.supportedAPIVersion)). Update the server for full compatibility."
+            }
+        } else {
+            apiVersionWarning = nil
         }
     }
 
     func disconnect() {
         apiClient.disconnect()
         savedServer = nil
+        apiVersionWarning = nil
     }
 
     /// Try to reconnect using saved server and keychain API key.
