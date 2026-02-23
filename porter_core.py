@@ -1160,6 +1160,11 @@ class NullDisplayHandler:
         pass
 
 
+def _is_cancelled(event):
+    """Check if a cancellation event has been signalled."""
+    return event is not None and event.is_set()
+
+
 class _DisplayProgress:
     """Adapter that maps ProgressBar .update()/.close() API to DisplayHandler.
 
@@ -1435,10 +1440,11 @@ class TaggerManager:
     """Manages MP3 tag operations (update, restore, reset)."""
 
     def __init__(self, logger=None, cleanup_options=None, output_profile=None,
-                 prompt_handler=None, display_handler=None):
+                 prompt_handler=None, display_handler=None, cancel_event=None):
         self.logger = logger or Logger()
         self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
         self.display_handler = display_handler or NullDisplayHandler()
+        self.cancel_event = cancel_event
         self.output_profile = output_profile or OUTPUT_PROFILES[DEFAULT_OUTPUT_TYPE]
         if output_profile is not None:
             self.cleanup_options = {
@@ -1489,6 +1495,9 @@ class TaggerManager:
 
         try:
             for filepath in mp3_files:
+                if _is_cancelled(self.cancel_event):
+                    self.logger.warn("Tag update cancelled by user")
+                    break
                 filename = filepath.relative_to(directory)
 
                 try:
@@ -1647,6 +1656,9 @@ class TaggerManager:
 
         try:
             for filepath in mp3_files:
+                if _is_cancelled(self.cancel_event):
+                    self.logger.warn("Tag restore cancelled by user")
+                    break
                 count += 1
                 filename = filepath.relative_to(directory)
 
@@ -1831,6 +1843,9 @@ class TaggerManager:
                                       files_matched=0, files_reset=0, files_skipped=0, errors=0)
 
         for input_file in m4a_files:
+            if _is_cancelled(self.cancel_event):
+                self.logger.warn("Tag reset cancelled by user")
+                break
             count += 1
             display_name = input_file.relative_to(input_path)
 
@@ -1980,9 +1995,10 @@ class Converter:
     """Manages M4A to MP3 conversion with tag preservation."""
 
     def __init__(self, logger=None, quality_preset='lossless', workers=None, embed_cover_art=True,
-                 output_profile=None, display_handler=None):
+                 output_profile=None, display_handler=None, cancel_event=None):
         self.logger = logger or Logger()
         self.display_handler = display_handler or NullDisplayHandler()
+        self.cancel_event = cancel_event
         self.stats = ConversionStatistics()
         self.quality_preset = quality_preset
         self.quality_settings = self._get_quality_settings(quality_preset)
@@ -2263,16 +2279,22 @@ class Converter:
                 self.logger.info(f"Using {effective_workers} parallel workers")
 
                 with ThreadPoolExecutor(max_workers=effective_workers) as executor:
-                    futures = {
-                        executor.submit(
+                    futures = {}
+                    for input_file in m4a_files:
+                        if _is_cancelled(self.cancel_event):
+                            break
+                        futures[executor.submit(
                             self._convert_single_file,
                             input_file, input_path, output_path,
                             force, dry_run, verbose, progress
-                        ): input_file
-                        for input_file in m4a_files
-                    }
+                        )] = input_file
 
                     for future in as_completed(futures):
+                        if _is_cancelled(self.cancel_event):
+                            for f in futures:
+                                f.cancel()
+                            self.logger.warn("Conversion cancelled by user")
+                            break
                         # Exceptions are already handled inside _convert_single_file,
                         # but catch any unexpected errors from the future itself
                         try:
@@ -2283,6 +2305,9 @@ class Converter:
                             self.stats.increment('errors')
             else:
                 for input_file in m4a_files:
+                    if _is_cancelled(self.cancel_event):
+                        self.logger.warn("Conversion cancelled by user")
+                        break
                     self._convert_single_file(
                         input_file, input_path, output_path,
                         force, dry_run, verbose, progress
@@ -2328,10 +2353,11 @@ class Downloader:
     """Manages downloads from Apple Music using gamdl."""
 
     def __init__(self, logger=None, venv_python=None, cookie_path='cookies.txt',
-                 prompt_handler=None, display_handler=None):
+                 prompt_handler=None, display_handler=None, cancel_event=None):
         self.logger = logger or Logger()
         self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
         self.display_handler = display_handler or NullDisplayHandler()
+        self.cancel_event = cancel_event
         self.venv_python = venv_python or sys.executable
         self.cookie_manager = CookieManager(cookie_path, logger=self.logger,
                                             prompt_handler=self.prompt_handler)
@@ -2504,6 +2530,10 @@ class Downloader:
 
             try:
                 for line in process.stdout:
+                    if _is_cancelled(self.cancel_event):
+                        process.terminate()
+                        self.logger.warn("Download cancelled by user")
+                        break
                     # Clean carriage returns to prevent screen scrolling
                     cleaned = self._clean_line(line)
 
@@ -3319,10 +3349,11 @@ class USBManager:
     """Manages USB drive detection and file copying."""
 
     def __init__(self, logger=None, excluded_volumes=None, prompt_handler=None,
-                 display_handler=None):
+                 display_handler=None, cancel_event=None):
         self.logger = logger or Logger()
         self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
         self.display_handler = display_handler or NullDisplayHandler()
+        self.cancel_event = cancel_event
         self.excluded_volumes = excluded_volumes or EXCLUDED_USB_VOLUMES
 
     def find_usb_drives(self):
@@ -3560,6 +3591,9 @@ class USBManager:
 
         try:
             for src_file in mp3_files:
+                if _is_cancelled(self.cancel_event):
+                    self.logger.warn("USB sync cancelled by user")
+                    break
                 try:
                     # Preserve directory structure relative to source
                     if source_path.is_dir():
@@ -4068,10 +4102,12 @@ class SummaryManager:
 class CoverArtManager:
     """Manages cover art operations: embed, extract, update, strip."""
 
-    def __init__(self, logger=None, output_profile=None, display_handler=None):
+    def __init__(self, logger=None, output_profile=None, display_handler=None,
+                 cancel_event=None):
         self.logger = logger or Logger()
         self.output_profile = output_profile or OUTPUT_PROFILES[DEFAULT_OUTPUT_TYPE]
         self.display_handler = display_handler or NullDisplayHandler()
+        self.cancel_event = cancel_event
 
     def embed(self, directory, source_dir=None, force=False, dry_run=False, verbose=False):
         """
@@ -4152,6 +4188,9 @@ class CoverArtManager:
 
         try:
             for mp3_file in mp3_files:
+                if _is_cancelled(self.cancel_event):
+                    self.logger.warn("Cover art embed cancelled by user")
+                    break
                 try:
                     # Find matching M4A source
                     m4a_file = m4a_lookup.get(mp3_file.name)
@@ -4281,6 +4320,9 @@ class CoverArtManager:
 
         try:
             for mp3_file in mp3_files:
+                if _is_cancelled(self.cancel_event):
+                    self.logger.warn("Cover art extract cancelled by user")
+                    break
                 try:
                     try:
                         tags = ID3(str(mp3_file))
@@ -4382,6 +4424,9 @@ class CoverArtManager:
 
         try:
             for mp3_file in mp3_files:
+                if _is_cancelled(self.cancel_event):
+                    self.logger.warn("Cover art update cancelled by user")
+                    break
                 try:
                     if dry_run:
                         self.logger.dry_run(f"Would update cover art: {mp3_file.name}")
@@ -4459,6 +4504,9 @@ class CoverArtManager:
 
         try:
             for mp3_file in mp3_files:
+                if _is_cancelled(self.cancel_event):
+                    self.logger.warn("Cover art strip cancelled by user")
+                    break
                 try:
                     try:
                         tags = ID3(str(mp3_file))
@@ -4542,6 +4590,9 @@ class CoverArtManager:
 
         try:
             for mp3_file in mp3_files:
+                if _is_cancelled(self.cancel_event):
+                    self.logger.warn("Cover art resize cancelled by user")
+                    break
                 try:
                     try:
                         tags = ID3(str(mp3_file))
@@ -4790,10 +4841,12 @@ class PipelineOrchestrator:
 
     def __init__(self, logger=None, deps=None, config=None, quality_preset='lossless',
                  cookie_path='cookies.txt', workers=None, embed_cover_art=True,
-                 output_profile=None, prompt_handler=None, display_handler=None):
+                 output_profile=None, prompt_handler=None, display_handler=None,
+                 cancel_event=None):
         self.logger = logger or Logger()
         self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
         self.display_handler = display_handler or NullDisplayHandler()
+        self.cancel_event = cancel_event
         self.deps = deps or DependencyChecker(self.logger)
         self.config = config or ConfigManager(logger=self.logger)
         self.stats = PipelineStatistics()
@@ -4848,6 +4901,17 @@ class PipelineOrchestrator:
                 success=False, playlist_name=None, playlist_key=None,
                 duration=duration, stages_failed=["download"])
 
+        # ── Cancellation check before Stage 2 ────────────────────────
+        if _is_cancelled(self.cancel_event):
+            self.logger.warn("Pipeline cancelled by user")
+            duration = time.time() - self.stats.start_time
+            return PipelineResult(
+                success=False, playlist_name=self.stats.playlist_name,
+                playlist_key=self.stats.playlist_key, duration=duration,
+                stages_completed=list(self.stats.stages_completed),
+                stages_failed=["cancelled"],
+                stages_skipped=list(self.stats.stages_skipped))
+
         # ── Stage 2: Convert M4A → MP3 ────────────────────────────────
         self.logger.info("\n=== STAGE 2: Convert M4A → MP3 ===")
         music_dir = f"{DEFAULT_MUSIC_DIR}/{self.stats.playlist_key}"
@@ -4858,7 +4922,8 @@ class PipelineOrchestrator:
         converter = Converter(self.logger, quality_preset=preset, workers=self.workers,
                               embed_cover_art=self.embed_cover_art,
                               output_profile=self.output_profile,
-                              display_handler=self.display_handler)
+                              display_handler=self.display_handler,
+                              cancel_event=self.cancel_event)
         convert_result = converter.convert(
             music_dir,
             export_dir,
@@ -4873,6 +4938,17 @@ class PipelineOrchestrator:
         else:
             self.stats.stages_failed.append("convert")
             self.logger.error("Conversion stage failed")
+
+        # ── Cancellation check before Stage 3 ────────────────────────
+        if _is_cancelled(self.cancel_event):
+            self.logger.warn("Pipeline cancelled by user")
+            duration = time.time() - self.stats.start_time
+            return PipelineResult(
+                success=False, playlist_name=self.stats.playlist_name,
+                playlist_key=self.stats.playlist_key, duration=duration,
+                stages_completed=list(self.stats.stages_completed),
+                stages_failed=["cancelled"],
+                stages_skipped=list(self.stats.stages_skipped))
 
         # ── Stage 3: Update tags ───────────────────────────────────────
         self.logger.info("\n=== STAGE 3: Update tags ===")
@@ -4889,7 +4965,8 @@ class PipelineOrchestrator:
             new_artist = None
 
         tagger = TaggerManager(self.logger, output_profile=self.output_profile,
-                               display_handler=self.display_handler)
+                               display_handler=self.display_handler,
+                               cancel_event=self.cancel_event)
         tag_result = tagger.update_tags(
             export_dir,
             new_album=new_album,
@@ -4911,11 +4988,23 @@ class PipelineOrchestrator:
         if self.embed_cover_art and self.output_profile.artwork_size != -1:
             self._check_and_embed_cover_art(export_dir, auto, dry_run, verbose)
 
+        # ── Cancellation check before Stage 4 ────────────────────────
+        if _is_cancelled(self.cancel_event):
+            self.logger.warn("Pipeline cancelled by user")
+            duration = time.time() - self.stats.start_time
+            return PipelineResult(
+                success=False, playlist_name=self.stats.playlist_name,
+                playlist_key=self.stats.playlist_key, duration=duration,
+                stages_completed=list(self.stats.stages_completed),
+                stages_failed=["cancelled"],
+                stages_skipped=list(self.stats.stages_skipped))
+
         # ── Stage 4: USB sync (optional) ───────────────────────────────
         if copy_to_usb:
             self.logger.info("\n=== STAGE 4: Copy to USB ===")
             usb_manager = USBManager(self.logger, prompt_handler=self.prompt_handler,
-                                     display_handler=self.display_handler)
+                                     display_handler=self.display_handler,
+                                     cancel_event=self.cancel_event)
             usb_result = usb_manager.sync_to_usb(
                 export_dir,
                 usb_dir=usb_dir,
@@ -4959,7 +5048,8 @@ class PipelineOrchestrator:
         downloader = Downloader(self.logger, self.deps.venv_python,
                                cookie_path=self.cookie_path,
                                prompt_handler=self.prompt_handler,
-                               display_handler=self.display_handler)
+                               display_handler=self.display_handler,
+                               cancel_event=self.cancel_event)
 
         key, album_name = downloader.extract_url_info(url)
         if not key:
@@ -5027,7 +5117,8 @@ class PipelineOrchestrator:
         downloader = Downloader(self.logger, self.deps.venv_python,
                                cookie_path=self.cookie_path,
                                prompt_handler=self.prompt_handler,
-                               display_handler=self.display_handler)
+                               display_handler=self.display_handler,
+                               cancel_event=self.cancel_event)
         dl_result = downloader.download(
             playlist.url,
             output_dir,
@@ -5106,7 +5197,8 @@ class PipelineOrchestrator:
 
         if should_embed:
             cam = CoverArtManager(self.logger, output_profile=self.output_profile,
-                                  display_handler=self.display_handler)
+                                  display_handler=self.display_handler,
+                                  cancel_event=self.cancel_event)
             cam.embed(export_dir, dry_run=False, verbose=verbose)
             # Resize newly-embedded art if profile specifies a max dimension
             artwork_size = self.output_profile.artwork_size

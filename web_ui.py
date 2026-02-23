@@ -663,12 +663,14 @@ def create_app(project_root=None):
 
             quality_preset = preset or profile.quality_preset
             display = _make_display_handler(task_id)
+            task = task_manager.get(task_id)
             orchestrator = mp.PipelineOrchestrator(
                 logger, deps, config,
                 quality_preset=quality_preset,
                 workers=workers,
                 output_profile=profile,
                 display_handler=display,
+                cancel_event=task.cancel_event,
             )
 
             if auto:
@@ -741,10 +743,12 @@ def create_app(project_root=None):
 
             out = output_dir if output_dir else mp.get_export_dir(profile.name)
             display = _make_display_handler(task_id)
+            task = task_manager.get(task_id)
             converter = mp.Converter(
                 logger, quality_preset=preset, workers=workers,
                 embed_cover_art=not no_cover_art, output_profile=profile,
                 display_handler=display,
+                cancel_event=task.cancel_event,
             )
             convert_result = converter.convert(safe_input, out, force=force,
                                                dry_run=dry_run, verbose=verbose)
@@ -780,8 +784,10 @@ def create_app(project_root=None):
             config = mp.ConfigManager(logger=logger)
             profile = _get_output_profile(config)
             display = _make_display_handler(task_id)
+            task = task_manager.get(task_id)
             tagger = mp.TaggerManager(logger, output_profile=profile,
-                                      display_handler=display)
+                                      display_handler=display,
+                                      cancel_event=task.cancel_event)
             tag_result = tagger.update_tags(safe, new_album=album, new_artist=artist,
                                             dry_run=dry_run, verbose=verbose)
             return {'success': tag_result.success}
@@ -816,8 +822,10 @@ def create_app(project_root=None):
             config = mp.ConfigManager(logger=logger)
             profile = _get_output_profile(config)
             display = _make_display_handler(task_id)
+            task = task_manager.get(task_id)
             tagger = mp.TaggerManager(logger, output_profile=profile,
-                                      display_handler=display)
+                                      display_handler=display,
+                                      cancel_event=task.cancel_event)
             restore_result = tagger.restore_tags(
                 safe,
                 restore_album=restore_all or restore_album,
@@ -855,8 +863,10 @@ def create_app(project_root=None):
             config = mp.ConfigManager(logger=logger)
             profile = _get_output_profile(config)
             display = _make_display_handler(task_id)
+            task = task_manager.get(task_id)
             tagger = mp.TaggerManager(logger, output_profile=profile,
-                                      display_handler=display)
+                                      display_handler=display,
+                                      cancel_event=task.cancel_event)
             success = tagger.reset_tags_from_source(safe_in, safe_out,
                                                      dry_run=dry_run, verbose=verbose)
             return {'success': success}
@@ -892,8 +902,10 @@ def create_app(project_root=None):
             config = mp.ConfigManager(logger=logger)
             profile = _get_output_profile(config)
             display = _make_display_handler(task_id)
+            task = task_manager.get(task_id)
             cam = mp.CoverArtManager(logger, output_profile=profile,
-                                     display_handler=display)
+                                     display_handler=display,
+                                     cancel_event=task.cancel_event)
 
             if action == 'embed':
                 source = data.get('source')
@@ -955,7 +967,9 @@ def create_app(project_root=None):
         def _run(task_id):
             logger = _make_logger(task_id, verbose=verbose)
             display = _make_display_handler(task_id)
-            usb_mgr = mp.USBManager(logger, display_handler=display)
+            task = task_manager.get(task_id)
+            usb_mgr = mp.USBManager(logger, display_handler=display,
+                                    cancel_event=task.cancel_event)
             usb_result = usb_mgr.sync_to_usb(
                 source_dir, usb_dir=usb_dir, dry_run=dry_run, volume=volume,
             )
