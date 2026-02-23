@@ -1678,11 +1678,25 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
 
     # ── web ────────────────────────────────────────────────────────
     web_parser = subparsers.add_parser('web',
-        help='Start the web dashboard UI')
+        help='Start the web dashboard UI (no auth, browser use)')
     web_parser.add_argument('--host', default='127.0.0.1',
                             help='Host to bind (default: 127.0.0.1)')
     web_parser.add_argument('--port', type=int, default=5555,
                             help='Port (default: 5555)')
+
+    # ── server ────────────────────────────────────────────────────
+    server_parser = subparsers.add_parser('server',
+        help='Start API server with authentication (for iOS companion app)')
+    server_parser.add_argument('--host', default='0.0.0.0',
+                               help='Host to bind (default: 0.0.0.0 for network access)')
+    server_parser.add_argument('--port', type=int, default=5555,
+                               help='Port (default: 5555)')
+    server_parser.add_argument('--no-auth', action='store_true', dest='no_auth',
+                               help='Disable API key authentication')
+    server_parser.add_argument('--show-api-key', action='store_true', dest='show_api_key',
+                               help='Display the full API key at startup')
+    server_parser.add_argument('--no-bonjour', action='store_true', dest='no_bonjour',
+                               help='Disable Bonjour/mDNS service advertisement')
 
     return parser
 
@@ -2224,16 +2238,36 @@ def main():
             sys.exit(1)
 
     elif args.command == 'web':
-        # Start web dashboard UI
+        # Start web dashboard UI (no auth, for browser use)
         try:
             import importlib.util
             web_ui_path = Path(__file__).resolve().parent / 'web_ui.py'
             spec = importlib.util.spec_from_file_location('web_ui', web_ui_path)
             web_ui = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(web_ui)
-            web_ui.start_server(host=args.host, port=args.port)
+            web_ui.start_server(host=args.host, port=args.port, no_auth=True)
         except ImportError as e:
             logger.error(f"Web UI requires Flask: {e}")
+            logger.info("Install with: pip install flask")
+            sys.exit(1)
+
+    elif args.command == 'server':
+        # Start API server with authentication (for iOS companion app)
+        try:
+            import importlib.util
+            web_ui_path = Path(__file__).resolve().parent / 'web_ui.py'
+            spec = importlib.util.spec_from_file_location('web_ui', web_ui_path)
+            web_ui = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(web_ui)
+            web_ui.start_server(
+                host=args.host,
+                port=args.port,
+                no_auth=args.no_auth,
+                show_api_key=args.show_api_key,
+                enable_bonjour=not args.no_bonjour,
+            )
+        except ImportError as e:
+            logger.error(f"API server requires Flask: {e}")
             logger.info("Install with: pip install flask")
             sys.exit(1)
 

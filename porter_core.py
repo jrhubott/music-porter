@@ -45,7 +45,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.7.0"
+VERSION = "2.9.0"
 
 DEFAULT_MUSIC_DIR = "music"
 DEFAULT_EXPORT_DIR = "export"
@@ -700,6 +700,20 @@ class ConfigManager:
         self._save()
         self.logger.info(f"Removed playlist '{key}' from configuration")
         return True
+
+    def ensure_api_key(self):
+        """Ensure an API key exists in settings; generate one if missing.
+
+        Returns the API key string.
+        """
+        import secrets
+        key = self.settings.get('api_key')
+        if not key:
+            key = secrets.token_urlsafe(32)
+            self.settings['api_key'] = key
+            self._save()
+            self.logger.info("Generated new API key for web dashboard")
+        return key
 
 
 # ══════════════════════════════════════════════════════════════════

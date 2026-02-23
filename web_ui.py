@@ -23,6 +23,7 @@ import platform
 import queue
 import re
 import signal
+import socket
 import subprocess
 import threading
 import time
@@ -31,9 +32,8 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 
-from flask import Flask, Response, jsonify, render_template, request, stream_with_context
+from flask import Flask, Response, jsonify, render_template, request, send_from_directory, stream_with_context
 
-# ── Import business logic from porter_core ──────────────────────────────────
 import porter_core as mp
 
 # Initialize third-party imports once at load time.
@@ -278,7 +278,7 @@ def _get_freshness_level(last_modified: datetime | None, today: date) -> str:
 # Flask Application Factory
 # ══════════════════════════════════════════════════════════════════
 
-def create_app(project_root=None):
+def create_app(project_root=None, no_auth=False):
     """Create and configure the Flask application."""
     if project_root is None:
         project_root = Path(__file__).resolve().parent
@@ -288,8 +288,41 @@ def create_app(project_root=None):
 
     app = Flask(__name__, template_folder=str(template_dir))
     app.config['PROJECT_ROOT'] = str(project_root)
+    app.config['NO_AUTH'] = no_auth
 
     task_manager = TaskManager()
+
+    # ── CORS headers for iOS companion app ───────────────────
+    @app.after_request
+    def _add_cors_headers(response):
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+        return response
+
+    # ── API key authentication middleware ─────────────────────
+    # Ensure an API key exists in config.yaml
+    _boot_config = mp.ConfigManager(logger=mp.Logger(verbose=False))
+    _api_key = _boot_config.ensure_api_key()
+
+    @app.before_request
+    def _check_api_auth():
+        # Skip auth for non-API routes (HTML pages, static files)
+        if not request.path.startswith('/api/'):
+            return
+        # Skip auth for CORS preflight
+        if request.method == 'OPTIONS':
+            return
+        # Skip auth when --no-auth is set (browser-only mode)
+        if app.config.get('NO_AUTH'):
+            return
+        # Validate Bearer token
+        auth_header = request.headers.get('Authorization', '')
+        if auth_header.startswith('Bearer '):
+            token = auth_header[7:]
+            if token == _api_key:
+                return
+        return jsonify({'error': 'Unauthorized — provide Authorization: Bearer <api_key>'}), 401
 
     # ── Helper to create a WebLogger for a task ──────────────────
     def _make_logger(task_id, verbose=False):
@@ -322,6 +355,31 @@ def create_app(project_root=None):
             return str(resolved)
         except Exception:
             return None
+
+    # ── API: Auth & Server Info ──────────────────────────────────
+
+    @app.route('/api/auth/validate', methods=['POST'])
+    def api_auth_validate():
+        """Validate API key and return server identity."""
+        return jsonify({
+            'valid': True,
+            'version': mp.VERSION,
+            'server_name': socket.gethostname(),
+            'api_version': 1,
+        })
+
+    @app.route('/api/server-info')
+    def api_server_info():
+        """Return server metadata for client discovery."""
+        config = _get_config()
+        mp.load_output_profiles(config)
+        return jsonify({
+            'name': socket.gethostname(),
+            'version': mp.VERSION,
+            'platform': mp.get_os_display_name(),
+            'profiles': list(mp.OUTPUT_PROFILES.keys()),
+            'api_version': 1,
+        })
 
     # ── Page Routes ──────────────────────────────────────────────
 
@@ -645,12 +703,17 @@ def create_app(project_root=None):
         config = _get_config()
         profile = _get_output_profile(config)
         export_dir = project_root / mp.get_export_dir(profile.name)
+        playlist_map = {p.key: p.name for p in config.playlists}
         dirs = []
         if export_dir.exists():
             for d in sorted(export_dir.iterdir()):
                 if d.is_dir() and not d.name.startswith('.'):
                     file_count = len(list(d.rglob('*.mp3')))
-                    dirs.append({'name': d.name, 'files': file_count})
+                    dirs.append({
+                        'name': d.name,
+                        'display_name': playlist_map.get(d.name, d.name),
+                        'files': file_count,
+                    })
         return jsonify(dirs)
 
     # ── API: Pipeline ────────────────────────────────────────────
@@ -974,6 +1037,137 @@ def create_app(project_root=None):
             return jsonify({'error': 'Another operation is already running'}), 409
         return jsonify({'task_id': task_id})
 
+    # ── API: File Serving (for iOS companion app) ─────────────────
+
+    @app.route('/api/files/<playlist_key>')
+    def api_files_list(playlist_key):
+        """List MP3 files in a playlist with ID3 metadata."""
+        config = _get_config()
+        profile = _get_output_profile(config)
+        playlist_dir = project_root / mp.get_export_dir(profile.name, playlist_key)
+        safe = _safe_dir(playlist_dir)
+        if not safe or not Path(safe).is_dir():
+            return jsonify({'error': f'Playlist directory not found: {playlist_key}'}), 404
+
+        from mutagen.id3 import ID3
+        from mutagen.mp3 import MP3
+
+        files = []
+        for f in sorted(Path(safe).glob('*.mp3')):
+            entry = {
+                'filename': f.name,
+                'size': f.stat().st_size,
+            }
+            try:
+                audio = MP3(str(f))
+                entry['duration'] = round(audio.info.length, 1) if audio.info else 0
+                tags = ID3(str(f))
+                entry['title'] = str(tags.get('TIT2', ''))
+                entry['artist'] = str(tags.get('TPE1', ''))
+                entry['album'] = str(tags.get('TALB', ''))
+                entry['has_cover_art'] = any(
+                    key.startswith('APIC') for key in tags)
+                entry['has_protection_tags'] = any(
+                    hasattr(frame, 'desc') and frame.desc.startswith('Original')
+                    for frame in tags.values()
+                    if hasattr(frame, 'desc'))
+            except Exception:
+                entry.setdefault('title', f.stem)
+                entry.setdefault('duration', 0)
+                entry.setdefault('has_cover_art', False)
+                entry.setdefault('has_protection_tags', False)
+            files.append(entry)
+
+        return jsonify({
+            'playlist': playlist_key,
+            'profile': profile.name,
+            'file_count': len(files),
+            'files': files,
+        })
+
+    @app.route('/api/files/<playlist_key>/<filename>')
+    def api_files_download(playlist_key, filename):
+        """Download a single MP3 file."""
+        config = _get_config()
+        profile = _get_output_profile(config)
+        playlist_dir = project_root / mp.get_export_dir(profile.name, playlist_key)
+        safe = _safe_dir(playlist_dir)
+        if not safe:
+            return jsonify({'error': 'Invalid directory'}), 400
+
+        file_path = Path(safe) / filename
+        if not file_path.exists() or file_path.suffix.lower() != '.mp3':
+            return jsonify({'error': 'File not found'}), 404
+
+        # Validate the file is within the safe directory
+        if not str(file_path.resolve()).startswith(str(Path(safe).resolve())):
+            return jsonify({'error': 'Invalid path'}), 400
+
+        return send_from_directory(safe, filename, mimetype='audio/mpeg')
+
+    @app.route('/api/files/<playlist_key>/<filename>/artwork')
+    def api_files_artwork(playlist_key, filename):
+        """Extract and serve cover art from an MP3 file."""
+        config = _get_config()
+        profile = _get_output_profile(config)
+        playlist_dir = project_root / mp.get_export_dir(profile.name, playlist_key)
+        safe = _safe_dir(playlist_dir)
+        if not safe:
+            return jsonify({'error': 'Invalid directory'}), 400
+
+        file_path = Path(safe) / filename
+        if not file_path.exists():
+            return jsonify({'error': 'File not found'}), 404
+
+        try:
+            from mutagen.id3 import ID3
+            tags = ID3(str(file_path))
+            for key, frame in tags.items():
+                if key.startswith('APIC'):
+                    mime = getattr(frame, 'mime', 'image/jpeg')
+                    return Response(frame.data, mimetype=mime)
+            return jsonify({'error': 'No cover art found'}), 404
+        except Exception as e:
+            return jsonify({'error': f'Could not read artwork: {e}'}), 500
+
+    @app.route('/api/files/<playlist_key>/download-all')
+    def api_files_download_all(playlist_key):
+        """Stream a ZIP archive of all MP3s in a playlist."""
+        import io
+        import zipfile
+
+        config = _get_config()
+        profile = _get_output_profile(config)
+        playlist_dir = project_root / mp.get_export_dir(profile.name, playlist_key)
+        safe = _safe_dir(playlist_dir)
+        if not safe or not Path(safe).is_dir():
+            return jsonify({'error': f'Playlist directory not found: {playlist_key}'}), 404
+
+        mp3_files = sorted(Path(safe).glob('*.mp3'))
+        if not mp3_files:
+            return jsonify({'error': 'No MP3 files found'}), 404
+
+        def generate_zip():
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, 'w', zipfile.ZIP_STORED) as zf:
+                for f in mp3_files:
+                    zf.write(f, f.name)
+            buf.seek(0)
+            while True:
+                chunk = buf.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+
+        zip_name = f"{playlist_key}.zip"
+        return Response(
+            generate_zip(),
+            mimetype='application/zip',
+            headers={
+                'Content-Disposition': f'attachment; filename="{zip_name}"',
+            }
+        )
+
     # ── API: USB ─────────────────────────────────────────────────
 
     @app.route('/api/usb/drives')
@@ -1120,13 +1314,158 @@ def _kill_port_process(port):
         print(f"  Warning: could not free port {port}: {e}")
 
 
-def start_server(host='127.0.0.1', port=5555):
-    """Start the Flask development server."""
+def _print_pairing_qr(host, port, api_key):
+    """Print a QR code to the terminal for iOS app pairing.
+
+    The QR code encodes a JSON payload with the server address and API key:
+    {"host": "...", "port": 5555, "key": "..."}
+    """
+    try:
+        import io
+
+        import segno
+        payload = json.dumps({"host": host, "port": port, "key": api_key})
+        qr = segno.make(payload)
+        buf = io.StringIO()
+        qr.terminal(out=buf, compact=True)
+        # Indent each line for consistent formatting
+        for line in buf.getvalue().splitlines():
+            print(f"  {line}")
+        print()
+    except ImportError:
+        print("  (Install 'segno' for QR code: pip install segno)")
+    except Exception:
+        pass  # Gracefully skip QR on any error
+
+
+def start_server(host='127.0.0.1', port=5555, no_auth=False,
+                  show_api_key=False, enable_bonjour=False):
+    """Start the Flask development server.
+
+    Args:
+        host: Host to bind.
+        port: Port to bind.
+        no_auth: If True, skip API key authentication on /api/* routes.
+        show_api_key: If True, print the API key at startup.
+        enable_bonjour: If True, advertise via mDNS/Bonjour.
+    """
     _kill_port_process(port)
-    print(f"\n  Web Dashboard: http://{host}:{port}")
-    print("  Press Ctrl+C to stop\n")
-    app = create_app()
-    app.run(host=host, port=port, debug=False, threaded=True)
+
+    # Determine local network IP for iOS connection info
+    local_ip = BonjourAdvertiser._get_local_ip() or host
+
+    if not no_auth:
+        config = mp.ConfigManager(logger=mp.Logger(verbose=False))
+        api_key = config.ensure_api_key()
+
+        # Always show full API key and connection details for server mode
+        print(f"\n  ── Server Mode ({'auth enabled' if not no_auth else 'no auth'}) ──")
+        print(f"  Server:    http://{host}:{port}")
+        if host == '0.0.0.0':
+            print(f"  Local URL: http://{local_ip}:{port}")
+        print(f"  API Key:   {api_key}")
+        print("  Auth:      Bearer token required on /api/* routes")
+        print()
+        print("  ── iOS Companion App Connection ──")
+        print("  1. Open the Music Porter iOS app")
+        print(f"  2. Enter server address: {local_ip}:{port}")
+        print(f"  3. Enter API key: {api_key}")
+        print("  4. Or scan the QR code below:")
+        print()
+        _print_pairing_qr(local_ip, port, api_key)
+    else:
+        print("\n  ── Web Dashboard Mode (no auth) ──")
+        print(f"  Server:  http://{host}:{port}")
+
+    print("\n  Press Ctrl+C to stop\n")
+
+    app = create_app(no_auth=no_auth)
+
+    # Bonjour/mDNS advertisement
+    bonjour = None
+    if enable_bonjour and host != '127.0.0.1':
+        bonjour = BonjourAdvertiser(port)
+        bonjour.start()
+
+    try:
+        app.run(host=host, port=port, debug=False, threaded=True)
+    finally:
+        if bonjour:
+            bonjour.stop()
+
+
+# ══════════════════════════════════════════════════════════════════
+# Bonjour/mDNS Service Advertisement
+# ══════════════════════════════════════════════════════════════════
+
+class BonjourAdvertiser:
+    """Advertises the music-porter server via mDNS/Bonjour.
+
+    Uses zeroconf to register a _music-porter._tcp.local. service so
+    iOS companion apps can discover the server on the local network.
+    """
+
+    SERVICE_TYPE = "_music-porter._tcp.local."
+
+    def __init__(self, port):
+        self._port = port
+        self._zeroconf = None
+        self._info = None
+
+    def start(self):
+        """Register the mDNS service."""
+        try:
+            from zeroconf import ServiceInfo, Zeroconf
+        except ImportError:
+            print("  Bonjour: skipped (zeroconf not installed)")
+            return
+
+        hostname = socket.gethostname()
+        # Get local IP for service registration
+        local_ip = self._get_local_ip()
+        if not local_ip:
+            print("  Bonjour: skipped (could not determine local IP)")
+            return
+
+        # Service name must be unique; use hostname without special chars
+        safe_name = hostname.replace('.', '-')
+        self._info = ServiceInfo(
+            self.SERVICE_TYPE,
+            f"Music Porter on {safe_name}.{self.SERVICE_TYPE}",
+            addresses=[socket.inet_aton(local_ip)],
+            port=self._port,
+            properties={
+                'version': mp.VERSION,
+                'platform': mp.get_os_display_name(),
+                'api_version': '1',
+            },
+        )
+        try:
+            self._zeroconf = Zeroconf()
+            self._zeroconf.register_service(self._info, allow_name_change=True)
+            print(f"  Bonjour: advertising as _music-porter._tcp on {local_ip}:{self._port}")
+        except Exception as e:
+            print(f"  Bonjour: failed to register ({e})")
+            self._zeroconf = None
+            self._info = None
+
+    def stop(self):
+        """Unregister the mDNS service."""
+        if self._zeroconf and self._info:
+            self._zeroconf.unregister_service(self._info)
+            self._zeroconf.close()
+
+    @staticmethod
+    def _get_local_ip():
+        """Get the local network IP address."""
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(('10.255.255.255', 1))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return None
 
 
 if __name__ == '__main__':
