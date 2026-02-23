@@ -28,7 +28,6 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
@@ -1098,7 +1097,7 @@ def start_server(host='127.0.0.1', port=5555):
     """Start the Flask development server."""
     _kill_port_process(port)
     print(f"\n  Web Dashboard: http://{host}:{port}")
-    print(f"  Press Ctrl+C to stop\n")
+    print("  Press Ctrl+C to stop\n")
     app = create_app()
     app.run(host=host, port=port, debug=False, threaded=True)
 

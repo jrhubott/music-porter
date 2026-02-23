@@ -9,12 +9,14 @@ Successfully created a unified Python script (`music-porter`) that combines the 
 ### Core Infrastructure (Sections 1-4)
 
 #### 1. Logger Class
+
 - Timestamped logging to both console and log files
 - Log levels: INFO, WARN, ERROR, SKIP, OK, DRY-RUN, VERBOSE
 - Automatic log file creation: `logs/YYYY-MM-DD_HH-MM-SS.log`
 - Thread-safe file writing
 
 #### 2. ConfigManager Class
+
 - Loads and parses `playlists.conf` (pipe-delimited format: `key|url|name`)
 - Comment support (lines starting with `#`)
 - Playlist lookup by key (case-insensitive) or index
@@ -22,6 +24,7 @@ Successfully created a unified Python script (`music-porter`) that combines the 
 - Duplicate prevention
 
 #### 3. DependencyChecker Class
+
 - Virtual environment detection (active venv or `.venv/`)
 - Auto-install mutagen if missing
 - Check ffmpeg availability
@@ -29,6 +32,7 @@ Successfully created a unified Python script (`music-porter`) that combines the 
 - Selective checking (only required dependencies)
 
 #### 4. Constants and Configuration
+
 - Default paths: `music/`, `export/`, `logs/`, `playlists.conf`
 - USB configuration: excluded volumes, default USB directory
 - FFmpeg quality settings
@@ -36,6 +40,7 @@ Successfully created a unified Python script (`music-porter`) that combines the 
 ### Tag Management Module (Section 5)
 
 #### Helper Functions
+
 - `_get_txxx()` - Safe TXXX frame retrieval by description
 - `_txxx_exists()` - Check TXXX frame existence
 - `save_original_tag()` - Hard-gate protection (write once, never overwrite)
@@ -44,6 +49,7 @@ Successfully created a unified Python script (`music-porter`) that combines the 
 - `_apply_cleanup()` - Remove non-essential ID3 frames
 
 #### TaggerManager Class
+
 - Update album and artist tags on existing MP3s
 - Restore original tags from TXXX frames
 - Statistics tracking (TagStatistics)
@@ -57,6 +63,7 @@ Successfully created a unified Python script (`music-porter`) that combines the 
 ### Conversion Module (Section 6)
 
 #### Audio Conversion
+
 - **Library**: ffmpeg-python >= 0.2.0
 - **System Requirement**: ffmpeg binary (not bundled)
 - **Quality Settings**: VBR encoding with libmp3lame, quality level 2
@@ -64,6 +71,7 @@ Successfully created a unified Python script (`music-porter`) that combines the 
 - **Silent Mode**: Uses quiet=True to suppress output during batch operations
 
 #### Converter Class
+
 - Recursive M4A file discovery
 - FFmpeg-based conversion via ffmpeg-python library
 - Flat output structure: "Artist - Title.mp3"
@@ -81,6 +89,7 @@ Successfully created a unified Python script (`music-porter`) that combines the 
 ### Download Module (Section 7)
 
 #### Downloader Class
+
 - Apple Music URL parsing (extracts key and album name)
 - gamdl integration via virtual environment Python
 - Interactive confirmation prompts (optional)
@@ -95,6 +104,7 @@ Successfully created a unified Python script (`music-porter`) that combines the 
 ### USB Sync Module (Section 8)
 
 #### USBManager Class
+
 - Auto-detect USB drives in `/Volumes/`
 - Filter excluded volumes (Macintosh HD, etc.)
 - Interactive selection for multiple drives
@@ -105,6 +115,7 @@ Successfully created a unified Python script (`music-porter`) that combines the 
 ### Pipeline Orchestration (Section 9)
 
 #### PipelineOrchestrator Class
+
 - Coordinates multi-stage workflows:
   1. Download from Apple Music
   2. Convert M4A → MP3
@@ -124,6 +135,7 @@ Successfully created a unified Python script (`music-porter`) that combines the 
 - Save new URLs to config
 
 #### PipelineStatistics Class
+
 - Download success, playlist info
 - Conversion statistics aggregation
 - Tagging statistics aggregation
@@ -133,6 +145,7 @@ Successfully created a unified Python script (`music-porter`) that combines the 
 ### Interactive Menu (Section 9b)
 
 #### InteractiveMenu Class
+
 - Beautiful formatted menu display
 - Numbered playlist selection (1-N)
 - Letter-based action options:
@@ -155,6 +168,7 @@ Successfully created a unified Python script (`music-porter`) that combines the 
 ### CLI Interface (Section 10)
 
 #### Subcommand Architecture
+
 - **pipeline** - Full download + convert + tag workflow (default)
 - **download** - Download from Apple Music using gamdl
 - **convert** - Convert M4A → MP3 with tag preservation
@@ -163,16 +177,19 @@ Successfully created a unified Python script (`music-porter`) that combines the 
 - **sync-usb** - Copy files to USB drive
 
 #### Global Flags
+
 - `--verbose / -v` - Enable detailed output
 - `--dry-run` - Preview changes without modifying files
 - `--version` - Display version information
 
 #### Command-Specific Options
+
 Each subcommand has appropriate options (see MUSIC-PORTER-GUIDE.md)
 
 ### Entry Point (Section 11)
 
 #### Main Function
+
 - Argument parsing and validation
 - Logger initialization
 - Dependency checking (command-specific)
@@ -183,17 +200,20 @@ Each subcommand has appropriate options (see MUSIC-PORTER-GUIDE.md)
 ## Statistics
 
 ### Code Metrics
+
 - **Total lines:** 1,921
 - **Classes:** 13
 - **Top-level functions:** 8
 - **Original estimate:** ~2,150 lines (within 11% of estimate)
 
 ### Estimated Time Savings
+
 - Original: 396 (bash) + 1,321 (Python) = 1,717 lines in 2 scripts
 - Unified: 1,921 lines in 1 script
 - **Improvement:** Single codebase, no subprocess overhead, better error handling
 
 ### Classes Implemented
+
 1. Logger
 2. PlaylistConfig
 3. ConfigManager
@@ -211,6 +231,7 @@ Each subcommand has appropriate options (see MUSIC-PORTER-GUIDE.md)
 ## Testing Results
 
 ### ✅ Tested and Verified
+
 1. **convert** command - Dry-run with 100 M4A files
    - Correct file discovery
    - Proper filename sanitization
@@ -245,6 +266,7 @@ Each subcommand has appropriate options (see MUSIC-PORTER-GUIDE.md)
    - ffmpeg detection
 
 ### 🚧 Not Tested (Requires External Dependencies)
+
 - **download** command - Requires gamdl installation
 - **sync-usb** command - Requires USB drive
 - **pipeline** command - Requires gamdl installation
@@ -253,6 +275,7 @@ Each subcommand has appropriate options (see MUSIC-PORTER-GUIDE.md)
 ## Key Implementation Decisions
 
 ### 1. Subcommand Architecture ✅
+
 **Chosen:** Professional, industry-standard CLI interface
 
 **Benefits:**
@@ -262,6 +285,7 @@ Each subcommand has appropriate options (see MUSIC-PORTER-GUIDE.md)
 - Flexible for power users
 
 ### 2. Tag Preservation Strategy ✅
+
 **Implemented:** Hard-gate protection with TXXX frames
 
 **How it works:**
@@ -270,6 +294,7 @@ Each subcommand has appropriate options (see MUSIC-PORTER-GUIDE.md)
 - Always restorable to true originals
 
 ### 3. Error Handling Philosophy ✅
+
 **Approach:** Continue on individual failures
 
 **Benefits:**
@@ -279,6 +304,7 @@ Each subcommand has appropriate options (see MUSIC-PORTER-GUIDE.md)
 - Logs capture full details
 
 ### 4. Statistics Tracking ✅
+
 **Implementation:** Dedicated statistics classes
 
 **Benefits:**
@@ -288,6 +314,7 @@ Each subcommand has appropriate options (see MUSIC-PORTER-GUIDE.md)
 - Supports pipeline aggregation
 
 ### 5. Logging Strategy ✅
+
 **Design:** Console + file with structured levels
 
 **Benefits:**
@@ -298,7 +325,7 @@ Each subcommand has appropriate options (see MUSIC-PORTER-GUIDE.md)
 
 ## File Structure
 
-```
+```text
 music-porter          (1,921 lines)
 ├── Section 1: Imports and Constants
 ├── Section 2: Logging Infrastructure
@@ -332,6 +359,7 @@ music-porter          (1,921 lines)
 ## Compatibility with Original Scripts
 
 ### Feature Parity ✅
+
 All features from both original scripts are implemented:
 
 **From do-it-all:**
@@ -371,6 +399,7 @@ All features from both original scripts are implemented:
 ## Remaining Work (Not Critical)
 
 ### 1. Backward Compatibility Wrappers (Optional)
+
 Create thin wrappers for old scripts:
 - `do-it-all` → calls `music-porter` with mapped arguments
 - `ride-command-mp3-export` → calls `music-porter` with mapped arguments
@@ -378,23 +407,27 @@ Create thin wrappers for old scripts:
 - Remove after grace period
 
 ### 2. Reset Tags Feature (From Original)
+
 Port the `--reset-tags-from-input` functionality:
 - Re-read tags from source M4A files
 - Reset TXXX protection frames
 - Useful for correcting mistakes
 
 ### 3. Advanced Tag Cleanup Options (From Original)
+
 Port optional flags:
 - `--keep-id3v1` - Don't strip ID3v1 tags
 - `--keep-id3v24` - Keep ID3v2.4 (default is v2.3)
 - `--keep-duplicates` - Don't remove duplicate frames
 
 ### 4. Documentation Updates
+
 - Update CLAUDE.md with new command documentation
 - Add migration guide for users of old scripts
 - Add troubleshooting section
 
 ### 5. End-to-End Testing
+
 - Test full pipeline with actual download
 - Test USB sync with real USB drive
 - Test with edge cases (special characters, very long filenames, etc.)
@@ -402,6 +435,7 @@ Port optional flags:
 ## Usage Examples
 
 ### Basic Usage
+
 ```bash
 # Interactive menu (easiest)
 ./music-porter
@@ -426,6 +460,7 @@ Port optional flags:
 ```
 
 ### Advanced Usage
+
 ```bash
 # Dry-run before actual operation
 ./music-porter --dry-run pipeline --playlist "Pop_Workout"
@@ -443,17 +478,20 @@ Port optional flags:
 ## Performance Characteristics
 
 ### Speed
+
 - **Conversion:** ~2-3 seconds per track (ffmpeg)
 - **Tag update:** <100ms per track (mutagen)
 - **Download:** Depends on Apple Music API and network
 - **USB sync:** Depends on drive speed and file count
 
 ### Memory
+
 - **Conversion:** Low (processes one file at a time)
 - **Tag operations:** Low (mutagen is efficient)
 - **Download:** Moderate (gamdl buffering)
 
 ### Disk Space
+
 - **Logs:** ~1-10 KB per run
 - **M4A files:** ~10 MB per track (lossless)
 - **MP3 files:** ~3-5 MB per track (high quality)

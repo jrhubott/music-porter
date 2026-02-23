@@ -3,6 +3,7 @@
 ## Table of Contents
 
 ### Core Pipeline
+
 | # | Entry | IDs | Description |
 |---|-------|-----|-------------|
 | 1 | [Pipeline](#srs-1-pipeline) | 1.1–1.3 | Multi-stage workflow orchestration: download → convert → tag → USB sync, with batch processing and statistics |
@@ -13,6 +14,7 @@
 | 6 | [USB Sync](#srs-6-usb-sync) | 6.1–6.7 | Platform-aware USB drive detection, incremental file sync, and auto-eject for macOS/Linux/Windows |
 
 ### Library & Configuration
+
 | # | Entry | IDs | Description |
 |---|-------|-----|-------------|
 | 7 | [Library Summary](#srs-7-library-summary) | 7.1–7.8 | Export library statistics with tag integrity checking, cover art analysis, and three output modes (quick/default/detailed) |
@@ -20,6 +22,7 @@
 | 9 | [Configurable Output Profiles](#srs-9-configurable-output-profiles) | 9.1–9.14 | User-defined output profiles in config.yaml replacing hardcoded Python definitions, with validation and migration |
 
 ### User Interfaces
+
 | # | Entry | IDs | Description |
 |---|-------|-----|-------------|
 | 10 | [Interactive Menu](#srs-10-interactive-menu) | 10.1–10.4 | Loop-based CLI menu with numbered playlist selection, letter-based actions, and profile management |
@@ -27,6 +30,7 @@
 | 12 | [CLI & Runtime](#srs-12-cli--runtime) | 12.1–12.13 | Argument parsing, subcommand routing, startup banner, dependency checking, logging, progress bars, and platform detection |
 
 ### Architecture
+
 | # | Entry | IDs | Description |
 |---|-------|-----|-------------|
 | 13 | [Service Layer](#srs-13-service-layer) | 13.1–13.7 | Business logic / UI separation: structured result objects, UserPromptHandler callbacks, DisplayHandler abstraction |

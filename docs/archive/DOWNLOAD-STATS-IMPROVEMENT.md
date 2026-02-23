@@ -7,15 +7,18 @@ Enhanced the `apple-to-ride-command` tool with detailed download statistics and 
 ## Changes Made
 
 ### 1. Added DownloadStatistics Class
+
 **Location**: After `ConversionStatistics` class (line ~922)
 
 New class to track download-specific metrics:
+
 - `playlist_total`: Total tracks in the playlist
 - `downloaded`: Newly downloaded tracks
 - `skipped`: Tracks already existing (skipped by gamdl)
 - `failed`: Failed downloads
 
 ### 2. Enhanced Download Parsing
+
 **Location**: `Downloader.download()` method (lines ~1208-1310)
 
 Implemented real-time parsing of gamdl 2.8.4 output:
@@ -26,6 +29,7 @@ Implemented real-time parsing of gamdl 2.8.4 output:
 - Returns 4-tuple: `(success, key, album_name, download_stats)`
 
 **Parsing Algorithm**:
+
 ```python
 # Track the last "Downloading" line
 # If we see another download or finish, the previous succeeded
@@ -34,9 +38,11 @@ Implemented real-time parsing of gamdl 2.8.4 output:
 ```
 
 ### 3. Updated PipelineStatistics
+
 **Location**: `PipelineStatistics` class (lines ~1403-1420)
 
 Changed:
+
 ```python
 # Before
 self.tracks_downloaded = 0  # Misleading - actually came from converter
@@ -46,6 +52,7 @@ self.download_stats = None  # DownloadStatistics object
 ```
 
 ### 4. Updated Pipeline Methods
+
 **Locations**:
 - `_download_from_url()` (lines ~1560-1595)
 - `_download_playlist()` (lines ~1597-1631)
@@ -56,10 +63,12 @@ Both methods now:
 - Remove workaround that used `converter.stats.total_found`
 
 ### 5. Enhanced Download Stage Summary
+
 **Location**: `_print_pipeline_summary()` (lines ~1643-1716)
 
 **Before**:
-```
+
+```text
 DOWNLOAD STAGE
 ──────────────────────────────────────────────────────────────────────
   Status:                  ✅ Success
@@ -67,7 +76,8 @@ DOWNLOAD STAGE
 ```
 
 **After**:
-```
+
+```text
 DOWNLOAD STAGE
 ──────────────────────────────────────────────────────────────────────
   Total tracks in playlist:42
@@ -78,11 +88,12 @@ DOWNLOAD STAGE
 ```
 
 ### 6. Added Comprehensive Files Summary
+
 **Location**: End of `_print_pipeline_summary()` (before overall status)
 
 New section that provides a complete view of file progression:
 
-```
+```text
 COMPREHENSIVE FILES SUMMARY
 ──────────────────────────────────────────────────────────────────────
   Playlist tracks:         102
@@ -102,6 +113,7 @@ This section:
 ## Testing
 
 ### Unit Tests
+
 Created and verified parsing logic with test scripts:
 - ✅ Correctly parses track totals
 - ✅ Correctly counts new downloads
@@ -110,6 +122,7 @@ Created and verified parsing logic with test scripts:
 - ✅ Handles edge cases (no downloads, all skipped, errors)
 
 ### Integration Tests
+
 - ✅ Script compiles without syntax errors
 - ✅ `--version` flag works
 - ✅ `--help` flags work for all commands
@@ -143,7 +156,7 @@ Created and verified parsing logic with test scripts:
 
 Based on actual gamdl 2.8.4 output (from logs):
 
-```
+```text
 [INFO     HH:MM:SS] Starting Gamdl 2.8.4
 [INFO     HH:MM:SS] [Track 1/102] Downloading "Track Name"
 [WARNING  HH:MM:SS] [Track 1/102] Skipping "Track Name": Media file already exists at path: ...

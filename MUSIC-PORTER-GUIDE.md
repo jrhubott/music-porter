@@ -22,9 +22,10 @@ The tool runs on **macOS**, **Linux**, and **Windows** with automatic platform d
 ### Platform-Specific Setup
 
 **FFmpeg Installation:**
+
 - **macOS:** `brew install ffmpeg`
 - **Linux:** `sudo apt-get install ffmpeg` (Ubuntu/Debian), `sudo dnf install ffmpeg` (Fedora/RHEL), `sudo pacman -S ffmpeg` (Arch)
-- **Windows:** `choco install ffmpeg` or download from https://ffmpeg.org/download.html
+- **Windows:** `choco install ffmpeg` or download from <https://ffmpeg.org/download.html>
 
 **Virtual Environment Activation:**
 - **macOS/Linux:** `source .venv/bin/activate`
@@ -38,9 +39,11 @@ The tool runs on **macOS**, **Linux**, and **Windows** with automatic platform d
 ## Quick Start
 
 ### Interactive Menu (Recommended)
+
 ```bash
 ./music-porter
 ```
+
 Shows an interactive menu for easy playlist selection and processing.
 
 **Menu options:**
@@ -53,6 +56,7 @@ Shows an interactive menu for easy playlist selection and processing.
 - **X** - Exit
 
 ### Full Pipeline (One Command)
+
 ```bash
 # Process a configured playlist
 ./music-porter pipeline --playlist "Pop_Workout"
@@ -81,6 +85,7 @@ Cookies are checked at **two points**:
 2. **Before downloads** - Validates and blocks if invalid
 
 **Status messages:**
+
 ```bash
 # Valid cookies
 [OK] Cookie status: Cookies valid until 2026-08-16 (178 days remaining)
@@ -138,7 +143,7 @@ Supports **Chrome**, **Firefox**, **Safari**, and **Edge**:
 
 If you prefer manual control or automation fails:
 
-1. Open your browser and go to: https://music.apple.com
+1. Open your browser and go to: <https://music.apple.com>
 2. Log in to your Apple Music account
 3. Install browser extension:
    - **Chrome**: "Get cookies.txt LOCALLY" extension
@@ -159,6 +164,7 @@ If you prefer manual control or automation fails:
 ## Commands Overview
 
 ### 1. pipeline
+
 **Full download + convert + tag workflow**
 
 ```bash
@@ -187,6 +193,7 @@ If you prefer manual control or automation fails:
 4. Optionally copies to USB drive
 
 ### 2. download
+
 **Download from Apple Music using gamdl**
 
 ```bash
@@ -204,6 +211,7 @@ If you prefer manual control or automation fails:
 **Output:** M4A files in `music/{key}/` directory
 
 ### 3. convert
+
 **Convert M4A → MP3 with tag preservation**
 
 ```bash
@@ -234,6 +242,7 @@ If you prefer manual control or automation fails:
 - Skips existing files unless `--force` is used
 
 ### 4. tag
+
 **Update tags on existing MP3s**
 
 ```bash
@@ -251,6 +260,7 @@ If you prefer manual control or automation fails:
 - ID3v2.3 tags by default (better device compatibility)
 
 ### 5. restore
+
 **Restore original tags from TXXX frames**
 
 ```bash
@@ -269,6 +279,7 @@ If you prefer manual control or automation fails:
 - Original TXXX frames remain intact (can restore again later)
 
 ### 6. sync-usb
+
 **Copy files to USB drive**
 
 ```bash
@@ -291,6 +302,7 @@ If you prefer manual control or automation fails:
 ## Global Options
 
 ### --dry-run
+
 Preview changes without modifying any files
 
 ```bash
@@ -299,6 +311,7 @@ Preview changes without modifying any files
 ```
 
 ### --verbose / -v
+
 Show detailed information during processing
 
 ```bash
@@ -307,6 +320,7 @@ Show detailed information during processing
 ```
 
 ### Combined
+
 ```bash
 ./music-porter --dry-run --verbose convert music/Pop_Workout
 ```
@@ -342,6 +356,7 @@ MP3 conversion supports configurable quality presets to balance file size and au
 ### Usage Examples
 
 #### Basic Usage
+
 ```bash
 # Default (lossless 320kbps CBR)
 ./music-porter convert music/Pop_Workout
@@ -357,6 +372,7 @@ MP3 conversion supports configurable quality presets to balance file size and au
 ```
 
 #### Custom Quality
+
 ```bash
 # Custom VBR quality 0 (best possible)
 ./music-porter convert music/Pop_Workout --preset custom --quality 0
@@ -368,6 +384,7 @@ MP3 conversion supports configurable quality presets to balance file size and au
 ```
 
 #### Pipeline Integration
+
 ```bash
 # Full pipeline with high quality
 ./music-porter pipeline --playlist "Pop_Workout" --preset high
@@ -380,6 +397,7 @@ MP3 conversion supports configurable quality presets to balance file size and au
 ```
 
 #### Force Re-conversion with New Quality
+
 ```bash
 # Re-convert existing files with different quality
 ./music-porter convert music/Pop_Workout --preset high --force
@@ -388,6 +406,7 @@ MP3 conversion supports configurable quality presets to balance file size and au
 ### Quality Setting Display
 
 When using `--verbose`, quality settings are displayed:
+
 ```bash
 ./music-porter --verbose convert music/Pop_Workout --preset high
 # Output includes:
@@ -395,7 +414,8 @@ When using `--verbose`, quality settings are displayed:
 ```
 
 Conversion summaries also show quality settings:
-```
+
+```text
 QUALITY SETTINGS
 ─────────────────────────────────────────────────────────
 Preset:                  high
@@ -435,6 +455,7 @@ Mode:                    VBR quality 2
 ### Error Handling
 
 Invalid quality settings produce clear errors:
+
 ```bash
 # Missing --quality with custom preset
 ./music-porter convert music/Pop_Workout --preset custom
@@ -488,7 +509,7 @@ playlists:
 
 ## Directory Structure
 
-```
+```text
 .
 ├── music-porter    # Main script
 ├── config.yaml              # Playlist and settings configuration
@@ -542,6 +563,7 @@ Export directories are scoped by the active output profile: `export/<profile>/<p
 ## Common Workflows
 
 ### Workflow 1: Download and Convert New Playlist
+
 ```bash
 # Interactive (recommended)
 ./music-porter
@@ -552,12 +574,14 @@ Export directories are scoped by the active output profile: `export/<profile>/<p
 ```
 
 ### Workflow 2: Update All Playlists
+
 ```bash
 # Process all configured playlists automatically
 ./music-porter pipeline --auto --copy-to-usb
 ```
 
 ### Workflow 3: One-Time URL Download
+
 ```bash
 # Download, convert, and copy from a direct URL
 ./music-porter pipeline --url "https://music.apple.com/us/playlist/..."
@@ -565,12 +589,14 @@ Export directories are scoped by the active output profile: `export/<profile>/<p
 ```
 
 ### Workflow 4: Re-convert with Different Settings
+
 ```bash
 # Re-convert existing M4A files
 ./music-porter convert music/Pop_Workout --output export/ride-command/Pop_Workout --force
 ```
 
 ### Workflow 5: Batch Tag Update
+
 ```bash
 # Update tags on all playlists for the ride-command profile
 for dir in export/ride-command/*/; do
@@ -580,6 +606,7 @@ done
 ```
 
 ### Workflow 6: Copy Multiple Playlists to USB
+
 ```bash
 # Copy all exported playlists for the active profile
 ./music-porter sync-usb export/ride-command/
@@ -593,6 +620,7 @@ All operations are logged to timestamped files in `logs/`:
 - Useful for debugging and audit trails
 
 **View recent log:**
+
 ```bash
 tail -f logs/$(ls -t logs/ | head -1)
 ```
@@ -602,7 +630,8 @@ tail -f logs/$(ls -t logs/ | head -1)
 Each command provides detailed summary reports:
 
 ### Conversion Summary
-```
+
+```text
 ============================================================
   CONVERSION SUMMARY
 ============================================================
@@ -634,7 +663,8 @@ Each command provides detailed summary reports:
 ```
 
 ### Pipeline Summary
-```
+
+```text
 ======================================================================
   PIPELINE SUMMARY
 ======================================================================
@@ -673,6 +703,7 @@ Each command provides detailed summary reports:
 ## Troubleshooting
 
 ### gamdl not found
+
 ```bash
 # Install gamdl in virtual environment
 source .venv/bin/activate
@@ -680,6 +711,7 @@ pip install gamdl
 ```
 
 ### ffmpeg not found
+
 ```bash
 # macOS
 brew install ffmpeg
@@ -689,17 +721,20 @@ sudo apt install ffmpeg
 ```
 
 ### mutagen not found
+
 ```bash
 # Auto-installs when script runs, or manually:
 pip install mutagen
 ```
 
 ### USB drive not detected
+
 - Check excluded volumes list at top of script
 - Ensure drive is mounted in `/Volumes/`
 - Check drive permissions
 
 ### Conversion fails
+
 - Verify input files are valid M4A
 - Check ffmpeg installation
 - Try with `--verbose` for detailed error messages
@@ -724,6 +759,7 @@ pip install mutagen
 ## Tips and Best Practices
 
 1. **Always use dry-run first** for new operations
+
    ```bash
    ./music-porter --dry-run --verbose convert music/NewPlaylist
    ```
@@ -731,16 +767,19 @@ pip install mutagen
 2. **Keep originals safe** - TXXX frames preserve true originals forever
 
 3. **Use pipeline for new downloads** - handles everything in one command
+
    ```bash
    ./music-porter pipeline --playlist "New_Playlist"
    ```
 
 4. **Check logs** if something goes wrong
+
    ```bash
    tail -100 logs/$(ls -t logs/ | head -1)
    ```
 
 5. **Test USB sync without copying** using dry-run
+
    ```bash
    ./music-porter --dry-run sync-usb export/ride-command/Pop_Workout
    ```

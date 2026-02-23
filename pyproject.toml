@@ -1,0 +1,75 @@
+# ── Ruff ─────────────────────────────────────────────────────────
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-include = ["music-porter"]
+extend-exclude = [
+    "do-it-all.backup",
+    "ride-command-mp3-export.backup",
+    "docs/",
+]
+
+[tool.ruff.lint]
+select = [
+    "F",    # pyflakes
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff-specific rules
+]
+ignore = [
+    "E501",      # line too long (handled by formatter, not enforced yet)
+    "E741",      # ambiguous variable name (l, O, I)
+    "SIM102",    # combine nested ifs — readability preference (comments between conditions)
+    "SIM103",    # return condition directly — readability preference (comments explain logic)
+    "SIM105",    # use contextlib.suppress — readability preference
+    "SIM108",    # use ternary operator — readability preference
+    "SIM110",    # use any() — readability preference
+    "RUF001",    # ambiguous unicode (curly quotes in strings)
+    "RUF002",    # ambiguous unicode in docstrings
+    "RUF003",    # ambiguous unicode in comments
+]
+
+[tool.ruff.lint.per-file-ignores]
+"music-porter" = [
+    "F403",  # star import (from porter_core import *)
+    "F405",  # may be undefined from star import
+    "E402",  # module-level import not at top (venv bootstrap)
+]
+"porter_core.py" = [
+    "E402",  # module-level import not at top (conditional imports)
+]
+"web_ui.py" = [
+    "E402",  # module-level import not at top (path setup)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["porter_core"]
+
+[tool.ruff.format]
+# Configured but not enforced yet — future adoption
+quote-style = "double"
+indent-style = "space"
+
+# ── PyMarkdown ───────────────────────────────────────────────────
+[tool.pymarkdown]
+
+[tool.pymarkdown.extensions]
+front-matter.enabled = true
+
+[tool.pymarkdown.plugins]
+md041.enabled = false   # First-line heading — SKILL.md uses YAML frontmatter
+# Disabled rules
+md013.enabled = false   # Line length — SRS tables exceed 200 chars
+md024.enabled = false   # Duplicate headings — SRS repeats section names
+md033.enabled = false   # Inline HTML — used for strikethrough, anchors
+md036.enabled = false   # Bold as emphasis — SRS metadata lines
+md046.enabled = false   # Code block style — mixed fenced/indented
+
+# Configured rules
+md003.style = "atx"            # ATX-style headings (# Heading)
+md004.style = "dash"           # Dash for unordered lists
+md029.style = "ordered"        # Ordered list numbering (1. 2. 3.)

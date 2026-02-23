@@ -5,6 +5,7 @@
 ### ✅ 1. Added reset-tags Feature
 
 **Implementation:**
+
 - Added `reset_tags_from_source()` method to `TaggerManager` class
 - Reads tags from source M4A files
 - Finds matching MP3 files by sanitized filename
@@ -14,6 +15,7 @@
 - Comprehensive summary statistics
 
 **New Command:**
+
 ```bash
 ./apple-to-ride-command reset music/Pop_Workout export/Pop_Workout
 ```
@@ -27,6 +29,7 @@
 - Statistics tracking: tags reset, files updated, errors
 
 **Testing:**
+
 ```bash
 # Preview what would be reset
 ./apple-to-ride-command --dry-run reset music/Pop_Workout export/Pop_Workout
@@ -51,6 +54,7 @@
 - Shows migration guidance
 
 **Argument Mapping:**
+
 ```bash
 # Old → New
 --auto           → pipeline --auto
@@ -63,6 +67,7 @@
 ```
 
 **Example:**
+
 ```bash
 $ ./do-it-all --playlist "Pop_Workout"
 ╔════════════════════════════════════════════════════════════════╗
@@ -93,6 +98,7 @@ $ ./do-it-all --playlist "Pop_Workout"
 - Shows migration guidance
 
 **Argument Mapping:**
+
 ```bash
 # Old → New
 (input_dir)                     → convert (input_dir)
@@ -110,6 +116,7 @@ $ ./do-it-all --playlist "Pop_Workout"
 ```
 
 **Example:**
+
 ```bash
 $ ./ride-command-mp3-export music/Pop_Workout/ --new-album "Pop Workout"
 ╔════════════════════════════════════════════════════════════════╗
@@ -154,6 +161,7 @@ $ ./ride-command-mp3-export music/Pop_Workout/ --new-album "Pop Workout"
 **New Content Added:**
 
 #### Architecture Section
+
 - 13 classes documented with descriptions
 - 7 subcommands listed with purposes
 - Feature list highlighting key capabilities
@@ -161,6 +169,7 @@ $ ./ride-command-mp3-export music/Pop_Workout/ --new-album "Pop Workout"
 - Benefits comparison table
 
 #### Command Examples
+
 - Quick start section
 - Full pipeline workflows
 - Granular control examples
@@ -168,12 +177,14 @@ $ ./ride-command-mp3-export music/Pop_Workout/ --new-album "Pop Workout"
 - Legacy command warnings
 
 #### Migration Guide
+
 - Automatic migration via wrappers
 - Recommended migration patterns
 - Side-by-side old/new comparisons
 - Clear deprecation notices
 
 #### Implementation Notes
+
 - Tag management approach
 - Conversion process details
 - Pipeline orchestration workflow
@@ -196,6 +207,7 @@ $ ./ride-command-mp3-export music/Pop_Workout/ --new-album "Pop Workout"
 ## Testing Results
 
 ### Reset Command
+
 ```bash
 $ ./apple-to-ride-command reset --help
 usage: apple-to-ride-command reset [-h] input_dir output_dir
@@ -204,30 +216,36 @@ positional arguments:
   input_dir   Input directory with M4A files
   output_dir  Output directory with MP3 files
 ```
+
 ✅ Command available and help working
 
 ### Backward Compatibility Wrappers
+
 ```bash
 $ ./ride-command-mp3-export --help
 # Shows apple-to-ride-command help
 ```
+
 ✅ Wrapper successfully calls unified command
 
 ## Migration Strategy
 
 ### Phase 1: Compatibility (Current)
+
 - Original scripts backed up to `.backup` files
 - Wrappers in place showing deprecation warnings
 - All existing scripts and workflows continue to work
 - 3-second warning allows time to read message
 
 ### Phase 2: Migration Period (Recommended: 2-3 months)
+
 - Users update scripts to use `apple-to-ride-command`
 - Monitor usage via wrapper invocations
 - Provide support for migration issues
 - Document common migration patterns
 
 ### Phase 3: Deprecation (Future)
+
 - Remove wrapper scripts
 - Keep `.backup` files for reference
 - Update all documentation to show only new commands
@@ -238,16 +256,19 @@ $ ./ride-command-mp3-export --help
 ### Using New Unified Command
 
 **Interactive menu:**
+
 ```bash
 ./apple-to-ride-command
 ```
 
 **Full pipeline:**
+
 ```bash
 ./apple-to-ride-command pipeline --playlist "Pop_Workout"
 ```
 
 **Reset tags:**
+
 ```bash
 ./apple-to-ride-command reset music/Pop_Workout export/Pop_Workout
 ```
@@ -255,6 +276,7 @@ $ ./ride-command-mp3-export --help
 ### Using Legacy Wrappers (Deprecated)
 
 **Still work, but show warnings:**
+
 ```bash
 ./do-it-all --auto
 ./ride-command-mp3-export music/Pop_Workout/ --output export/Pop_Workout
@@ -262,7 +284,7 @@ $ ./ride-command-mp3-export --help
 
 ## Documentation Structure
 
-```
+```text
 Documentation Files:
 ├── CLAUDE.md                       # Project documentation (updated)
 ├── APPLE-TO-RIDE-COMMAND-GUIDE.md  # Complete usage guide
@@ -281,18 +303,21 @@ Script Files:
 ## Next Steps (Optional)
 
 ### For Users
+
 1. Start using `apple-to-ride-command` for new workflows
 2. Gradually migrate existing scripts
 3. Report any migration issues or bugs
 4. Provide feedback on new features
 
 ### For Developers
+
 1. Monitor wrapper usage to track migration progress
 2. Fix any compatibility issues that arise
 3. Add any missing features from legacy scripts
 4. Plan removal of wrappers after migration period
 
 ### Future Enhancements
+
 1. Add `--keep-id3v1`, `--keep-id3v24`, `--keep-duplicates` flags
 2. Add progress bars for long operations
 3. Add parallel processing for batch conversions
