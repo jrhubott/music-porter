@@ -1,7 +1,7 @@
 import Foundation
 
 /// REST API client for the music-porter server.
-@Observable
+@MainActor @Observable
 final class APIClient {
     var server: ServerConnection?
     var apiKey: String?

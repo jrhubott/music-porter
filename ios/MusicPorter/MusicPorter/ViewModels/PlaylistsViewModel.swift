@@ -1,6 +1,6 @@
 import Foundation
 
-@Observable
+@MainActor @Observable
 final class PlaylistsViewModel {
     var playlists: [Playlist] = []
     var exportDirs: [ExportDirectory] = []

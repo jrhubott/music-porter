@@ -1,7 +1,7 @@
 import Foundation
 
 /// Global app state shared across all views.
-@Observable
+@MainActor @Observable
 final class AppState {
     // Services
     let apiClient = APIClient()

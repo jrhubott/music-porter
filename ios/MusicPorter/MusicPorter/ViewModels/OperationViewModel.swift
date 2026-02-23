@@ -1,7 +1,7 @@
 import Foundation
 
 /// Shared view model for running server operations with SSE progress tracking.
-@Observable
+@MainActor @Observable
 final class OperationViewModel {
     var isRunning = false
     var taskId: String?
@@ -34,25 +34,17 @@ final class OperationViewModel {
 
             let sseClient = SSEClient(apiClient: api)
             for await event in await sseClient.events(taskId: id) {
-                await MainActor.run {
-                    handleEvent(event)
-                }
+                handleEvent(event)
             }
         } catch let apiError as APIError {
-            await MainActor.run {
-                error = apiError.localizedDescription
-                status = "failed"
-            }
+            error = apiError.localizedDescription
+            status = "failed"
         } catch {
-            await MainActor.run {
-                self.error = error.localizedDescription
-                status = "failed"
-            }
+            self.error = error.localizedDescription
+            status = "failed"
         }
 
-        await MainActor.run {
-            isRunning = false
-        }
+        isRunning = false
     }
 
     private func handleEvent(_ event: SSEEvent) {

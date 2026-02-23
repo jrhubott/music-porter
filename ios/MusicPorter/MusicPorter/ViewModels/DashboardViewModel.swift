@@ -1,6 +1,6 @@
 import Foundation
 
-@Observable
+@MainActor @Observable
 final class DashboardViewModel {
     var status: ServerStatus?
     var summary: SummaryResponse?

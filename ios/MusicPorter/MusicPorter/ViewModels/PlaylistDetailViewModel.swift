@@ -1,6 +1,6 @@
 import Foundation
 
-@Observable
+@MainActor @Observable
 final class PlaylistDetailViewModel {
     var tracks: [Track] = []
     var playlistKey: String = ""
