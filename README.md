@@ -440,7 +440,7 @@ The tool uses a "hard gate" protection system for original metadata:
 
 ## Version
 
-Current version: **v2.4.0**
+Current version: **v2.5.3**
 
 ## License
 
