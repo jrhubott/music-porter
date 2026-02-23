@@ -1,0 +1,24 @@
+services:
+  music-porter:
+    build: .
+    # Host networking lets Bonjour/mDNS work for iOS companion app discovery.
+    # To use bridge networking instead (no Bonjour), replace with:
+    #   ports:
+    #     - "5555:5555"
+    network_mode: host
+    volumes:
+      - ./config.yaml:/app/config.yaml
+      - ./cookies.txt:/app/cookies.txt
+      - ./music:/app/music
+      - ./export:/app/export
+      - ./logs:/app/logs
+    restart: unless-stopped
+    # Default: server mode (auth enabled, 0.0.0.0, Bonjour)
+    # For web mode (no auth, local browser UI):
+    #   command: ["web", "--host", "0.0.0.0"]
+    # For server without auth:
+    #   command: ["server", "--no-auth"]
+
+    # Limitations:
+    # - Cookie refresh: No browser in container. Provide cookies.txt from host.
+    # - USB sync: Not available in container. Use host CLI for USB operations.

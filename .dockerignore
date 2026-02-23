@@ -1,0 +1,44 @@
+# Virtual environment
+.venv/
+
+# Git
+.git/
+.gitignore
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Data directories (mounted as volumes)
+music/
+export/
+logs/
+gamdl_temp_*/
+
+# Runtime config (mounted as volumes)
+config.yaml
+cookies.txt
+cookies.txt.backup
+
+# iOS companion app
+ios/
+
+# Documentation and dev files
+*.md
+SRS/
+pyproject.toml
+requirements-dev.txt
+todos.md
+
+# Legacy scripts
+do-it-all
+do-it-all.bak
+ride-command-mp3-export
+ride-command-mp3-export.bak
+
+# IDE / OS
+.claude/
+.DS_Store
+.idea/
+.vscode/
