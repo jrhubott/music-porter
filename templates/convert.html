@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Convert - Music Porter{% endblock %}
+{% block title %}Convert - Music Porter{% endblock title %}
 {% block content %}
 <h4 class="mb-4">Convert M4A to MP3</h4>
 
@@ -80,7 +80,7 @@
     </div>
   </div>
 </div>
-{% endblock %}
+{% endblock content %}
 
 {% block scripts %}
 <script>
@@ -117,4 +117,4 @@ document.getElementById('convertForm').addEventListener('submit', function(e) {
   });
 });
 </script>
-{% endblock %}
+{% endblock scripts %}

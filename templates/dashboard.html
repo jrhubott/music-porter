@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Dashboard - Music Porter{% endblock %}
+{% block title %}Dashboard - Music Porter{% endblock title %}
 {% block content %}
 <h4 class="mb-4">Dashboard</h4>
 
@@ -280,7 +280,7 @@
     </div>
   </div>
 </div>
-{% endblock %}
+{% endblock content %}
 
 {% block scripts %}
 <style>
@@ -552,4 +552,4 @@ function sortTable(key) {
 
 loadSummary();
 </script>
-{% endblock %}
+{% endblock scripts %}

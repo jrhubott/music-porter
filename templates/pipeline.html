@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Pipeline - Music Porter{% endblock %}
+{% block title %}Pipeline - Music Porter{% endblock title %}
 {% block content %}
 <h4 class="mb-4">Pipeline</h4>
 <p class="text-muted">Full workflow: Download &rarr; Convert &rarr; Tag &rarr; (USB Sync)</p>
@@ -99,7 +99,7 @@
     </div>
   </div>
 </div>
-{% endblock %}
+{% endblock content %}
 
 {% block scripts %}
 <script>
@@ -153,4 +153,4 @@ document.getElementById('pipelineForm').addEventListener('submit', function(e) {
   });
 });
 </script>
-{% endblock %}
+{% endblock scripts %}

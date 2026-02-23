@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Settings - Music Porter{% endblock %}
+{% block title %}Settings - Music Porter{% endblock title %}
 {% block content %}
 <h4 class="mb-4">Settings</h4>
 
@@ -74,7 +74,7 @@
     </div>
   </div>
 </div>
-{% endblock %}
+{% endblock content %}
 
 {% block scripts %}
 <script>
@@ -190,4 +190,4 @@ document.getElementById('btnRefreshCookies').addEventListener('click', function(
 loadCookieStatus();
 loadBrowsers();
 </script>
-{% endblock %}
+{% endblock scripts %}
