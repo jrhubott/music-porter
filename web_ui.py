@@ -5,8 +5,6 @@ Provides a browser-based UI for all music-porter operations with
 live log streaming via Server-Sent Events (SSE).
 """
 
-import importlib.machinery
-import importlib.util
 import json
 import os
 import platform
@@ -23,13 +21,8 @@ from pathlib import Path
 
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 
-# ── Import music-porter module ──────────────────────────────────────────────
-# music-porter has no .py extension, so we need to tell importlib it's Python.
-_mp_path = Path(__file__).resolve().parent / 'music-porter'
-_loader = importlib.machinery.SourceFileLoader('music_porter', str(_mp_path))
-_spec = importlib.util.spec_from_loader('music_porter', _loader, origin=str(_mp_path))
-mp = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(mp)
+# ── Import business logic from porter_core ──────────────────────────────────
+import porter_core as mp
 
 # Initialize third-party imports once at load time.
 # The web server runs inside the venv so all packages are already available.
