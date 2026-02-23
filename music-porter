@@ -5,6 +5,8 @@ music-porter - Apple Music to Ride Command MP3 converter
 Combines download, conversion, tag management, and USB sync into a single tool.
 """
 
+from __future__ import annotations
+
 import sys
 import subprocess
 import os
@@ -16,7 +18,8 @@ from datetime import datetime
 import platform
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field, asdict
+from typing import Protocol, Optional, List, Dict, Any, runtime_checkable
 
 
 # ── Auto-activate venv ──
@@ -1102,6 +1105,1197 @@ class TagStatistics:
         self.title_missing = 0
         self.artist_missing = 0
         self.album_missing = 0
+
+
+# ══════════════════════════════════════════════════════════════════
+# Section 5b: Service Layer — Protocols, Results, Handlers, Renderers
+# ══════════════════════════════════════════════════════════════════
+
+# ── Protocols ─────────────────────────────────────────────────────
+
+@runtime_checkable
+class UserPromptHandler(Protocol):
+    """Protocol for user interaction callbacks.
+
+    Business logic classes accept an optional UserPromptHandler at
+    construction. When no handler is provided, NonInteractivePromptHandler
+    is used as a fail-safe default.
+    """
+
+    def confirm(self, message: str, default: bool = True) -> bool: ...
+
+    def confirm_destructive(self, message: str) -> bool: ...
+
+    def select_from_list(self, prompt: str, options: list[str],
+                         allow_cancel: bool = True) -> int | None: ...
+
+    def get_text_input(self, prompt: str,
+                       default: str | None = None) -> str | None: ...
+
+    def wait_for_continue(self, message: str,
+                          timeout: float | None = None) -> None: ...
+
+
+@runtime_checkable
+class DisplayHandler(Protocol):
+    """Protocol for progress and status display.
+
+    Business logic classes accept an optional DisplayHandler at
+    construction. When no handler is provided, NullDisplayHandler
+    is used (silently discards all calls).
+    """
+
+    def show_progress(self, current: int, total: int,
+                      message: str) -> None: ...
+
+    def show_status(self, message: str,
+                    level: str = "info") -> None: ...
+
+    def show_banner(self, title: str,
+                    subtitle: str | None = None) -> None: ...
+
+
+# ── Handler Implementations ───────────────────────────────────────
+
+class NonInteractivePromptHandler:
+    """Fail-safe defaults for non-interactive contexts (Web API, testing).
+
+    confirm() returns the default, confirm_destructive() returns False,
+    select_from_list() returns None, get_text_input() returns default,
+    wait_for_continue() returns immediately.
+    """
+
+    def confirm(self, message: str, default: bool = True) -> bool:
+        return default
+
+    def confirm_destructive(self, message: str) -> bool:
+        return False
+
+    def select_from_list(self, prompt: str, options: list[str],
+                         allow_cancel: bool = True) -> int | None:
+        return None
+
+    def get_text_input(self, prompt: str,
+                       default: str | None = None) -> str | None:
+        return default
+
+    def wait_for_continue(self, message: str,
+                          timeout: float | None = None) -> None:
+        return
+
+
+class CLIPromptHandler:
+    """CLI implementation of UserPromptHandler using input().
+
+    confirm() formats as "message [Y/n] " or "message [y/N] " based
+    on default. confirm_destructive() requires typing "yes".
+    select_from_list() prints numbered options and reads an integer.
+    """
+
+    def confirm(self, message: str, default: bool = True) -> bool:
+        hint = "[Y/n]" if default else "[y/N]"
+        try:
+            response = input(f"{message} {hint} ").strip().lower()
+            if response == '':
+                return default
+            return response in ('y', 'yes')
+        except (KeyboardInterrupt, EOFError):
+            print()
+            return default
+
+    def confirm_destructive(self, message: str) -> bool:
+        try:
+            response = input(
+                f"{message}\n   Type 'yes' to continue, anything else to cancel: "
+            ).strip().lower()
+            return response == 'yes'
+        except (KeyboardInterrupt, EOFError):
+            print()
+            return False
+
+    def select_from_list(self, prompt: str, options: list[str],
+                         allow_cancel: bool = True) -> int | None:
+        for i, option in enumerate(options, 1):
+            print(f"  {i}. {option}")
+        try:
+            selection = input(f"{prompt} ").strip()
+            index = int(selection) - 1
+            if 0 <= index < len(options):
+                return index
+            return None
+        except (ValueError, KeyboardInterrupt, EOFError):
+            return None
+
+    def get_text_input(self, prompt: str,
+                       default: str | None = None) -> str | None:
+        try:
+            if default:
+                response = input(f"{prompt} [{default}]: ").strip()
+                return response if response else default
+            else:
+                response = input(f"{prompt}: ").strip()
+                return response if response else None
+        except (KeyboardInterrupt, EOFError):
+            print()
+            return default
+
+    def wait_for_continue(self, message: str,
+                          timeout: float | None = None) -> None:
+        try:
+            input(message)
+        except (KeyboardInterrupt, EOFError):
+            print()
+
+
+class NullDisplayHandler:
+    """Silently discards all display calls.
+
+    Used when no DisplayHandler is provided — operations still log
+    to the Logger log file.
+    """
+
+    def show_progress(self, current: int, total: int,
+                      message: str) -> None:
+        pass
+
+    def show_status(self, message: str,
+                    level: str = "info") -> None:
+        pass
+
+    def show_banner(self, title: str,
+                    subtitle: str | None = None) -> None:
+        pass
+
+
+class CLIDisplayHandler:
+    """CLI implementation of DisplayHandler using print() and ProgressBar.
+
+    show_progress() manages a tqdm ProgressBar internally.
+    show_status() prints with optional ANSI color based on level.
+    show_banner() prints the startup banner.
+    """
+
+    def __init__(self, logger: Logger | None = None):
+        self._logger = logger
+        self._bar: ProgressBar | None = None
+        self._bar_total: int = 0
+        self._bar_desc: str = ""
+
+    def show_progress(self, current: int, total: int,
+                      message: str) -> None:
+        if self._bar is None or self._bar_total != total or self._bar_desc != message:
+            if self._bar is not None:
+                self._bar.close()
+            self._bar = ProgressBar(
+                total=total, desc=message,
+                logger=self._logger, disable=False,
+            )
+            self._bar_total = total
+            self._bar_desc = message
+        self._bar.update(1)
+
+    def finish_progress(self) -> None:
+        """Close the current progress bar if active."""
+        if self._bar is not None:
+            self._bar.close()
+            self._bar = None
+            self._bar_total = 0
+            self._bar_desc = ""
+
+    def show_status(self, message: str,
+                    level: str = "info") -> None:
+        print(message)
+
+    def show_banner(self, title: str,
+                    subtitle: str | None = None) -> None:
+        width = max(len(title), 62)
+        title_padded = title.ljust(width)
+        print(f"\n╔{'═' * width}╗")
+        print(f"║{title_padded}║")
+        print(f"╚{'═' * width}╝\n")
+        if subtitle:
+            print(f"  {subtitle}")
+
+
+# ── Result Dataclasses ────────────────────────────────────────────
+
+@dataclass
+class TagUpdateResult:
+    """Result of TaggerManager.update_tags()."""
+    success: bool
+    directory: str
+    duration: float
+    files_processed: int
+    files_updated: int
+    files_skipped: int
+    errors: int
+    title_updated: int = 0
+    album_updated: int = 0
+    artist_updated: int = 0
+    title_stored: int = 0
+    artist_stored: int = 0
+    album_stored: int = 0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class TagRestoreResult:
+    """Result of TaggerManager.restore_tags()."""
+    success: bool
+    directory: str
+    duration: float
+    files_processed: int
+    files_restored: int
+    files_skipped: int
+    errors: int
+    title_restored: int = 0
+    artist_restored: int = 0
+    album_restored: int = 0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class TagResetResult:
+    """Result of TaggerManager.reset_tags_from_source()."""
+    success: bool
+    input_dir: str
+    output_dir: str
+    duration: float
+    files_matched: int
+    files_reset: int
+    files_skipped: int
+    errors: int
+    tags_reset: int = 0
+    tags_rewritten: int = 0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class ConversionResult:
+    """Result of Converter.convert()."""
+    success: bool
+    input_dir: str
+    output_dir: str
+    duration: float
+    quality_preset: str
+    quality_mode: str
+    quality_value: str
+    workers: int
+    total_found: int
+    converted: int
+    overwritten: int
+    skipped: int
+    errors: int
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class DownloadResult:
+    """Result of Downloader.download()."""
+    success: bool
+    key: str | None
+    album_name: str | None
+    duration: float
+    playlist_total: int = 0
+    downloaded: int = 0
+    skipped: int = 0
+    failed: int = 0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class USBSyncResult:
+    """Result of USBManager.sync_to_usb()."""
+    success: bool
+    source: str
+    destination: str
+    volume_name: str
+    duration: float
+    files_found: int = 0
+    files_copied: int = 0
+    files_skipped: int = 0
+    files_failed: int = 0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class LibrarySummaryResult:
+    """Result of SummaryManager.generate_summary()."""
+    success: bool
+    export_dir: str
+    scan_duration: float
+    mode: str  # "quick", "default", "detailed"
+    total_playlists: int = 0
+    total_files: int = 0
+    total_size_bytes: int = 0
+    avg_file_size: float = 0.0
+    files_with_protection_tags: int = 0
+    files_missing_protection_tags: int = 0
+    sample_size: int = 0
+    files_with_cover_art: int = 0
+    files_without_cover_art: int = 0
+    files_with_original_cover_art: int = 0
+    files_with_resized_cover_art: int = 0
+    playlist_summaries: list = field(default_factory=list)
+    music_library_stats: Any = None  # MusicLibraryStats or None
+
+    def to_dict(self) -> dict:
+        d = asdict(self)
+        # PlaylistSummary objects need manual conversion
+        d['playlist_summaries'] = [
+            {
+                'name': p.name, 'path': p.path,
+                'file_count': p.file_count,
+                'total_size_bytes': p.total_size_bytes,
+                'avg_file_size_mb': p.avg_file_size_mb,
+                'files_with_cover_art': p.files_with_cover_art,
+                'files_without_cover_art': p.files_without_cover_art,
+            } if hasattr(p, 'name') else p
+            for p in self.playlist_summaries
+        ]
+        return d
+
+
+@dataclass
+class CoverArtResult:
+    """Result of CoverArtManager action methods."""
+    success: bool
+    action: str  # "embed", "extract", "update", "strip", "resize"
+    directory: str
+    duration: float
+    files_processed: int = 0
+    files_modified: int = 0
+    files_skipped: int = 0
+    errors: int = 0
+    source_dir: str | None = None
+    image_path: str | None = None
+    no_source: int = 0
+    max_size: int | None = None
+    total_before: int = 0
+    total_after: int = 0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class PipelineResult:
+    """Result of PipelineOrchestrator.run_full_pipeline()."""
+    success: bool
+    playlist_name: str | None
+    playlist_key: str | None
+    duration: float
+    stages_completed: list = field(default_factory=list)
+    stages_failed: list = field(default_factory=list)
+    stages_skipped: list = field(default_factory=list)
+    download_result: DownloadResult | None = None
+    conversion_result: ConversionResult | None = None
+    tag_result: TagUpdateResult | None = None
+    cover_art_result: CoverArtResult | None = None
+    usb_result: USBSyncResult | None = None
+    # Pipeline-specific stats carried over from PipelineStatistics
+    tagging_album: str | None = None
+    tagging_artist: str | None = None
+    cover_art_embedded: int = 0
+    cover_art_missing: int = 0
+    usb_destination: str | None = None
+
+    def to_dict(self) -> dict:
+        d = asdict(self)
+        return d
+
+
+@dataclass
+class AggregateResult:
+    """Result of PipelineOrchestrator batch processing."""
+    success: bool
+    duration: float
+    total_playlists: int = 0
+    successful_playlists: int = 0
+    failed_playlists: int = 0
+    playlist_results: list = field(default_factory=list)
+    cumulative_stats: dict = field(default_factory=dict)
+    usb_destination: str | None = None
+
+    def to_dict(self) -> dict:
+        d = asdict(self)
+        d['playlist_results'] = [
+            r.to_dict() if hasattr(r, 'to_dict') else r
+            for r in self.playlist_results
+        ]
+        return d
+
+
+@dataclass
+class DependencyCheckResult:
+    """Result of DependencyChecker checks."""
+    venv_active: bool
+    venv_path: str | None
+    packages: dict = field(default_factory=dict)
+    ffmpeg_available: bool = False
+    all_ok: bool = False
+    missing_packages: list = field(default_factory=list)
+    playlists_loaded: int = 0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+# ── CLI Summary Renderer Functions ────────────────────────────────
+
+def render_tag_update_summary(r: TagUpdateResult) -> None:
+    """Render tag update summary as 60-char-wide console box."""
+    total_tag_updates = r.title_updated + r.album_updated + r.artist_updated
+    total_stored = r.title_stored + r.artist_stored + r.album_stored
+
+    print()
+    print("=" * 60)
+    print("  TAG UPDATE SUMMARY")
+    print("=" * 60)
+    print(f"  Run date:                {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"  Directory:               '{r.directory}'")
+    print(f"  Duration:                {r.duration:.1f}s")
+    print("─" * 60)
+    print("  FILES")
+    print("─" * 60)
+    print(f"  Files processed:         {r.files_processed}")
+    print(f"  Files updated:           {r.files_updated}")
+    print(f"  Files skipped:           {r.files_skipped}")
+    print(f"  Errors:                  {r.errors}")
+    print("─" * 60)
+    print("  TAG UPDATES")
+    print("─" * 60)
+    print(f"  Title updated:           {r.title_updated}")
+    print(f"  Album updated:           {r.album_updated}")
+    print(f"  Artist updated:          {r.artist_updated}")
+    print(f"  Total tag updates:       {total_tag_updates}")
+    print("─" * 60)
+    print("  ORIGINAL TAG PROTECTION")
+    print("─" * 60)
+    print(f"  OriginalTitle stored:    {r.title_stored}")
+    print(f"  OriginalArtist stored:   {r.artist_stored}")
+    print(f"  OriginalAlbum stored:    {r.album_stored}")
+    print(f"  Total stored:            {total_stored}")
+    print("─" * 60)
+    status_emoji = "✅" if r.errors == 0 else "❌"
+    status_text = "Completed successfully" if r.errors == 0 else "Completed with errors"
+    print(f"  Status:                  {status_emoji} {status_text}")
+    print("=" * 60)
+
+
+def render_tag_restore_summary(r: TagRestoreResult) -> None:
+    """Render tag restore summary as 60-char-wide console box."""
+    total_restored = r.title_restored + r.album_restored + r.artist_restored
+
+    print()
+    print("=" * 60)
+    print("  TAG RESTORATION SUMMARY")
+    print("=" * 60)
+    print(f"  Run date:                {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"  Directory:               '{r.directory}'")
+    print(f"  Duration:                {r.duration:.1f}s")
+    print("─" * 60)
+    print("  FILES")
+    print("─" * 60)
+    print(f"  Files processed:         {r.files_processed}")
+    print(f"  Files restored:          {r.files_restored}")
+    print(f"  Files skipped:           {r.files_skipped}")
+    print(f"  Errors:                  {r.errors}")
+    print("─" * 60)
+    print("  TAG RESTORATIONS")
+    print("─" * 60)
+    print(f"  Title restored:          {r.title_restored}")
+    print(f"  Artist restored:         {r.artist_restored}")
+    print(f"  Album restored:          {r.album_restored}")
+    print(f"  Total restored:          {total_restored}")
+    print("─" * 60)
+    status_emoji = "✅" if r.errors == 0 else "❌"
+    status_text = "Completed successfully" if r.errors == 0 else "Completed with errors"
+    print(f"  Status:                  {status_emoji} {status_text}")
+    print("=" * 60)
+
+
+def render_tag_reset_summary(r: TagResetResult) -> None:
+    """Render tag reset summary as 60-char-wide console box."""
+    print(f"\n{'=' * 60}")
+    print(f"  RESET TAGS SUMMARY")
+    print(f"{'=' * 60}")
+    print(f"  Run date:                {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"  Input directory:         '{r.input_dir}'")
+    print(f"  Output directory:        '{r.output_dir}'")
+    print(f"  Duration:                {r.duration:.1f}s")
+    print(f"{'─' * 60}")
+    print(f"  FILES")
+    print(f"{'─' * 60}")
+    print(f"  Total .m4a found:        {r.files_matched}")
+    print(f"  MP3s updated:            {r.files_reset}")
+    print(f"  Skipped (no MP3 match):  {r.files_skipped}")
+    print(f"  Errors:                  {r.errors}")
+    print(f"{'─' * 60}")
+    print(f"  TAGGING")
+    print(f"{'─' * 60}")
+    print(f"  Original tags reset:     {r.tags_reset}")
+    print(f"  Original tags rewritten: {r.tags_rewritten}")
+    print(f"{'─' * 60}")
+    if r.errors > 0:
+        print(f"  Status:                  ⚠️  Completed with errors")
+    elif r.files_reset == 0:
+        print(f"  Status:                  ℹ️  No MP3s updated")
+    else:
+        print(f"  Status:                  ✅ Completed successfully")
+    print(f"{'=' * 60}")
+
+
+def render_conversion_summary(r: ConversionResult) -> None:
+    """Render conversion summary as 60-char-wide console box."""
+    quality_desc = f"{r.quality_mode.upper()}"
+    if r.quality_mode == 'vbr':
+        quality_desc += f" quality {r.quality_value}"
+    else:
+        quality_desc += f" {r.quality_value}kbps"
+
+    print(f"\n{'=' * 60}")
+    print(f"  CONVERSION SUMMARY")
+    print(f"{'=' * 60}")
+    print(f"  Run date:                {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"  Input directory:         '{r.input_dir}'")
+    print(f"  Output directory:        '{r.output_dir}'")
+    print(f"  Duration:                {r.duration:.1f}s")
+    if r.workers > 1:
+        print(f"  Workers:                 {r.workers}")
+    print(f"{'─' * 60}")
+    print(f"  QUALITY SETTINGS")
+    print(f"{'─' * 60}")
+    print(f"  Preset:                  {r.quality_preset}")
+    print(f"  Mode:                    {quality_desc}")
+    print(f"{'─' * 60}")
+    print(f"  FILES")
+    print(f"{'─' * 60}")
+    print(f"  Total found:             {r.total_found}")
+    print(f"  Converted:               {r.converted}")
+    print(f"  Overwritten:             {r.overwritten}")
+    print(f"  Skipped (exists):        {r.skipped}")
+    print(f"  Errors:                  {r.errors}")
+    print(f"{'─' * 60}")
+    print(f"  TAGGING")
+    print(f"{'─' * 60}")
+    print(f"  Tags copied from source: Title, Artist, Album")
+    print(f"{'─' * 60}")
+    if r.errors > 0:
+        print(f"  Status:                  ⚠️  Completed with errors")
+    elif r.skipped == r.total_found:
+        print(f"  Status:                  ℹ️  Nothing to do — all files already exist")
+    else:
+        print(f"  Status:                  ✅ Completed successfully")
+    print(f"{'=' * 60}")
+
+
+def render_usb_sync_summary(r: USBSyncResult) -> None:
+    """Render USB sync summary as 60-char-wide console box."""
+    print()
+    print("=" * 60)
+    print("  USB SYNC SUMMARY")
+    print("=" * 60)
+    print(f"  Run date:                {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"  Source:                  '{r.source}'")
+    print(f"  Destination:             '{r.destination}'")
+    print(f"  Duration:                {r.duration:.1f}s")
+    print("─" * 60)
+    print("  FILES")
+    print("─" * 60)
+    print(f"  Files found:             {r.files_found}")
+    print(f"  Files copied:            {r.files_copied}")
+    print(f"  Files skipped:           {r.files_skipped}")
+    print(f"  Files failed:            {r.files_failed}")
+    print("─" * 60)
+    status_emoji = "✅" if r.files_failed == 0 else "❌"
+    status_text = "Completed successfully" if r.files_failed == 0 else "Completed with errors"
+    print(f"  Status:                  {status_emoji} {status_text}")
+    print("=" * 60)
+
+
+def _format_size_for_renderer(bytes_size: int) -> str:
+    """Format bytes to human-readable size (shared by renderers)."""
+    if bytes_size < 1024:
+        return f"{bytes_size} B"
+    elif bytes_size < 1024 * 1024:
+        return f"{bytes_size / 1024:.1f} KB"
+    elif bytes_size < 1024 * 1024 * 1024:
+        return f"{bytes_size / (1024 * 1024):.1f} MB"
+    else:
+        return f"{bytes_size / (1024 * 1024 * 1024):.1f} GB"
+
+
+def render_library_summary(r: LibrarySummaryResult, mode: str = "default") -> None:
+    """Render library summary. mode: 'quick', 'default', or 'detailed'."""
+    # Render music library stats first if available
+    if r.music_library_stats is not None:
+        ms = r.music_library_stats
+        if ms.total_files > 0:
+            print()
+            print("╔" + "═" * 60 + "╗")
+            print("║" + "LIBRARY STATS".center(60) + "║")
+            print("╚" + "═" * 60 + "╝")
+            print()
+            print(f"  Directory:               '{DEFAULT_MUSIC_DIR}/'")
+            print(f"  Total playlists:         {ms.total_playlists}")
+            print(f"  Total M4A files:         {ms.total_files}")
+            print(f"  Total library size:      {_format_size_for_renderer(ms.total_size_bytes)}")
+            if ms.total_files > 0:
+                pct = (ms.total_exported / ms.total_files) * 100
+                print(f"  Exported:                {ms.total_exported}/{ms.total_files} ({pct:.0f}%)")
+                if ms.total_unconverted > 0:
+                    print(f"  Unconverted:             {ms.total_unconverted}")
+                else:
+                    print(f"  Unconverted:             0  ✅")
+            print(f"  Scan duration:           {ms.scan_duration:.1f}s")
+            print()
+
+    if r.total_files == 0 and r.total_playlists == 0:
+        # Empty library
+        print()
+        print("╔" + "═" * 60 + "╗")
+        print("║" + "PLAYLIST SUMMARY".center(60) + "║")
+        print("╚" + "═" * 60 + "╝")
+        print()
+        print(f"  Directory:               '{r.export_dir}'")
+        print(f"  Total playlists:         0")
+        print(f"  Total MP3 files:         0")
+        print()
+        print("  ℹ️  Library is empty")
+        print()
+        print("  Suggested next steps:")
+        print("    • Run: ./music-porter pipeline --auto")
+        print("    • Or download a playlist: ./music-porter download --playlist 1")
+        print()
+        return
+
+    if mode == "quick":
+        _render_quick_summary(r)
+    elif mode == "detailed":
+        _render_default_summary(r)
+        _render_detailed_extras(r)
+    else:
+        _render_default_summary(r)
+
+
+def _render_quick_summary(r: LibrarySummaryResult) -> None:
+    """Print minimal aggregate-only summary."""
+    print()
+    print("╔" + "═" * 60 + "╗")
+    print("║" + "PLAYLIST SUMMARY (QUICK)".center(60) + "║")
+    print("╚" + "═" * 60 + "╝")
+    print()
+    print(f"  Directory:               '{r.export_dir}'")
+    print(f"  Total playlists:         {r.total_playlists}")
+    print(f"  Total MP3 files:         {r.total_files}")
+    print(f"  Total library size:      {_format_size_for_renderer(r.total_size_bytes)}")
+    print(f"  Scan duration:           {r.scan_duration:.1f}s")
+    print()
+
+
+def _render_default_summary(r: LibrarySummaryResult) -> None:
+    """Print default balanced summary."""
+    print()
+    print("╔" + "═" * 60 + "╗")
+    print("║" + "PLAYLIST SUMMARY".center(60) + "║")
+    print("╚" + "═" * 60 + "╝")
+    print()
+    print(f"  Directory:               '{r.export_dir}'")
+    scan_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"  Scan date:               {scan_date}")
+    print(f"  Scan duration:           {r.scan_duration:.1f}s")
+    print()
+
+    # Aggregate statistics
+    print("─" * 60)
+    print("  AGGREGATE STATISTICS")
+    print("─" * 60)
+    print(f"  Total playlists:         {r.total_playlists}")
+    print(f"  Total MP3 files:         {r.total_files}")
+    print(f"  Total library size:      {_format_size_for_renderer(r.total_size_bytes)}")
+    if r.total_files > 0:
+        avg_size = r.total_size_bytes / r.total_files
+        print(f"  Average file size:       {_format_size_for_renderer(int(avg_size))}")
+    print()
+
+    # Tag integrity
+    print("─" * 60)
+    print(f"  TAG INTEGRITY")
+    print("─" * 60)
+    if r.sample_size > 0:
+        percentage = (r.files_with_protection_tags / r.sample_size) * 100
+        print(f"  Files with protection:   {r.files_with_protection_tags}/{r.sample_size} ({percentage:.0f}%)")
+        if r.files_missing_protection_tags == 0:
+            print(f"  Status:                  ✅ All files have TXXX protection tags")
+        else:
+            print(f"  Status:                  ⚠️  Some files missing TXXX protection tags")
+    else:
+        print("  Status:                  ℹ️  No files checked")
+    print()
+
+    # Cover art
+    print("─" * 60)
+    print(f"  COVER ART")
+    print("─" * 60)
+    total_cover_checked = r.files_with_cover_art + r.files_without_cover_art
+    if total_cover_checked > 0:
+        cover_pct = (r.files_with_cover_art / total_cover_checked) * 100
+        print(f"  Files with cover art:    {r.files_with_cover_art}/{total_cover_checked} ({cover_pct:.0f}%)")
+        if r.files_with_cover_art > 0:
+            original_pct = (r.files_with_original_cover_art / r.files_with_cover_art) * 100
+            print(f"  Original cover art:      {r.files_with_original_cover_art}/{r.files_with_cover_art} ({original_pct:.0f}%)")
+            resized_pct = (r.files_with_resized_cover_art / r.files_with_cover_art) * 100
+            print(f"  Modified cover art:      {r.files_with_resized_cover_art}/{r.files_with_cover_art} ({resized_pct:.0f}%)")
+        if r.files_without_cover_art == 0:
+            print(f"  Status:                  ✅ All files have embedded cover art")
+        else:
+            print(f"  Status:                  ⚠️  {r.files_without_cover_art} files missing cover art")
+            print(f"  Fix:                     ./music-porter cover-art embed <dir>")
+    else:
+        print("  Status:                  ℹ️  No files checked")
+    print()
+
+    # Playlist breakdown
+    print("─" * 60)
+    print("  PLAYLIST BREAKDOWN")
+    print("─" * 60)
+    _render_playlist_table(r.playlist_summaries)
+    print()
+
+    # Final status
+    print("═" * 60)
+    print("  Status:                  ✅ Library scan completed")
+    print("═" * 60)
+    print()
+
+
+def _render_playlist_table(playlists: list) -> None:
+    """Print formatted table of playlists."""
+    if not playlists:
+        print("  (no playlists found)")
+        return
+
+    # Header
+    print(f"  {'Playlist':<25} {'Files':>6}  {'Art/Mod':>9}  {'Size':>10}  {'Updated':<10}")
+    print("  " + "─" * 62)
+
+    # Sort by name
+    sorted_playlists = sorted(playlists, key=lambda p: p.name)
+
+    today = datetime.now().date()
+    for playlist in sorted_playlists:
+        name = playlist.name[:24]
+        files = str(playlist.file_count)
+        art = f"{playlist.files_with_cover_art}/{playlist.files_with_resized_cover_art}"
+
+        if playlist.files_with_resized_cover_art > 0 and playlist.files_with_cover_art != playlist.files_with_resized_cover_art:
+            art = f"⚠️{art}"
+
+        size = _format_size_for_renderer(playlist.total_size_bytes)
+
+        if playlist.last_modified:
+            updated = playlist.last_modified.strftime("%b %d")
+            if playlist.last_modified.date() != today:
+                updated = f"⚠️{updated}"
+        else:
+            updated = "⚠️N/A"
+
+        print(f"  {name:<25} {files:>6}  {art:>9}  {size:>10}  {updated:<10}")
+
+    print("  " + "─" * 62)
+
+
+def _render_detailed_extras(r: LibrarySummaryResult) -> None:
+    """Print extended per-playlist breakdowns (appended after default summary)."""
+    print("─" * 60)
+    print("  DETAILED PLAYLIST INFORMATION")
+    print("─" * 60)
+    print()
+
+    for playlist in r.playlist_summaries:
+        print(f"  📁 {playlist.name}")
+        print(f"     Files:                {playlist.file_count}")
+        print(f"     Total size:           {_format_size_for_renderer(playlist.total_size_bytes)}")
+        print(f"     Average file size:    {playlist.avg_file_size_mb:.1f} MB")
+
+        if playlist.last_modified:
+            modified_str = playlist.last_modified.strftime("%b %d, %Y %H:%M")
+            print(f"     Last modified:        {modified_str}")
+
+        if playlist.sample_files_checked > 0:
+            percentage = (playlist.sample_files_with_tags / playlist.sample_files_checked) * 100
+            print(f"     Tag integrity:        {playlist.sample_files_with_tags}/{playlist.sample_files_checked} ({percentage:.0f}%)")
+
+        total_cover = playlist.files_with_cover_art + playlist.files_without_cover_art
+        if total_cover > 0:
+            cover_pct = (playlist.files_with_cover_art / total_cover) * 100
+            print(f"     Cover art:            {playlist.files_with_cover_art}/{total_cover} ({cover_pct:.0f}%)")
+            if playlist.files_with_cover_art > 0:
+                original_pct = (playlist.files_with_original_cover_art / playlist.files_with_cover_art) * 100
+                print(f"     Original cover art:   {playlist.files_with_original_cover_art}/{playlist.files_with_cover_art} ({original_pct:.0f}%)")
+                if playlist.files_with_resized_cover_art > 0:
+                    resized_pct = (playlist.files_with_resized_cover_art / playlist.files_with_cover_art) * 100
+                    print(f"     Modified cover art:   {playlist.files_with_resized_cover_art}/{playlist.files_with_cover_art} ({resized_pct:.0f}%)")
+
+        print()
+
+    print("═" * 60)
+    print()
+
+
+def render_cover_art_summary(r: CoverArtResult) -> None:
+    """Render cover art operation summary as 60-char-wide console box."""
+    action_titles = {
+        "embed": "COVER ART EMBED SUMMARY",
+        "extract": "COVER ART EXTRACT SUMMARY",
+        "update": "COVER ART UPDATE SUMMARY",
+        "strip": "COVER ART STRIP SUMMARY",
+        "resize": "COVER ART RESIZE SUMMARY",
+    }
+    title = action_titles.get(r.action, f"COVER ART {r.action.upper()} SUMMARY")
+
+    print(f"\n{'=' * 60}")
+    print(f"  {title}")
+    print(f"{'=' * 60}")
+    print(f"  Directory:               '{r.directory}'")
+
+    if r.action == "embed" and r.source_dir:
+        print(f"  Source:                   '{r.source_dir}'")
+    if r.action == "update" and r.image_path:
+        print(f"  Image:                   '{r.image_path}'")
+    if r.action == "resize" and r.max_size is not None:
+        print(f"  Max dimension:           {r.max_size}px")
+
+    print(f"{'─' * 60}")
+
+    if r.action == "embed":
+        print(f"  Embedded:                {r.files_modified}")
+        print(f"  Skipped (already has):   {r.files_skipped}")
+        print(f"  No source found:         {r.no_source}")
+        print(f"  Errors:                  {r.errors}")
+    elif r.action == "extract":
+        print(f"  Extracted:               {r.files_modified}")
+        print(f"  Skipped (no art):        {r.files_skipped}")
+        print(f"  Errors:                  {r.errors}")
+    elif r.action == "update":
+        print(f"  Updated:                 {r.files_modified}")
+        print(f"  Errors:                  {r.errors}")
+    elif r.action == "strip":
+        print(f"  Stripped:                {r.files_modified}")
+        print(f"  Skipped (no art):        {r.files_skipped}")
+        print(f"  Errors:                  {r.errors}")
+    elif r.action == "resize":
+        print(f"  Resized:                 {r.files_modified}")
+        print(f"  Skipped (already small): {r.files_skipped}")
+        print(f"  Skipped (no art):        {r.no_source}")
+        print(f"  Errors:                  {r.errors}")
+        if r.total_before > 0:
+            def fmt_sz(b):
+                if b >= 1024 * 1024:
+                    return f"{b / (1024 * 1024):.1f} MB"
+                return f"{b / 1024:.1f} KB"
+            print(f"{'─' * 60}")
+            if r.total_after > 0:
+                print(f"  Total cover art:         {fmt_sz(r.total_before)} → {fmt_sz(r.total_after)}")
+            else:
+                print(f"  Total cover art:         {fmt_sz(r.total_before)}")
+
+    print(f"{'=' * 60}")
+
+
+def render_pipeline_summary(r: PipelineResult) -> None:
+    """Render pipeline summary as 70-char-wide console box."""
+    print(f"\n{'=' * 70}")
+    print(f"  PIPELINE SUMMARY")
+    print(f"{'=' * 70}")
+    print(f"  Run date:                {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"  Playlist:                {r.playlist_name or '—'} ({r.playlist_key or '—'})")
+    print(f"  Duration:                {r.duration:.1f}s")
+
+    # Download stage
+    if "download" in r.stages_completed or "download" in r.stages_failed or "download" in r.stages_skipped:
+        print(f"{'─' * 70}")
+        print(f"  DOWNLOAD STAGE")
+        print(f"{'─' * 70}")
+        if "download" in r.stages_completed and r.download_result:
+            d = r.download_result
+            if d.playlist_total > 0:
+                print(f"  Total tracks in playlist:{d.playlist_total}")
+            print(f"  Downloaded (new):        {d.downloaded}")
+            print(f"  Skipped (already exist): {d.skipped}")
+            if d.failed > 0:
+                print(f"  Failed:                  {d.failed}")
+            print(f"  Status:                  ✅ Success")
+        elif "download" in r.stages_completed:
+            print(f"  Status:                  ✅ Success")
+        elif "download" in r.stages_skipped:
+            print(f"  Status:                  ⏭️  Skipped")
+        else:
+            print(f"  Status:                  ❌ Failed")
+
+    # Conversion stage
+    if r.conversion_result:
+        cr = r.conversion_result
+        print(f"{'─' * 70}")
+        print(f"  CONVERSION STAGE")
+        print(f"{'─' * 70}")
+        print(f"  Files converted:         {cr.converted}")
+        print(f"  Files overwritten:       {cr.overwritten}")
+        print(f"  Files skipped:           {cr.skipped}")
+        print(f"  Conversion errors:       {cr.errors}")
+
+    # Tagging stage
+    if r.tag_result:
+        tr = r.tag_result
+        print(f"{'─' * 70}")
+        print(f"  TAGGING STAGE")
+        print(f"{'─' * 70}")
+        if r.tagging_album:
+            print(f"  Album set to:            {r.tagging_album}")
+        if r.tagging_artist:
+            print(f"  Artist set to:           {r.tagging_artist}")
+        print(f"  Title updated:           {tr.title_updated}")
+        print(f"  Album updated:           {tr.album_updated}")
+        print(f"  Artist updated:          {tr.artist_updated}")
+        print(f"  OriginalTitle stored:    {tr.title_stored}")
+        print(f"  OriginalArtist stored:   {tr.artist_stored}")
+        print(f"  OriginalAlbum stored:    {tr.album_stored}")
+        if r.cover_art_embedded > 0 or r.cover_art_missing > 0:
+            print(f"  Cover art embedded:      {r.cover_art_embedded}")
+            print(f"  Cover art missing:       {r.cover_art_missing}")
+
+    # USB sync stage
+    if r.usb_result or "usb-sync" in r.stages_failed:
+        print(f"{'─' * 70}")
+        print(f"  USB SYNC STAGE")
+        print(f"{'─' * 70}")
+        if r.usb_result and r.usb_result.success:
+            print(f"  Status:                  ✅ Success")
+            if r.usb_destination:
+                print(f"  USB destination:         {r.usb_destination}")
+        else:
+            print(f"  Status:                  ❌ Failed")
+
+    # Comprehensive file summary
+    if len(r.stages_completed) > 0:
+        print(f"{'─' * 70}")
+        print(f"  COMPREHENSIVE FILES SUMMARY")
+        print(f"{'─' * 70}")
+
+        if r.download_result:
+            d = r.download_result
+            if d.playlist_total > 0:
+                print(f"  Playlist tracks:         {d.playlist_total}")
+            total_after_download = d.downloaded + d.skipped
+            print(f"  M4A files after download:{total_after_download} "
+                  f"({d.downloaded} new, {d.skipped} existing)")
+
+        if r.conversion_result:
+            c = r.conversion_result
+            total_processed = c.converted + c.overwritten + c.skipped
+            print(f"  MP3s after conversion:   {total_processed} "
+                  f"({c.converted + c.overwritten} converted, {c.skipped} skipped)")
+
+        if r.tag_result:
+            t = r.tag_result
+            print(f"  Tags updated:            {t.title_updated}")
+            total_original_stored = t.title_stored + t.artist_stored + t.album_stored
+            if total_original_stored > 0:
+                print(f"  Original tags stored:    {total_original_stored}")
+            if r.cover_art_embedded > 0 or r.cover_art_missing > 0:
+                print(f"  Cover art embedded:      {r.cover_art_embedded}")
+                if r.cover_art_missing > 0:
+                    print(f"  Cover art missing:       {r.cover_art_missing}")
+
+        if r.usb_result and r.usb_result.success and r.conversion_result:
+            files_on_usb = r.conversion_result.converted + r.conversion_result.overwritten + r.conversion_result.skipped
+            print(f"  Files copied to USB:     {files_on_usb}")
+
+    # Overall status
+    print(f"{'─' * 70}")
+    if len(r.stages_failed) == 0:
+        print(f"  Status:                  ✅ Completed successfully")
+    else:
+        print(f"  Status:                  ⚠️  Completed with errors")
+        print(f"  Failed stages:           {', '.join(r.stages_failed)}")
+    print(f"{'=' * 70}")
+
+
+def render_aggregate_summary(r: AggregateResult) -> None:
+    """Render aggregate summary for multiple playlists as 70-char-wide console box."""
+    duration_mins = int(r.duration // 60)
+    duration_secs = int(r.duration % 60)
+
+    print(f"\n{'=' * 70}")
+    print(f"  TOTAL SUMMARY - ALL PLAYLISTS")
+    print(f"{'=' * 70}")
+    print(f"  Playlists processed:     {r.total_playlists}")
+    print(f"  Total duration:          {r.duration:.1f}s ({duration_mins}m {duration_secs}s)")
+
+    if r.failed_playlists == 0:
+        print(f"  Overall status:          ✅ All succeeded")
+    else:
+        print(f"  Overall status:          ⚠️  Some failed")
+
+    # Playlist results table
+    print(f"{'─' * 70}")
+    print(f"  PLAYLIST RESULTS")
+    print(f"{'─' * 70}")
+    print(f"  {'Playlist':<24} {'Downloaded':<12} {'Converted':<11} {'Tagged':<8} Status")
+    print(f"  {'─' * 70}")
+
+    for pr in r.playlist_results:
+        # Format download stats
+        if hasattr(pr, 'download_result') and pr.download_result:
+            dl_str = f"{pr.download_result.downloaded}/{pr.download_result.playlist_total}"
+        elif hasattr(pr, 'download_stats') and pr.download_stats:
+            dl_str = f"{pr.download_stats.downloaded}/{pr.download_stats.playlist_total}"
+        elif hasattr(pr, 'failed_stage') and pr.failed_stage == "download":
+            dl_str = "ERROR"
+        else:
+            dl_str = "-/-"
+
+        # Format conversion stats
+        if hasattr(pr, 'conversion_result') and pr.conversion_result:
+            cr = pr.conversion_result
+            conv_count = cr.converted + cr.overwritten
+            conv_total = conv_count + cr.skipped
+            conv_str = f"{conv_count}/{conv_total}"
+        elif hasattr(pr, 'conversion_stats') and pr.conversion_stats:
+            cs = pr.conversion_stats
+            conv_count = cs.converted + cs.overwritten
+            conv_total = conv_count + cs.skipped
+            conv_str = f"{conv_count}/{conv_total}"
+        elif hasattr(pr, 'failed_stage') and pr.failed_stage in ["download", "convert"]:
+            conv_str = "-/-"
+        else:
+            conv_str = "0/0"
+
+        # Format tag stats
+        if hasattr(pr, 'tag_result') and pr.tag_result:
+            tag_str = str(pr.tag_result.title_updated)
+        elif hasattr(pr, 'tagging_stats') and pr.tagging_stats:
+            tag_str = str(pr.tagging_stats.title_updated)
+        else:
+            tag_str = "-"
+
+        # Status
+        if pr.success:
+            status = "✅ Success"
+        else:
+            failed = getattr(pr, 'failed_stage', 'Failed') or 'Failed'
+            status = f"❌ {failed}"
+
+        name = getattr(pr, 'playlist_name', None) or getattr(pr, 'name', '?')
+        display_name_str = name[:22] if len(name) > 22 else name
+
+        print(f"  {display_name_str:<24} {dl_str:<12} {conv_str:<11} {tag_str:<8} {status}")
+
+    # Totals
+    totals = r.cumulative_stats
+    print(f"  {'─' * 70}")
+    total_dl = f"{totals.get('downloaded', 0)}/{totals.get('playlist_total', 0)}"
+    total_conv = f"{totals.get('converted', 0) + totals.get('overwritten', 0)}/{totals.get('converted', 0) + totals.get('overwritten', 0) + totals.get('skipped_conversion', 0)}"
+    success_ratio = f"✅ {r.successful_playlists}/{r.total_playlists}"
+
+    print(f"  {'TOTALS':<24} {total_dl:<12} {total_conv:<11} {totals.get('title_updated', 0):<8} {success_ratio}")
+
+    # Cumulative statistics
+    print(f"{'─' * 70}")
+    print(f"  CUMULATIVE STATISTICS")
+    print(f"{'─' * 70}")
+    print(f"  Total tracks in playlists:    {totals.get('playlist_total', 0)}")
+    print()
+    print(f"  Downloads:")
+    print(f"    New downloads:              {totals.get('downloaded', 0)}")
+    print(f"    Already existed (skipped):  {totals.get('skipped_download', 0)}")
+    if totals.get('failed_download', 0) > 0:
+        print(f"    Failed:                     {totals['failed_download']}")
+    print()
+    print(f"  Conversions:")
+    print(f"    Newly converted:            {totals.get('converted', 0)}")
+    if totals.get('overwritten', 0) > 0:
+        print(f"    Overwritten:                {totals['overwritten']}")
+    print(f"    Skipped (already exist):    {totals.get('skipped_conversion', 0)}")
+    if totals.get('errors_conversion', 0) > 0:
+        print(f"    Errors:                     {totals['errors_conversion']}")
+    print()
+    print(f"  Tag Operations:")
+    print(f"    Titles updated:             {totals.get('title_updated', 0)}")
+    if totals.get('original_tags_stored', 0) > 0:
+        print(f"    Original tags stored:       {totals['original_tags_stored']}")
+
+    # USB sync
+    if r.usb_destination and totals.get('files_on_usb', 0) > 0:
+        print()
+        print(f"  USB Sync:")
+        print(f"    Files copied to USB:        {totals['files_on_usb']}")
+        print(f"    Destination:                {r.usb_destination}")
+
+    # Final status
+    print(f"{'─' * 70}")
+    if r.failed_playlists == 0:
+        print(f"  STATUS:  ✅ All playlists completed successfully")
+    else:
+        print(f"  STATUS:  ⚠️  {r.failed_playlists} of {r.total_playlists} playlists failed")
+        failed_names = [
+            f"{getattr(pr, 'playlist_name', None) or getattr(pr, 'name', '?')} ({getattr(pr, 'failed_stage', '?')})"
+            for pr in r.playlist_results
+            if not pr.success
+        ]
+        if failed_names:
+            print(f"  Failed:  {', '.join(failed_names)}")
+
+    print(f"{'=' * 70}")
+
+
+def render_dependency_check(r: DependencyCheckResult, config=None) -> None:
+    """Render dependency check summary."""
+    print("\n  ── Dependencies ──")
+
+    if r.venv_active:
+        venv_display = r.venv_path
+        if venv_display:
+            from pathlib import Path as _Path
+            venv_display = venv_display.replace(str(_Path.home()), '~')
+        else:
+            venv_display = 'active'
+        print(f"  Python:   ✓ venv ({venv_display})")
+    else:
+        print(f"  Python:   ⚠ No virtual environment")
+
+    if r.packages:
+        installed = [pkg for pkg, ok in r.packages.items() if ok]
+        missing = [pkg for pkg, ok in r.packages.items() if not ok]
+        if not missing:
+            pkg_list = ', '.join(installed)
+            print(f"  Packages: ✓ {pkg_list}")
+        else:
+            print(f"  Packages: ⚠ Missing: {', '.join(missing)}")
+
+    if r.ffmpeg_available:
+        print(f"  System:   ✓ ffmpeg")
+    else:
+        print(f"  System:   ⚠ ffmpeg not found")
+
+    if config:
+        count = len(config.playlists)
+        print(f"  Config:   ✓ {count} playlist{'s' if count != 1 else ''} loaded")
+
+    print()
 
 
 class TaggerManager:
