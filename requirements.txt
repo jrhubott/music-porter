@@ -29,3 +29,6 @@ Flask>=3.0.0
 
 # mDNS/Bonjour service discovery for iOS companion app
 zeroconf>=0.131.0
+
+# QR code generation for iOS app pairing
+segno>=1.6.0

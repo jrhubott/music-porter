@@ -1308,6 +1308,30 @@ def _kill_port_process(port):
         print(f"  Warning: could not free port {port}: {e}")
 
 
+def _print_pairing_qr(host, port, api_key):
+    """Print a QR code to the terminal for iOS app pairing.
+
+    The QR code encodes a JSON payload with the server address and API key:
+    {"host": "...", "port": 5555, "key": "..."}
+    """
+    try:
+        import io
+
+        import segno
+        payload = json.dumps({"host": host, "port": port, "key": api_key})
+        qr = segno.make(payload)
+        buf = io.StringIO()
+        qr.terminal(out=buf, compact=True)
+        # Indent each line for consistent formatting
+        for line in buf.getvalue().splitlines():
+            print(f"  {line}")
+        print()
+    except ImportError:
+        print("  (Install 'segno' for QR code: pip install segno)")
+    except Exception:
+        pass  # Gracefully skip QR on any error
+
+
 def start_server(host='127.0.0.1', port=5555, no_auth=False,
                   show_api_key=False, enable_bonjour=False):
     """Start the Flask development server.
@@ -1340,7 +1364,9 @@ def start_server(host='127.0.0.1', port=5555, no_auth=False,
         print("  1. Open the Music Porter iOS app")
         print(f"  2. Enter server address: {local_ip}:{port}")
         print(f"  3. Enter API key: {api_key}")
-        print("  4. Or scan QR code from the web dashboard")
+        print("  4. Or scan the QR code below:")
+        print()
+        _print_pairing_qr(local_ip, port, api_key)
     else:
         print("\n  ── Web Dashboard Mode (no auth) ──")
         print(f"  Server:  http://{host}:{port}")
