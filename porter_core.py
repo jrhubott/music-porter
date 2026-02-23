@@ -7,20 +7,19 @@ and supporting utilities. CLI-specific code lives in music-porter.
 
 from __future__ import annotations
 
-import sys
-import subprocess
 import os
-import re
-import time
-import shutil
-from pathlib import Path
-from datetime import datetime
 import platform
+import re
+import shutil
+import subprocess
+import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field, asdict
-from typing import Protocol, Optional, List, Dict, Any, runtime_checkable
-
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, ClassVar, Protocol, runtime_checkable
 
 # ══════════════════════════════════════════════════════════════════
 # Section 0: Platform Detection
@@ -46,7 +45,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.5.1"
+VERSION = "2.5.2"
 
 DEFAULT_MUSIC_DIR = "music"
 DEFAULT_EXPORT_DIR = "export"
@@ -539,7 +538,7 @@ class ConfigManager:
         """Load configuration from YAML file."""
         import yaml
 
-        with open(self.conf_path, 'r') as f:
+        with open(self.conf_path) as f:
             data = yaml.safe_load(f) or {}
 
         # Load settings
@@ -706,7 +705,7 @@ class DependencyChecker:
     """Checks and manages dependencies from requirements.txt."""
 
     # Maps pip package names to their Python import names
-    IMPORT_MAP = {
+    IMPORT_MAP: ClassVar[dict[str, str]] = {
         'ffmpeg-python': 'ffmpeg',
         'webdriver-manager': 'webdriver_manager',
         'Pillow': 'PIL',
@@ -715,7 +714,7 @@ class DependencyChecker:
     }
 
     # Packages that must be checked via subprocess instead of import
-    SUBPROCESS_CHECK = {'gamdl'}
+    SUBPROCESS_CHECK: ClassVar[set[str]] = {'gamdl'}
 
     def __init__(self, logger=None):
         self.logger = logger or Logger()
@@ -816,7 +815,7 @@ class DependencyChecker:
                 self.logger.ok("Python packages installed successfully from requirements.txt")
                 # Re-exec so the fresh process can import newly installed packages
                 self.logger.info("Restarting with installed packages...")
-                os.execv(self.venv_python, [self.venv_python] + sys.argv)
+                os.execv(self.venv_python, [self.venv_python, *sys.argv])
                 return True  # unreachable, but keeps the code path clear
             except subprocess.CalledProcessError as e:
                 self.logger.error(f"Failed to install from requirements.txt: {e}")
@@ -872,7 +871,7 @@ class DependencyChecker:
 
         # Re-exec under venv python
         self.logger.info("Restarting with virtual environment...")
-        os.execv(venv_python, [venv_python] + sys.argv)
+        os.execv(venv_python, [venv_python, *sys.argv])
 
     def _show_ffmpeg_install_help(self):
         """Show OS-specific ffmpeg installation instructions."""
@@ -1066,8 +1065,9 @@ def resize_cover_art_bytes(image_data, max_size, mime_type="image/jpeg"):
     Returns (resized_bytes, mime_type). If already small enough, returns originals unchanged.
     Lazy-imports PIL to avoid startup cost.
     """
-    from PIL import Image
     import io
+
+    from PIL import Image
 
     img = Image.open(io.BytesIO(image_data))
     width, height = img.size
@@ -1715,7 +1715,7 @@ class TaggerManager:
                     current_title  = str(tags["TIT2"]) if "TIT2" in tags else ""
 
                     if verbose:
-                        self.logger.debug(f"Tags BEFORE update:")
+                        self.logger.debug("Tags BEFORE update:")
                         self.logger.debug(f"  → Title:  '{current_title}'")
                         self.logger.debug(f"  → Artist: '{current_artist}'")
                         self.logger.debug(f"  → Album:  '{current_album}'")
@@ -1877,7 +1877,7 @@ class TaggerManager:
                     orig_album  = _get_txxx(tags, TXXX_ORIGINAL_ALBUM)
 
                     if verbose:
-                        self.logger.debug(f"Preserved originals:")
+                        self.logger.debug("Preserved originals:")
                         self.logger.debug(f"  → OriginalTitle:  '{orig_title}'")
                         self.logger.debug(f"  → OriginalArtist: '{orig_artist}'")
                         self.logger.debug(f"  → OriginalAlbum:  '{orig_album}'")
@@ -1991,7 +1991,7 @@ class TaggerManager:
 
         ⚠️ WARNING: This permanently overwrites TXXX:Original* frames!
         """
-        from mutagen.id3 import ID3, TIT2, TPE1, TALB, TXXX, ID3NoHeaderError
+        from mutagen.id3 import ID3, TALB, TIT2, TPE1, TXXX, ID3NoHeaderError
 
         start_time = time.time()
 
@@ -2079,14 +2079,14 @@ class TaggerManager:
                     continue
 
                 if verbose:
-                    self.logger.debug(f"Source .m4a tags:")
+                    self.logger.debug("Source .m4a tags:")
                     self.logger.debug(f"  → Title:  '{title}'")
                     self.logger.debug(f"  → Artist: '{artist}'")
                     self.logger.debug(f"  → Album:  '{album}'")
                     self.logger.debug(f"Matched MP3: '{mp3_path}'")
 
                 if dry_run:
-                    self.logger.dry_run(f"Would reset MP3 tags from source:")
+                    self.logger.dry_run("Would reset MP3 tags from source:")
                     self.logger.dry_run(f"  → TIT2 / OriginalTitle:  '{title}'")
                     self.logger.dry_run(f"  → TPE1 / OriginalArtist: '{artist}'")
                     self.logger.dry_run(f"  → TALB / OriginalAlbum:  '{album}'")
@@ -2129,8 +2129,8 @@ class TaggerManager:
                 _apply_cleanup(tags, str(mp3_path), self.cleanup_options)
 
                 if verbose:
-                    self.logger.debug(f"Tags AFTER reset:")
-                    self.logger.debug(f"  → Title:          '{str(tags['TIT2'])}'")
+                    self.logger.debug("Tags AFTER reset:")
+                    self.logger.debug(f"  → Title:          '{tags['TIT2']!s}'")
                     self.logger.debug(f"  → Artist:         '{artist}'")
                     self.logger.debug(f"  → Album:          '{album}'")
                     self.logger.debug(f"  → OriginalTitle:  '{title}'")
@@ -2236,7 +2236,7 @@ class Converter:
         # Default: artist_title
         return f"{artist} - {title}.mp3"
 
-    def _build_output_path(self, base_path: Path, filename: str, artist: str = None, album: str = None) -> Path:
+    def _build_output_path(self, base_path: Path, filename: str, artist: str | None = None, album: str | None = None) -> Path:
         """Build output file path based on the active output profile."""
         structure = self.output_profile.directory_structure
         if structure == "nested-artist":
@@ -2251,8 +2251,9 @@ class Converter:
 
     def _convert_single_file(self, input_file, input_path, output_path, force, dry_run, verbose, progress_bar=None):
         """Convert a single M4A file to MP3. Thread-safe for parallel execution."""
-        from mutagen.id3 import ID3, TIT2, TPE1, TALB, APIC, TXXX, ID3NoHeaderError
         import hashlib
+
+        from mutagen.id3 import APIC, ID3, TALB, TIT2, TPE1, TXXX, ID3NoHeaderError
 
         display_name = input_file.relative_to(input_path)
         count = self.stats.next_progress()
@@ -2295,7 +2296,7 @@ class Converter:
                 else:
                     quality_desc += f" {self.quality_settings['value']}kbps"
                 self.logger.debug(f"Quality:      {quality_desc} (preset: {self.quality_preset})")
-                self.logger.debug(f"Source tags:")
+                self.logger.debug("Source tags:")
                 self.logger.debug(f"  → Title:  '{title}'")
                 self.logger.debug(f"  → Artist: '{artist}'")
                 self.logger.debug(f"  → Album:  '{album}'")
@@ -2319,7 +2320,7 @@ class Converter:
                             art_desc += f", resize to {artwork_size}px"
                         self.logger.dry_run(f"  → Cover art:  {art_desc}")
                     else:
-                        self.logger.dry_run(f"  → Cover art:  (none found in source)")
+                        self.logger.dry_run("  → Cover art:  (none found in source)")
                 else:
                     reason = "stripped by profile" if artwork_size == -1 else "disabled"
                     self.logger.dry_run(f"  → Cover art:  ({reason})")
@@ -2347,7 +2348,7 @@ class Converter:
             except _ffmpeg.Error as e:
                 # Re-raise as generic exception to be caught by outer try/except
                 error_msg = e.stderr.decode('utf-8') if e.stderr else str(e)
-                raise Exception(f"FFmpeg conversion failed: {error_msg}")
+                raise Exception(f"FFmpeg conversion failed: {error_msg}") from e
 
             # Write basic ID3 tags from source M4A (no modifications)
             try:
@@ -2388,7 +2389,7 @@ class Converter:
                         self.logger.debug(f"  → Cover art: {size_desc}")
                 else:
                     if verbose:
-                        self.logger.debug(f"  → Cover art: (none found in source)")
+                        self.logger.debug("  → Cover art: (none found in source)")
 
             # Save using profile-driven ID3 version and v1 settings
             tags.save(str(output_file),
@@ -2396,7 +2397,7 @@ class Converter:
                       v1=0 if self.output_profile.strip_id3v1 else 1)
 
             if verbose:
-                self.logger.debug(f"Tags AFTER conversion (copied from source):")
+                self.logger.debug("Tags AFTER conversion (copied from source):")
                 self.logger.debug(f"  → Title:  '{title}'")
                 self.logger.debug(f"  → Artist: '{artist}'")
                 self.logger.debug(f"  → Album:  '{album}'")
@@ -2696,7 +2697,7 @@ class Downloader:
         output_path.mkdir(parents=True, exist_ok=True)
 
         # Run gamdl
-        self.logger.info(f"Starting download from Apple Music...")
+        self.logger.info("Starting download from Apple Music...")
         if url:
             url_display = url[:80] + "..." if len(url) > 80 else url
             self.logger.info(f"URL: {url_display}")
@@ -2751,7 +2752,7 @@ class Downloader:
                         if '[Track' in cleaned and '/' in cleaned:
                             match = re.search(r'\[Track (\d+)/(\d+)\]', cleaned)
                             if match:
-                                current_track = int(match.group(1))
+                                _current_track = int(match.group(1))
                                 total_tracks = int(match.group(2))
                                 if stats.playlist_total == 0:
                                     stats.playlist_total = total_tracks
@@ -2866,7 +2867,7 @@ class CookieManager:
             CookieStatus: Validation result with detailed information
         """
         import http.cookiejar
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         status = CookieStatus()
 
@@ -2904,10 +2905,10 @@ class CookieManager:
                 return status
 
             status.expiration_timestamp = target_cookie.expires
-            status.expiration_date = datetime.fromtimestamp(target_cookie.expires, tz=timezone.utc)
+            status.expiration_date = datetime.fromtimestamp(target_cookie.expires, tz=UTC)
 
             # Compare with current time
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             time_diff = status.expiration_date - now
             status.days_until_expiration = time_diff.total_seconds() / 86400
 
@@ -3098,14 +3099,7 @@ class CookieManager:
                  'chrome'/'firefox'/'safari'/'edge' = specific browser.
         Returns cookie_jar on success, None on failure.
         """
-        import http.cookiejar
-        import time
 
-        from selenium import webdriver
-        from selenium.webdriver.common.by import By
-        from selenium.webdriver.support.ui import WebDriverWait
-        from selenium.webdriver.support import expected_conditions as EC
-        from selenium.common.exceptions import TimeoutException, WebDriverException
 
         # Detect browsers
         default_browser = self._detect_default_browser()
@@ -3178,7 +3172,7 @@ class CookieManager:
         # Find all driver binaries (exclude .zip files)
         binary_name = driver_name + '.exe' if IS_WINDOWS else driver_name
         matches = sorted(
-            [p for p in wdm_dir.rglob(binary_name) if p.is_file() and not p.suffix == '.zip'],
+            [p for p in wdm_dir.rglob(binary_name) if p.is_file() and p.suffix != '.zip'],
             key=lambda p: p.stat().st_mtime,
             reverse=True,
         )
@@ -3189,13 +3183,12 @@ class CookieManager:
 
     def _launch_browser(self, browser_name, headless=True):
         """Launch browser with Selenium. Returns driver or None."""
+
         from selenium import webdriver
-        from selenium.webdriver.chrome.service import Service as ChromeService
-        from selenium.webdriver.firefox.service import Service as FirefoxService
-        from selenium.webdriver.edge.service import Service as EdgeService
-        from selenium.webdriver.safari.service import Service as SafariService
         from selenium.common.exceptions import WebDriverException
-        import time
+        from selenium.webdriver.chrome.service import Service as ChromeService
+        from selenium.webdriver.edge.service import Service as EdgeService
+        from selenium.webdriver.firefox.service import Service as FirefoxService
 
         try:
             # Try to import webdriver-manager
@@ -3306,8 +3299,7 @@ class CookieManager:
         """
         import http.cookiejar
         import time
-        from selenium.webdriver.common.by import By
-        from selenium.common.exceptions import TimeoutException
+
 
         LOGIN_POLL_INTERVAL = 3   # seconds between login checks
         LOGIN_TIMEOUT = 300       # 5 minutes max wait
@@ -3425,7 +3417,6 @@ class CookieManager:
     def _check_login_status(self, driver):
         """Check if user is logged in to Apple Music. Returns True if logged in."""
         from selenium.webdriver.common.by import By
-        from selenium.common.exceptions import NoSuchElementException
 
         try:
             # Strategy: Look for sign-in button. If found, user is NOT logged in.
@@ -3730,7 +3721,7 @@ class USBManager:
             if source_path.suffix == '.mp3':
                 mp3_files.append(source_path)
         else:
-            for root, dirs, files in os.walk(source_path):
+            for root, _dirs, files in os.walk(source_path):
                 for file in files:
                     if file.endswith('.mp3'):
                         mp3_files.append(Path(root) / file)
@@ -4146,6 +4137,7 @@ class SummaryManager:
     def _check_tag_integrity(self):
         """Check all files for TXXX protection tags and cover art."""
         import hashlib
+
         from mutagen.id3 import ID3, ID3NoHeaderError
 
         for playlist in self.stats.playlists:
@@ -4172,7 +4164,7 @@ class SummaryManager:
 
                     # Check for cover art (APIC frame)
                     apic_frame = None
-                    for key in tags.keys():
+                    for key in tags:
                         if key.startswith("APIC"):
                             apic_frame = tags[key]
                             break
@@ -4315,8 +4307,9 @@ class CoverArtManager:
         Embed cover art into existing MP3s from matching M4A source files.
         Auto-derives source dir from export/ → music/ if not specified.
         """
-        from mutagen.id3 import ID3, APIC, TXXX, ID3NoHeaderError
         import hashlib
+
+        from mutagen.id3 import APIC, ID3, TXXX, ID3NoHeaderError
 
         start_time = time.time()
         dir_path = Path(directory)
@@ -4417,7 +4410,7 @@ class CoverArtManager:
                     except ID3NoHeaderError:
                         tags = ID3()
 
-                    apic_keys = [key for key in tags.keys() if key.startswith("APIC")]
+                    apic_keys = [key for key in tags if key.startswith("APIC")]
 
                     if apic_keys:
                         if not force:
@@ -4579,7 +4572,7 @@ class CoverArtManager:
 
     def update(self, directory, image_path, dry_run=False, verbose=False):
         """Replace cover art on all MP3s in a directory from a single image file."""
-        from mutagen.id3 import ID3, APIC, ID3NoHeaderError
+        from mutagen.id3 import APIC, ID3, ID3NoHeaderError
 
         start_time = time.time()
         dir_path = Path(directory)
@@ -4717,7 +4710,7 @@ class CoverArtManager:
                         continue
 
                     # Find and remove APIC frames
-                    apic_keys = [key for key in tags.keys() if key.startswith("APIC")]
+                    apic_keys = [key for key in tags if key.startswith("APIC")]
 
                     if not apic_keys:
                         skipped += 1
@@ -4757,9 +4750,10 @@ class CoverArtManager:
 
     def resize(self, directory, max_size, dry_run=False, verbose=False):
         """Resize embedded cover art to a maximum dimension, preserving aspect ratio."""
-        from PIL import Image
         import io
+
         from mutagen.id3 import ID3, ID3NoHeaderError
+        from PIL import Image
 
         start_time = time.time()
         dir_path = Path(directory)
@@ -4803,11 +4797,9 @@ class CoverArtManager:
                         continue
 
                     # Find APIC frame
-                    apic_key = None
                     apic_frame = None
-                    for key in tags.keys():
+                    for key in tags:
                         if key.startswith("APIC"):
-                            apic_key = key
                             apic_frame = tags[key]
                             break
 
@@ -5375,7 +5367,7 @@ class PipelineOrchestrator:
         for mp3_file in mp3_files:
             try:
                 tags = ID3(str(mp3_file))
-                if not any(k.startswith("APIC") for k in tags.keys()):
+                if not any(k.startswith("APIC") for k in tags):
                     missing += 1
             except (ID3NoHeaderError, Exception):
                 missing += 1
@@ -5418,7 +5410,7 @@ class PipelineOrchestrator:
             for mp3_file in mp3_files:
                 try:
                     tags = ID3(str(mp3_file))
-                    if any(k.startswith("APIC") for k in tags.keys()):
+                    if any(k.startswith("APIC") for k in tags):
                         embedded_count += 1
                     else:
                         still_missing += 1

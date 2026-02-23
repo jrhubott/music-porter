@@ -45,28 +45,28 @@ Merge the current feature branch into main following the project's version workf
    - If no SRS file exists for this branch, skip this step silently
 
 5b. **Add unfinished work to README**
-   - Review the branch's commits and diffs for TODOs, FIXMEs, partial implementations, known limitations, or follow-up work that was deferred
-   - Also check for any comments in the code mentioning future improvements related to this branch's changes
-   - Also check `todos.md` (via `/todo list`) for active items that represent future work related to this branch — these may belong in the README "Future Features" list even if they weren't completed
-   - If any unfinished items are found (from code, diffs, or todos.md), ask the user which (if any) should be added to the README "Future Features" list
-   - Append new items to the appropriate priority section (High / Medium / Low), continuing the existing numbering
-   - Keep descriptions concise and consistent with the existing list style: `**Bold title** - Description`
+- Review the branch's commits and diffs for TODOs, FIXMEs, partial implementations, known limitations, or follow-up work that was deferred
+- Also check for any comments in the code mentioning future improvements related to this branch's changes
+- Also check `todos.md` (via `/todo list`) for active items that represent future work related to this branch — these may belong in the README "Future Features" list even if they weren't completed
+- If any unfinished items are found (from code, diffs, or todos.md), ask the user which (if any) should be added to the README "Future Features" list
+- Append new items to the appropriate priority section (High / Medium / Low), continuing the existing numbering
+- Keep descriptions concise and consistent with the existing list style: `**Bold title** - Description`
 
 5c. **Update todos.md**
-   - Use `/todo list` (via the Skill tool) to view current todos
-   - Identify any active todos that match the work completed on this branch
-   - For each matching active todo, use `/todo complete` (via the Skill tool) with the todo text to mark it done
-   - If no todos.md exists or no active todos match, skip this step silently
-   - Do NOT ask the user — complete matching todos automatically as part of the merge
+- Use `/todo list` (via the Skill tool) to view current todos
+- Identify any active todos that match the work completed on this branch
+- For each matching active todo, use `/todo complete` (via the Skill tool) with the todo text to mark it done
+- If no todos.md exists or no active todos match, skip this step silently
+- Do NOT ask the user — complete matching todos automatically as part of the merge
 
-6. **Update version and commit on feature branch**
+1. **Update version and commit on feature branch**
    - Edit `music-porter` to set `VERSION = "X.Y.Z"` (clean version, no branch suffix)
    - Stage the version change (and README if modified)
    - Commit on the feature branch with message: `Update version to X.Y.Z for merge to main`
    - Do NOT include Co-Authored-By lines
    - **Important:** This commit must happen BEFORE checking out main, otherwise uncommitted changes will block the checkout
 
-7. **Merge**
+2. **Merge**
    - `git checkout main`
    - `git merge <branch-name> --no-ff` (preserve branch history in merge commit)
    - If merge conflicts occur:
@@ -77,34 +77,34 @@ Merge the current feature branch into main following the project's version workf
      - Do NOT include Co-Authored-By lines in the merge commit
    - If the user wants to abandon the merge, run `git merge --abort` and stop
 
-8. **Verify merge**
+3. **Verify merge**
    - Verify working tree is clean: `git status`
    - Verify branch commits are present: `git log --oneline -10` should include the feature branch commits
    - Verify VERSION matches the expected clean `X.Y.Z`: read line 68 of `music-porter`
    - If any check fails, warn the user and ask whether to proceed with tagging or abort
 
-9. **Archive SRS document**
-    - If an SRS file was found in step 5, archive it into `SRS.md` (root of repo)
-    - **Read `SRS.md` first** to understand its existing format and structure before making changes
-    - If `SRS.md` does not exist, create it with a `# Completed SRS Documents` heading
-    - If `SRS.md` already exists, match its existing format:
-      - Use the same heading style, separator style (`---`), and metadata fields as existing entries
-      - Add an `**Implemented in:** vX.Y.Z` metadata line to the new entry's header block
-      - Append the new entry after the last existing entry, separated by `---`
-    - Delete the individual SRS file from the `SRS/` directory
-    - If the `SRS/` directory is now empty, delete it
-    - Stage and commit: `Archive SRS: <feature-name> into SRS.md`
-    - Do NOT include Co-Authored-By lines
+4. **Archive SRS document**
+   - If an SRS file was found in step 5, archive it into `SRS.md` (root of repo)
+   - **Read `SRS.md` first** to understand its existing format and structure before making changes
+   - If `SRS.md` does not exist, create it with a `# Completed SRS Documents` heading
+   - If `SRS.md` already exists, match its existing format:
+     - Use the same heading style, separator style (`---`), and metadata fields as existing entries
+     - Add an `**Implemented in:** vX.Y.Z` metadata line to the new entry's header block
+     - Append the new entry after the last existing entry, separated by `---`
+   - Delete the individual SRS file from the `SRS/` directory
+   - If the `SRS/` directory is now empty, delete it
+   - Stage and commit: `Archive SRS: <feature-name> into SRS.md`
+   - Do NOT include Co-Authored-By lines
 
-10. **Tag the release**
-    - `git tag vX.Y.Z`
-    - The tag is placed after the SRS archive commit so the tagged release includes the archived SRS content
+5. **Tag the release**
+   - `git tag vX.Y.Z`
+   - The tag is placed after the SRS archive commit so the tagged release includes the archived SRS content
 
-11. **Clean up**
-    - Ask the user if they want to delete the feature branch
-    - If yes, run `git branch -d <branch-name>`
+6. **Clean up**
+   - Ask the user if they want to delete the feature branch
+   - If yes, run `git branch -d <branch-name>`
 
-12. **Report**
-    - Show the final `git log --oneline -5` so the user can verify
-    - Show the tag: `git tag -l 'vX.Y.Z'`
-    - Remind the user to `git push origin main --tags` when ready
+7. **Report**
+   - Show the final `git log --oneline -5` so the user can verify
+   - Show the tag: `git tag -l 'vX.Y.Z'`
+   - Remind the user to `git push origin main --tags` when ready

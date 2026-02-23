@@ -2,11 +2,14 @@
 
 ## 🚀 Most Common Commands
 
-### Just Starting? Use This:
+### Just Starting? Use This
+
 ```bash
 ./music-porter
 ```
+
 Interactive menu - easiest way to get started!
+
 - **1-N**: Select a playlist by number
 - **A**: Process all playlists
 - **U**: Enter a URL
@@ -14,16 +17,20 @@ Interactive menu - easiest way to get started!
 - **P**: Change output profile
 - **X**: Exit
 
-### Full Workflow in One Command:
+### Full Workflow in One Command
+
 ```bash
 ./music-porter pipeline --playlist "Pop_Workout"
 ```
+
 Downloads, converts, tags, and prompts for USB copy.
 
-### Process Everything:
+### Process Everything
+
 ```bash
 ./music-porter pipeline --auto --copy-to-usb
 ```
+
 Processes all configured playlists and copies to USB.
 
 ## 📋 Command Cheat Sheet
@@ -46,6 +53,7 @@ Processes all configured playlists and copies to USB.
 ## 🎯 Common Workflows
 
 ### New Playlist from URL
+
 ```bash
 ./music-porter pipeline --url "https://music.apple.com/..."
 # Asks to save to config.yaml
@@ -53,21 +61,25 @@ Processes all configured playlists and copies to USB.
 ```
 
 ### Update Existing Playlist
+
 ```bash
 ./music-porter pipeline --playlist "Pop_Workout"
 ```
 
 ### Batch Update All Playlists
+
 ```bash
 ./music-porter pipeline --auto
 ```
 
 ### Re-convert with Force
+
 ```bash
 ./music-porter convert music/Pop_Workout --output export/ride-command/Pop_Workout --force
 ```
 
 ### Quick USB Copy
+
 ```bash
 ./music-porter sync-usb
 # Copies entire export/<profile>/ directory
@@ -96,7 +108,8 @@ Processes all configured playlists and copies to USB.
 | `low` | ~115-150kbps VBR | Small | Space-constrained |
 | `custom` | Variable VBR | Custom | Advanced (0=best, 9=worst) |
 
-### Examples:
+### Examples
+
 ```bash
 # Default (lossless)
 ./music-porter convert music/Pop_Workout
@@ -113,7 +126,7 @@ Processes all configured playlists and copies to USB.
 
 ## 📁 Where Files Go
 
-```
+```text
 music/Pop_Workout/                    ← Downloaded M4A files
 export/ride-command/Pop_Workout/      ← Converted MP3 files (profile-scoped, flat)
 export/basic/Pop_Workout/             ← Another profile's output
@@ -148,22 +161,26 @@ For example, `--output-type basic` overrides the `output_type` setting in config
 ## 🆘 Quick Fixes
 
 ### "gamdl not found"
+
 ```bash
 source .venv/bin/activate
 pip install gamdl
 ```
 
 ### "ffmpeg not found"
+
 ```bash
 brew install ffmpeg
 ```
 
 ### See What Went Wrong
+
 ```bash
 tail -50 logs/$(ls -t logs/ | head -1)
 ```
 
 ### Test Before Running
+
 ```bash
 ./music-porter --dry-run --verbose [command] [options]
 ```
@@ -181,7 +198,7 @@ tail -50 logs/$(ls -t logs/ | head -1)
 
 After each operation, you'll see a summary like this:
 
-```
+```text
 ============================================================
   CONVERSION SUMMARY
 ============================================================

@@ -8,13 +8,13 @@ CLI interface — business logic is in porter_core.py.
 
 from __future__ import annotations
 
-import sys
-import os
 import argparse
-import threading
-from pathlib import Path
-from datetime import datetime
+import os
 import platform
+import sys
+import threading
+from datetime import datetime
+from pathlib import Path
 
 
 # ── Auto-activate venv ──
@@ -35,7 +35,7 @@ def _auto_activate_venv():
 
     # Use absolute path (not realpath) so Python finds pyvenv.cfg via the venv path
     venv_python_abs = str(venv_python.absolute())
-    os.execv(venv_python_abs, [venv_python_abs] + sys.argv)
+    os.execv(venv_python_abs, [venv_python_abs, *sys.argv])
 
 _auto_activate_venv()
 
@@ -237,31 +237,31 @@ def render_tag_restore_summary(r: TagRestoreResult) -> None:
 def render_tag_reset_summary(r: TagResetResult) -> None:
     """Render tag reset summary as 60-char-wide console box."""
     print(f"\n{'=' * 60}")
-    print(f"  RESET TAGS SUMMARY")
+    print("  RESET TAGS SUMMARY")
     print(f"{'=' * 60}")
     print(f"  Run date:                {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"  Input directory:         '{r.input_dir}'")
     print(f"  Output directory:        '{r.output_dir}'")
     print(f"  Duration:                {r.duration:.1f}s")
     print(f"{'─' * 60}")
-    print(f"  FILES")
+    print("  FILES")
     print(f"{'─' * 60}")
     print(f"  Total .m4a found:        {r.files_matched}")
     print(f"  MP3s updated:            {r.files_reset}")
     print(f"  Skipped (no MP3 match):  {r.files_skipped}")
     print(f"  Errors:                  {r.errors}")
     print(f"{'─' * 60}")
-    print(f"  TAGGING")
+    print("  TAGGING")
     print(f"{'─' * 60}")
     print(f"  Original tags reset:     {r.tags_reset}")
     print(f"  Original tags rewritten: {r.tags_rewritten}")
     print(f"{'─' * 60}")
     if r.errors > 0:
-        print(f"  Status:                  ⚠️  Completed with errors")
+        print("  Status:                  ⚠️  Completed with errors")
     elif r.files_reset == 0:
-        print(f"  Status:                  ℹ️  No MP3s updated")
+        print("  Status:                  ℹ️  No MP3s updated")
     else:
-        print(f"  Status:                  ✅ Completed successfully")
+        print("  Status:                  ✅ Completed successfully")
     print(f"{'=' * 60}")
 
 
@@ -274,7 +274,7 @@ def render_conversion_summary(r: ConversionResult) -> None:
         quality_desc += f" {r.quality_value}kbps"
 
     print(f"\n{'=' * 60}")
-    print(f"  CONVERSION SUMMARY")
+    print("  CONVERSION SUMMARY")
     print(f"{'=' * 60}")
     print(f"  Run date:                {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"  Input directory:         '{r.input_dir}'")
@@ -283,12 +283,12 @@ def render_conversion_summary(r: ConversionResult) -> None:
     if r.workers > 1:
         print(f"  Workers:                 {r.workers}")
     print(f"{'─' * 60}")
-    print(f"  QUALITY SETTINGS")
+    print("  QUALITY SETTINGS")
     print(f"{'─' * 60}")
     print(f"  Preset:                  {r.quality_preset}")
     print(f"  Mode:                    {quality_desc}")
     print(f"{'─' * 60}")
-    print(f"  FILES")
+    print("  FILES")
     print(f"{'─' * 60}")
     print(f"  Total found:             {r.total_found}")
     print(f"  Converted:               {r.converted}")
@@ -296,16 +296,16 @@ def render_conversion_summary(r: ConversionResult) -> None:
     print(f"  Skipped (exists):        {r.skipped}")
     print(f"  Errors:                  {r.errors}")
     print(f"{'─' * 60}")
-    print(f"  TAGGING")
+    print("  TAGGING")
     print(f"{'─' * 60}")
-    print(f"  Tags copied from source: Title, Artist, Album")
+    print("  Tags copied from source: Title, Artist, Album")
     print(f"{'─' * 60}")
     if r.errors > 0:
-        print(f"  Status:                  ⚠️  Completed with errors")
+        print("  Status:                  ⚠️  Completed with errors")
     elif r.skipped == r.total_found:
-        print(f"  Status:                  ℹ️  Nothing to do — all files already exist")
+        print("  Status:                  ℹ️  Nothing to do — all files already exist")
     else:
-        print(f"  Status:                  ✅ Completed successfully")
+        print("  Status:                  ✅ Completed successfully")
     print(f"{'=' * 60}")
 
 
@@ -366,7 +366,7 @@ def render_library_summary(r: LibrarySummaryResult, mode: str = "default") -> No
                 if ms.total_unconverted > 0:
                     print(f"  Unconverted:             {ms.total_unconverted}")
                 else:
-                    print(f"  Unconverted:             0  ✅")
+                    print("  Unconverted:             0  ✅")
             print(f"  Scan duration:           {ms.scan_duration:.1f}s")
             print()
 
@@ -378,8 +378,8 @@ def render_library_summary(r: LibrarySummaryResult, mode: str = "default") -> No
         print("╚" + "═" * 60 + "╝")
         print()
         print(f"  Directory:               '{r.export_dir}'")
-        print(f"  Total playlists:         0")
-        print(f"  Total MP3 files:         0")
+        print("  Total playlists:         0")
+        print("  Total MP3 files:         0")
         print()
         print("  ℹ️  Library is empty")
         print()
@@ -440,22 +440,22 @@ def _render_default_summary(r: LibrarySummaryResult) -> None:
 
     # Tag integrity
     print("─" * 60)
-    print(f"  TAG INTEGRITY")
+    print("  TAG INTEGRITY")
     print("─" * 60)
     if r.sample_size > 0:
         percentage = (r.files_with_protection_tags / r.sample_size) * 100
         print(f"  Files with protection:   {r.files_with_protection_tags}/{r.sample_size} ({percentage:.0f}%)")
         if r.files_missing_protection_tags == 0:
-            print(f"  Status:                  ✅ All files have TXXX protection tags")
+            print("  Status:                  ✅ All files have TXXX protection tags")
         else:
-            print(f"  Status:                  ⚠️  Some files missing TXXX protection tags")
+            print("  Status:                  ⚠️  Some files missing TXXX protection tags")
     else:
         print("  Status:                  ℹ️  No files checked")
     print()
 
     # Cover art
     print("─" * 60)
-    print(f"  COVER ART")
+    print("  COVER ART")
     print("─" * 60)
     total_cover_checked = r.files_with_cover_art + r.files_without_cover_art
     if total_cover_checked > 0:
@@ -467,10 +467,10 @@ def _render_default_summary(r: LibrarySummaryResult) -> None:
             resized_pct = (r.files_with_resized_cover_art / r.files_with_cover_art) * 100
             print(f"  Modified cover art:      {r.files_with_resized_cover_art}/{r.files_with_cover_art} ({resized_pct:.0f}%)")
         if r.files_without_cover_art == 0:
-            print(f"  Status:                  ✅ All files have embedded cover art")
+            print("  Status:                  ✅ All files have embedded cover art")
         else:
             print(f"  Status:                  ⚠️  {r.files_without_cover_art} files missing cover art")
-            print(f"  Fix:                     ./music-porter cover-art embed <dir>")
+            print("  Fix:                     ./music-porter cover-art embed <dir>")
     else:
         print("  Status:                  ℹ️  No files checked")
     print()
@@ -626,7 +626,7 @@ def render_cover_art_summary(r: CoverArtResult) -> None:
 def render_pipeline_summary(r: PipelineResult) -> None:
     """Render pipeline summary as 70-char-wide console box."""
     print(f"\n{'=' * 70}")
-    print(f"  PIPELINE SUMMARY")
+    print("  PIPELINE SUMMARY")
     print(f"{'=' * 70}")
     print(f"  Run date:                {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"  Playlist:                {r.playlist_name or '—'} ({r.playlist_key or '—'})")
@@ -635,7 +635,7 @@ def render_pipeline_summary(r: PipelineResult) -> None:
     # Download stage
     if "download" in r.stages_completed or "download" in r.stages_failed or "download" in r.stages_skipped:
         print(f"{'─' * 70}")
-        print(f"  DOWNLOAD STAGE")
+        print("  DOWNLOAD STAGE")
         print(f"{'─' * 70}")
         if "download" in r.stages_completed and r.download_result:
             d = r.download_result
@@ -645,18 +645,18 @@ def render_pipeline_summary(r: PipelineResult) -> None:
             print(f"  Skipped (already exist): {d.skipped}")
             if d.failed > 0:
                 print(f"  Failed:                  {d.failed}")
-            print(f"  Status:                  ✅ Success")
+            print("  Status:                  ✅ Success")
         elif "download" in r.stages_completed:
-            print(f"  Status:                  ✅ Success")
+            print("  Status:                  ✅ Success")
         elif "download" in r.stages_skipped:
-            print(f"  Status:                  ⏭️  Skipped")
+            print("  Status:                  ⏭️  Skipped")
         else:
-            print(f"  Status:                  ❌ Failed")
+            print("  Status:                  ❌ Failed")
 
     # Conversion stage
     if r.conversion_result or "convert" in r.stages_failed:
         print(f"{'─' * 70}")
-        print(f"  CONVERSION STAGE")
+        print("  CONVERSION STAGE")
         print(f"{'─' * 70}")
         if r.conversion_result:
             cr = r.conversion_result
@@ -665,16 +665,16 @@ def render_pipeline_summary(r: PipelineResult) -> None:
             print(f"  Files skipped:           {cr.skipped}")
             print(f"  Conversion errors:       {cr.errors}")
             if cr.success:
-                print(f"  Status:                  ✅ Success")
+                print("  Status:                  ✅ Success")
             else:
-                print(f"  Status:                  ❌ Failed")
+                print("  Status:                  ❌ Failed")
         elif "convert" in r.stages_failed:
-            print(f"  Status:                  ❌ Failed")
+            print("  Status:                  ❌ Failed")
 
     # Tagging stage
     if r.tag_result or "tag" in r.stages_failed:
         print(f"{'─' * 70}")
-        print(f"  TAGGING STAGE")
+        print("  TAGGING STAGE")
         print(f"{'─' * 70}")
         if r.tag_result:
             tr = r.tag_result
@@ -692,28 +692,28 @@ def render_pipeline_summary(r: PipelineResult) -> None:
                 print(f"  Cover art embedded:      {r.cover_art_embedded}")
                 print(f"  Cover art missing:       {r.cover_art_missing}")
             if tr.success:
-                print(f"  Status:                  ✅ Success")
+                print("  Status:                  ✅ Success")
             else:
-                print(f"  Status:                  ❌ Failed")
+                print("  Status:                  ❌ Failed")
         elif "tag" in r.stages_failed:
-            print(f"  Status:                  ❌ Failed")
+            print("  Status:                  ❌ Failed")
 
     # USB sync stage
     if r.usb_result or "usb-sync" in r.stages_failed:
         print(f"{'─' * 70}")
-        print(f"  USB SYNC STAGE")
+        print("  USB SYNC STAGE")
         print(f"{'─' * 70}")
         if r.usb_result and r.usb_result.success:
-            print(f"  Status:                  ✅ Success")
+            print("  Status:                  ✅ Success")
             if r.usb_destination:
                 print(f"  USB destination:         {r.usb_destination}")
         else:
-            print(f"  Status:                  ❌ Failed")
+            print("  Status:                  ❌ Failed")
 
     # Comprehensive file summary
     if len(r.stages_completed) > 0:
         print(f"{'─' * 70}")
-        print(f"  COMPREHENSIVE FILES SUMMARY")
+        print("  COMPREHENSIVE FILES SUMMARY")
         print(f"{'─' * 70}")
 
         if r.download_result:
@@ -748,9 +748,9 @@ def render_pipeline_summary(r: PipelineResult) -> None:
     # Overall status
     print(f"{'─' * 70}")
     if len(r.stages_failed) == 0:
-        print(f"  Status:                  ✅ Completed successfully")
+        print("  Status:                  ✅ Completed successfully")
     else:
-        print(f"  Status:                  ⚠️  Completed with errors")
+        print("  Status:                  ⚠️  Completed with errors")
         print(f"  Failed stages:           {', '.join(r.stages_failed)}")
     print(f"{'=' * 70}")
 
@@ -761,19 +761,19 @@ def render_aggregate_summary(r: AggregateResult) -> None:
     duration_secs = int(r.duration % 60)
 
     print(f"\n{'=' * 70}")
-    print(f"  TOTAL SUMMARY - ALL PLAYLISTS")
+    print("  TOTAL SUMMARY - ALL PLAYLISTS")
     print(f"{'=' * 70}")
     print(f"  Playlists processed:     {r.total_playlists}")
     print(f"  Total duration:          {r.duration:.1f}s ({duration_mins}m {duration_secs}s)")
 
     if r.failed_playlists == 0:
-        print(f"  Overall status:          ✅ All succeeded")
+        print("  Overall status:          ✅ All succeeded")
     else:
-        print(f"  Overall status:          ⚠️  Some failed")
+        print("  Overall status:          ⚠️  Some failed")
 
     # Playlist results table
     print(f"{'─' * 70}")
-    print(f"  PLAYLIST RESULTS")
+    print("  PLAYLIST RESULTS")
     print(f"{'─' * 70}")
     print(f"  {'Playlist':<24} {'Downloaded':<12} {'Converted':<11} {'Tagged':<8} Status")
     print(f"  {'─' * 70}")
@@ -836,17 +836,17 @@ def render_aggregate_summary(r: AggregateResult) -> None:
 
     # Cumulative statistics
     print(f"{'─' * 70}")
-    print(f"  CUMULATIVE STATISTICS")
+    print("  CUMULATIVE STATISTICS")
     print(f"{'─' * 70}")
     print(f"  Total tracks in playlists:    {totals.get('playlist_total', 0)}")
     print()
-    print(f"  Downloads:")
+    print("  Downloads:")
     print(f"    New downloads:              {totals.get('downloaded', 0)}")
     print(f"    Already existed (skipped):  {totals.get('skipped_download', 0)}")
     if totals.get('failed_download', 0) > 0:
         print(f"    Failed:                     {totals['failed_download']}")
     print()
-    print(f"  Conversions:")
+    print("  Conversions:")
     print(f"    Newly converted:            {totals.get('converted', 0)}")
     if totals.get('overwritten', 0) > 0:
         print(f"    Overwritten:                {totals['overwritten']}")
@@ -854,7 +854,7 @@ def render_aggregate_summary(r: AggregateResult) -> None:
     if totals.get('errors_conversion', 0) > 0:
         print(f"    Errors:                     {totals['errors_conversion']}")
     print()
-    print(f"  Tag Operations:")
+    print("  Tag Operations:")
     print(f"    Titles updated:             {totals.get('title_updated', 0)}")
     if totals.get('original_tags_stored', 0) > 0:
         print(f"    Original tags stored:       {totals['original_tags_stored']}")
@@ -862,14 +862,14 @@ def render_aggregate_summary(r: AggregateResult) -> None:
     # USB sync
     if r.usb_destination and totals.get('files_on_usb', 0) > 0:
         print()
-        print(f"  USB Sync:")
+        print("  USB Sync:")
         print(f"    Files copied to USB:        {totals['files_on_usb']}")
         print(f"    Destination:                {r.usb_destination}")
 
     # Final status
     print(f"{'─' * 70}")
     if r.failed_playlists == 0:
-        print(f"  STATUS:  ✅ All playlists completed successfully")
+        print("  STATUS:  ✅ All playlists completed successfully")
     else:
         print(f"  STATUS:  ⚠️  {r.failed_playlists} of {r.total_playlists} playlists failed")
         failed_names = [
@@ -896,7 +896,7 @@ def render_dependency_check(r: DependencyCheckResult, config=None) -> None:
             venv_display = 'active'
         print(f"  Python:   ✓ venv ({venv_display})")
     else:
-        print(f"  Python:   ⚠ No virtual environment")
+        print("  Python:   ⚠ No virtual environment")
 
     if r.packages:
         installed = [pkg for pkg, ok in r.packages.items() if ok]
@@ -908,9 +908,9 @@ def render_dependency_check(r: DependencyCheckResult, config=None) -> None:
             print(f"  Packages: ⚠ Missing: {', '.join(missing)}")
 
     if r.ffmpeg_available:
-        print(f"  System:   ✓ ffmpeg")
+        print("  System:   ✓ ffmpeg")
     else:
-        print(f"  System:   ⚠ ffmpeg not found")
+        print("  System:   ⚠ ffmpeg not found")
 
     if config:
         count = len(config.playlists)
@@ -960,13 +960,13 @@ class InteractiveMenu:
             print("   ────────────────────────────────────────────────────────────")
             print()  # Blank line after separator
 
-            print(f"  📁  A. Process all playlists")
-            print(f"  🔗  U. Enter URL to add a new playlist")
-            print(f"  💾  C. Copy to USB only")
-            print(f"  📊  S. Show library summary")
-            print(f"  🖼️  R. Resize all cover art")
+            print("  📁  A. Process all playlists")
+            print("  🔗  U. Enter URL to add a new playlist")
+            print("  💾  C. Copy to USB only")
+            print("  📊  S. Show library summary")
+            print("  🖼️  R. Resize all cover art")
             print(f"  🔧  P. Change output profile (current: {self.output_profile.name})")
-            print(f"  ❌  X. Exit (or press Enter)")
+            print("  ❌  X. Exit (or press Enter)")
 
             # Get user selection
             try:
@@ -1273,7 +1273,7 @@ class InteractiveMenu:
     def _handle_change_profile(self):
         """Handle 'Change output profile' selection."""
         profiles = list(OUTPUT_PROFILES.items())
-        print(f"\n  Available output profiles:")
+        print("\n  Available output profiles:")
         print()
         for i, (name, profile) in enumerate(profiles, 1):
             current = " (current)" if name == self.output_profile.name else ""
@@ -1454,8 +1454,8 @@ def positive_int(value):
     """Argparse type for positive integers (1+)."""
     try:
         ivalue = int(value)
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"'{value}' is not a valid integer")
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(f"'{value}' is not a valid integer") from e
     if ivalue < 1:
         raise argparse.ArgumentTypeError(f"'{value}' is not a positive integer (must be >= 1)")
     return ivalue
@@ -1771,11 +1771,11 @@ def main():
     if workers > 1:
         print(f"  Workers:     {workers} (parallel conversion)")
     else:
-        print(f"  Workers:     1 (sequential)")
+        print("  Workers:     1 (sequential)")
     logger.file_info(f"Workers: {workers}")
 
     if args.dry_run:
-        print(f"  Mode:        DRY-RUN (no files will be modified)")
+        print("  Mode:        DRY-RUN (no files will be modified)")
         logger.file_info("Mode: DRY-RUN")
 
     # Check cookie status on startup (informational only, not blocking)
@@ -1800,13 +1800,13 @@ def main():
     # Additional warning for invalid cookies
     if not cookie_status.valid and args.command in ['download', 'pipeline', None]:
         if cookie_status.exists and cookie_status.has_required_cookie:
-            print(f"            ⚠ Downloads will fail until cookies are refreshed")
+            print("            ⚠ Downloads will fail until cookies are refreshed")
             logger.file_info("Warning: Downloads will fail until cookies are refreshed")
         elif cookie_status.exists:
-            print(f"            ⚠ Downloads will fail - required cookie not found")
+            print("            ⚠ Downloads will fail - required cookie not found")
             logger.file_info("Warning: Downloads will fail - required cookie not found")
         else:
-            print(f"            ⚠ Downloads will fail until cookies.txt is created")
+            print("            ⚠ Downloads will fail until cookies.txt is created")
             logger.file_info("Warning: Downloads will fail until cookies.txt is created")
 
     # Display default paths
@@ -1933,7 +1933,7 @@ def main():
             sys.exit(0 if result.success else 1)
 
         elif args.url:
-            key, album_name = downloader.extract_url_info(args.url)
+            key, _album_name = downloader.extract_url_info(args.url)
             output_dir = args.output or f"{DEFAULT_MUSIC_DIR}/{key}"
             result = downloader.download(
                 args.url,

@@ -7,11 +7,13 @@ The cookie management system automatically validates Apple Music authentication 
 ## Features
 
 ✅ **Automatic Cookie Validation**
+
 - Checks cookies at startup
 - Shows expiration status (days remaining or days ago)
 - Only blocks downloads if cookies are invalid
 
 ✅ **Automatic Cookie Refresh**
+
 - Uses Selenium to extract cookies from your browser
 - Supports Chrome, Firefox, Safari, and Edge
 - Automatically detects and uses your OS default browser
@@ -19,6 +21,7 @@ The cookie management system automatically validates Apple Music authentication 
 - Creates backup before overwriting (cookies.txt.backup)
 
 ✅ **Multi-Browser Support**
+
 - Tries default browser first
 - Falls back to other installed browsers
 - Clear error messages if all browsers fail
@@ -192,7 +195,7 @@ The tool automatically detects and uses browsers in this priority:
 
 When multiple browsers are detected, you'll be prompted to choose:
 
-```
+```text
 ============================================================
 Select Browser for Cookie Extraction
 ============================================================
@@ -256,7 +259,7 @@ The tool automatically detects:
 
 If automatic refresh fails or you prefer manual control:
 
-1. Open Chrome/Firefox and go to: https://music.apple.com
+1. Open Chrome/Firefox and go to: <https://music.apple.com>
 2. Log in to your Apple Music account
 3. Install browser extension:
    - **Chrome**: "Get cookies.txt LOCALLY" extension
@@ -269,11 +272,12 @@ If automatic refresh fails or you prefer manual control:
 
 ### Selenium Not Installed
 
-```
+```text
 [ERROR] Selenium not installed. Install with: pip install selenium webdriver-manager
 ```
 
 **Solution**: Install dependencies
+
 ```bash
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -281,7 +285,7 @@ pip install -r requirements.txt
 
 ### No Browsers Found
 
-```
+```text
 [ERROR] No supported browsers found (Chrome, Firefox, Safari, or Edge)
 ```
 
@@ -292,7 +296,7 @@ pip install -r requirements.txt
 
 ### All Browsers Failed
 
-```
+```text
 [ERROR] All browsers failed. Please ensure browser is up to date.
 ```
 
@@ -311,7 +315,7 @@ pip install -r requirements.txt
 
 ### Cookies Still Invalid After Refresh
 
-```
+```text
 [ERROR] Cookies still invalid after refresh
 ```
 
@@ -344,6 +348,7 @@ Before overwriting cookies.txt, a backup is created:
 - **Purpose**: Restore if refresh fails
 
 To restore:
+
 ```bash
 cp cookies.txt.backup cookies.txt
 ```
@@ -360,9 +365,10 @@ The tool validates:
 ### Cookie Format
 
 Standard Netscape HTTP Cookie File format:
-```
+
+```text
 # Netscape HTTP Cookie File
-.music.apple.com	TRUE	/	TRUE	1786904321	media-user-token	<token-value>
+.music.apple.com    TRUE    /   TRUE    1786904321  media-user-token    <token-value>
 ```
 
 Fields: `domain | flag | path | secure | expiration | name | value`
@@ -380,11 +386,13 @@ Fields: `domain | flag | path | secure | expiration | name | value`
 ## Best Practices
 
 ✅ **Use auto-refresh for convenience**
+
 ```bash
 ./music-porter pipeline --auto --auto-refresh-cookies
 ```
 
 ✅ **Check status before batch operations**
+
 ```bash
 ./music-porter pipeline --dry-run --auto
 ```
@@ -398,6 +406,7 @@ Fields: `domain | flag | path | secure | expiration | name | value`
 - Enables fully automatic refresh (no interaction)
 
 ❌ **Don't skip validation in production**
+
 ```bash
 # Bad: Downloads will fail silently with expired cookies
 ./music-porter download --skip-cookie-validation --playlist 1
@@ -437,6 +446,7 @@ The cookie management system makes maintaining Apple Music authentication seamle
 5. **Safe backups** - Never lose working cookies
 
 For most users:
+
 ```bash
 # Install once
 pip install -r requirements.txt

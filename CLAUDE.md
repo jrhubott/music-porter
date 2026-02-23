@@ -5,22 +5,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## User Preferences
 
 ### Git Commit Preferences
+
 - **Never include** Co-Authored-By lines in commit messages
 - Commits should be authored solely by the user
 
 ### README Future Features
+
 - When implementing a future feature from the README list, **strikethrough** the item (~~text~~) with a note like "*(implemented in vX.Y.Z)*" instead of removing it
 - Keep the original numbering intact
 
 ## Requirements Handling
 
 ### Workflow
+
 - Requirements (SRS) **must** be written and reviewed **before** implementation begins
 - When asked to "work on requirements", **only** produce the SRS document — do not plan or begin implementation
 - Implementation starts only after explicit user instruction
 - These are separate phases — never combine them
 
 ### SRS Document Format
+
 - Tables with columns: ID, Version, Tested, Requirement
 - New requirements start with `[ ]` in the Tested column — mark `[x]` when implemented and tested
 - **IDs must be globally unique** across all SRS documents in `SRS/SRS.md` — use the entry's sequential number as the first digit (e.g., entry 8 uses IDs `8.1.1`, `8.2.1`, etc.)
@@ -34,11 +38,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Requirements must be detailed enough to **reimplement the software** from the SRS alone
 
 ### During Implementation
+
 - Mark Tested cells `[x]` as each requirement is completed
 - Add new SRS items if requirements are discovered during design or implementation
 - Update the SRS whenever the user requests changes — keep in sync with the current implementation
 
 ### Merge Gate
+
 - **All** Tested cells must be `[x]` before merging to main — `/merge-to-main` enforces this
 - **Archive on merge:** completed SRS merged into `SRS/SRS.md` under the appropriate existing section. If no existing section fits, ask the user before creating one. Delete the individual SRS file from `SRS/` after archiving.
 
@@ -130,6 +136,7 @@ The conversion system supports configurable quality presets to balance file size
 | `custom` | VBR | 0-9 | Variable | Advanced users (0=best quality, 9=worst) |
 
 **Usage:**
+
 - All `convert` and `pipeline` commands support `--preset` flag
 - Default is `lossless` (320kbps CBR) for maximum quality
 - VBR (Variable Bit Rate) adjusts bitrate dynamically based on audio complexity
@@ -162,6 +169,7 @@ The conversion system supports configurable quality presets to balance file size
 ### Granular Control (Individual Commands)
 
 **Download:**
+
 ```bash
 # Download specific playlist
 ./music-porter download --playlist "Pop_Workout"
@@ -174,6 +182,7 @@ The conversion system supports configurable quality presets to balance file size
 ```
 
 **Convert:**
+
 ```bash
 # Convert M4A files to MP3 (default: lossless 320kbps)
 ./music-porter convert music/Pop_Workout
@@ -193,6 +202,7 @@ The conversion system supports configurable quality presets to balance file size
 ```
 
 **Tag Operations:**
+
 ```bash
 # Update album tag
 ./music-porter tag export/ride-command/Pop_Workout --album "Pop Workout"
@@ -202,6 +212,7 @@ The conversion system supports configurable quality presets to balance file size
 ```
 
 **Restore Original Tags:**
+
 ```bash
 # Restore all original tags
 ./music-porter restore export/ride-command/Pop_Workout --all
@@ -213,6 +224,7 @@ The conversion system supports configurable quality presets to balance file size
 ```
 
 **Reset Tags from Source (⚠️ Overwrites Protection):**
+
 ```bash
 # Reset all protection tags from source M4A files
 ./music-porter reset music/Pop_Workout export/ride-command/Pop_Workout
@@ -220,6 +232,7 @@ The conversion system supports configurable quality presets to balance file size
 ```
 
 **USB Operations:**
+
 ```bash
 # Copy to USB drive
 ./music-porter sync-usb export/ride-command/Pop_Workout
@@ -232,6 +245,7 @@ The conversion system supports configurable quality presets to balance file size
 ```
 
 **Library Summary:**
+
 ```bash
 # Display export library statistics (default mode)
 # Always checks all files for tag integrity
@@ -248,6 +262,7 @@ The conversion system supports configurable quality presets to balance file size
 ```
 
 **Cover Art Management:**
+
 ```bash
 # Embed cover art from M4A sources into existing MP3s
 ./music-porter cover-art embed export/ride-command/Pop_Workout
@@ -294,6 +309,7 @@ Profiles control conversion behavior, tag handling, artwork, and quality default
 | `basic` | v2.4 | original | lossless | original | original | Standard MP3, original tags & art |
 
 **Profile fields:**
+
 - `artwork_size`: `>0` = resize to max px, `0` = embed original, `-1` = strip artwork
 - `quality_preset`: Default conversion quality (`lossless`, `high`, `medium`, `low`)
 - `pipeline_album`: `"playlist_name"` or `"original"` — controls album tag in pipeline
@@ -316,6 +332,7 @@ Profiles control conversion behavior, tag handling, artwork, and quality default
 ## Development Setup
 
 ### Platform Support
+
 The tool supports **macOS**, **Linux**, and **Windows**. Platform is auto-detected at startup.
 
 | Platform | USB Detection | Eject Method | FFmpeg Install |
@@ -325,11 +342,12 @@ The tool supports **macOS**, **Linux**, and **Windows**. Platform is auto-detect
 | Windows | Drive letters (C:, D:, etc.) | Manual (Explorer) | Chocolatey or direct download |
 
 ### Prerequisites
+
 - Python 3.8+ (uses Python virtual environment)
 - ffmpeg (for audio conversion, system binary required)
   - **macOS:** `brew install ffmpeg`
   - **Linux:** `sudo apt-get install ffmpeg` (Ubuntu/Debian), `sudo dnf install ffmpeg` (Fedora/RHEL), `sudo pacman -S ffmpeg` (Arch)
-  - **Windows:** `choco install ffmpeg` or download from https://ffmpeg.org/download.html
+  - **Windows:** `choco install ffmpeg` or download from <https://ffmpeg.org/download.html>
 - gamdl (Apple Music downloader, installed via pip in venv)
 - mutagen (Python ID3 tag library, installed via pip in venv)
 - ffmpeg-python (Python wrapper for FFmpeg, installed via pip in venv)
@@ -339,6 +357,7 @@ The tool supports **macOS**, **Linux**, and **Windows**. Platform is auto-detect
 - PyYAML (YAML configuration file parsing, installed via pip in venv)
 
 ### Initial Setup
+
 ```bash
 # Create virtual environment
 python3 -m venv .venv
@@ -357,10 +376,30 @@ pip install -r requirements.txt
 ```
 
 ### Testing Changes
+
 - Use `--dry-run` flag extensively to preview behavior
 - Use `--verbose` to inspect tag transformations
 - Test tag preservation by running updates multiple times
 - Verify TXXX frames with: `./music-porter --verbose tag export/ride-command/PlaylistName`
+
+### Linting
+
+The project uses **Ruff** (Python) and **PyMarkdown** (Markdown) for linting. All config lives in `pyproject.toml`.
+
+```bash
+# Install dev dependencies (once)
+pip install -r requirements-dev.txt
+
+# Python linting
+ruff check .                # Check for issues
+ruff check --fix .          # Auto-fix safe issues
+
+# Markdown linting
+pymarkdown scan -r .        # Check for issues
+pymarkdown fix -r .         # Auto-fix safe issues
+```
+
+Both linters should pass clean before merging to main.
 
 ### Feature Branch Workflow
 
@@ -386,6 +425,7 @@ pip install -r requirements.txt
 - Keep descriptions to 2-4 words
 
 **Creating a feature branch:**
+
 ```bash
 # 1. Start from up-to-date main
 git checkout main
@@ -403,10 +443,12 @@ git commit -m "Start my-feature branch"
 ```
 
 **Working on the branch:**
+
 - Commit regularly with descriptive messages
 - Keep the branch version (e.g. `1.5.3-my-feature`) throughout development
 - Don't bump the base version number during dev — that happens at merge time
 - For long-lived branches, periodically sync with main:
+  
   ```bash
   # Option A: Rebase (cleaner history, preferred for solo branches)
   git fetch origin
@@ -418,6 +460,7 @@ git commit -m "Start my-feature branch"
   ```
 
 **Pre-merge checklist:**
+
 - [ ] Working tree is clean (`git status` shows nothing)
 - [ ] All changes tested with `--dry-run` and `--verbose`
 - [ ] No temporary or debug code left in
@@ -434,6 +477,7 @@ Use the `/merge-to-main` skill, which automates version bump, README updates, ta
 **IMPORTANT: Version number strategy depends on branch context.**
 
 The version number is defined in `music-porter` at line 68:
+
 ```python
 VERSION = "1.1.0"
 ```
@@ -441,6 +485,7 @@ VERSION = "1.1.0"
 **Branch-Based Version Workflow:**
 
 **While working on a feature branch:**
+
 - Include branch name in version: `VERSION = "1.1.0-feature-name"`
 - Format: `MAJOR.MINOR.PATCH-branch-name`
 - Use lowercase with hyphens (no underscores or slashes)
@@ -450,6 +495,7 @@ VERSION = "1.1.0"
   - `VERSION = "1.1.1-bugfix-tag-restoration"`
 
 **When merging to main:**
+
 - Update to clean release version (remove branch name)
 - Increment version number according to semantic versioning
 - **Create a git tag** for the new version: `git tag v1.2.0`
@@ -459,6 +505,7 @@ VERSION = "1.1.0"
   - `2.0.0-breaking-cli-refactor` → `2.0.0` (breaking change)
 
 **When committing directly to main:**
+
 - **ALWAYS ask the user if the version should be bumped** before committing
 - Present the current version and suggest appropriate bump level based on changes
 - Examples of prompts:
@@ -469,11 +516,13 @@ VERSION = "1.1.0"
 - Never assume - always ask!
 
 **Semantic Versioning (MAJOR.MINOR.PATCH):**
+
 - **PATCH** (1.1.0 → 1.1.1): Bug fixes, documentation updates, minor improvements
 - **MINOR** (1.1.0 → 1.2.0): New features, non-breaking changes
 - **MAJOR** (1.1.0 → 2.0.0): Breaking changes, major refactors
 
 **Complete Workflow Example:**
+
 ```bash
 # Create feature branch
 git checkout -b feature/cookie-management
@@ -500,12 +549,14 @@ git tag v1.2.0
 ```
 
 **Benefits:**
+
 - Branch versions clearly identify development builds
 - Clean versions on main identify stable releases
 - Easy to see if running development vs release build
 - Version in startup banner shows branch: `v1.2.0-new-feature`
 
 **Version Display:**
+
 - Shown in startup banner: `Apple Music to Ride Command MP3 Converter v1.1.0`
 - With branch: `Apple Music to Ride Command MP3 Converter v1.2.0-new-feature`
 - Shown with `--version` flag
@@ -514,6 +565,7 @@ git tag v1.2.0
 ### Common Gotchas
 
 **Apple Music Authentication & Cookie Management:**
+
 - Requires `cookies.txt` file with Apple Music session cookies
 - Tool automatically validates cookies at startup and before downloads
 - Expired cookies trigger interactive prompt: "Attempt automatic cookie refresh? [Y/n]"
@@ -528,6 +580,7 @@ git tag v1.2.0
 - See `COOKIE-MANAGEMENT-GUIDE.md` for complete documentation
 
 **Virtual Environment:**
+
 - Must activate venv before running
   - **macOS/Linux:** `source .venv/bin/activate`
   - **Windows:** `.venv\Scripts\activate`
@@ -535,11 +588,13 @@ git tag v1.2.0
 - Deactivate with `deactivate` command
 
 **Temporary Directories:**
+
 - gamdl creates `gamdl_temp_*` directories during downloads
 - Safe to delete after successful downloads
 - Not tracked in git (.gitignore)
 
 **USB Drive Detection:**
+
 - Tool auto-detects mounted volumes based on platform:
   - **macOS:** `/Volumes/` (excludes "Macintosh HD", "Macintosh HD - Data")
   - **Linux:** `/media/$USER/` and `/mnt/` (excludes "boot", "root")
@@ -550,13 +605,14 @@ git tag v1.2.0
   - **Windows:** Check File Explorer for removable drives
 
 **USB Ejection:**
+
 - **macOS:** Automatic via `diskutil eject`
 - **Linux:** Automatic via `udisksctl` or `umount`
 - **Windows:** Manual via Windows Explorer (automatic eject not implemented)
 
 ## Directory Structure
 
-```
+```text
 .
 ├── music-porter            # ⭐ Unified tool (RECOMMENDED)
 ├── do-it-all                        # Legacy wrapper (deprecated)
@@ -585,28 +641,33 @@ git tag v1.2.0
 ## Important Implementation Notes
 
 ### CLI / Web Feature Parity
+
 - Any feature added to the CLI **must** also be added to the Web dashboard (API endpoint + UI)
 - Any feature added to the Web dashboard **must** also be added to the CLI
 - Both interfaces should expose the same functionality — neither should have exclusive features
 
 ### TXXX Frame Handling
+
 - Always iterate through `tags.values()` to check frame types with `isinstance(frame, TXXX)`
 - Never rely on string key format like `TXXX:OriginalTitle` for existence checks
 - Mutagen's key indexing can be inconsistent after save/reload cycles
 - Use `_txxx_exists()` and `_get_txxx()` helper functions
 
 ### Title Format Handling
+
 - Prevents double-compounding: strips existing "Artist - " prefix before reformatting
 - Uses `_strip_artist_prefix()` to clean titles before applying new format
 - Always builds titles from protected originals (OriginalArtist, OriginalTitle)
 
 ### File Naming
+
 - Output files: "Artist - Title.mp3" (flat, no subdirectories)
 - Invalid filename characters are stripped: `/\:*?"<>|`
 - M4A sources remain in nested directory structure
 - Existing MP3s are skipped unless `--force` is used
 
 ### Cookie Management (CookieManager class)
+
 - **Validation:** Uses `http.cookiejar.MozillaCookieJar` to parse Netscape format cookies
 - **Browser Detection:** Detects OS default browser via LaunchServices (macOS), xdg-settings (Linux), registry (Windows)
 - **Multi-Browser Support:** Chrome, Firefox, Safari, Edge with automatic fallback
@@ -620,6 +681,7 @@ git tag v1.2.0
 - **Key Methods:** `validate()`, `auto_refresh()`, `_extract_with_selenium()`, `_detect_default_browser()`
 
 ### Error Handling
+
 - Scripts continue on individual file errors (don't fail entire batch)
 - Comprehensive logging to timestamped log files
 - Summary statistics printed at completion (converted, skipped, errors)
@@ -628,6 +690,7 @@ git tag v1.2.0
 - Browser automation errors trigger fallback to manual instructions
 
 ### FFmpeg Integration
+
 - Uses ffmpeg-python library for cleaner API and better error handling
 - Still requires system ffmpeg binary (ffmpeg-python is a wrapper, not a replacement)
 - Quality setting: VBR mode with libmp3lame, quality level 2 (high quality)
@@ -637,9 +700,11 @@ git tag v1.2.0
 ## Configuration
 
 ### config.yaml
+
 YAML configuration file containing both playlists and application settings. Auto-created with defaults if missing.
 
 **Format:**
+
 ```yaml
 # Music Porter Configuration
 # CLI flags override these settings when specified.
@@ -659,11 +724,13 @@ playlists:
 ```
 
 **Playlist fields:**
+
 - `key`: Short identifier (used for directory names)
 - `url`: Apple Music playlist URL
 - `name`: Display name for the playlist
 
 **Settings fields:**
+
 - `output_type`: Default output profile (`ride-command`, `basic`, etc.)
 - `usb_dir`: Default USB subdirectory for sync operations
 - `workers`: Number of parallel workers for batch operations
@@ -673,7 +740,9 @@ playlists:
 **Migration from playlists.conf:** The old pipe-delimited `playlists.conf` format (`key|url|name`) has been replaced by `config.yaml`. The `ConfigManager` class now reads and writes YAML exclusively.
 
 ### USB Drive Exclusions
+
 Excluded volumes are configured in `music-porter` (constant: `EXCLUDED_USB_VOLUMES`):
+
 ```python
 EXCLUDED_USB_VOLUMES = [
     "Macintosh HD",
@@ -690,6 +759,7 @@ The `music-porter` script is a modern, unified Python tool (3,065 lines) that re
 ### Key Components
 
 **21 Classes:**
+
 1. `Logger` - Timestamped logging to console and file
 2. `PlaylistConfig` - Playlist configuration representation
 3. `ConfigManager` - Loads and manages config.yaml (playlists + settings)
@@ -713,6 +783,7 @@ The `music-porter` script is a modern, unified Python tool (3,065 lines) that re
 21. `CoverArtManager` - Cover art embed, extract, update, and strip operations
 
 **Subcommands:**
+
 - `pipeline` - Full download + convert + tag workflow (default)
 - `download` - Download from Apple Music using gamdl
 - `convert` - Convert M4A → MP3 with tag preservation
@@ -724,6 +795,7 @@ The `music-porter` script is a modern, unified Python tool (3,065 lines) that re
 - `summary` - Display export library statistics
 
 **Features:**
+
 - Professional CLI with `--help` for every command
 - Global flags: `--dry-run`, `--verbose`, `--version`
 - Comprehensive error handling (continues on failures)
@@ -735,12 +807,14 @@ The `music-porter` script is a modern, unified Python tool (3,065 lines) that re
 ### Migration from Legacy Scripts
 
 **Automatic migration via wrappers:**
+
 - Old scripts still work but show deprecation warnings
 - Internally call `music-porter` with mapped arguments
 - No immediate changes required
 - Update scripts gradually
 
 **Recommended migration:**
+
 ```bash
 # Old: do-it-all
 ./do-it-all --auto
@@ -768,12 +842,14 @@ The `music-porter` script is a modern, unified Python tool (3,065 lines) that re
 ### Implementation Notes for music-porter
 
 **Tag Management (TaggerManager class):**
+
 - Implements same TXXX hard-gate protection as legacy script
 - Uses identical helper functions: `_get_txxx()`, `_txxx_exists()`, `save_original_tag()`
 - Maintains full backward compatibility with tag format
 - Statistics tracking for all operations
 
 **Conversion (Converter class):**
+
 - Uses ffmpeg with configurable quality presets
 - Default: lossless 320kbps CBR (libmp3lame -b:a 320k)
 - VBR presets: high (q:a 2), medium (q:a 4), low (q:a 6)
@@ -783,6 +859,7 @@ The `music-porter` script is a modern, unified Python tool (3,065 lines) that re
 - Identical filename sanitization and output structure
 
 **Configuration Management (ConfigManager class):**
+
 - Reads and writes `config.yaml` using PyYAML
 - Auto-creates default `config.yaml` if missing (`_create_default()`)
 - Key methods: `get_setting()`, `update_setting()`, `_save()`, `_create_default()`
@@ -791,6 +868,7 @@ The `music-porter` script is a modern, unified Python tool (3,065 lines) that re
 - IMPORT_MAP includes `'PyYAML': 'yaml'` for dependency checking
 
 **Profile-Scoped Export Directories:**
+
 - Export paths are now scoped by output profile: `export/<profile>/<playlist>/`
 - Examples: `export/ride-command/Pop_Workout/`, `export/basic/Pop_Workout/`
 - Helper function `get_export_dir(profile_name, playlist_key=None)` builds these paths
@@ -798,6 +876,7 @@ The `music-porter` script is a modern, unified Python tool (3,065 lines) that re
 - With `playlist_key`: returns `export/<profile>/<playlist_key>/`
 
 **Pipeline Orchestration (PipelineOrchestrator class):**
+
 - Coordinates: download → convert → tag → USB sync
 - Stage dependency handling
 - Aggregate statistics across all stages
@@ -805,6 +884,7 @@ The `music-porter` script is a modern, unified Python tool (3,065 lines) that re
 - Error recovery (continues on individual failures)
 
 **Interactive Menu (InteractiveMenu class):**
+
 - Beautiful formatted menu display with automatic loop-back
 - Numbered playlist selection (1-N)
 - Letter-based action options:
@@ -821,6 +901,7 @@ The `music-porter` script is a modern, unified Python tool (3,065 lines) that re
 - Summary display with pause-to-review before returning to menu
 
 **Library Summary (SummaryManager class):**
+
 - Displays comprehensive export library statistics
 - Three output modes: default (balanced), quick (aggregate only), detailed (extended)
 - Always scans all files for both size/count and tag integrity (no sampling)
@@ -832,6 +913,7 @@ The `music-porter` script is a modern, unified Python tool (3,065 lines) that re
 - Cover art statistics: tracks files with/without embedded APIC frames
 
 **Cover Art Management (CoverArtManager class):**
+
 - Manages cover art operations on existing MP3 files
 - Four actions: `embed`, `extract`, `update`, `strip`
 - `embed`: Reads cover art from matching M4A source files (auto-derives `export/` → `music/`)

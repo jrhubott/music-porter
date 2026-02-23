@@ -7,3 +7,4 @@ logs/
 music/
 .DS_Store
 cookies.txt.backup
+.ruff_cache/

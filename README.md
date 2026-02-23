@@ -50,7 +50,7 @@ A powerful music playlist management and conversion tool that downloads Apple Mu
 - Manual eject via Windows Explorer (automatic eject not implemented)
 - Install ffmpeg:
   - Via Chocolatey: `choco install ffmpeg`
-  - Or download from: https://ffmpeg.org/download.html (extract and add to PATH)
+  - Or download from: <https://ffmpeg.org/download.html> (extract and add to PATH)
 - Activate venv: `.venv\Scripts\activate`
 
 ## Quick Start
@@ -129,6 +129,7 @@ MP3 conversion supports configurable quality presets to balance file size and au
 ### Pipeline Commands
 
 **Full Pipeline** - Download → Convert → Tag → USB (optional)
+
 ```bash
 ./music-porter pipeline --playlist "Pop_Workout"
 ./music-porter pipeline --url "https://music.apple.com/..."
@@ -139,12 +140,14 @@ MP3 conversion supports configurable quality presets to balance file size and au
 ### Individual Commands
 
 **Download** - Download Apple Music playlists
+
 ```bash
 ./music-porter download --playlist "Pop_Workout"
 ./music-porter download --url "https://music.apple.com/..."
 ```
 
 **Convert** - Convert M4A to MP3
+
 ```bash
 ./music-porter convert music/Pop_Workout --output export/ride-command/Pop_Workout
 ./music-porter convert music/Pop_Workout --preset high --force
@@ -153,29 +156,34 @@ MP3 conversion supports configurable quality presets to balance file size and au
 ```
 
 **Tag** - Update MP3 tags
+
 ```bash
 ./music-porter tag export/ride-command/Pop_Workout --album "Pop Workout"
 ./music-porter tag export/ride-command/Pop_Workout --album "Pop" --artist "Various"
 ```
 
 **Restore** - Restore original tags from TXXX frames
+
 ```bash
 ./music-porter restore export/ride-command/Pop_Workout --all
 ./music-porter restore export/ride-command/Pop_Workout --album --artist
 ```
 
 **Reset** - Reset tags from source M4A files (⚠️ overwrites TXXX protection)
+
 ```bash
 ./music-porter reset music/Pop_Workout export/ride-command/Pop_Workout
 ```
 
 **USB Sync** - Copy to USB drive
+
 ```bash
 ./music-porter sync-usb export/ride-command/Pop_Workout
 ./music-porter sync-usb  # Copy entire export directory
 ```
 
 **Cover Art** - Manage embedded album artwork
+
 ```bash
 # Embed cover art from M4A sources into MP3s
 ./music-porter cover-art embed export/ride-command/Pop_Workout
@@ -200,6 +208,7 @@ MP3 conversion supports configurable quality presets to balance file size and au
 ```
 
 **Summary** - Display export library statistics
+
 ```bash
 ./music-porter summary
 ./music-porter summary --detailed
@@ -309,7 +318,7 @@ The tool includes intelligent cookie management to prevent authentication failur
 
 ## Project Structure
 
-```
+```text
 .
 ├── music-porter                     # Main unified tool (RECOMMENDED)
 ├── do-it-all                        # Legacy wrapper (deprecated)
@@ -391,6 +400,7 @@ The tool uses a "hard gate" protection system for original metadata:
 ## Future Features
 
 ### High Priority
+
 1. **Playlist sync detection** - Compare local library to Apple Music, download only new/changed tracks
 2. **Incremental updates** - Smart detection of changed tracks without full re-download
 3. ~~**Multi-threaded conversion** - Parallel processing for faster batch conversions~~ *(implemented in v1.3.0)*
@@ -398,35 +408,37 @@ The tool uses a "hard gate" protection system for original metadata:
 5. ~~**Configuration presets** - Save and load common conversion/tagging configurations~~ *(implemented in v1.8.0)*
 
 ### Medium Priority
-6. ~~**Web UI** - Browser-based interface for remote management~~ *(implemented in v2.0.0)*
-7. **Automatic USB detection** - Start sync when USB drive is plugged in
-8. ~~**Progress indicators** - Real-time progress bars for long-running operations~~ *(implemented in v1.4.0)*
-9. **Download resume** - Resume interrupted downloads
-10. ~~**Cover art management** - Embed, extract, and update album artwork~~ *(implemented in v1.5.0)*
-11. **Playlist merging** - Combine multiple playlists into one
-12. **Smart playlists** - Auto-generate playlists based on criteria (genre, artist, etc.)
-13. **Duplicate detection** - Find and remove duplicate tracks across playlists
-14. **Tag validation** - Verify tag integrity and fix common issues
-15. **Export formats** - Support for additional formats (FLAC, AAC, OGG)
-16. **Cover art resize on embed/convert** - Add `--cover-art-size` flag to `embed`, `update`, `convert`, and `pipeline` commands for automatic resizing during processing
+
+1. ~~**Web UI** - Browser-based interface for remote management~~ *(implemented in v2.0.0)*
+2. **Automatic USB detection** - Start sync when USB drive is plugged in
+3. ~~**Progress indicators** - Real-time progress bars for long-running operations~~ *(implemented in v1.4.0)*
+4. **Download resume** - Resume interrupted downloads
+5. ~~**Cover art management** - Embed, extract, and update album artwork~~ *(implemented in v1.5.0)*
+6. **Playlist merging** - Combine multiple playlists into one
+7. **Smart playlists** - Auto-generate playlists based on criteria (genre, artist, etc.)
+8. **Duplicate detection** - Find and remove duplicate tracks across playlists
+9. **Tag validation** - Verify tag integrity and fix common issues
+10. **Export formats** - Support for additional formats (FLAC, AAC, OGG)
+11. **Cover art resize on embed/convert** - Add `--cover-art-size` flag to `embed`, `update`, `convert`, and `pipeline` commands for automatic resizing during processing
 
 ### Low Priority / Nice to Have
-17. **Spotify integration** - Download from Spotify playlists
-18. **YouTube Music integration** - Download from YouTube Music playlists
-19. **Metadata enrichment** - Fetch additional metadata from online databases
-20. **Lyrics embedding** - Download and embed synchronized lyrics
-21. **BPM detection** - Analyze and tag tracks with BPM information
-22. **Playlist statistics** - Detailed analytics (genre distribution, duration, etc.)
-23. **Tag history** - Track changes to tags over time
-24. **Backup and restore** - Backup entire library with metadata
-25. **Cloud storage sync** - Sync to Dropbox, Google Drive, etc.
-26. **Mobile app** - iOS/Android app for remote control
-27. **Scheduling** - Automatic periodic syncing on schedule
-28. **Notification system** - Email/SMS alerts for completed operations
-29. ~~**Custom filename templates** - Configurable output filename patterns~~ *(implemented in v2.3.0)*
-30. **Equalizer presets** - Apply audio processing (normalization, compression)
-31. **Collaborative playlists** - Share playlists with others for collaborative management
-32. ~~**Additional output type profiles** - Add device-specific profiles beyond Ride Command (e.g., generic car stereo, nested directory structures, alternative filename formats)~~ *(implemented in v1.7.0)*
+
+1. **Spotify integration** - Download from Spotify playlists
+2. **YouTube Music integration** - Download from YouTube Music playlists
+3. **Metadata enrichment** - Fetch additional metadata from online databases
+4. **Lyrics embedding** - Download and embed synchronized lyrics
+5. **BPM detection** - Analyze and tag tracks with BPM information
+6. **Playlist statistics** - Detailed analytics (genre distribution, duration, etc.)
+7. **Tag history** - Track changes to tags over time
+8. **Backup and restore** - Backup entire library with metadata
+9. **Cloud storage sync** - Sync to Dropbox, Google Drive, etc.
+10. **Mobile app** - iOS/Android app for remote control
+11. **Scheduling** - Automatic periodic syncing on schedule
+12. **Notification system** - Email/SMS alerts for completed operations
+13. ~~**Custom filename templates** - Configurable output filename patterns~~ *(implemented in v2.3.0)*
+14. **Equalizer presets** - Apply audio processing (normalization, compression)
+15. **Collaborative playlists** - Share playlists with others for collaborative management
+16. ~~**Additional output type profiles** - Add device-specific profiles beyond Ride Command (e.g., generic car stereo, nested directory structures, alternative filename formats)~~ *(implemented in v1.7.0)*
 
 ## Version
 
