@@ -21,7 +21,7 @@ struct ServerConnection: Identifiable, Codable, Hashable {
         guard var components = baseURL.flatMap({ URLComponents(url: $0, resolvingAgainstBaseURL: false) }) else {
             return nil
         }
-        components.path = "/" + path
+        components.path = path.hasPrefix("/") ? path : "/" + path
         return components.url
     }
 }

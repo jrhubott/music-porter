@@ -83,25 +83,39 @@ final class ServerDiscovery {
     }
 
     private nonisolated func extractAddress(from endpoint: NWEndpoint, name: String) {
-        guard case .hostPort(let host, let port) = endpoint else { return }
+        print("[DEBUG Discovery] raw endpoint: \(endpoint)")
+        guard case .hostPort(let host, let port) = endpoint else {
+            print("[DEBUG Discovery] endpoint is NOT hostPort, skipping")
+            return
+        }
+        print("[DEBUG Discovery] host=\(host) port=\(port)")
 
-        let hostStr: String
+        var hostStr: String
         switch host {
         case .ipv4(let addr):
             hostStr = "\(addr)"
+            print("[DEBUG Discovery] IPv4 addr: '\(hostStr)'")
         case .ipv6(let addr):
             let str = "\(addr)"
+            print("[DEBUG Discovery] IPv6 addr: '\(str)'")
             // IPv4-mapped IPv6 (::ffff:192.168.1.x) — extract the real IPv4
             if str.hasPrefix("::ffff:") {
                 hostStr = String(str.dropFirst(7))
+                print("[DEBUG Discovery] extracted IPv4 from mapped: '\(hostStr)'")
             } else {
-                // Skip all other IPv6 addresses (link-local, ULA, etc.)
+                print("[DEBUG Discovery] skipping non-mapped IPv6")
                 return
             }
         case .name(let hostname, _):
             hostStr = hostname
+            print("[DEBUG Discovery] hostname: '\(hostStr)'")
         @unknown default:
             return
+        }
+
+        // Strip interface scope ID (e.g. %bridge101, %en0) — not valid in URLs
+        if let percentIndex = hostStr.firstIndex(of: "%") {
+            hostStr = String(hostStr[..<percentIndex])
         }
 
         let server = ServerConnection(
@@ -109,6 +123,7 @@ final class ServerDiscovery {
             port: Int(port.rawValue),
             name: name
         )
+        print("[DEBUG Discovery] created ServerConnection: host='\(server.host)' port=\(server.port) baseURL=\(server.baseURL?.absoluteString ?? "NIL")")
 
         Task { @MainActor [weak self] in
             guard let self else { return }
