@@ -1041,6 +1041,7 @@ class InteractiveMenu:
             dry_run=dry_run,
             verbose=verbose
         )
+        render_pipeline_summary(result)
 
         # Ask about USB copy
         if result.success and not dry_run:
@@ -1080,6 +1081,7 @@ class InteractiveMenu:
                 dry_run=dry_run,
                 verbose=verbose
             )
+            render_pipeline_summary(result)
 
             # Collect statistics from this run
             aggregate_stats.add_playlist_result(orchestrator.stats)
@@ -1093,7 +1095,8 @@ class InteractiveMenu:
 
         # Print aggregate summary (only for multiple playlists)
         if len(self.config.playlists) > 1:
-            orchestrator.print_aggregate_summary(aggregate_stats)
+            aggregate_stats.end_time = time.time()
+            render_aggregate_summary(aggregate_stats.to_result())
 
         return aggregate_stats.failed_playlists == 0
 
@@ -1124,6 +1127,7 @@ class InteractiveMenu:
                 dry_run=dry_run,
                 verbose=verbose
             )
+            render_pipeline_summary(result)
 
             # Ask about USB copy
             if result.success and not dry_run:
@@ -1148,6 +1152,7 @@ class InteractiveMenu:
             usb_dir=DEFAULT_USB_DIR,
             dry_run=dry_run
         )
+        render_usb_sync_summary(usb_result)
         return usb_result.success
 
     def _handle_summary(self, dry_run):
@@ -1163,6 +1168,7 @@ class InteractiveMenu:
             music_dir=DEFAULT_MUSIC_DIR,
             export_profile=self.output_profile.name,
         )
+        render_library_summary(summary_result, mode=summary_result.mode)
 
         # Pause for user to review before returning to menu
         if summary_result.success:
@@ -1219,6 +1225,7 @@ class InteractiveMenu:
                 self.logger.info(f"  Stripping: {d}")
                 self.logger.info(f"{'─' * 60}")
                 strip_result = cam.strip(d, dry_run=dry_run, verbose=verbose)
+                render_cover_art_summary(strip_result)
                 if not strip_result.success:
                     all_success = False
         else:
@@ -1228,6 +1235,7 @@ class InteractiveMenu:
                 self.logger.info(f"  Resizing: {d}")
                 self.logger.info(f"{'─' * 60}")
                 resize_result = cam.resize(d, max_size, dry_run=dry_run, verbose=verbose)
+                render_cover_art_summary(resize_result)
                 if not resize_result.success:
                     all_success = False
 
@@ -1788,6 +1796,7 @@ def main():
             dry_run=args.dry_run,
             verbose=args.verbose
         )
+        render_conversion_summary(result)
         sys.exit(0 if result.success else 1)
 
     elif args.command == 'tag':
@@ -1804,6 +1813,7 @@ def main():
             dry_run=args.dry_run,
             verbose=args.verbose
         )
+        render_tag_update_summary(result)
         sys.exit(0 if result.success else 1)
 
     elif args.command == 'restore':
@@ -1821,6 +1831,7 @@ def main():
             dry_run=args.dry_run,
             verbose=args.verbose
         )
+        render_tag_restore_summary(result)
         sys.exit(0 if result.success else 1)
 
     elif args.command == 'reset':
@@ -1837,6 +1848,7 @@ def main():
             dry_run=args.dry_run,
             verbose=args.verbose
         )
+        render_tag_reset_summary(result)
         sys.exit(0 if result.success else 1)
 
     elif args.command == 'download':
@@ -1900,6 +1912,7 @@ def main():
             usb_dir=usb_dir,
             dry_run=args.dry_run
         )
+        render_usb_sync_summary(result)
         sys.exit(0 if result.success else 1)
 
     elif args.command == 'summary':
@@ -1925,6 +1938,7 @@ def main():
             export_profile=output_profile.name,
             no_library=args.no_library,
         )
+        render_library_summary(result, mode=result.mode)
         sys.exit(0 if result.success else 1)
 
     elif args.command == 'cover-art':
@@ -1962,6 +1976,7 @@ def main():
                     logger.info(f"{'─' * 60}")
                     embed_result = cam.embed(d, force=getattr(args, 'force', False),
                                              dry_run=args.dry_run, verbose=args.verbose)
+                    render_cover_art_summary(embed_result)
                     if not embed_result.success:
                         all_success = False
                 success = all_success
@@ -1973,6 +1988,7 @@ def main():
                     dry_run=args.dry_run,
                     verbose=args.verbose
                 )
+                render_cover_art_summary(result)
                 success = result.success
             else:
                 logger.error("Specify a directory or use --all")
@@ -1984,6 +2000,7 @@ def main():
                 dry_run=args.dry_run,
                 verbose=args.verbose
             )
+            render_cover_art_summary(result)
             success = result.success
         elif args.cover_art_action == 'update':
             result = cam.update(
@@ -1992,6 +2009,7 @@ def main():
                 dry_run=args.dry_run,
                 verbose=args.verbose
             )
+            render_cover_art_summary(result)
             success = result.success
         elif args.cover_art_action == 'strip':
             result = cam.strip(
@@ -1999,6 +2017,7 @@ def main():
                 dry_run=args.dry_run,
                 verbose=args.verbose
             )
+            render_cover_art_summary(result)
             success = result.success
         elif args.cover_art_action == 'resize':
             if getattr(args, 'all_playlists', False) and args.directory:
@@ -2027,6 +2046,7 @@ def main():
                     logger.info(f"{'─' * 60}")
                     resize_result = cam.resize(d, args.max_size,
                                                dry_run=args.dry_run, verbose=args.verbose)
+                    render_cover_art_summary(resize_result)
                     if not resize_result.success:
                         all_success = False
                 success = all_success
@@ -2037,6 +2057,7 @@ def main():
                     dry_run=args.dry_run,
                     verbose=args.verbose
                 )
+                render_cover_art_summary(result)
                 success = result.success
             else:
                 logger.error("Specify a directory or use --all")
@@ -2088,13 +2109,15 @@ def main():
                     validate_cookies=not args.skip_cookie_validation,
                     auto_refresh_cookies=args.auto_refresh_cookies
                 )
+                render_pipeline_summary(pipeline_result)
 
                 # Collect statistics from this run
                 aggregate_stats.add_playlist_result(orchestrator.stats)
 
             # Print aggregate summary (only for multiple playlists)
             if len(config.playlists) > 1:
-                orchestrator.print_aggregate_summary(aggregate_stats)
+                aggregate_stats.end_time = time.time()
+                render_aggregate_summary(aggregate_stats.to_result())
 
             sys.exit(0 if aggregate_stats.failed_playlists == 0 else 1)
 
@@ -2112,6 +2135,7 @@ def main():
                 validate_cookies=not args.skip_cookie_validation,
                 auto_refresh_cookies=args.auto_refresh_cookies
             )
+            render_pipeline_summary(pipeline_result)
             sys.exit(0 if pipeline_result.success else 1)
 
         else:
@@ -2139,7 +2163,7 @@ def main():
             sys.exit(1)
 
         # Display dependency summary
-        deps.display_summary(config)
+        render_dependency_check(deps.get_status(config))
 
         menu = InteractiveMenu(logger, config, deps, workers=workers,
                                output_profile=output_profile,

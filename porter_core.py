@@ -741,48 +741,20 @@ class DependencyChecker:
             self.logger.error("  python3 -m venv .venv")
             self.logger.error("  source .venv/bin/activate")
 
-    def display_summary(self, config=None):
-        """Display formatted dependency summary."""
-        print("\n  ── Dependencies ──")
-
-        # Virtual environment
-        if self.dep_status['venv']:
-            venv_display = self.venv_path.replace(str(Path.home()), '~') if self.venv_path else 'active'
-            print(f"  Python:   ✓ venv ({venv_display})")
-            self.logger.file_info(f"Python: venv ({self.venv_path})")
-        else:
-            print(f"  Python:   ⚠ No virtual environment")
-            self.logger.file_info("Python: No virtual environment")
-
-        # Python packages
-        packages = self.dep_status['packages']
-        if packages:
-            installed = [pkg for pkg, ok in packages.items() if ok]
-            missing = [pkg for pkg, ok in packages.items() if not ok]
-            if not missing:
-                pkg_list = ', '.join(installed)
-                print(f"  Packages: ✓ {pkg_list}")
-                self.logger.file_info(f"Packages: {pkg_list} installed")
-            else:
-                print(f"  Packages: ⚠ Missing: {', '.join(missing)}")
-                self.logger.file_info(f"Packages: Missing {', '.join(missing)}")
-
-        # System dependencies
-        if self.dep_status['ffmpeg']:
-            print(f"  System:   ✓ ffmpeg")
-            self.logger.file_info("System: ffmpeg available")
-        else:
-            print(f"  System:   ⚠ ffmpeg not found")
-            self.logger.file_info("System: ffmpeg not found")
-
-        # Playlists (if config provided)
-        if config:
-            count = len(config.playlists)
-            self.dep_status['playlists'] = count
-            print(f"  Config:   ✓ {count} playlist{'s' if count != 1 else ''} loaded")
-            self.logger.file_info(f"Config: {count} playlists loaded from {DEFAULT_CONFIG_FILE}")
-
-        print()  # Blank line after summary
+    def get_status(self, config=None) -> DependencyCheckResult:
+        """Return current dependency status as a result object."""
+        packages = self.dep_status.get('packages', {})
+        missing = [pkg for pkg, ok in packages.items() if not ok]
+        playlists = len(config.playlists) if config else 0
+        return DependencyCheckResult(
+            venv_active=self.dep_status.get('venv', False),
+            venv_path=self.venv_path,
+            packages=packages,
+            ffmpeg_available=self.dep_status.get('ffmpeg', False),
+            all_ok=not missing and self.dep_status.get('ffmpeg', False),
+            missing_packages=missing,
+            playlists_loaded=playlists,
+        )
 
     def check_all(self, require_ffmpeg=True, require_gamdl=True):
         """Check all dependencies."""
@@ -1577,7 +1549,6 @@ class TaggerManager:
             progress.close()
 
         duration = time.time() - start_time
-        self._print_update_summary(directory, duration, updated, skipped, errors)
         return TagUpdateResult(
             success=errors == 0,
             directory=str(directory),
@@ -1593,45 +1564,6 @@ class TaggerManager:
             artist_stored=self.stats.artist_stored,
             album_stored=self.stats.album_stored,
         )
-
-    def _print_update_summary(self, directory, duration, updated, skipped, errors):
-        """Print formatted summary after tag updates."""
-        total_tag_updates = self.stats.title_updated + self.stats.album_updated + self.stats.artist_updated
-        total_stored = self.stats.title_stored + self.stats.artist_stored + self.stats.album_stored
-
-        print()
-        print("=" * 60)
-        print("  TAG UPDATE SUMMARY")
-        print("=" * 60)
-        print(f"  Run date:                {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"  Directory:               '{directory}'")
-        print(f"  Duration:                {duration:.1f}s")
-        print("─" * 60)
-        print("  FILES")
-        print("─" * 60)
-        print(f"  Files processed:         {updated + skipped}")
-        print(f"  Files updated:           {updated}")
-        print(f"  Files skipped:           {skipped}")
-        print(f"  Errors:                  {errors}")
-        print("─" * 60)
-        print("  TAG UPDATES")
-        print("─" * 60)
-        print(f"  Title updated:           {self.stats.title_updated}")
-        print(f"  Album updated:           {self.stats.album_updated}")
-        print(f"  Artist updated:          {self.stats.artist_updated}")
-        print(f"  Total tag updates:       {total_tag_updates}")
-        print("─" * 60)
-        print("  ORIGINAL TAG PROTECTION")
-        print("─" * 60)
-        print(f"  OriginalTitle stored:    {self.stats.title_stored}")
-        print(f"  OriginalArtist stored:   {self.stats.artist_stored}")
-        print(f"  OriginalAlbum stored:    {self.stats.album_stored}")
-        print(f"  Total stored:            {total_stored}")
-        print("─" * 60)
-        status_emoji = "✅" if errors == 0 else "❌"
-        status_text = "Completed successfully" if errors == 0 else "Completed with errors"
-        print(f"  Status:                  {status_emoji} {status_text}")
-        print("=" * 60)
 
     def restore_tags(self, directory, restore_album=False, restore_title=False,
                     restore_artist=False, dry_run=False, verbose=False):
@@ -1783,7 +1715,6 @@ class TaggerManager:
             progress.close()
 
         duration = time.time() - start_time
-        self._print_restore_summary(directory, duration, restored, skipped, errors)
         return TagRestoreResult(
             success=errors == 0,
             directory=str(directory),
@@ -1796,37 +1727,6 @@ class TaggerManager:
             artist_restored=self.stats.artist_restored,
             album_restored=self.stats.album_restored,
         )
-
-    def _print_restore_summary(self, directory, duration, restored, skipped, errors):
-        """Print formatted summary after tag restoration."""
-        total_restored = self.stats.title_restored + self.stats.album_restored + self.stats.artist_restored
-
-        print()
-        print("=" * 60)
-        print("  TAG RESTORATION SUMMARY")
-        print("=" * 60)
-        print(f"  Run date:                {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"  Directory:               '{directory}'")
-        print(f"  Duration:                {duration:.1f}s")
-        print("─" * 60)
-        print("  FILES")
-        print("─" * 60)
-        print(f"  Files processed:         {restored + skipped}")
-        print(f"  Files restored:          {restored}")
-        print(f"  Files skipped:           {skipped}")
-        print(f"  Errors:                  {errors}")
-        print("─" * 60)
-        print("  TAG RESTORATIONS")
-        print("─" * 60)
-        print(f"  Title restored:          {self.stats.title_restored}")
-        print(f"  Artist restored:         {self.stats.artist_restored}")
-        print(f"  Album restored:          {self.stats.album_restored}")
-        print(f"  Total restored:          {total_restored}")
-        print("─" * 60)
-        status_emoji = "✅" if errors == 0 else "❌"
-        status_text = "Completed successfully" if errors == 0 else "Completed with errors"
-        print(f"  Status:                  {status_emoji} {status_text}")
-        print("=" * 60)
 
     def reset_tags_from_source(self, input_dir, output_dir, dry_run=False, verbose=False):
         """
@@ -1989,35 +1889,6 @@ class TaggerManager:
                 errors += 1
 
         duration = time.time() - start_time
-
-        # Print summary
-        print(f"\n{'=' * 60}")
-        print(f"  RESET TAGS SUMMARY")
-        print(f"{'=' * 60}")
-        print(f"  Run date:                {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"  Input directory:         '{input_dir}'")
-        print(f"  Output directory:        '{output_dir}'")
-        print(f"  Duration:                {duration:.1f}s")
-        print(f"{'─' * 60}")
-        print(f"  FILES")
-        print(f"{'─' * 60}")
-        print(f"  Total .m4a found:        {total}")
-        print(f"  MP3s updated:            {updated}")
-        print(f"  Skipped (no MP3 match):  {skipped}")
-        print(f"  Errors:                  {errors}")
-        print(f"{'─' * 60}")
-        print(f"  TAGGING")
-        print(f"{'─' * 60}")
-        print(f"  Original tags reset:     {tags_reset}")
-        print(f"  Original tags rewritten: {updated * 3}")
-        print(f"{'─' * 60}")
-        if errors > 0:
-            print(f"  Status:                  ⚠️  Completed with errors")
-        elif updated == 0:
-            print(f"  Status:                  ℹ️  No MP3s updated")
-        else:
-            print(f"  Status:                  ✅ Completed successfully")
-        print(f"{'=' * 60}")
 
         return TagResetResult(
             success=errors == 0,
@@ -2379,7 +2250,6 @@ class Converter:
             progress.close()
 
         duration = time.time() - start_time
-        self._print_summary(input_dir, output_dir, duration)
 
         return ConversionResult(
             success=self.stats.errors == 0,
@@ -2397,49 +2267,6 @@ class Converter:
             errors=self.stats.errors,
         )
 
-    def _print_summary(self, input_dir, output_dir, duration):
-        """Print conversion summary statistics."""
-        # Format quality settings for display
-        quality_desc = f"{self.quality_settings['mode'].upper()}"
-        if self.quality_settings['mode'] == 'vbr':
-            quality_desc += f" quality {self.quality_settings['value']}"
-        else:
-            quality_desc += f" {self.quality_settings['value']}kbps"
-
-        print(f"\n{'=' * 60}")
-        print(f"  CONVERSION SUMMARY")
-        print(f"{'=' * 60}")
-        print(f"  Run date:                {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"  Input directory:         '{input_dir}'")
-        print(f"  Output directory:        '{output_dir}'")
-        print(f"  Duration:                {duration:.1f}s")
-        if self.workers > 1:
-            print(f"  Workers:                 {self.workers}")
-        print(f"{'─' * 60}")
-        print(f"  QUALITY SETTINGS")
-        print(f"{'─' * 60}")
-        print(f"  Preset:                  {self.quality_preset}")
-        print(f"  Mode:                    {quality_desc}")
-        print(f"{'─' * 60}")
-        print(f"  FILES")
-        print(f"{'─' * 60}")
-        print(f"  Total found:             {self.stats.total_found}")
-        print(f"  Converted:               {self.stats.converted}")
-        print(f"  Overwritten:             {self.stats.overwritten}")
-        print(f"  Skipped (exists):        {self.stats.skipped}")
-        print(f"  Errors:                  {self.stats.errors}")
-        print(f"{'─' * 60}")
-        print(f"  TAGGING")
-        print(f"{'─' * 60}")
-        print(f"  Tags copied from source: Title, Artist, Album")
-        print(f"{'─' * 60}")
-        if self.stats.errors > 0:
-            print(f"  Status:                  ⚠️  Completed with errors")
-        elif self.stats.skipped == self.stats.total_found:
-            print(f"  Status:                  ℹ️  Nothing to do — all files already exist")
-        else:
-            print(f"  Status:                  ✅ Completed successfully")
-        print(f"{'=' * 60}")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -3662,7 +3489,7 @@ class USBManager:
                     stats.files_skipped += 1
             self.logger.dry_run("Would prompt to eject USB drive after copy")
             duration = time.time() - start_time
-            self._print_usb_summary(str(source_path), str(dest), stats, duration)
+
             return USBSyncResult(
                 success=True, source=str(source_path), destination=str(dest),
                 volume_name=volume, duration=duration, files_found=stats.files_found,
@@ -3676,7 +3503,7 @@ class USBManager:
             self.logger.error(f"Failed to create destination directory: {e}")
             stats.files_failed = stats.files_found
             duration = time.time() - start_time
-            self._print_usb_summary(str(source_path), str(dest), stats, duration)
+
             return USBSyncResult(
                 success=False, source=str(source_path), destination=str(dest),
                 volume_name=volume, duration=duration, files_found=stats.files_found,
@@ -3728,8 +3555,6 @@ class USBManager:
         # Log summary
         self.logger.ok("Sync complete")
         duration = time.time() - start_time
-        self._print_usb_summary(str(source_path), str(dest), stats, duration)
-
         # Prompt to eject USB drive after successful copy
         if not dry_run:
             self._prompt_and_eject_usb(volume)
@@ -3741,29 +3566,6 @@ class USBManager:
             destination=str(dest), volume_name=volume, duration=duration,
             files_found=stats.files_found, files_copied=stats.files_copied,
             files_skipped=stats.files_skipped, files_failed=stats.files_failed)
-
-    def _print_usb_summary(self, source, destination, stats, duration):
-        """Print formatted summary after USB sync."""
-        print()
-        print("=" * 60)
-        print("  USB SYNC SUMMARY")
-        print("=" * 60)
-        print(f"  Run date:                {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"  Source:                  '{source}'")
-        print(f"  Destination:             '{destination}'")
-        print(f"  Duration:                {duration:.1f}s")
-        print("─" * 60)
-        print("  FILES")
-        print("─" * 60)
-        print(f"  Files found:             {stats.files_found}")
-        print(f"  Files copied:            {stats.files_copied}")
-        print(f"  Files skipped:           {stats.files_skipped}")
-        print(f"  Files failed:            {stats.files_failed}")
-        print("─" * 60)
-        status_emoji = "✅" if stats.files_failed == 0 else "❌"
-        status_text = "Completed successfully" if stats.files_failed == 0 else "Completed with errors"
-        print(f"  Status:                  {status_emoji} {status_text}")
-        print("=" * 60)
 
     def _prompt_and_eject_usb(self, volume_name):
         """
@@ -3940,33 +3742,19 @@ class SummaryManager:
         Returns:
             LibrarySummaryResult
         """
-        # Print library stats first (unless skipped)
+        # Scan music library stats (unless skipped)
         music_stats = None
         if not no_library:
             music_stats = self.scan_music_library(
                 music_dir=music_dir,
                 export_profile=export_profile,
             )
-            if music_stats and music_stats.total_files > 0:
-                self._print_music_library_stats(music_stats)
 
         start_time = time.time()
 
         # Check if directory exists
         export_path = Path(export_dir)
         if not export_path.exists():
-            print()
-            print("╔" + "═" * 60 + "╗")
-            print("║" + "PLAYLIST SUMMARY".center(60) + "║")
-            print("╚" + "═" * 60 + "╝")
-            print()
-            print("  ℹ️  Export directory not found")
-            print(f"  Path: '{export_dir}'")
-            print()
-            print("  Suggested next steps:")
-            print("    • Run: ./music-porter pipeline --auto")
-            print("    • Or specify custom directory: --export-dir /path/to/export")
-            print()
             mode = "quick" if quick else ("detailed" if detailed else "default")
             return LibrarySummaryResult(
                 success=True, export_dir=str(export_dir), scan_duration=0,
@@ -3976,21 +3764,6 @@ class SummaryManager:
         playlist_dirs = self._scan_playlists(export_path)
 
         if not playlist_dirs:
-            print()
-            print("╔" + "═" * 60 + "╗")
-            print("║" + "PLAYLIST SUMMARY".center(60) + "║")
-            print("╚" + "═" * 60 + "╝")
-            print()
-            print(f"  Directory:               '{export_dir}'")
-            print(f"  Total playlists:         0")
-            print(f"  Total MP3 files:         0")
-            print()
-            print("  ℹ️  Library is empty")
-            print()
-            print("  Suggested next steps:")
-            print("    • Run: ./music-porter pipeline --auto")
-            print("    • Or download a playlist: ./music-porter download --playlist 1")
-            print()
             mode = "quick" if quick else ("detailed" if detailed else "default")
             return LibrarySummaryResult(
                 success=True, export_dir=str(export_dir), scan_duration=0,
@@ -4012,14 +3785,6 @@ class SummaryManager:
 
         # Record scan duration
         self.stats.scan_duration = time.time() - start_time
-
-        # Display results
-        if quick:
-            self._print_quick_summary(export_dir)
-        elif detailed:
-            self._print_detailed_summary(export_dir)
-        else:
-            self._print_summary(export_dir)
 
         mode = "quick" if quick else ("detailed" if detailed else "default")
         avg_size = (self.stats.total_size_bytes / self.stats.total_files
@@ -4168,188 +3933,6 @@ class SummaryManager:
         self.stats.sample_size = sum(p.sample_files_checked for p in self.stats.playlists)
 
 
-    def _print_summary(self, export_dir):
-        """Print default balanced summary."""
-        print()
-        print("╔" + "═" * 60 + "╗")
-        print("║" + "PLAYLIST SUMMARY".center(60) + "║")
-        print("╚" + "═" * 60 + "╝")
-        print()
-        print(f"  Directory:               '{export_dir}'")
-
-        # Format scan date
-        scan_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        print(f"  Scan date:               {scan_date}")
-        print(f"  Scan duration:           {self.stats.scan_duration:.1f}s")
-        print()
-
-        # Aggregate statistics
-        print("─" * 60)
-        print("  AGGREGATE STATISTICS")
-        print("─" * 60)
-        print(f"  Total playlists:         {self.stats.total_playlists}")
-        print(f"  Total MP3 files:         {self.stats.total_files}")
-        print(f"  Total library size:      {self._format_size(self.stats.total_size_bytes)}")
-
-        if self.stats.total_files > 0:
-            avg_size = self.stats.total_size_bytes / self.stats.total_files
-            print(f"  Average file size:       {self._format_size(avg_size)}")
-
-        print()
-
-        # Tag integrity
-        print("─" * 60)
-        print(f"  TAG INTEGRITY")
-        print("─" * 60)
-
-        if self.stats.sample_size > 0:
-            percentage = (self.stats.files_with_protection_tags / self.stats.sample_size) * 100
-            print(f"  Files with protection:   {self.stats.files_with_protection_tags}/{self.stats.sample_size} ({percentage:.0f}%)")
-
-            if self.stats.files_missing_protection_tags == 0:
-                print(f"  Status:                  ✅ All files have TXXX protection tags")
-            else:
-                print(f"  Status:                  ⚠️  Some files missing TXXX protection tags")
-        else:
-            print("  Status:                  ℹ️  No files checked")
-
-        print()
-
-        # Cover art
-        print("─" * 60)
-        print(f"  COVER ART")
-        print("─" * 60)
-
-        total_cover_checked = self.stats.files_with_cover_art + self.stats.files_without_cover_art
-        if total_cover_checked > 0:
-            cover_pct = (self.stats.files_with_cover_art / total_cover_checked) * 100
-            print(f"  Files with cover art:    {self.stats.files_with_cover_art}/{total_cover_checked} ({cover_pct:.0f}%)")
-
-            if self.stats.files_with_cover_art > 0:
-                original_pct = (self.stats.files_with_original_cover_art / self.stats.files_with_cover_art) * 100
-                print(f"  Original cover art:      {self.stats.files_with_original_cover_art}/{self.stats.files_with_cover_art} ({original_pct:.0f}%)")
-
-                resized_pct = (self.stats.files_with_resized_cover_art / self.stats.files_with_cover_art) * 100
-                print(f"  Modified cover art:      {self.stats.files_with_resized_cover_art}/{self.stats.files_with_cover_art} ({resized_pct:.0f}%)")
-
-            if self.stats.files_without_cover_art == 0:
-                print(f"  Status:                  ✅ All files have embedded cover art")
-            else:
-                print(f"  Status:                  ⚠️  {self.stats.files_without_cover_art} files missing cover art")
-                print(f"  Fix:                     ./music-porter cover-art embed <dir>")
-        else:
-            print("  Status:                  ℹ️  No files checked")
-
-        print()
-
-        # Playlist breakdown
-        print("─" * 60)
-        print("  PLAYLIST BREAKDOWN")
-        print("─" * 60)
-        self._print_playlist_table()
-        print()
-
-        # Final status
-        print("═" * 60)
-        print("  Status:                  ✅ Library scan completed")
-        print("═" * 60)
-        print()
-
-    def _print_quick_summary(self, export_dir):
-        """Print minimal aggregate-only summary."""
-        print()
-        print("╔" + "═" * 60 + "╗")
-        print("║" + "PLAYLIST SUMMARY (QUICK)".center(60) + "║")
-        print("╚" + "═" * 60 + "╝")
-        print()
-        print(f"  Directory:               '{export_dir}'")
-        print(f"  Total playlists:         {self.stats.total_playlists}")
-        print(f"  Total MP3 files:         {self.stats.total_files}")
-        print(f"  Total library size:      {self._format_size(self.stats.total_size_bytes)}")
-        print(f"  Scan duration:           {self.stats.scan_duration:.1f}s")
-        print()
-
-    def _print_detailed_summary(self, export_dir):
-        """Print extended summary with detailed breakdowns."""
-        # Start with default summary
-        self._print_summary(export_dir)
-
-        # Add detailed per-playlist breakdowns
-        print("─" * 60)
-        print("  DETAILED PLAYLIST INFORMATION")
-        print("─" * 60)
-        print()
-
-        for playlist in self.stats.playlists:
-            print(f"  📁 {playlist.name}")
-            print(f"     Files:                {playlist.file_count}")
-            print(f"     Total size:           {self._format_size(playlist.total_size_bytes)}")
-            print(f"     Average file size:    {playlist.avg_file_size_mb:.1f} MB")
-
-            if playlist.last_modified:
-                modified_str = playlist.last_modified.strftime("%b %d, %Y %H:%M")
-                print(f"     Last modified:        {modified_str}")
-
-            # Tag integrity for this playlist
-            if playlist.sample_files_checked > 0:
-                percentage = (playlist.sample_files_with_tags / playlist.sample_files_checked) * 100
-                print(f"     Tag integrity:        {playlist.sample_files_with_tags}/{playlist.sample_files_checked} ({percentage:.0f}%)")
-
-            # Cover art for this playlist
-            total_cover = playlist.files_with_cover_art + playlist.files_without_cover_art
-            if total_cover > 0:
-                cover_pct = (playlist.files_with_cover_art / total_cover) * 100
-                print(f"     Cover art:            {playlist.files_with_cover_art}/{total_cover} ({cover_pct:.0f}%)")
-                if playlist.files_with_cover_art > 0:
-                    original_pct = (playlist.files_with_original_cover_art / playlist.files_with_cover_art) * 100
-                    print(f"     Original cover art:   {playlist.files_with_original_cover_art}/{playlist.files_with_cover_art} ({original_pct:.0f}%)")
-                    if playlist.files_with_resized_cover_art > 0:
-                        resized_pct = (playlist.files_with_resized_cover_art / playlist.files_with_cover_art) * 100
-                        print(f"     Modified cover art:   {playlist.files_with_resized_cover_art}/{playlist.files_with_cover_art} ({resized_pct:.0f}%)")
-
-            print()
-
-        print("═" * 60)
-        print()
-
-    def _print_playlist_table(self):
-        """Print formatted table of playlists."""
-        if not self.stats.playlists:
-            print("  (no playlists found)")
-            return
-
-        # Header
-        print(f"  {'Playlist':<25} {'Files':>6}  {'Art/Mod':>9}  {'Size':>10}  {'Updated':<10}")
-        print("  " + "─" * 62)
-
-        # Sort by name
-        sorted_playlists = sorted(self.stats.playlists, key=lambda p: p.name)
-
-        # Rows
-        today = datetime.now().date()
-        for playlist in sorted_playlists:
-            name = playlist.name[:24]  # Truncate long names
-            files = str(playlist.file_count)
-            art = f"{playlist.files_with_cover_art}/{playlist.files_with_resized_cover_art}"
-            size = self._format_size(playlist.total_size_bytes)
-
-            # Highlight Art/Mod if art has been modified but not all match
-            if playlist.files_with_resized_cover_art > 0 and playlist.files_with_cover_art != playlist.files_with_resized_cover_art:
-                art = f"⚠️{art}"
-
-            if playlist.last_modified:
-                # Format as "Feb 17" or "Feb 18"
-                updated = playlist.last_modified.strftime("%b %d")
-                # Highlight Updated if not today
-                if playlist.last_modified.date() != today:
-                    updated = f"⚠️{updated}"
-            else:
-                updated = "⚠️N/A"
-
-            print(f"  {name:<25} {files:>6}  {art:>9}  {size:>10}  {updated:<10}")
-
-        print("  " + "─" * 62)
-
     def scan_music_library(self, music_dir=None, export_profile=None):
         """
         Scan the music/ directory for source M4A library stats.
@@ -4423,29 +4006,6 @@ class SummaryManager:
         stats.scan_duration = time.time() - start_time
 
         return stats
-
-    def _print_music_library_stats(self, music_stats):
-        """Print the LIBRARY STATS section for the music/ directory."""
-        print()
-        print("╔" + "═" * 60 + "╗")
-        print("║" + "LIBRARY STATS".center(60) + "║")
-        print("╚" + "═" * 60 + "╝")
-        print()
-        print(f"  Directory:               '{DEFAULT_MUSIC_DIR}/'")
-        print(f"  Total playlists:         {music_stats.total_playlists}")
-        print(f"  Total M4A files:         {music_stats.total_files}")
-        print(f"  Total library size:      {self._format_size(music_stats.total_size_bytes)}")
-
-        if music_stats.total_files > 0:
-            pct = (music_stats.total_exported / music_stats.total_files) * 100
-            print(f"  Exported:                {music_stats.total_exported}/{music_stats.total_files} ({pct:.0f}%)")
-            if music_stats.total_unconverted > 0:
-                print(f"  Unconverted:             {music_stats.total_unconverted}")
-            else:
-                print(f"  Unconverted:             0  ✅")
-
-        print(f"  Scan duration:           {music_stats.scan_duration:.1f}s")
-        print()
 
     def _format_size(self, bytes_size):
         """Format bytes to human-readable size."""
@@ -4637,19 +4197,6 @@ class CoverArtManager:
         finally:
             progress.close()
 
-        # Print summary
-        print(f"\n{'=' * 60}")
-        print(f"  COVER ART EMBED SUMMARY")
-        print(f"{'=' * 60}")
-        print(f"  Directory:               '{directory}'")
-        print(f"  Source:                   '{source_dir}'")
-        print(f"{'─' * 60}")
-        print(f"  Embedded:                {embedded}")
-        print(f"  Skipped (already has):   {skipped}")
-        print(f"  No source found:         {no_source}")
-        print(f"  Errors:                  {errors}")
-        print(f"{'=' * 60}")
-
         return CoverArtResult(
             success=errors == 0, action="embed", directory=str(directory),
             duration=time.time() - start_time,
@@ -4739,18 +4286,6 @@ class CoverArtManager:
                     progress.update(1)
         finally:
             progress.close()
-
-        # Print summary
-        print(f"\n{'=' * 60}")
-        print(f"  COVER ART EXTRACT SUMMARY")
-        print(f"{'=' * 60}")
-        print(f"  Source:                  '{directory}'")
-        print(f"  Output:                  '{out_path}'")
-        print(f"{'─' * 60}")
-        print(f"  Extracted:               {extracted}")
-        print(f"  Skipped (no art):        {skipped}")
-        print(f"  Errors:                  {errors}")
-        print(f"{'=' * 60}")
 
         return CoverArtResult(
             success=errors == 0, action="extract", directory=str(directory),
@@ -4846,17 +4381,6 @@ class CoverArtManager:
                     progress.update(1)
         finally:
             progress.close()
-
-        # Print summary
-        print(f"\n{'=' * 60}")
-        print(f"  COVER ART UPDATE SUMMARY")
-        print(f"{'=' * 60}")
-        print(f"  Directory:               '{directory}'")
-        print(f"  Image:                   '{image_path}'")
-        print(f"{'─' * 60}")
-        print(f"  Updated:                 {updated}")
-        print(f"  Errors:                  {errors}")
-        print(f"{'=' * 60}")
 
         return CoverArtResult(
             success=errors == 0, action="update", directory=str(directory),
@@ -5208,6 +4732,20 @@ class AggregateStatistics:
 
         return totals
 
+    def to_result(self) -> AggregateResult:
+        """Convert to AggregateResult for rendering."""
+        duration = (self.end_time or time.time()) - self.start_time
+        return AggregateResult(
+            success=self.failed_playlists == 0,
+            duration=duration,
+            total_playlists=self.total_playlists,
+            successful_playlists=self.successful_playlists,
+            failed_playlists=self.failed_playlists,
+            playlist_results=self.playlist_results,
+            cumulative_stats=self.get_cumulative_stats(),
+            usb_destination=self.usb_destination,
+        )
+
 
 class PipelineOrchestrator:
     """Coordinates multi-stage workflows: download → convert → tag → USB sync."""
@@ -5242,8 +4780,13 @@ class PipelineOrchestrator:
             success = self._download_from_url(url, auto, dry_run, verbose,
                                              validate_cookies, auto_refresh_cookies)
             if not success:
-                self._print_pipeline_summary()
-                return False
+                duration = time.time() - self.stats.start_time
+                return PipelineResult(
+                    success=False, playlist_name=self.stats.playlist_name,
+                    playlist_key=self.stats.playlist_key, duration=duration,
+                    stages_failed=list(self.stats.stages_failed),
+                    stages_completed=list(self.stats.stages_completed),
+                    stages_skipped=list(self.stats.stages_skipped))
 
         elif playlist:
             # Playlist key or index provided
@@ -5251,12 +4794,20 @@ class PipelineOrchestrator:
             success = self._download_playlist(playlist, auto, dry_run, verbose,
                                              validate_cookies, auto_refresh_cookies)
             if not success:
-                self._print_pipeline_summary()
-                return False
+                duration = time.time() - self.stats.start_time
+                return PipelineResult(
+                    success=False, playlist_name=self.stats.playlist_name,
+                    playlist_key=self.stats.playlist_key, duration=duration,
+                    stages_failed=list(self.stats.stages_failed),
+                    stages_completed=list(self.stats.stages_completed),
+                    stages_skipped=list(self.stats.stages_skipped))
 
         else:
             self.logger.error("Either --playlist or --url must be specified for pipeline")
-            return False
+            duration = time.time() - self.stats.start_time
+            return PipelineResult(
+                success=False, playlist_name=None, playlist_key=None,
+                duration=duration, stages_failed=["download"])
 
         # ── Stage 2: Convert M4A → MP3 ────────────────────────────────
         self.logger.info("\n=== STAGE 2: Convert M4A → MP3 ===")
@@ -5343,9 +4894,6 @@ class PipelineOrchestrator:
             else:
                 self.stats.stages_failed.append("usb-sync")
                 self.logger.error("USB sync stage failed")
-
-        # ── Print final summary ────────────────────────────────────────
-        self._print_pipeline_summary()
 
         duration = time.time() - self.stats.start_time
         return PipelineResult(
@@ -5535,249 +5083,5 @@ class PipelineOrchestrator:
             self.stats.cover_art_missing = still_missing
         else:
             self.stats.cover_art_missing = missing
-
-    def _print_pipeline_summary(self):
-        """Print comprehensive pipeline summary."""
-        duration = time.time() - self.stats.start_time
-
-        print(f"\n{'=' * 70}")
-        print(f"  PIPELINE SUMMARY")
-        print(f"{'=' * 70}")
-        print(f"  Run date:                {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"  Playlist:                {self.stats.playlist_name or '—'} ({self.stats.playlist_key or '—'})")
-        print(f"  Duration:                {duration:.1f}s")
-
-        # Download stage
-        if "download" in self.stats.stages_completed or "download" in self.stats.stages_failed or "download" in self.stats.stages_skipped:
-            print(f"{'─' * 70}")
-            print(f"  DOWNLOAD STAGE")
-            print(f"{'─' * 70}")
-            if "download" in self.stats.stages_completed and self.stats.download_stats:
-                s = self.stats.download_stats
-                if s.playlist_total > 0:
-                    print(f"  Total tracks in playlist:{s.playlist_total}")
-                print(f"  Downloaded (new):        {s.downloaded}")
-                print(f"  Skipped (already exist): {s.skipped}")
-                if s.failed > 0:
-                    print(f"  Failed:                  {s.failed}")
-                print(f"  Status:                  ✅ Success")
-            elif "download" in self.stats.stages_completed:
-                print(f"  Status:                  ✅ Success")
-            elif "download" in self.stats.stages_skipped:
-                print(f"  Status:                  ⏭️  Skipped")
-            else:
-                print(f"  Status:                  ❌ Failed")
-
-        # Conversion stage
-        if self.stats.conversion_stats:
-            print(f"{'─' * 70}")
-            print(f"  CONVERSION STAGE")
-            print(f"{'─' * 70}")
-            s = self.stats.conversion_stats
-            print(f"  Files converted:         {s.converted}")
-            print(f"  Files overwritten:       {s.overwritten}")
-            print(f"  Files skipped:           {s.skipped}")
-            print(f"  Conversion errors:       {s.errors}")
-
-        # Tagging stage
-        if self.stats.tagging_stats:
-            print(f"{'─' * 70}")
-            print(f"  TAGGING STAGE")
-            print(f"{'─' * 70}")
-            s = self.stats.tagging_stats
-            if self.stats.tagging_album:
-                print(f"  Album set to:            {self.stats.tagging_album}")
-            if self.stats.tagging_artist:
-                print(f"  Artist set to:           {self.stats.tagging_artist}")
-            print(f"  Title updated:           {s.title_updated}")
-            print(f"  Album updated:           {s.album_updated}")
-            print(f"  Artist updated:          {s.artist_updated}")
-            print(f"  OriginalTitle stored:    {s.title_stored}")
-            print(f"  OriginalArtist stored:   {s.artist_stored}")
-            print(f"  OriginalAlbum stored:    {s.album_stored}")
-            if self.stats.cover_art_embedded > 0 or self.stats.cover_art_missing > 0:
-                print(f"  Cover art embedded:      {self.stats.cover_art_embedded}")
-                print(f"  Cover art missing:       {self.stats.cover_art_missing}")
-
-        # USB sync stage
-        if self.stats.usb_success or "usb-sync" in self.stats.stages_failed:
-            print(f"{'─' * 70}")
-            print(f"  USB SYNC STAGE")
-            print(f"{'─' * 70}")
-            if self.stats.usb_success:
-                print(f"  Status:                  ✅ Success")
-                print(f"  USB destination:         {self.stats.usb_destination}")
-            else:
-                print(f"  Status:                  ❌ Failed")
-
-        # Comprehensive file summary
-        # Show if any pipeline stages completed (always show for comprehensive view)
-        if len(self.stats.stages_completed) > 0:
-            print(f"{'─' * 70}")
-            print(f"  COMPREHENSIVE FILES SUMMARY")
-            print(f"{'─' * 70}")
-
-            # Download phase
-            if self.stats.download_stats:
-                d = self.stats.download_stats
-                if d.playlist_total > 0:
-                    print(f"  Playlist tracks:         {d.playlist_total}")
-                total_after_download = d.downloaded + d.skipped
-                print(f"  M4A files after download:{total_after_download} "
-                      f"({d.downloaded} new, {d.skipped} existing)")
-
-            # Conversion phase
-            if self.stats.conversion_stats:
-                c = self.stats.conversion_stats
-                total_processed = c.converted + c.overwritten + c.skipped
-                print(f"  MP3s after conversion:   {total_processed} "
-                      f"({c.converted + c.overwritten} converted, {c.skipped} skipped)")
-
-            # Tagging phase
-            if self.stats.tagging_stats:
-                t = self.stats.tagging_stats
-                print(f"  Tags updated:            {t.title_updated}")
-                total_original_stored = t.title_stored + t.artist_stored + t.album_stored
-                if total_original_stored > 0:
-                    print(f"  Original tags stored:    {total_original_stored}")
-                if self.stats.cover_art_embedded > 0 or self.stats.cover_art_missing > 0:
-                    print(f"  Cover art embedded:      {self.stats.cover_art_embedded}")
-                    if self.stats.cover_art_missing > 0:
-                        print(f"  Cover art missing:       {self.stats.cover_art_missing}")
-
-            # USB sync
-            if self.stats.usb_success and self.stats.conversion_stats:
-                files_on_usb = self.stats.conversion_stats.converted + self.stats.conversion_stats.overwritten + self.stats.conversion_stats.skipped
-                print(f"  Files copied to USB:     {files_on_usb}")
-
-        # Overall status
-        print(f"{'─' * 70}")
-        if len(self.stats.stages_failed) == 0:
-            print(f"  Status:                  ✅ Completed successfully")
-        else:
-            print(f"  Status:                  ⚠️  Completed with errors")
-            print(f"  Failed stages:           {', '.join(self.stats.stages_failed)}")
-        print(f"{'=' * 70}")
-
-    def print_aggregate_summary(self, aggregate_stats):
-        """Print comprehensive summary for multiple playlists."""
-        aggregate_stats.end_time = time.time()
-        duration = aggregate_stats.end_time - aggregate_stats.start_time
-        duration_mins = int(duration // 60)
-        duration_secs = int(duration % 60)
-
-        print(f"\n{'=' * 70}")
-        print(f"  TOTAL SUMMARY - ALL PLAYLISTS")
-        print(f"{'=' * 70}")
-        print(f"  Playlists processed:     {aggregate_stats.total_playlists}")
-        print(f"  Total duration:          {duration:.1f}s ({duration_mins}m {duration_secs}s)")
-
-        if aggregate_stats.failed_playlists == 0:
-            print(f"  Overall status:          ✅ All succeeded")
-        else:
-            print(f"  Overall status:          ⚠️  Some failed")
-
-        # Playlist results table
-        print(f"{'─' * 70}")
-        print(f"  PLAYLIST RESULTS")
-        print(f"{'─' * 70}")
-        print(f"  {'Playlist':<24} {'Downloaded':<12} {'Converted':<11} {'Tagged':<8} Status")
-        print(f"  {'─' * 70}")
-
-        for result in aggregate_stats.playlist_results:
-            # Format download stats
-            if result.download_stats:
-                dl_str = f"{result.download_stats.downloaded}/{result.download_stats.playlist_total}"
-            elif result.failed_stage == "download":
-                dl_str = "ERROR"
-            else:
-                dl_str = "-/-"
-
-            # Format conversion stats
-            if result.conversion_stats:
-                conv_count = result.conversion_stats.converted + result.conversion_stats.overwritten
-                conv_total = conv_count + result.conversion_stats.skipped
-                conv_str = f"{conv_count}/{conv_total}"
-            elif result.failed_stage in ["download", "convert"]:
-                conv_str = "-/-"
-            else:
-                conv_str = "0/0"
-
-            # Format tag stats
-            if result.tagging_stats:
-                tag_str = str(result.tagging_stats.title_updated)
-            else:
-                tag_str = "-"
-
-            # Status
-            if result.success:
-                status = "✅ Success"
-            else:
-                status = f"❌ {result.failed_stage or 'Failed'}"
-
-            # Display name (truncate if needed)
-            display_name = result.name[:22] if len(result.name) > 22 else result.name
-
-            print(f"  {display_name:<24} {dl_str:<12} {conv_str:<11} {tag_str:<8} {status}")
-
-        # Calculate totals
-        totals = aggregate_stats.get_cumulative_stats()
-
-        print(f"  {'─' * 70}")
-        total_dl = f"{totals['downloaded']}/{totals['playlist_total']}"
-        total_conv = f"{totals['converted'] + totals['overwritten']}/{totals['converted'] + totals['overwritten'] + totals['skipped_conversion']}"
-        success_ratio = f"✅ {aggregate_stats.successful_playlists}/{aggregate_stats.total_playlists}"
-
-        print(f"  {'TOTALS':<24} {total_dl:<12} {total_conv:<11} {totals['title_updated']:<8} {success_ratio}")
-
-        # Cumulative statistics
-        print(f"{'─' * 70}")
-        print(f"  CUMULATIVE STATISTICS")
-        print(f"{'─' * 70}")
-        print(f"  Total tracks in playlists:    {totals['playlist_total']}")
-        print(f"")
-        print(f"  Downloads:")
-        print(f"    New downloads:              {totals['downloaded']}")
-        print(f"    Already existed (skipped):  {totals['skipped_download']}")
-        if totals['failed_download'] > 0:
-            print(f"    Failed:                     {totals['failed_download']}")
-        print(f"")
-        print(f"  Conversions:")
-        print(f"    Newly converted:            {totals['converted']}")
-        if totals['overwritten'] > 0:
-            print(f"    Overwritten:                {totals['overwritten']}")
-        print(f"    Skipped (already exist):    {totals['skipped_conversion']}")
-        if totals['errors_conversion'] > 0:
-            print(f"    Errors:                     {totals['errors_conversion']}")
-        print(f"")
-        print(f"  Tag Operations:")
-        print(f"    Titles updated:             {totals['title_updated']}")
-        if totals['original_tags_stored'] > 0:
-            print(f"    Original tags stored:       {totals['original_tags_stored']}")
-
-        # USB sync
-        if aggregate_stats.usb_destination and totals['files_on_usb'] > 0:
-            print(f"")
-            print(f"  USB Sync:")
-            print(f"    Files copied to USB:        {totals['files_on_usb']}")
-            print(f"    Destination:                {aggregate_stats.usb_destination}")
-
-        # Final status
-        print(f"{'─' * 70}")
-        if aggregate_stats.failed_playlists == 0:
-            print(f"  STATUS:  ✅ All playlists completed successfully")
-        else:
-            print(f"  STATUS:  ⚠️  {aggregate_stats.failed_playlists} of {aggregate_stats.total_playlists} playlists failed")
-
-            # List failed playlists
-            failed_names = [
-                f"{r.name} ({r.failed_stage})"
-                for r in aggregate_stats.playlist_results
-                if not r.success
-            ]
-            if failed_names:
-                print(f"  Failed:  {', '.join(failed_names)}")
-
-        print(f"{'=' * 70}")
 
 
