@@ -1665,6 +1665,11 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
 
 def main():
     """Main entry point."""
+    # Fast path: --version needs no config or dependency checks
+    if '--version' in sys.argv:
+        print(f"music-porter {VERSION}")
+        sys.exit(0)
+
     temp_logger = Logger(verbose=False)
 
     # Ensure Python packages (especially PyYAML) are installed before config loading.
