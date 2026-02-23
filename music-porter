@@ -11,6 +11,7 @@ from __future__ import annotations
 import sys
 import os
 import argparse
+import threading
 from pathlib import Path
 from datetime import datetime
 import platform
@@ -118,27 +119,30 @@ class CLIDisplayHandler:
         self._bar: ProgressBar | None = None
         self._bar_total: int = 0
         self._bar_desc: str = ""
+        self._lock = threading.Lock()
 
     def show_progress(self, current: int, total: int,
                       message: str) -> None:
-        if self._bar is None or self._bar_total != total or self._bar_desc != message:
-            if self._bar is not None:
-                self._bar.close()
-            self._bar = ProgressBar(
-                total=total, desc=message,
-                logger=self._logger, disable=False,
-            )
-            self._bar_total = total
-            self._bar_desc = message
-        self._bar.update(1)
+        with self._lock:
+            if self._bar is None or self._bar_total != total or self._bar_desc != message:
+                if self._bar is not None:
+                    self._bar.close()
+                self._bar = ProgressBar(
+                    total=total, desc=message,
+                    logger=self._logger, disable=False,
+                )
+                self._bar_total = total
+                self._bar_desc = message
+            self._bar.update(1)
 
     def finish_progress(self) -> None:
         """Close the current progress bar if active."""
-        if self._bar is not None:
-            self._bar.close()
-            self._bar = None
-            self._bar_total = 0
-            self._bar_desc = ""
+        with self._lock:
+            if self._bar is not None:
+                self._bar.close()
+                self._bar = None
+                self._bar_total = 0
+                self._bar_desc = ""
 
     def show_status(self, message: str,
                     level: str = "info") -> None:
@@ -910,13 +914,14 @@ class InteractiveMenu:
     """Provides interactive menu for playlist selection and operations."""
 
     def __init__(self, logger=None, config=None, deps=None, workers=None,
-                 output_profile=None, prompt_handler=None):
+                 output_profile=None, prompt_handler=None, display_handler=None):
         self.logger = logger or Logger()
         self.config = config or ConfigManager(logger=self.logger)
         self.deps = deps or DependencyChecker(self.logger)
         self.workers = workers
         self.output_profile = output_profile or OUTPUT_PROFILES[DEFAULT_OUTPUT_TYPE]
         self.prompt_handler = prompt_handler or CLIPromptHandler()
+        self.display_handler = display_handler or CLIDisplayHandler(self.logger)
 
     def show(self, dry_run=False, verbose=False):
         """Display interactive menu and handle user selection."""
@@ -1032,7 +1037,8 @@ class InteractiveMenu:
         # Run pipeline for this playlist
         orchestrator = PipelineOrchestrator(self.logger, self.deps, self.config, workers=self.workers,
                                             output_profile=self.output_profile,
-                                            prompt_handler=self.prompt_handler)
+                                            prompt_handler=self.prompt_handler,
+                                            display_handler=self.display_handler)
 
         result = orchestrator.run_full_pipeline(
             playlist=str(index + 1),
@@ -1073,7 +1079,8 @@ class InteractiveMenu:
 
             orchestrator = PipelineOrchestrator(self.logger, self.deps, self.config, workers=self.workers,
                                                 output_profile=self.output_profile,
-                                                prompt_handler=self.prompt_handler)
+                                                prompt_handler=self.prompt_handler,
+                                                display_handler=self.display_handler)
             result = orchestrator.run_full_pipeline(
                 playlist=str(i + 1),
                 auto=True,
@@ -1119,7 +1126,8 @@ class InteractiveMenu:
             # Run pipeline for this URL
             orchestrator = PipelineOrchestrator(self.logger, self.deps, self.config, workers=self.workers,
                                                 output_profile=self.output_profile,
-                                                prompt_handler=self.prompt_handler)
+                                                prompt_handler=self.prompt_handler,
+                                                display_handler=self.display_handler)
             result = orchestrator.run_full_pipeline(
                 url=url,
                 auto=False,
@@ -1146,7 +1154,8 @@ class InteractiveMenu:
         """Handle 'Copy to USB only' selection."""
         self.logger.info("Copying existing files to USB...")
 
-        usb_manager = USBManager(self.logger, prompt_handler=self.prompt_handler)
+        usb_manager = USBManager(self.logger, prompt_handler=self.prompt_handler,
+                                 display_handler=self.display_handler)
         usb_result = usb_manager.sync_to_usb(
             get_export_dir(self.output_profile.name),
             usb_dir=DEFAULT_USB_DIR,
@@ -1215,7 +1224,8 @@ class InteractiveMenu:
             self.logger.error("No export directories found for configured playlists")
             return False
 
-        cam = CoverArtManager(self.logger, output_profile=self.output_profile)
+        cam = CoverArtManager(self.logger, output_profile=self.output_profile,
+                              display_handler=self.display_handler)
         all_success = True
 
         if max_size == -1:
@@ -1319,7 +1329,8 @@ class InteractiveMenu:
         try:
             response = input("\nCopy files to USB? [y/N] ").strip().lower()
             if response == 'y':
-                usb_manager = USBManager(self.logger, prompt_handler=self.prompt_handler)
+                usb_manager = USBManager(self.logger, prompt_handler=self.prompt_handler,
+                                         display_handler=self.display_handler)
                 usb_manager.sync_to_usb(
                     source_dir,
                     usb_dir=DEFAULT_USB_DIR,
@@ -1642,9 +1653,10 @@ def main():
     parser = create_parser()
     args = parser.parse_args()
 
-    # Initialize logger and CLI prompt handler
+    # Initialize logger, CLI prompt handler, and display handler
     logger = Logger(verbose=args.verbose)
     cli_prompt = CLIPromptHandler()
+    cli_display = CLIDisplayHandler(logger)
 
     # Load config early (before banner) so settings are available everywhere
     config = ConfigManager(logger=logger)
@@ -1788,7 +1800,8 @@ def main():
         embed_cover_art = not getattr(args, 'no_cover_art', False)
         quality_preset = resolve_quality_preset(args, logger, output_profile)
         converter = Converter(logger, quality_preset=quality_preset, workers=workers,
-                              embed_cover_art=embed_cover_art, output_profile=output_profile)
+                              embed_cover_art=embed_cover_art, output_profile=output_profile,
+                              display_handler=cli_display)
         result = converter.convert(
             args.input_dir,
             output_dir,
@@ -1805,7 +1818,7 @@ def main():
         if not deps.check_python_packages():
             sys.exit(1)
 
-        tagger = TaggerManager(logger, output_profile=output_profile)
+        tagger = TaggerManager(logger, output_profile=output_profile, display_handler=cli_display)
         result = tagger.update_tags(
             args.directory,
             new_album=args.album,
@@ -1822,7 +1835,7 @@ def main():
         if not deps.check_python_packages():
             sys.exit(1)
 
-        tagger = TaggerManager(logger, output_profile=output_profile)
+        tagger = TaggerManager(logger, output_profile=output_profile, display_handler=cli_display)
         result = tagger.restore_tags(
             args.directory,
             restore_album=args.all or args.album,
@@ -1841,7 +1854,7 @@ def main():
             sys.exit(1)
 
         tagger = TaggerManager(logger, output_profile=output_profile,
-                               prompt_handler=cli_prompt)
+                               prompt_handler=cli_prompt, display_handler=cli_display)
         result = tagger.reset_tags_from_source(
             args.input_dir,
             args.output_dir,
@@ -1858,7 +1871,7 @@ def main():
             sys.exit(1)
 
         downloader = Downloader(logger, deps.venv_python, cookie_path=args.cookies,
-                               prompt_handler=cli_prompt)
+                               prompt_handler=cli_prompt, display_handler=cli_display)
 
         # Handle --playlist or --url
         if args.playlist:
@@ -1906,7 +1919,7 @@ def main():
     elif args.command == 'sync-usb':
         # Copy files to USB drive
         source_dir = args.source_dir or get_export_dir(output_profile.name)
-        usb_manager = USBManager(logger, prompt_handler=cli_prompt)
+        usb_manager = USBManager(logger, prompt_handler=cli_prompt, display_handler=cli_display)
         result = usb_manager.sync_to_usb(
             source_dir,
             usb_dir=usb_dir,
@@ -1947,7 +1960,7 @@ def main():
         if not deps.check_python_packages():
             sys.exit(1)
 
-        cam = CoverArtManager(logger, output_profile=output_profile)
+        cam = CoverArtManager(logger, output_profile=output_profile, display_handler=cli_display)
 
         if args.cover_art_action == 'embed':
             if getattr(args, 'all_playlists', False) and args.directory:
@@ -2083,7 +2096,8 @@ def main():
                                           workers=workers,
                                           embed_cover_art=embed_cover_art,
                                           output_profile=output_profile,
-                                          prompt_handler=cli_prompt)
+                                          prompt_handler=cli_prompt,
+                                          display_handler=cli_display)
 
         # Determine what to process
         if args.auto:
@@ -2167,7 +2181,8 @@ def main():
 
         menu = InteractiveMenu(logger, config, deps, workers=workers,
                                output_profile=output_profile,
-                               prompt_handler=cli_prompt)
+                               prompt_handler=cli_prompt,
+                               display_handler=cli_display)
 
         success = menu.show(dry_run=args.dry_run, verbose=args.verbose)
         sys.exit(0 if success else 1)

@@ -203,8 +203,9 @@ def _init_third_party():
 class Logger:
     """Manages logging to both console and timestamped log file."""
 
-    def __init__(self, log_dir=DEFAULT_LOG_DIR, verbose=False):
+    def __init__(self, log_dir=DEFAULT_LOG_DIR, verbose=False, echo_to_console=True):
         self.verbose = verbose
+        self.echo_to_console = echo_to_console
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(exist_ok=True)
         self._lock = threading.Lock()
@@ -231,10 +232,11 @@ class Logger:
             formatted_with_prefix = f"[{timestamp}] [{level}] {message}"
 
             # Console: route through tqdm.write() if a bar is active
-            if self._active_bars and _tqdm is not None:
-                _tqdm.write(message)
-            else:
-                print(message)
+            if self.echo_to_console:
+                if self._active_bars and _tqdm is not None:
+                    _tqdm.write(message)
+                else:
+                    print(message)
 
             # File: full format with timestamp and level
             with open(self.log_file, 'a') as f:
@@ -1097,6 +1099,8 @@ class DisplayHandler(Protocol):
     def show_progress(self, current: int, total: int,
                       message: str) -> None: ...
 
+    def finish_progress(self) -> None: ...
+
     def show_status(self, message: str,
                     level: str = "info") -> None: ...
 
@@ -1144,6 +1148,9 @@ class NullDisplayHandler:
                       message: str) -> None:
         pass
 
+    def finish_progress(self) -> None:
+        pass
+
     def show_status(self, message: str,
                     level: str = "info") -> None:
         pass
@@ -1151,6 +1158,40 @@ class NullDisplayHandler:
     def show_banner(self, title: str,
                     subtitle: str | None = None) -> None:
         pass
+
+
+class _DisplayProgress:
+    """Adapter that maps ProgressBar .update()/.close() API to DisplayHandler.
+
+    Business classes create this instead of ProgressBar directly, routing
+    all progress display through the injected DisplayHandler.
+    """
+
+    def __init__(self, display_handler, total=0, desc="Processing"):
+        self._handler = display_handler
+        self._total = total
+        self._desc = desc
+        self._count = 0
+
+    def set_total(self, total):
+        """Lazily set the total when it becomes known (e.g. Downloader)."""
+        self._total = total
+
+    def update(self, n=1):
+        """Advance the progress counter and notify the handler."""
+        self._count += n
+        self._handler.show_progress(self._count, self._total, self._desc)
+
+    def close(self):
+        """Signal progress completion."""
+        self._handler.finish_progress()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+        return False
 
 
 # ── Result Dataclasses ────────────────────────────────────────────
@@ -1394,9 +1435,10 @@ class TaggerManager:
     """Manages MP3 tag operations (update, restore, reset)."""
 
     def __init__(self, logger=None, cleanup_options=None, output_profile=None,
-                 prompt_handler=None):
+                 prompt_handler=None, display_handler=None):
         self.logger = logger or Logger()
         self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
+        self.display_handler = display_handler or NullDisplayHandler()
         self.output_profile = output_profile or OUTPUT_PROFILES[DEFAULT_OUTPUT_TYPE]
         if output_profile is not None:
             self.cleanup_options = {
@@ -1441,9 +1483,8 @@ class TaggerManager:
         skipped = 0
         errors = 0
 
-        progress = ProgressBar(
-            total=len(mp3_files), desc="Tagging",
-            logger=self.logger, disable=dry_run,
+        progress = _DisplayProgress(
+            self.display_handler, total=len(mp3_files), desc="Tagging",
         )
 
         try:
@@ -1600,9 +1641,8 @@ class TaggerManager:
         skipped = 0
         errors = 0
 
-        progress = ProgressBar(
-            total=len(mp3_files), desc="Restoring",
-            logger=self.logger, disable=dry_run,
+        progress = _DisplayProgress(
+            self.display_handler, total=len(mp3_files), desc="Restoring",
         )
 
         try:
@@ -1939,8 +1979,10 @@ class ConversionStatistics:
 class Converter:
     """Manages M4A to MP3 conversion with tag preservation."""
 
-    def __init__(self, logger=None, quality_preset='lossless', workers=None, embed_cover_art=True, output_profile=None):
+    def __init__(self, logger=None, quality_preset='lossless', workers=None, embed_cover_art=True,
+                 output_profile=None, display_handler=None):
         self.logger = logger or Logger()
+        self.display_handler = display_handler or NullDisplayHandler()
         self.stats = ConversionStatistics()
         self.quality_preset = quality_preset
         self.quality_settings = self._get_quality_settings(quality_preset)
@@ -2212,9 +2254,8 @@ class Converter:
         # Determine effective worker count
         effective_workers = min(self.workers, self.stats.total_found)
 
-        progress = ProgressBar(
-            total=self.stats.total_found, desc="Converting",
-            logger=self.logger, disable=dry_run,
+        progress = _DisplayProgress(
+            self.display_handler, total=self.stats.total_found, desc="Converting",
         )
 
         try:
@@ -2287,9 +2328,10 @@ class Downloader:
     """Manages downloads from Apple Music using gamdl."""
 
     def __init__(self, logger=None, venv_python=None, cookie_path='cookies.txt',
-                 prompt_handler=None):
+                 prompt_handler=None, display_handler=None):
         self.logger = logger or Logger()
         self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
+        self.display_handler = display_handler or NullDisplayHandler()
         self.venv_python = venv_python or sys.executable
         self.cookie_manager = CookieManager(cookie_path, logger=self.logger,
                                             prompt_handler=self.prompt_handler)
@@ -2455,9 +2497,8 @@ class Downloader:
             )
 
             # Parse output line by line
-            progress = ProgressBar(
-                total=0, desc="Downloading",
-                logger=self.logger, disable=dry_run,
+            progress = _DisplayProgress(
+                self.display_handler, total=0, desc="Downloading",
             )
             verbose = self.logger.verbose
 
@@ -3277,9 +3318,11 @@ class USBSyncStatistics:
 class USBManager:
     """Manages USB drive detection and file copying."""
 
-    def __init__(self, logger=None, excluded_volumes=None, prompt_handler=None):
+    def __init__(self, logger=None, excluded_volumes=None, prompt_handler=None,
+                 display_handler=None):
         self.logger = logger or Logger()
         self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
+        self.display_handler = display_handler or NullDisplayHandler()
         self.excluded_volumes = excluded_volumes or EXCLUDED_USB_VOLUMES
 
     def find_usb_drives(self):
@@ -3511,9 +3554,8 @@ class USBManager:
                 files_failed=stats.files_failed)
 
         # Copy files with incremental check
-        progress = ProgressBar(
-            total=len(mp3_files), desc="Syncing to USB",
-            logger=self.logger, disable=dry_run,
+        progress = _DisplayProgress(
+            self.display_handler, total=len(mp3_files), desc="Syncing to USB",
         )
 
         try:
@@ -4026,9 +4068,10 @@ class SummaryManager:
 class CoverArtManager:
     """Manages cover art operations: embed, extract, update, strip."""
 
-    def __init__(self, logger=None, output_profile=None):
+    def __init__(self, logger=None, output_profile=None, display_handler=None):
         self.logger = logger or Logger()
         self.output_profile = output_profile or OUTPUT_PROFILES[DEFAULT_OUTPUT_TYPE]
+        self.display_handler = display_handler or NullDisplayHandler()
 
     def embed(self, directory, source_dir=None, force=False, dry_run=False, verbose=False):
         """
@@ -4103,9 +4146,8 @@ class CoverArtManager:
         errors = 0
         no_source = 0
 
-        progress = ProgressBar(
-            total=len(mp3_files), desc="Embedding cover art",
-            logger=self.logger, disable=dry_run,
+        progress = _DisplayProgress(
+            self.display_handler, total=len(mp3_files), desc="Embedding cover art",
         )
 
         try:
@@ -4233,9 +4275,8 @@ class CoverArtManager:
         skipped = 0
         errors = 0
 
-        progress = ProgressBar(
-            total=len(mp3_files), desc="Extracting cover art",
-            logger=self.logger, disable=dry_run,
+        progress = _DisplayProgress(
+            self.display_handler, total=len(mp3_files), desc="Extracting cover art",
         )
 
         try:
@@ -4335,9 +4376,8 @@ class CoverArtManager:
         updated = 0
         errors = 0
 
-        progress = ProgressBar(
-            total=len(mp3_files), desc="Updating cover art",
-            logger=self.logger, disable=dry_run,
+        progress = _DisplayProgress(
+            self.display_handler, total=len(mp3_files), desc="Updating cover art",
         )
 
         try:
@@ -4413,9 +4453,8 @@ class CoverArtManager:
         skipped = 0
         errors = 0
 
-        progress = ProgressBar(
-            total=len(mp3_files), desc="Stripping cover art",
-            logger=self.logger, disable=dry_run,
+        progress = _DisplayProgress(
+            self.display_handler, total=len(mp3_files), desc="Stripping cover art",
         )
 
         try:
@@ -4497,9 +4536,8 @@ class CoverArtManager:
         total_before = 0
         total_after = 0
 
-        progress = ProgressBar(
-            total=len(mp3_files), desc="Resizing cover art",
-            logger=self.logger, disable=dry_run,
+        progress = _DisplayProgress(
+            self.display_handler, total=len(mp3_files), desc="Resizing cover art",
         )
 
         try:
@@ -4752,9 +4790,10 @@ class PipelineOrchestrator:
 
     def __init__(self, logger=None, deps=None, config=None, quality_preset='lossless',
                  cookie_path='cookies.txt', workers=None, embed_cover_art=True,
-                 output_profile=None, prompt_handler=None):
+                 output_profile=None, prompt_handler=None, display_handler=None):
         self.logger = logger or Logger()
         self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
+        self.display_handler = display_handler or NullDisplayHandler()
         self.deps = deps or DependencyChecker(self.logger)
         self.config = config or ConfigManager(logger=self.logger)
         self.stats = PipelineStatistics()
@@ -4818,7 +4857,8 @@ class PipelineOrchestrator:
         preset = quality_preset if quality_preset is not None else self.quality_preset
         converter = Converter(self.logger, quality_preset=preset, workers=self.workers,
                               embed_cover_art=self.embed_cover_art,
-                              output_profile=self.output_profile)
+                              output_profile=self.output_profile,
+                              display_handler=self.display_handler)
         convert_result = converter.convert(
             music_dir,
             export_dir,
@@ -4848,7 +4888,8 @@ class PipelineOrchestrator:
         else:  # "original"
             new_artist = None
 
-        tagger = TaggerManager(self.logger, output_profile=self.output_profile)
+        tagger = TaggerManager(self.logger, output_profile=self.output_profile,
+                               display_handler=self.display_handler)
         tag_result = tagger.update_tags(
             export_dir,
             new_album=new_album,
@@ -4873,7 +4914,8 @@ class PipelineOrchestrator:
         # ── Stage 4: USB sync (optional) ───────────────────────────────
         if copy_to_usb:
             self.logger.info("\n=== STAGE 4: Copy to USB ===")
-            usb_manager = USBManager(self.logger, prompt_handler=self.prompt_handler)
+            usb_manager = USBManager(self.logger, prompt_handler=self.prompt_handler,
+                                     display_handler=self.display_handler)
             usb_result = usb_manager.sync_to_usb(
                 export_dir,
                 usb_dir=usb_dir,
@@ -4916,7 +4958,8 @@ class PipelineOrchestrator:
         """Download playlist from URL."""
         downloader = Downloader(self.logger, self.deps.venv_python,
                                cookie_path=self.cookie_path,
-                               prompt_handler=self.prompt_handler)
+                               prompt_handler=self.prompt_handler,
+                               display_handler=self.display_handler)
 
         key, album_name = downloader.extract_url_info(url)
         if not key:
@@ -4983,7 +5026,8 @@ class PipelineOrchestrator:
 
         downloader = Downloader(self.logger, self.deps.venv_python,
                                cookie_path=self.cookie_path,
-                               prompt_handler=self.prompt_handler)
+                               prompt_handler=self.prompt_handler,
+                               display_handler=self.display_handler)
         dl_result = downloader.download(
             playlist.url,
             output_dir,
@@ -5061,7 +5105,8 @@ class PipelineOrchestrator:
                 "Embed cover art from source files?", default=True)
 
         if should_embed:
-            cam = CoverArtManager(self.logger, output_profile=self.output_profile)
+            cam = CoverArtManager(self.logger, output_profile=self.output_profile,
+                                  display_handler=self.display_handler)
             cam.embed(export_dir, dry_run=False, verbose=verbose)
             # Resize newly-embedded art if profile specifies a max dimension
             artwork_size = self.output_profile.artwork_size
