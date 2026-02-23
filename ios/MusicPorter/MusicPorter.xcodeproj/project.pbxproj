@@ -18,7 +18,6 @@
 		A10000009 /* DownloadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000009 /* DownloadView.swift */; };
 		A1000000A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000A /* SettingsView.swift */; };
 		A1000000B /* OperationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000B /* OperationsView.swift */; };
-		A1000000C /* AppleMusicBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000C /* AppleMusicBrowserView.swift */; };
 		A10000026 /* DocumentExportPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000026 /* DocumentExportPicker.swift */; };
 		A1000000E /* ProgressPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000E /* ProgressPanel.swift */; };
 		A1000000F /* StatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000F /* StatusBadge.swift */; };
@@ -58,7 +57,6 @@
 		A20000009 /* DownloadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadView.swift; sourceTree = "<group>"; };
 		A2000000A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A2000000B /* OperationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationsView.swift; sourceTree = "<group>"; };
-		A2000000C /* AppleMusicBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicBrowserView.swift; sourceTree = "<group>"; };
 		A20000026 /* DocumentExportPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentExportPicker.swift; sourceTree = "<group>"; };
 		A2000000E /* ProgressPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressPanel.swift; sourceTree = "<group>"; };
 		A2000000F /* StatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBadge.swift; sourceTree = "<group>"; };
@@ -177,7 +175,6 @@
 				A20000009 /* DownloadView.swift */,
 				A2000000A /* SettingsView.swift */,
 				A2000000B /* OperationsView.swift */,
-				A2000000C /* AppleMusicBrowserView.swift */,
 				A50000007 /* Components */,
 			);
 			path = Views;
@@ -278,7 +275,6 @@
 				A10000009 /* DownloadView.swift in Sources */,
 				A1000000A /* SettingsView.swift in Sources */,
 				A1000000B /* OperationsView.swift in Sources */,
-				A1000000C /* AppleMusicBrowserView.swift in Sources */,
 				A10000026 /* DocumentExportPicker.swift in Sources */,
 				A1000000E /* ProgressPanel.swift in Sources */,
 				A1000000F /* StatusBadge.swift in Sources */,

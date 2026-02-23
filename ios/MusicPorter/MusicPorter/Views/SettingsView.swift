@@ -37,9 +37,6 @@ struct SettingsView: View {
                     NavigationLink("Task History") {
                         OperationsView()
                     }
-                    NavigationLink("Apple Music") {
-                        AppleMusicBrowserView()
-                    }
                 }
 
                 Section("About") {
