@@ -79,6 +79,11 @@ QUALITY_PRESETS = {
 }
 DEFAULT_QUALITY_PRESET = 'lossless'
 
+# Freshness thresholds for summary display (calendar days)
+FRESHNESS_CURRENT_DAYS = 0
+FRESHNESS_RECENT_DAYS = 7
+FRESHNESS_STALE_DAYS = 30
+
 # Worker pool defaults for parallel conversion
 MAX_DEFAULT_WORKERS = 6
 DEFAULT_WORKERS = min(os.cpu_count() or 1, MAX_DEFAULT_WORKERS)

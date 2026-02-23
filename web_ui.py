@@ -28,6 +28,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
@@ -255,6 +256,25 @@ class TaskManager:
 
 
 # ══════════════════════════════════════════════════════════════════
+# Helpers
+# ══════════════════════════════════════════════════════════════════
+
+def _get_freshness_level(last_modified: datetime | None, today: date) -> str:
+    """Return freshness level name for a playlist's last_modified date."""
+    if not last_modified:
+        return "outdated"
+    age_days = (today - last_modified.date()).days
+    if age_days <= mp.FRESHNESS_CURRENT_DAYS:
+        return "current"
+    elif age_days <= mp.FRESHNESS_RECENT_DAYS:
+        return "recent"
+    elif age_days <= mp.FRESHNESS_STALE_DAYS:
+        return "stale"
+    else:
+        return "outdated"
+
+
+# ══════════════════════════════════════════════════════════════════
 # Flask Application Factory
 # ══════════════════════════════════════════════════════════════════
 
@@ -469,14 +489,20 @@ def create_app(project_root=None):
 
         scan_duration = round(time.time() - start_time, 2)
 
+        today = date.today()
+        freshness_counts = {"current": 0, "recent": 0, "stale": 0, "outdated": 0}
+
         playlists_json = []
         for p in mgr.stats.playlists:
+            freshness = _get_freshness_level(p.last_modified, today)
+            freshness_counts[freshness] += 1
             playlists_json.append({
                 'name': p.name,
                 'file_count': p.file_count,
                 'size_bytes': p.total_size_bytes,
                 'avg_size_mb': round(p.avg_file_size_mb, 1),
                 'last_modified': p.last_modified.isoformat() if p.last_modified else None,
+                'freshness': freshness,
                 'tags_checked': p.sample_files_checked,
                 'tags_protected': p.sample_files_with_tags,
                 'cover_with': p.files_with_cover_art,
@@ -499,6 +525,7 @@ def create_app(project_root=None):
                 'original': mgr.stats.files_with_original_cover_art,
                 'resized': mgr.stats.files_with_resized_cover_art,
             },
+            'freshness': freshness_counts,
             'playlists': playlists_json,
             'profile': profile.name,
         })
