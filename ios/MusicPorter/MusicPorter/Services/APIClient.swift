@@ -203,6 +203,12 @@ final class APIClient {
         try await get("/api/summary")
     }
 
+    // MARK: - Library Stats (source music/ directory)
+
+    func getLibraryStats() async throws -> LibraryStatsResponse {
+        try await get("/api/library-stats")
+    }
+
     // MARK: - HTTP Helpers
 
     private func makeRequest(_ path: String, method: String) throws -> URLRequest {
@@ -363,16 +369,47 @@ struct SummaryResponse: Codable {
     let totalFiles: Int
     let totalSizeBytes: Int
     let scanDuration: Double
+    let tagIntegrity: TagIntegrityStats
+    let coverArt: CoverArtStats
+    let freshness: FreshnessStats
     let playlists: [PlaylistSummary]
     let profile: String
 
     enum CodingKeys: String, CodingKey {
-        case profile, playlists
+        case profile, playlists, freshness
         case totalPlaylists = "total_playlists"
         case totalFiles = "total_files"
         case totalSizeBytes = "total_size_bytes"
         case scanDuration = "scan_duration"
+        case tagIntegrity = "tag_integrity"
+        case coverArt = "cover_art"
     }
+}
+
+struct TagIntegrityStats: Codable {
+    let checked: Int
+    let protected: Int
+    let missing: Int
+}
+
+struct CoverArtStats: Codable {
+    let withArt: Int
+    let withoutArt: Int
+    let original: Int
+    let resized: Int
+
+    enum CodingKeys: String, CodingKey {
+        case original, resized
+        case withArt = "with_art"
+        case withoutArt = "without_art"
+    }
+}
+
+struct FreshnessStats: Codable {
+    let current: Int
+    let recent: Int
+    let stale: Int
+    let outdated: Int
 }
 
 struct PlaylistSummary: Identifiable, Codable {
@@ -382,12 +419,40 @@ struct PlaylistSummary: Identifiable, Codable {
     let sizeBytes: Int
     let avgSizeMb: Double
     let freshness: String
+    let tagsChecked: Int
+    let tagsProtected: Int
+    let coverWith: Int
+    let coverWithout: Int
+    let lastModified: String?
 
     enum CodingKeys: String, CodingKey {
         case name, freshness
         case fileCount = "file_count"
         case sizeBytes = "size_bytes"
         case avgSizeMb = "avg_size_mb"
+        case tagsChecked = "tags_checked"
+        case tagsProtected = "tags_protected"
+        case coverWith = "cover_with"
+        case coverWithout = "cover_without"
+        case lastModified = "last_modified"
+    }
+}
+
+struct LibraryStatsResponse: Codable {
+    let totalPlaylists: Int
+    let totalFiles: Int
+    let totalSizeBytes: Int
+    let totalExported: Int
+    let totalUnconverted: Int
+    let scanDuration: Double
+
+    enum CodingKeys: String, CodingKey {
+        case totalPlaylists = "total_playlists"
+        case totalFiles = "total_files"
+        case totalSizeBytes = "total_size_bytes"
+        case totalExported = "total_exported"
+        case totalUnconverted = "total_unconverted"
+        case scanDuration = "scan_duration"
     }
 }
 

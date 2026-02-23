@@ -702,12 +702,17 @@ def create_app(project_root=None, no_auth=False):
         config = _get_config()
         profile = _get_output_profile(config)
         export_dir = project_root / mp.get_export_dir(profile.name)
+        playlist_map = {p.key: p.name for p in config.playlists}
         dirs = []
         if export_dir.exists():
             for d in sorted(export_dir.iterdir()):
                 if d.is_dir() and not d.name.startswith('.'):
                     file_count = len(list(d.rglob('*.mp3')))
-                    dirs.append({'name': d.name, 'files': file_count})
+                    dirs.append({
+                        'name': d.name,
+                        'display_name': playlist_map.get(d.name, d.name),
+                        'files': file_count,
+                    })
         return jsonify(dirs)
 
     # ── API: Pipeline ────────────────────────────────────────────

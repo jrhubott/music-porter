@@ -4,28 +4,29 @@ struct USBSyncView: View {
     @Environment(AppState.self) private var appState
     @State private var localPlaylists: [String] = []
     @State private var selectedPlaylists: Set<String> = []
+    @State private var playlistNames: [String: String] = [:]
     @State private var error: String?
 
     var body: some View {
         List {
             Section("Downloaded Playlists") {
-                ForEach(localPlaylists, id: \.self) { name in
+                ForEach(localPlaylists, id: \.self) { key in
                     HStack {
-                        Image(systemName: selectedPlaylists.contains(name) ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(selectedPlaylists.contains(name) ? .blue : .secondary)
-                        Text(name)
+                        Image(systemName: selectedPlaylists.contains(key) ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(selectedPlaylists.contains(key) ? .blue : .secondary)
+                        Text(playlistNames[key] ?? key)
                         Spacer()
-                        let count = appState.downloadManager.localFiles(playlist: name).count
+                        let count = appState.downloadManager.localFiles(playlist: key).count
                         Text("\(count) files")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        if selectedPlaylists.contains(name) {
-                            selectedPlaylists.remove(name)
+                        if selectedPlaylists.contains(key) {
+                            selectedPlaylists.remove(key)
                         } else {
-                            selectedPlaylists.insert(name)
+                            selectedPlaylists.insert(key)
                         }
                     }
                 }
@@ -34,7 +35,6 @@ struct USBSyncView: View {
             if !selectedPlaylists.isEmpty {
                 Section {
                     Button {
-                        // USB export requires UIKit presenter - simplified here
                         error = "USB export requires selecting a destination folder. Use the Share sheet on individual files."
                     } label: {
                         Label("Export to USB (\(selectedPlaylists.count) playlists)", systemImage: "externaldrive")
@@ -66,7 +66,14 @@ struct USBSyncView: View {
             }
         }
         .navigationTitle("USB Export")
-        .onAppear { scanLocalPlaylists() }
+        .task { await loadData() }
+    }
+
+    private func loadData() async {
+        scanLocalPlaylists()
+        if let playlists = try? await appState.apiClient.getPlaylists() {
+            playlistNames = Dictionary(uniqueKeysWithValues: playlists.map { ($0.key, $0.name) })
+        }
     }
 
     private func scanLocalPlaylists() {

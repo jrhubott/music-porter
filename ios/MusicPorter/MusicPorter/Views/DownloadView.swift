@@ -20,7 +20,7 @@ struct DownloadView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
                                 VStack(alignment: .leading) {
-                                    Text(dir.name)
+                                    Text(dir.displayName)
                                         .font(.headline)
                                     Text("\(dir.files) files on server")
                                         .font(.caption)
