@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 /// Manages downloading MP3 files from the server to the device.
-@Observable
+@MainActor @Observable
 final class FileDownloadManager: NSObject {
     var downloads: [String: DownloadState] = [:]  // keyed by filename
     var downloadedFiles: [URL] = []
@@ -43,9 +43,7 @@ final class FileDownloadManager: NSObject {
         }
         try FileManager.default.moveItem(at: tempURL, to: destFile)
 
-        await MainActor.run {
-            self.downloads[filename] = .completed(destFile)
-        }
+        self.downloads[filename] = .completed(destFile)
         return destFile
     }
 
@@ -111,14 +109,14 @@ final class FileDownloadManager: NSObject {
 }
 
 extension FileDownloadManager: URLSessionDownloadDelegate {
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
-                    didFinishDownloadingTo location: URL) {
+    nonisolated func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
+                                didFinishDownloadingTo location: URL) {
         // Background download completion handled here
     }
 
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
-                    didWriteData bytesWritten: Int64, totalBytesWritten: Int64,
-                    totalBytesExpectedToWrite: Int64) {
+    nonisolated func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
+                                didWriteData bytesWritten: Int64, totalBytesWritten: Int64,
+                                totalBytesExpectedToWrite: Int64) {
         guard let url = downloadTask.originalRequest?.url else { return }
         let filename = url.lastPathComponent
         let progress = totalBytesExpectedToWrite > 0
