@@ -32,9 +32,8 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 
-from flask import Flask, Response, jsonify, render_template, request, stream_with_context
+from flask import Flask, Response, jsonify, render_template, request, send_from_directory, stream_with_context
 
-# ── Import business logic from porter_core ──────────────────────────────────
 import porter_core as mp
 
 # Initialize third-party imports once at load time.
@@ -1032,6 +1031,137 @@ def create_app(project_root=None, no_auth=False):
             return jsonify({'error': 'Another operation is already running'}), 409
         return jsonify({'task_id': task_id})
 
+    # ── API: File Serving (for iOS companion app) ─────────────────
+
+    @app.route('/api/files/<playlist_key>')
+    def api_files_list(playlist_key):
+        """List MP3 files in a playlist with ID3 metadata."""
+        config = _get_config()
+        profile = _get_output_profile(config)
+        playlist_dir = project_root / mp.get_export_dir(profile.name, playlist_key)
+        safe = _safe_dir(playlist_dir)
+        if not safe or not Path(safe).is_dir():
+            return jsonify({'error': f'Playlist directory not found: {playlist_key}'}), 404
+
+        from mutagen.id3 import ID3
+        from mutagen.mp3 import MP3
+
+        files = []
+        for f in sorted(Path(safe).glob('*.mp3')):
+            entry = {
+                'filename': f.name,
+                'size': f.stat().st_size,
+            }
+            try:
+                audio = MP3(str(f))
+                entry['duration'] = round(audio.info.length, 1) if audio.info else 0
+                tags = ID3(str(f))
+                entry['title'] = str(tags.get('TIT2', ''))
+                entry['artist'] = str(tags.get('TPE1', ''))
+                entry['album'] = str(tags.get('TALB', ''))
+                entry['has_cover_art'] = any(
+                    key.startswith('APIC') for key in tags)
+                entry['has_protection_tags'] = any(
+                    hasattr(frame, 'desc') and frame.desc.startswith('Original')
+                    for frame in tags.values()
+                    if hasattr(frame, 'desc'))
+            except Exception:
+                entry.setdefault('title', f.stem)
+                entry.setdefault('duration', 0)
+                entry.setdefault('has_cover_art', False)
+                entry.setdefault('has_protection_tags', False)
+            files.append(entry)
+
+        return jsonify({
+            'playlist': playlist_key,
+            'profile': profile.name,
+            'file_count': len(files),
+            'files': files,
+        })
+
+    @app.route('/api/files/<playlist_key>/<filename>')
+    def api_files_download(playlist_key, filename):
+        """Download a single MP3 file."""
+        config = _get_config()
+        profile = _get_output_profile(config)
+        playlist_dir = project_root / mp.get_export_dir(profile.name, playlist_key)
+        safe = _safe_dir(playlist_dir)
+        if not safe:
+            return jsonify({'error': 'Invalid directory'}), 400
+
+        file_path = Path(safe) / filename
+        if not file_path.exists() or file_path.suffix.lower() != '.mp3':
+            return jsonify({'error': 'File not found'}), 404
+
+        # Validate the file is within the safe directory
+        if not str(file_path.resolve()).startswith(str(Path(safe).resolve())):
+            return jsonify({'error': 'Invalid path'}), 400
+
+        return send_from_directory(safe, filename, mimetype='audio/mpeg')
+
+    @app.route('/api/files/<playlist_key>/<filename>/artwork')
+    def api_files_artwork(playlist_key, filename):
+        """Extract and serve cover art from an MP3 file."""
+        config = _get_config()
+        profile = _get_output_profile(config)
+        playlist_dir = project_root / mp.get_export_dir(profile.name, playlist_key)
+        safe = _safe_dir(playlist_dir)
+        if not safe:
+            return jsonify({'error': 'Invalid directory'}), 400
+
+        file_path = Path(safe) / filename
+        if not file_path.exists():
+            return jsonify({'error': 'File not found'}), 404
+
+        try:
+            from mutagen.id3 import ID3
+            tags = ID3(str(file_path))
+            for key, frame in tags.items():
+                if key.startswith('APIC'):
+                    mime = getattr(frame, 'mime', 'image/jpeg')
+                    return Response(frame.data, mimetype=mime)
+            return jsonify({'error': 'No cover art found'}), 404
+        except Exception as e:
+            return jsonify({'error': f'Could not read artwork: {e}'}), 500
+
+    @app.route('/api/files/<playlist_key>/download-all')
+    def api_files_download_all(playlist_key):
+        """Stream a ZIP archive of all MP3s in a playlist."""
+        import io
+        import zipfile
+
+        config = _get_config()
+        profile = _get_output_profile(config)
+        playlist_dir = project_root / mp.get_export_dir(profile.name, playlist_key)
+        safe = _safe_dir(playlist_dir)
+        if not safe or not Path(safe).is_dir():
+            return jsonify({'error': f'Playlist directory not found: {playlist_key}'}), 404
+
+        mp3_files = sorted(Path(safe).glob('*.mp3'))
+        if not mp3_files:
+            return jsonify({'error': 'No MP3 files found'}), 404
+
+        def generate_zip():
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, 'w', zipfile.ZIP_STORED) as zf:
+                for f in mp3_files:
+                    zf.write(f, f.name)
+            buf.seek(0)
+            while True:
+                chunk = buf.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+
+        zip_name = f"{playlist_key}.zip"
+        return Response(
+            generate_zip(),
+            mimetype='application/zip',
+            headers={
+                'Content-Disposition': f'attachment; filename="{zip_name}"',
+            }
+        )
+
     # ── API: USB ─────────────────────────────────────────────────
 
     @app.route('/api/usb/drives')
@@ -1191,20 +1321,31 @@ def start_server(host='127.0.0.1', port=5555, no_auth=False,
     """
     _kill_port_process(port)
 
-    # Show API key if requested or if auth is enabled (server mode)
+    # Determine local network IP for iOS connection info
+    local_ip = BonjourAdvertiser._get_local_ip() or host
+
     if not no_auth:
         config = mp.ConfigManager(logger=mp.Logger(verbose=False))
         api_key = config.ensure_api_key()
-        if show_api_key:
-            print(f"\n  API Key: {api_key}")
-        else:
-            print(f"\n  API Key: {api_key[:8]}... (use --show-api-key to reveal)")
-        print("  Auth:    Required (Bearer token)")
-    else:
-        print("\n  Auth:    Disabled (--no-auth)")
 
-    print(f"  Server:  http://{host}:{port}")
-    print("  Press Ctrl+C to stop\n")
+        # Always show full API key and connection details for server mode
+        print(f"\n  ── Server Mode ({'auth enabled' if not no_auth else 'no auth'}) ──")
+        print(f"  Server:    http://{host}:{port}")
+        if host == '0.0.0.0':
+            print(f"  Local URL: http://{local_ip}:{port}")
+        print(f"  API Key:   {api_key}")
+        print("  Auth:      Bearer token required on /api/* routes")
+        print()
+        print("  ── iOS Companion App Connection ──")
+        print("  1. Open the Music Porter iOS app")
+        print(f"  2. Enter server address: {local_ip}:{port}")
+        print(f"  3. Enter API key: {api_key}")
+        print("  4. Or scan QR code from the web dashboard")
+    else:
+        print("\n  ── Web Dashboard Mode (no auth) ──")
+        print(f"  Server:  http://{host}:{port}")
+
+    print("\n  Press Ctrl+C to stop\n")
 
     app = create_app(no_auth=no_auth)
 
