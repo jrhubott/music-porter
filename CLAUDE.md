@@ -22,6 +22,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - When asked to "work on requirements", **only** produce the SRS document — do not plan or begin implementation
 - Implementation starts only after explicit user instruction
 - These are separate phases — never combine them
+- **Always use a feature branch** when adding or changing SRS requirements — never commit SRS changes directly to main
 
 ### SRS Document Format
 
