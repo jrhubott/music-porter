@@ -1665,6 +1665,16 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
 
 def main():
     """Main entry point."""
+    # Load config and output profiles BEFORE argparse so --output-type choices
+    # reflect config-defined profiles (including user-added ones).
+    temp_logger = Logger(verbose=False)
+    try:
+        config = ConfigManager(logger=temp_logger)
+        load_output_profiles(config)
+    except ValueError as e:
+        temp_logger.error(str(e))
+        sys.exit(1)
+
     parser = create_parser()
     args = parser.parse_args()
 
@@ -1673,8 +1683,8 @@ def main():
     cli_prompt = CLIPromptHandler()
     cli_display = CLIDisplayHandler(logger)
 
-    # Load config early (before banner) so settings are available everywhere
-    config = ConfigManager(logger=logger)
+    # Re-assign config's logger to the real (possibly verbose) one
+    config.logger = logger
 
     # Resolve settings: CLI > config.yaml > hardcoded constant
     output_type, usb_dir, workers, dir_structure, filename_format = resolve_config_settings(args, config)
@@ -1734,7 +1744,8 @@ def main():
 
     print(f"  Platform:    {platform_str}")
     print(f"  Command:     {command_str}")
-    print(f"  Output type: {output_type} ({output_type_desc})")
+    total_profiles = len(OUTPUT_PROFILES)
+    print(f"  Output type: {output_type} ({output_type_desc}) [1 of {total_profiles}]")
     print(f"  Quality:     {quality_desc}")
     print(f"  Artwork:     {artwork_desc}")
     print(f"  Dir layout:  {display_name(output_profile.directory_structure)}")

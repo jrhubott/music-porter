@@ -10,6 +10,7 @@ from __future__ import annotations
 import sys
 import subprocess
 import os
+import re
 import time
 import shutil
 from pathlib import Path
@@ -45,7 +46,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.4.0"
+VERSION = "2.5.0"
 
 DEFAULT_MUSIC_DIR = "music"
 DEFAULT_EXPORT_DIR = "export"
@@ -129,39 +130,144 @@ class OutputProfile:
     pipeline_artist: str      # "various" or "original"
 
 
-OUTPUT_PROFILES: dict = {
-    "ride-command": OutputProfile(
-        name="ride-command",
-        description="Polaris Ride Command infotainment system",
-        directory_structure="flat",
-        filename_format="full",
-        id3_version=3,
-        strip_id3v1=True,
-        title_tag_format="artist_title",
-        artwork_size=100,
-        quality_preset="lossless",
-        pipeline_album="playlist_name",
-        pipeline_artist="various",
-    ),
-    "basic": OutputProfile(
-        name="basic",
-        description="Standard MP3 with original tags and artwork",
-        directory_structure="flat",
-        filename_format="full",
-        id3_version=4,
-        strip_id3v1=True,
-        title_tag_format="artist_title",
-        artwork_size=0,
-        quality_preset="lossless",
-        pipeline_album="original",
-        pipeline_artist="original",
-    ),
+# Seed defaults — used for auto-migration and _create_default().
+# At runtime, OUTPUT_PROFILES is populated from config.yaml via load_output_profiles().
+DEFAULT_OUTPUT_PROFILES: dict = {
+    "ride-command": {
+        "description": "Polaris Ride Command infotainment system",
+        "directory_structure": "flat",
+        "filename_format": "full",
+        "id3_version": 3,
+        "strip_id3v1": True,
+        "title_tag_format": "artist_title",
+        "artwork_size": 100,
+        "quality_preset": "lossless",
+        "pipeline_album": "playlist_name",
+        "pipeline_artist": "various",
+    },
+    "basic": {
+        "description": "Standard MP3 with original tags and artwork",
+        "directory_structure": "flat",
+        "filename_format": "full",
+        "id3_version": 4,
+        "strip_id3v1": True,
+        "title_tag_format": "artist_title",
+        "artwork_size": 0,
+        "quality_preset": "lossless",
+        "pipeline_album": "original",
+        "pipeline_artist": "original",
+    },
 }
+
+OUTPUT_PROFILES: dict = {}  # Populated at runtime by load_output_profiles()
 DEFAULT_OUTPUT_TYPE = "ride-command"
 
 # Valid choices for directory structure and filename format
 VALID_DIR_STRUCTURES = ("flat", "nested-artist", "nested-artist-album")
 VALID_FILENAME_FORMATS = ("full", "title-only")
+
+# Profile name validation: lowercase alphanumeric with hyphens
+VALID_PROFILE_NAME_RE = re.compile(r'^[a-z0-9]+(-[a-z0-9]+)*$')
+
+# Required fields for each profile entry in config.yaml
+_PROFILE_REQUIRED_FIELDS = (
+    "description", "directory_structure", "filename_format", "id3_version",
+    "strip_id3v1", "title_tag_format", "artwork_size", "quality_preset",
+    "pipeline_album", "pipeline_artist",
+)
+
+
+def _validate_profile(name, data):
+    """Validate a single profile entry from config.yaml.
+
+    Raises ValueError with a descriptive message on any validation failure.
+    """
+    # Name validation
+    if not VALID_PROFILE_NAME_RE.match(name):
+        raise ValueError(
+            f"Invalid profile name '{name}': must be lowercase alphanumeric "
+            f"with hyphens (e.g., 'my-device', 'car-stereo')")
+
+    # Required fields
+    for field_name in _PROFILE_REQUIRED_FIELDS:
+        if field_name not in data:
+            raise ValueError(
+                f"Profile '{name}': missing required field '{field_name}'")
+
+    # Type and value validation
+    desc = data["description"]
+    if not isinstance(desc, str) or not desc.strip():
+        raise ValueError(
+            f"Profile '{name}': 'description' must be a non-empty string")
+
+    ds = data["directory_structure"]
+    if ds not in VALID_DIR_STRUCTURES:
+        raise ValueError(
+            f"Profile '{name}': 'directory_structure' must be one of "
+            f"{VALID_DIR_STRUCTURES}, got '{ds}'")
+
+    ff = data["filename_format"]
+    if ff not in VALID_FILENAME_FORMATS:
+        raise ValueError(
+            f"Profile '{name}': 'filename_format' must be one of "
+            f"{VALID_FILENAME_FORMATS}, got '{ff}'")
+
+    iv = data["id3_version"]
+    if iv not in (3, 4):
+        raise ValueError(
+            f"Profile '{name}': 'id3_version' must be 3 or 4, got {iv!r}")
+
+    si = data["strip_id3v1"]
+    if not isinstance(si, bool):
+        raise ValueError(
+            f"Profile '{name}': 'strip_id3v1' must be a boolean, got {si!r}")
+
+    ttf = data["title_tag_format"]
+    if ttf != "artist_title":
+        raise ValueError(
+            f"Profile '{name}': 'title_tag_format' must be 'artist_title', got '{ttf}'")
+
+    asize = data["artwork_size"]
+    if not isinstance(asize, int) or asize < -1:
+        raise ValueError(
+            f"Profile '{name}': 'artwork_size' must be an integer >= -1, got {asize!r}")
+
+    qp = data["quality_preset"]
+    if qp not in QUALITY_PRESETS:
+        raise ValueError(
+            f"Profile '{name}': 'quality_preset' must be one of "
+            f"{list(QUALITY_PRESETS.keys())}, got '{qp}'")
+
+    pa = data["pipeline_album"]
+    if pa not in ("playlist_name", "original"):
+        raise ValueError(
+            f"Profile '{name}': 'pipeline_album' must be 'playlist_name' or "
+            f"'original', got '{pa}'")
+
+    par = data["pipeline_artist"]
+    if par not in ("various", "original"):
+        raise ValueError(
+            f"Profile '{name}': 'pipeline_artist' must be 'various' or "
+            f"'original', got '{par}'")
+
+
+def load_output_profiles(config):
+    """Populate the module-level OUTPUT_PROFILES dict from a ConfigManager instance.
+
+    Must be called after ConfigManager has loaded config.yaml.
+    Raises ValueError if settings.output_type references a nonexistent profile.
+    """
+    OUTPUT_PROFILES.clear()
+    for name, profile in config.output_profiles.items():
+        OUTPUT_PROFILES[name] = profile
+
+    # Validate that settings.output_type references an existing profile
+    selected = config.get_setting('output_type', DEFAULT_OUTPUT_TYPE)
+    if selected not in OUTPUT_PROFILES:
+        available = ", ".join(OUTPUT_PROFILES.keys())
+        raise ValueError(
+            f"settings.output_type '{selected}' not found in output_types. "
+            f"Available profiles: {available}")
 
 
 DISPLAY_NAMES = {
@@ -407,6 +513,8 @@ class ConfigManager:
         self.logger = logger or Logger()
         self.playlists = []
         self.settings = {}
+        self.output_profiles = {}
+        self._raw_output_types = {}
 
         if self.conf_path.exists():
             try:
@@ -415,6 +523,8 @@ class ConfigManager:
                 # PyYAML not yet installed (first run before DependencyChecker)
                 self.logger.warn("PyYAML not available — cannot load config.yaml yet")
                 self.settings = {}
+                self.output_profiles = {}
+                self._raw_output_types = {}
         else:
             try:
                 self._create_default()
@@ -422,6 +532,8 @@ class ConfigManager:
                 # PyYAML not yet installed (first run before DependencyChecker)
                 self.logger.warn(f"Configuration file not found: {self.conf_path}")
                 self.settings = {}
+                self.output_profiles = {}
+                self._raw_output_types = {}
 
     def _load_yaml(self):
         """Load configuration from YAML file."""
@@ -443,15 +555,57 @@ class ConfigManager:
             elif key or url or name:
                 self.logger.warn(f"Incomplete playlist entry (need key, url, name): {entry}")
 
-        self.logger.info(f"Loaded {len(self.playlists)} playlists from {self.conf_path}")
+        # Load output_types — auto-migrate if missing/null
+        raw_types = data.get('output_types')
+        if raw_types is None:
+            # Missing or null — inject seed defaults and save (one-time migration)
+            import copy
+            raw_types = copy.deepcopy(DEFAULT_OUTPUT_PROFILES)
+            self._raw_output_types = raw_types
+            self._save()
+            self.logger.info("Migrated config.yaml: added output_types with default profiles")
+        elif isinstance(raw_types, dict) and len(raw_types) == 0:
+            raise ValueError(
+                "config.yaml: 'output_types' is empty — at least one profile is required")
+
+        # Validate and build OutputProfile instances
+        self._raw_output_types = raw_types
+        self.output_profiles = {}
+        for name, fields in raw_types.items():
+            _validate_profile(name, fields)
+            # Build OutputProfile — ignore unknown extra fields (forward compat)
+            self.output_profiles[name] = OutputProfile(
+                name=name,
+                description=fields["description"],
+                directory_structure=fields["directory_structure"],
+                filename_format=fields["filename_format"],
+                id3_version=fields["id3_version"],
+                strip_id3v1=fields["strip_id3v1"],
+                title_tag_format=fields["title_tag_format"],
+                artwork_size=fields["artwork_size"],
+                quality_preset=fields["quality_preset"],
+                pipeline_album=fields["pipeline_album"],
+                pipeline_artist=fields["pipeline_artist"],
+            )
+
+        self.logger.info(f"Loaded {len(self.playlists)} playlists and "
+                         f"{len(self.output_profiles)} output profiles from {self.conf_path}")
 
     def _create_default(self):
-        """Create a default config.yaml with empty playlists."""
+        """Create a default config.yaml with default profiles and empty playlists."""
+        import copy
         self.settings = {
             'output_type': DEFAULT_OUTPUT_TYPE,
             'usb_dir': DEFAULT_USB_DIR,
             'workers': DEFAULT_WORKERS,
         }
+        self._raw_output_types = copy.deepcopy(DEFAULT_OUTPUT_PROFILES)
+        # Build OutputProfile instances from defaults
+        self.output_profiles = {}
+        for name, fields in self._raw_output_types.items():
+            self.output_profiles[name] = OutputProfile(
+                name=name, **{k: fields[k] for k in _PROFILE_REQUIRED_FIELDS}
+            )
         self._save()
         self.logger.info(f"Created default configuration: {self.conf_path}")
 
@@ -459,8 +613,19 @@ class ConfigManager:
         """Write current configuration to YAML file."""
         import yaml
 
+        # Serialize output_types from raw dict if available, else from profiles
+        if self._raw_output_types:
+            output_types = self._raw_output_types
+        else:
+            output_types = {}
+            for name, p in self.output_profiles.items():
+                output_types[name] = {
+                    f: getattr(p, f) for f in _PROFILE_REQUIRED_FIELDS
+                }
+
         data = {
             'settings': self.settings,
+            'output_types': output_types,
             'playlists': [
                 {'key': p.key, 'url': p.url, 'name': p.name}
                 for p in self.playlists
