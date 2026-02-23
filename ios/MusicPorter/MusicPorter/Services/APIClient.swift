@@ -7,7 +7,12 @@ final class APIClient {
     var apiKey: String?
     var isConnected = false
 
-    private var session: URLSession = .shared
+    private var session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 15
+        config.timeoutIntervalForResource = 60
+        return URLSession(configuration: config)
+    }()
 
     // MARK: - Connection
 
@@ -81,18 +86,15 @@ final class APIClient {
     }
 
     func fileDownloadURL(playlist: String, filename: String) -> URL? {
-        guard let server else { return nil }
-        return server.baseURL.appendingPathComponent("api/files/\(playlist)/\(filename)")
+        server?.apiURL(path: "api/files/\(playlist)/\(filename)")
     }
 
     func artworkURL(playlist: String, filename: String) -> URL? {
-        guard let server else { return nil }
-        return server.baseURL.appendingPathComponent("api/files/\(playlist)/\(filename)/artwork")
+        server?.apiURL(path: "api/files/\(playlist)/\(filename)/artwork")
     }
 
     func downloadAllURL(playlist: String) -> URL? {
-        guard let server else { return nil }
-        return server.baseURL.appendingPathComponent("api/files/\(playlist)/download-all")
+        server?.apiURL(path: "api/files/\(playlist)/download-all")
     }
 
     // MARK: - Operations
@@ -203,9 +205,10 @@ final class APIClient {
 
     // MARK: - HTTP Helpers
 
-    private func makeRequest(_ path: String, method: String) -> URLRequest {
-        guard let server else { fatalError("APIClient not configured") }
-        var request = URLRequest(url: server.baseURL.appendingPathComponent(path))
+    private func makeRequest(_ path: String, method: String) throws -> URLRequest {
+        guard let server else { throw APIError.notConfigured }
+        guard let url = server.apiURL(path: path) else { throw APIError.invalidResponse }
+        var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let apiKey {
@@ -215,14 +218,14 @@ final class APIClient {
     }
 
     private func get<T: Decodable>(_ path: String) async throws -> T {
-        let request = makeRequest(path, method: "GET")
+        let request = try makeRequest(path, method: "GET")
         let (data, response) = try await session.data(for: request)
         try checkResponse(response, data: data)
         return try JSONDecoder().decode(T.self, from: data)
     }
 
     private func post<T: Decodable, B: Encodable>(_ path: String, body: B) async throws -> T {
-        var request = makeRequest(path, method: "POST")
+        var request = try makeRequest(path, method: "POST")
         request.httpBody = try JSONEncoder().encode(body)
         let (data, response) = try await session.data(for: request)
         try checkResponse(response, data: data)
@@ -230,7 +233,7 @@ final class APIClient {
     }
 
     private func postAny<T: Decodable>(_ path: String, body: [String: Any]) async throws -> T {
-        var request = makeRequest(path, method: "POST")
+        var request = try makeRequest(path, method: "POST")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response) = try await session.data(for: request)
         try checkResponse(response, data: data)
@@ -238,7 +241,7 @@ final class APIClient {
     }
 
     private func put<T: Decodable, B: Encodable>(_ path: String, body: B) async throws -> T {
-        var request = makeRequest(path, method: "PUT")
+        var request = try makeRequest(path, method: "PUT")
         request.httpBody = try JSONEncoder().encode(body)
         let (data, response) = try await session.data(for: request)
         try checkResponse(response, data: data)
@@ -246,7 +249,7 @@ final class APIClient {
     }
 
     private func delete<T: Decodable>(_ path: String) async throws -> T {
-        let request = makeRequest(path, method: "DELETE")
+        let request = try makeRequest(path, method: "DELETE")
         let (data, response) = try await session.data(for: request)
         try checkResponse(response, data: data)
         return try JSONDecoder().decode(T.self, from: data)
@@ -389,6 +392,7 @@ struct PlaylistSummary: Identifiable, Codable {
 }
 
 enum APIError: LocalizedError {
+    case notConfigured
     case invalidResponse
     case unauthorized
     case serverBusy
@@ -396,6 +400,7 @@ enum APIError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
+        case .notConfigured: return "Not connected to a server"
         case .invalidResponse: return "Invalid server response"
         case .unauthorized: return "Invalid API key"
         case .serverBusy: return "Server is busy with another operation"

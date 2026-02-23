@@ -9,7 +9,11 @@ struct ServerConnection: Identifiable, Codable, Hashable {
     var version: String?
     var platform: String?
 
-    var baseURL: URL {
-        URL(string: "http://\(host):\(port)")!
+    var baseURL: URL? {
+        URL(string: "http://\(host):\(port)")
+    }
+
+    func apiURL(path: String) -> URL? {
+        baseURL?.appendingPathComponent(path)
     }
 }

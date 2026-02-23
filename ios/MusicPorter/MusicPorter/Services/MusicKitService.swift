@@ -2,17 +2,15 @@ import Foundation
 import MusicKit
 
 /// Provides access to the user's Apple Music library via MusicKit.
-@Observable
+@MainActor @Observable
 final class MusicKitService {
     var isAuthorized = false
     var authorizationStatus: MusicAuthorization.Status = .notDetermined
 
     func requestAuthorization() async {
         let status = await MusicAuthorization.request()
-        await MainActor.run {
-            self.authorizationStatus = status
-            self.isAuthorized = (status == .authorized)
-        }
+        self.authorizationStatus = status
+        self.isAuthorized = (status == .authorized)
     }
 
     /// Fetch the user's library playlists.

@@ -2,12 +2,12 @@ import Foundation
 import Network
 
 /// Discovers music-porter servers on the local network via Bonjour/mDNS.
-@Observable
+@MainActor @Observable
 final class ServerDiscovery {
     var discoveredServers: [ServerConnection] = []
     var isSearching = false
 
-    private var browser: NWBrowser?
+    @ObservationIgnored private var browser: NWBrowser?
 
     func startSearch() {
         isSearching = true
@@ -15,16 +15,15 @@ final class ServerDiscovery {
 
         let params = NWParameters()
         params.includePeerToPeer = true
-        browser = NWBrowser(for: .bonjour(type: "_music-porter._tcp", domain: nil), using: params)
+        let newBrowser = NWBrowser(for: .bonjour(type: "_music-porter._tcp", domain: nil), using: params)
 
-        browser?.browseResultsChangedHandler = { [weak self] results, _ in
-            guard let self else { return }
+        newBrowser.browseResultsChangedHandler = { [weak self] results, _ in
             for result in results {
-                self.resolveEndpoint(result)
+                self?.resolveEndpoint(result)
             }
         }
 
-        browser?.stateUpdateHandler = { [weak self] state in
+        newBrowser.stateUpdateHandler = { [weak self] state in
             switch state {
             case .failed, .cancelled:
                 Task { @MainActor in self?.isSearching = false }
@@ -33,12 +32,13 @@ final class ServerDiscovery {
             }
         }
 
-        browser?.start(queue: .global())
+        newBrowser.start(queue: .global())
+        browser = newBrowser
 
         // Auto-stop after 10 seconds
         Task {
             try? await Task.sleep(for: .seconds(10))
-            await MainActor.run { self.stopSearch() }
+            stopSearch()
         }
     }
 
@@ -48,7 +48,7 @@ final class ServerDiscovery {
         isSearching = false
     }
 
-    private func resolveEndpoint(_ result: NWBrowser.Result) {
+    private nonisolated func resolveEndpoint(_ result: NWBrowser.Result) {
         // Extract the service name from the result
         let serviceName: String
         if case .service(let name, _, _, _) = result.endpoint {
@@ -82,7 +82,7 @@ final class ServerDiscovery {
         }
     }
 
-    private func extractAddress(from endpoint: NWEndpoint, name: String) {
+    private nonisolated func extractAddress(from endpoint: NWEndpoint, name: String) {
         guard case .hostPort(let host, let port) = endpoint else { return }
 
         let hostStr: String

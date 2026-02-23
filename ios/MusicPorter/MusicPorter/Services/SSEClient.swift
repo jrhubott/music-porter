@@ -16,7 +16,10 @@ actor SSEClient {
                     continuation.finish()
                     return
                 }
-                let url = server.baseURL.appendingPathComponent("api/stream/\(taskId)")
+                guard let url = server.apiURL(path: "api/stream/\(taskId)") else {
+                    continuation.finish()
+                    return
+                }
                 var request = URLRequest(url: url)
                 if let key = await apiClient.apiKey {
                     request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
