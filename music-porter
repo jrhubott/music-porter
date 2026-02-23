@@ -13,7 +13,7 @@ import os
 import platform
 import sys
 import threading
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 
@@ -345,6 +345,21 @@ def _format_size_for_renderer(bytes_size: int) -> str:
         return f"{bytes_size / (1024 * 1024 * 1024):.1f} GB"
 
 
+def _get_freshness(last_modified: datetime | None, today: date) -> tuple[str, str]:
+    """Return (icon, level_name) for a playlist's last_modified date."""
+    if not last_modified:
+        return ("❌", "outdated")
+    age_days = (today - last_modified.date()).days
+    if age_days <= FRESHNESS_CURRENT_DAYS:
+        return ("✅", "current")
+    elif age_days <= FRESHNESS_RECENT_DAYS:
+        return ("", "recent")
+    elif age_days <= FRESHNESS_STALE_DAYS:
+        return ("⚠️", "stale")
+    else:
+        return ("❌", "outdated")
+
+
 def render_library_summary(r: LibrarySummaryResult, mode: str = "default") -> None:
     """Render library summary. mode: 'quick', 'default', or 'detailed'."""
     # Render music library stats first if available
@@ -475,6 +490,19 @@ def _render_default_summary(r: LibrarySummaryResult) -> None:
         print("  Status:                  ℹ️  No files checked")
     print()
 
+    # Freshness
+    print("─" * 60)
+    print("  FRESHNESS")
+    print("─" * 60)
+    today = datetime.now().date()
+    counts = {"current": 0, "recent": 0, "stale": 0, "outdated": 0}
+    for p in r.playlist_summaries:
+        _, level = _get_freshness(p.last_modified, today)
+        counts[level] += 1
+    print(f"  Freshness:               {counts['current']} current, {counts['recent']} recent, "
+          f"{counts['stale']} stale, {counts['outdated']} outdated")
+    print()
+
     # Playlist breakdown
     print("─" * 60)
     print("  PLAYLIST BREAKDOWN")
@@ -513,12 +541,12 @@ def _render_playlist_table(playlists: list) -> None:
 
         size = _format_size_for_renderer(playlist.total_size_bytes)
 
+        icon, _ = _get_freshness(playlist.last_modified, today)
         if playlist.last_modified:
-            updated = playlist.last_modified.strftime("%b %d")
-            if playlist.last_modified.date() != today:
-                updated = f"⚠️{updated}"
+            date_str = playlist.last_modified.strftime("%b %d")
         else:
-            updated = "⚠️N/A"
+            date_str = "N/A"
+        updated = f"{icon} {date_str}" if icon else f"  {date_str}"
 
         print(f"  {name:<25} {files:>6}  {art:>9}  {size:>10}  {updated:<10}")
 

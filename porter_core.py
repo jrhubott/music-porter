@@ -45,7 +45,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.5.3"
+VERSION = "2.6.0"
 
 DEFAULT_MUSIC_DIR = "music"
 DEFAULT_EXPORT_DIR = "export"
@@ -78,6 +78,11 @@ QUALITY_PRESETS = {
     'low': {'mode': 'vbr', 'value': '6'},         # ~115-150kbps VBR
 }
 DEFAULT_QUALITY_PRESET = 'lossless'
+
+# Freshness thresholds for summary display (calendar days)
+FRESHNESS_CURRENT_DAYS = 0
+FRESHNESS_RECENT_DAYS = 7
+FRESHNESS_STALE_DAYS = 30
 
 # Worker pool defaults for parallel conversion
 MAX_DEFAULT_WORKERS = 6
