@@ -20,6 +20,7 @@
 | 7 | [Library Summary](#srs-7-library-summary) | 7.1–7.8 | Export library statistics with tag integrity checking, cover art analysis, and three output modes (quick/default/detailed) |
 | 8 | [Configuration](#srs-8-configuration) | 8.1–8.15 | YAML config system, output profiles, directory structures, filename formats, settings precedence, and CLI/Web parity |
 | 9 | [Configurable Output Profiles](#srs-9-configurable-output-profiles) | 9.1–9.14 | User-defined output profiles in config.yaml replacing hardcoded Python definitions, with validation and migration |
+| 14 | [Summary Freshness Levels](#srs-14-summary-freshness-levels) | 14.1–14.4 | Graduated freshness indicators (Current/Recent/Stale/Outdated) in summary playlist table with aggregate statistics |
 
 ### User Interfaces
 
@@ -1705,3 +1706,62 @@ The existing `ProgressBar` class (tqdm wrapper) is a CLI-specific concern that m
 | 13.7.6 | v2.4.0 | [x] | **Partial results on interruption:** If a batch operation (e.g., converting 50 files) is interrupted by error or cancellation after processing some files, the result object shall reflect the partial progress (e.g., `converted=23, errors=1, total_found=50`) rather than reporting zero |
 | 13.7.7 | v2.4.0 | [x] | **Handler hot-swap prevention:** Once a business logic class is constructed with a `UserPromptHandler` and `DisplayHandler`, those handlers shall not be changed during an operation. Handlers are set at construction time and remain fixed for the lifetime of that instance |
 | 13.7.8 | v2.4.0 | [x] | **Backward compatibility during migration:** While interfaces are being migrated incrementally, a `LegacyDisplayHandler` shall be available that reproduces the current `print()`-based behavior exactly, allowing classes to be migrated one at a time without changing visible output |
+
+---
+
+## Library & Configuration (continued)
+
+---
+
+### SRS 14: Summary Freshness Levels
+
+**Version:** 1.0  |  **Date:** 2026-02-23  |  **Status:** Complete  |  **Implemented in:** v2.6.0
+
+---
+
+#### Purpose
+
+Replace the binary today/not-today update check in the library summary playlist table with four graduated freshness levels, giving users clear visual indicators of which playlists need re-syncing.
+
+#### Freshness Levels
+
+| Level | Icon | Age Range | Meaning |
+|-------|------|-----------|---------|
+| Current | ✅ | Today (0 days) | Just updated |
+| Recent | (none) | 1–7 days | Still fresh |
+| Stale | ⚠️ | 8–30 days | Needs attention |
+| Outdated | ❌ | 31+ days | Needs re-sync |
+
+#### Requirements
+
+##### 14.1 Freshness Classification
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 14.1.1 | v2.6.0 | [x] | A helper function classifies a `last_modified` datetime into one of four levels: Current (0 days), Recent (1–7 days), Stale (8–30 days), Outdated (31+ days) |
+| 14.1.2 | v2.6.0 | [x] | The function returns both the icon string and the level name |
+| 14.1.3 | v2.6.0 | [x] | Age is calculated as calendar days between `last_modified.date()` and `today` |
+
+##### 14.2 Playlist Table Display
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 14.2.1 | v2.6.0 | [x] | The "Updated" column in `_render_playlist_table()` uses the freshness icon instead of the old binary ⚠️ check |
+| 14.2.2 | v2.6.0 | [x] | Format: `{icon} {MMM DD}` (e.g., `✅ Feb 23`, `⚠️ Feb 10`, `❌ Jan 05`) |
+| 14.2.3 | v2.6.0 | [x] | Recent level shows no icon — just the date (e.g., `  Feb 20`) |
+| 14.2.4 | v2.6.0 | [x] | Missing `last_modified` displays `❌ N/A` |
+
+##### 14.3 Aggregate Freshness Statistics
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 14.3.1 | v2.6.0 | [x] | Default and detailed summary modes display a freshness breakdown line showing counts per level |
+| 14.3.2 | v2.6.0 | [x] | Format: `Freshness: X current, X recent, X stale, X outdated` |
+| 14.3.3 | v2.6.0 | [x] | Quick mode does not display freshness breakdown |
+
+##### 14.4 Edge Cases
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 14.4.1 | v2.6.0 | [x] | Playlists with no files (empty directory) show `❌ N/A` |
+| 14.4.2 | v2.6.0 | [x] | The freshness thresholds are defined as named constants, not magic numbers |
