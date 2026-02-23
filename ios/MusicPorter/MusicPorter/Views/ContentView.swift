@@ -3,23 +3,19 @@ import SwiftUI
 /// Root view: shows connection flow or main app tabs.
 struct ContentView: View {
     @Environment(AppState.self) private var appState
-    @State private var isCheckingConnection = true
 
     var body: some View {
         Group {
-            if isCheckingConnection {
-                ProgressView("Connecting...")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(.systemBackground))
-            } else if appState.isConnected {
+            if appState.isConnected {
                 MainTabView()
             } else {
                 ServerDiscoveryView()
             }
         }
         .task {
-            let reconnected = await appState.attemptAutoReconnect()
-            isCheckingConnection = false
+            // Non-blocking: if reconnect succeeds, isConnected flips and
+            // the view auto-switches to MainTabView
+            await appState.attemptAutoReconnect()
         }
     }
 }

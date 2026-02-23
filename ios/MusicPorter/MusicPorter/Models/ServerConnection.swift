@@ -10,14 +10,18 @@ struct ServerConnection: Identifiable, Codable, Hashable {
     var platform: String?
 
     var baseURL: URL? {
-        // IPv6 addresses contain colons and must be bracketed in URLs
-        if host.contains(":") {
-            return URL(string: "http://[\(host)]:\(port)")
-        }
-        return URL(string: "http://\(host):\(port)")
+        var components = URLComponents()
+        components.scheme = "http"
+        components.host = host  // URLComponents handles IPv6 bracketing automatically
+        components.port = port
+        return components.url
     }
 
     func apiURL(path: String) -> URL? {
-        baseURL?.appendingPathComponent(path)
+        guard var components = baseURL.flatMap({ URLComponents(url: $0, resolvingAgainstBaseURL: false) }) else {
+            return nil
+        }
+        components.path = "/" + path
+        return components.url
     }
 }

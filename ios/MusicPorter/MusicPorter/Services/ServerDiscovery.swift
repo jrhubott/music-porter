@@ -90,10 +90,14 @@ final class ServerDiscovery {
         case .ipv4(let addr):
             hostStr = "\(addr)"
         case .ipv6(let addr):
-            // Skip link-local IPv6 — prefer IPv4
             let str = "\(addr)"
-            if str.hasPrefix("fe80") { return }
-            hostStr = str
+            // IPv4-mapped IPv6 (::ffff:192.168.1.x) — extract the real IPv4
+            if str.hasPrefix("::ffff:") {
+                hostStr = String(str.dropFirst(7))
+            } else {
+                // Skip all other IPv6 addresses (link-local, ULA, etc.)
+                return
+            }
         case .name(let hostname, _):
             hostStr = hostname
         @unknown default:
