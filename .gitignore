@@ -8,3 +8,6 @@ music/
 .DS_Store
 cookies.txt.backup
 .ruff_cache/
+.venv/
+test_m4a_input/
+test_mp3_output/

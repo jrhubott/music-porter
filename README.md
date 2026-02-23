@@ -231,9 +231,7 @@ MP3 conversion supports configurable quality presets to balance file size and au
 
 - **[User Guide](MUSIC-PORTER-GUIDE.md)** - Complete usage guide with detailed examples
 - **[Cookie Management Guide](COOKIE-MANAGEMENT-GUIDE.md)** - Cookie validation, auto-refresh, and troubleshooting
-- **[Quick Reference](QUICK-REFERENCE.md)** - Command cheat sheet for quick lookup
 - **[Architecture](CLAUDE.md)** - Developer guide and AI assistant context
-- **[Technical Details](IMPLEMENTATION-SUMMARY.md)** - Implementation architecture and design decisions
 
 ## Configuration
 
