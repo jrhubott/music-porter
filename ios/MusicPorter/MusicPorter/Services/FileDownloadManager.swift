@@ -1,24 +1,23 @@
 import Foundation
 import Observation
 
+/// Progress state for a batch download operation.
+struct DownloadProgress {
+    var completed: Int
+    var total: Int
+    var currentFile: String
+
+    var fraction: Double {
+        total > 0 ? Double(completed) / Double(total) : 0
+    }
+}
+
 /// Manages downloading MP3 files from the server to the device.
 @MainActor @Observable
-final class FileDownloadManager: NSObject {
-    var downloads: [String: DownloadState] = [:]  // keyed by filename
-    var downloadedFiles: [URL] = []
+final class FileDownloadManager {
+    var downloadProgress: DownloadProgress?
 
     @ObservationIgnored private var apiClient: APIClient?
-    @ObservationIgnored private var _downloadSession: URLSession?
-    @ObservationIgnored private var completionHandlers: [String: (URL?, Error?) -> Void] = [:]
-
-    private var downloadSession: URLSession {
-        if let session = _downloadSession { return session }
-        let config = URLSessionConfiguration.background(withIdentifier: "com.musicporter.downloads")
-        config.isDiscretionary = false
-        let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
-        _downloadSession = session
-        return session
-    }
 
     func configure(apiClient: APIClient) {
         self.apiClient = apiClient
@@ -35,7 +34,6 @@ final class FileDownloadManager: NSObject {
         try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
         let destFile = destDir.appendingPathComponent(filename)
 
-        // Use regular download (not background) for simplicity
         let (tempURL, _) = try await URLSession.shared.download(for: request)
 
         if FileManager.default.fileExists(atPath: destFile.path) {
@@ -43,29 +41,65 @@ final class FileDownloadManager: NSObject {
         }
         try FileManager.default.moveItem(at: tempURL, to: destFile)
 
-        self.downloads[filename] = .completed(destFile)
         return destFile
     }
 
-    /// Download all files in a playlist as a ZIP.
-    func downloadAll(playlist: String) async throws -> URL {
-        guard let apiClient, let url = apiClient.downloadAllURL(playlist: playlist) else {
+    /// Download all files in a playlist individually, skipping files that already exist locally.
+    func downloadAll(playlist: String) async throws {
+        guard let apiClient else {
             throw FileDownloadError.notConfigured
         }
 
-        let request = apiClient.authenticatedRequest(for: url)
+        let response = try await apiClient.getFiles(playlist: playlist)
+        let tracks = response.files
+
+        // Determine which files already exist locally
+        let existingFiles = Set(localFiles(playlist: playlist).map { $0.lastPathComponent })
+        let toDownload = tracks.filter { !existingFiles.contains($0.filename) }
+
+        let total = toDownload.count
+        guard total > 0 else { return }
+
+        downloadProgress = DownloadProgress(completed: 0, total: total, currentFile: "")
+
         let destDir = getPlaylistDirectory(playlist: playlist)
         try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
-        let destFile = destDir.appendingPathComponent("\(playlist).zip")
 
-        let (tempURL, _) = try await URLSession.shared.download(for: request)
+        for (index, track) in toDownload.enumerated() {
+            downloadProgress = DownloadProgress(
+                completed: index, total: total, currentFile: track.filename)
 
-        if FileManager.default.fileExists(atPath: destFile.path) {
-            try FileManager.default.removeItem(at: destFile)
+            guard let url = apiClient.fileDownloadURL(playlist: playlist, filename: track.filename) else {
+                continue
+            }
+
+            let request = apiClient.authenticatedRequest(for: url)
+
+            do {
+                let (tempURL, response) = try await URLSession.shared.download(for: request)
+
+                // Check for successful HTTP status
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
+                    continue
+                }
+
+                let destFile = destDir.appendingPathComponent(track.filename)
+                if FileManager.default.fileExists(atPath: destFile.path) {
+                    try FileManager.default.removeItem(at: destFile)
+                }
+                try FileManager.default.moveItem(at: tempURL, to: destFile)
+            } catch {
+                // Skip failed files and continue with the rest
+                continue
+            }
         }
-        try FileManager.default.moveItem(at: tempURL, to: destFile)
 
-        return destFile
+        downloadProgress = DownloadProgress(completed: total, total: total, currentFile: "")
+    }
+
+    /// Clear download progress (call after download completes).
+    func clearProgress() {
+        downloadProgress = nil
     }
 
     /// Get the local directory for a playlist's downloads.
@@ -106,32 +140,6 @@ final class FileDownloadManager: NSObject {
         }
         return total
     }
-}
-
-extension FileDownloadManager: URLSessionDownloadDelegate {
-    nonisolated func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
-                                didFinishDownloadingTo location: URL) {
-        // Background download completion handled here
-    }
-
-    nonisolated func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
-                                didWriteData bytesWritten: Int64, totalBytesWritten: Int64,
-                                totalBytesExpectedToWrite: Int64) {
-        guard let url = downloadTask.originalRequest?.url else { return }
-        let filename = url.lastPathComponent
-        let progress = totalBytesExpectedToWrite > 0
-            ? Double(totalBytesWritten) / Double(totalBytesExpectedToWrite) : 0
-        Task { @MainActor in
-            self.downloads[filename] = .downloading(progress)
-        }
-    }
-}
-
-enum DownloadState {
-    case pending
-    case downloading(Double)
-    case completed(URL)
-    case failed(Error)
 }
 
 enum FileDownloadError: LocalizedError {
