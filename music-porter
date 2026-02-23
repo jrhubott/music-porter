@@ -1665,9 +1665,17 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
 
 def main():
     """Main entry point."""
+    temp_logger = Logger(verbose=False)
+
+    # Ensure Python packages (especially PyYAML) are installed before config loading.
+    # If missing, installs from requirements.txt and re-execs — code below won't run.
+    bootstrap_deps = DependencyChecker(temp_logger)
+    if not bootstrap_deps.check_python_packages():
+        temp_logger.error("Failed to install required Python packages")
+        sys.exit(1)
+
     # Load config and output profiles BEFORE argparse so --output-type choices
     # reflect config-defined profiles (including user-added ones).
-    temp_logger = Logger(verbose=False)
     try:
         config = ConfigManager(logger=temp_logger)
         load_output_profiles(config)
