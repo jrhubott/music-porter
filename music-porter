@@ -1034,7 +1034,7 @@ class InteractiveMenu:
                                             output_profile=self.output_profile,
                                             prompt_handler=self.prompt_handler)
 
-        success = orchestrator.run_full_pipeline(
+        result = orchestrator.run_full_pipeline(
             playlist=str(index + 1),
             auto=False,
             copy_to_usb=False,
@@ -1043,13 +1043,13 @@ class InteractiveMenu:
         )
 
         # Ask about USB copy
-        if success and not dry_run:
+        if result.success and not dry_run:
             self._ask_copy_to_usb(
                 get_export_dir(self.output_profile.name, playlist.key),
                 dry_run
             )
 
-        return success
+        return result.success
 
     def _handle_all_playlists(self, dry_run, verbose):
         """Handle 'All playlists' selection."""
@@ -1073,7 +1073,7 @@ class InteractiveMenu:
             orchestrator = PipelineOrchestrator(self.logger, self.deps, self.config, workers=self.workers,
                                                 output_profile=self.output_profile,
                                                 prompt_handler=self.prompt_handler)
-            success = orchestrator.run_full_pipeline(
+            result = orchestrator.run_full_pipeline(
                 playlist=str(i + 1),
                 auto=True,
                 copy_to_usb=False,
@@ -1084,7 +1084,7 @@ class InteractiveMenu:
             # Collect statistics from this run
             aggregate_stats.add_playlist_result(orchestrator.stats)
 
-            if not success:
+            if not result.success:
                 self.logger.error(f"Failed to process {playlist.name}")
 
         # Ask about USB copy after all playlists
@@ -1117,7 +1117,7 @@ class InteractiveMenu:
             orchestrator = PipelineOrchestrator(self.logger, self.deps, self.config, workers=self.workers,
                                                 output_profile=self.output_profile,
                                                 prompt_handler=self.prompt_handler)
-            success = orchestrator.run_full_pipeline(
+            result = orchestrator.run_full_pipeline(
                 url=url,
                 auto=False,
                 copy_to_usb=False,
@@ -1126,13 +1126,13 @@ class InteractiveMenu:
             )
 
             # Ask about USB copy
-            if success and not dry_run:
+            if result.success and not dry_run:
                 self._ask_copy_to_usb(
                     get_export_dir(self.output_profile.name, orchestrator.stats.playlist_key),
                     dry_run
                 )
 
-            return success
+            return result.success
 
         except KeyboardInterrupt:
             print("\n\nCancelled by user")
@@ -1143,19 +1143,19 @@ class InteractiveMenu:
         self.logger.info("Copying existing files to USB...")
 
         usb_manager = USBManager(self.logger, prompt_handler=self.prompt_handler)
-        success, _ = usb_manager.sync_to_usb(
+        usb_result = usb_manager.sync_to_usb(
             get_export_dir(self.output_profile.name),
             usb_dir=DEFAULT_USB_DIR,
             dry_run=dry_run
         )
-        return success
+        return usb_result.success
 
     def _handle_summary(self, dry_run):
         """Handle 'Show library summary' selection."""
         self.logger.info("Displaying library summary...")
 
         summary_manager = SummaryManager(self.logger)
-        success = summary_manager.generate_summary(
+        summary_result = summary_manager.generate_summary(
             export_dir=get_export_dir(self.output_profile.name),
             detailed=False,
             quick=False,
@@ -1165,14 +1165,14 @@ class InteractiveMenu:
         )
 
         # Pause for user to review before returning to menu
-        if success:
+        if summary_result.success:
             try:
                 input("\nPress Enter to continue...")
             except KeyboardInterrupt:
                 print()
                 pass
 
-        return success
+        return summary_result.success
 
     def _handle_resize_cover_art(self, dry_run, verbose):
         """Handle 'Resize all cover art' selection."""
@@ -1218,8 +1218,8 @@ class InteractiveMenu:
                 self.logger.info(f"\n{'─' * 60}")
                 self.logger.info(f"  Stripping: {d}")
                 self.logger.info(f"{'─' * 60}")
-                ok = cam.strip(d, dry_run=dry_run, verbose=verbose)
-                if not ok:
+                strip_result = cam.strip(d, dry_run=dry_run, verbose=verbose)
+                if not strip_result.success:
                     all_success = False
         else:
             self.logger.info(f"Resizing cover art to max {max_size}px across {len(existing)} playlist(s)...")
@@ -1227,8 +1227,8 @@ class InteractiveMenu:
                 self.logger.info(f"\n{'─' * 60}")
                 self.logger.info(f"  Resizing: {d}")
                 self.logger.info(f"{'─' * 60}")
-                ok = cam.resize(d, max_size, dry_run=dry_run, verbose=verbose)
-                if not ok:
+                resize_result = cam.resize(d, max_size, dry_run=dry_run, verbose=verbose)
+                if not resize_result.success:
                     all_success = False
 
         try:
@@ -1312,7 +1312,7 @@ class InteractiveMenu:
             response = input("\nCopy files to USB? [y/N] ").strip().lower()
             if response == 'y':
                 usb_manager = USBManager(self.logger, prompt_handler=self.prompt_handler)
-                success, _ = usb_manager.sync_to_usb(
+                usb_manager.sync_to_usb(
                     source_dir,
                     usb_dir=DEFAULT_USB_DIR,
                     dry_run=dry_run
@@ -1781,14 +1781,14 @@ def main():
         quality_preset = resolve_quality_preset(args, logger, output_profile)
         converter = Converter(logger, quality_preset=quality_preset, workers=workers,
                               embed_cover_art=embed_cover_art, output_profile=output_profile)
-        success = converter.convert(
+        result = converter.convert(
             args.input_dir,
             output_dir,
             force=args.force,
             dry_run=args.dry_run,
             verbose=args.verbose
         )
-        sys.exit(0 if success else 1)
+        sys.exit(0 if result.success else 1)
 
     elif args.command == 'tag':
         # Update tags on existing MP3s
@@ -1797,14 +1797,14 @@ def main():
             sys.exit(1)
 
         tagger = TaggerManager(logger, output_profile=output_profile)
-        success = tagger.update_tags(
+        result = tagger.update_tags(
             args.directory,
             new_album=args.album,
             new_artist=args.artist,
             dry_run=args.dry_run,
             verbose=args.verbose
         )
-        sys.exit(0 if success else 1)
+        sys.exit(0 if result.success else 1)
 
     elif args.command == 'restore':
         # Restore original tags from TXXX frames
@@ -1813,7 +1813,7 @@ def main():
             sys.exit(1)
 
         tagger = TaggerManager(logger, output_profile=output_profile)
-        success = tagger.restore_tags(
+        result = tagger.restore_tags(
             args.directory,
             restore_album=args.all or args.album,
             restore_title=args.all or args.title,
@@ -1821,7 +1821,7 @@ def main():
             dry_run=args.dry_run,
             verbose=args.verbose
         )
-        sys.exit(0 if success else 1)
+        sys.exit(0 if result.success else 1)
 
     elif args.command == 'reset':
         # Reset tags from source M4A files
@@ -1831,13 +1831,13 @@ def main():
 
         tagger = TaggerManager(logger, output_profile=output_profile,
                                prompt_handler=cli_prompt)
-        success = tagger.reset_tags_from_source(
+        result = tagger.reset_tags_from_source(
             args.input_dir,
             args.output_dir,
             dry_run=args.dry_run,
             verbose=args.verbose
         )
-        sys.exit(0 if success else 1)
+        sys.exit(0 if result.success else 1)
 
     elif args.command == 'download':
         # Download from Apple Music
@@ -1862,7 +1862,7 @@ def main():
                 sys.exit(1)
 
             output_dir = args.output or f"{DEFAULT_MUSIC_DIR}/{playlist.key}"
-            success, _, _, _ = downloader.download(
+            result = downloader.download(
                 playlist.url,
                 output_dir,
                 key=playlist.key,
@@ -1871,12 +1871,12 @@ def main():
                 validate_cookies=not args.skip_cookie_validation,
                 auto_refresh=args.auto_refresh_cookies
             )
-            sys.exit(0 if success else 1)
+            sys.exit(0 if result.success else 1)
 
         elif args.url:
             key, album_name = downloader.extract_url_info(args.url)
             output_dir = args.output or f"{DEFAULT_MUSIC_DIR}/{key}"
-            success, _, _, _ = downloader.download(
+            result = downloader.download(
                 args.url,
                 output_dir,
                 key=key,
@@ -1885,7 +1885,7 @@ def main():
                 validate_cookies=not args.skip_cookie_validation,
                 auto_refresh=args.auto_refresh_cookies
             )
-            sys.exit(0 if success else 1)
+            sys.exit(0 if result.success else 1)
 
         else:
             logger.error("Either --playlist or --url must be specified")
@@ -1895,12 +1895,12 @@ def main():
         # Copy files to USB drive
         source_dir = args.source_dir or get_export_dir(output_profile.name)
         usb_manager = USBManager(logger, prompt_handler=cli_prompt)
-        success, _ = usb_manager.sync_to_usb(
+        result = usb_manager.sync_to_usb(
             source_dir,
             usb_dir=usb_dir,
             dry_run=args.dry_run
         )
-        sys.exit(0 if success else 1)
+        sys.exit(0 if result.success else 1)
 
     elif args.command == 'summary':
         # Display library stats and playlist summary
@@ -1916,7 +1916,7 @@ def main():
             sys.exit(1)
 
         export_dir = args.export_dir or get_export_dir(output_profile.name)
-        success = summary_manager.generate_summary(
+        result = summary_manager.generate_summary(
             export_dir=export_dir,
             detailed=args.detailed,
             quick=args.quick,
@@ -1925,7 +1925,7 @@ def main():
             export_profile=output_profile.name,
             no_library=args.no_library,
         )
-        sys.exit(0 if success else 1)
+        sys.exit(0 if result.success else 1)
 
     elif args.command == 'cover-art':
         # Cover art management
@@ -1960,42 +1960,46 @@ def main():
                     logger.info(f"\n{'─' * 60}")
                     logger.info(f"  Embedding: {d}")
                     logger.info(f"{'─' * 60}")
-                    ok = cam.embed(d, force=getattr(args, 'force', False),
-                                   dry_run=args.dry_run, verbose=args.verbose)
-                    if not ok:
+                    embed_result = cam.embed(d, force=getattr(args, 'force', False),
+                                             dry_run=args.dry_run, verbose=args.verbose)
+                    if not embed_result.success:
                         all_success = False
                 success = all_success
             elif args.directory:
-                success = cam.embed(
+                result = cam.embed(
                     args.directory,
                     source_dir=args.source,
                     force=args.force,
                     dry_run=args.dry_run,
                     verbose=args.verbose
                 )
+                success = result.success
             else:
                 logger.error("Specify a directory or use --all")
                 sys.exit(1)
         elif args.cover_art_action == 'extract':
-            success = cam.extract(
+            result = cam.extract(
                 args.directory,
                 output_dir=args.output,
                 dry_run=args.dry_run,
                 verbose=args.verbose
             )
+            success = result.success
         elif args.cover_art_action == 'update':
-            success = cam.update(
+            result = cam.update(
                 args.directory,
                 args.image,
                 dry_run=args.dry_run,
                 verbose=args.verbose
             )
+            success = result.success
         elif args.cover_art_action == 'strip':
-            success = cam.strip(
+            result = cam.strip(
                 args.directory,
                 dry_run=args.dry_run,
                 verbose=args.verbose
             )
+            success = result.success
         elif args.cover_art_action == 'resize':
             if getattr(args, 'all_playlists', False) and args.directory:
                 logger.error("Cannot specify both a directory and --all")
@@ -2021,18 +2025,19 @@ def main():
                     logger.info(f"\n{'─' * 60}")
                     logger.info(f"  Resizing: {d}")
                     logger.info(f"{'─' * 60}")
-                    ok = cam.resize(d, args.max_size,
-                                    dry_run=args.dry_run, verbose=args.verbose)
-                    if not ok:
+                    resize_result = cam.resize(d, args.max_size,
+                                               dry_run=args.dry_run, verbose=args.verbose)
+                    if not resize_result.success:
                         all_success = False
                 success = all_success
             elif args.directory:
-                success = cam.resize(
+                result = cam.resize(
                     args.directory,
                     args.max_size,
                     dry_run=args.dry_run,
                     verbose=args.verbose
                 )
+                success = result.success
             else:
                 logger.error("Specify a directory or use --all")
                 sys.exit(1)
@@ -2072,7 +2077,7 @@ def main():
                 logger.info(f"Processing playlist {i+1}/{len(config.playlists)}: {playlist.name}")
                 logger.info(f"{'=' * 70}")
 
-                success = orchestrator.run_full_pipeline(
+                pipeline_result = orchestrator.run_full_pipeline(
                     playlist=str(i + 1),
                     auto=True,
                     copy_to_usb=args.copy_to_usb,
@@ -2095,7 +2100,7 @@ def main():
 
         elif args.playlist or args.url:
             # Process specific playlist or URL
-            success = orchestrator.run_full_pipeline(
+            pipeline_result = orchestrator.run_full_pipeline(
                 playlist=args.playlist,
                 url=args.url,
                 auto=False,
@@ -2107,7 +2112,7 @@ def main():
                 validate_cookies=not args.skip_cookie_validation,
                 auto_refresh_cookies=args.auto_refresh_cookies
             )
-            sys.exit(0 if success else 1)
+            sys.exit(0 if pipeline_result.success else 1)
 
         else:
             logger.error("For pipeline command, specify --playlist, --url, or --auto")

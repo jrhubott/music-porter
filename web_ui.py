@@ -624,13 +624,13 @@ def create_app(project_root=None):
                     aggregate.add_playlist_result(orchestrator.stats)
                 return {'success': True, 'playlists': len(config.playlists)}
             else:
-                success = orchestrator.run_full_pipeline(
+                pipeline_result = orchestrator.run_full_pipeline(
                     playlist=playlist_key, url=url, auto=False,
                     copy_to_usb=copy_to_usb, usb_dir=usb_dir,
                     dry_run=dry_run, verbose=verbose,
                     quality_preset=quality_preset,
                 )
-                return {'success': success}
+                return {'success': pipeline_result.success}
 
         task_id = task_manager.submit('pipeline', desc, _run)
         if task_id is None:
@@ -681,9 +681,9 @@ def create_app(project_root=None):
                 logger, quality_preset=preset, workers=workers,
                 embed_cover_art=not no_cover_art, output_profile=profile,
             )
-            success = converter.convert(safe_input, out, force=force,
-                                        dry_run=dry_run, verbose=verbose)
-            return {'success': success}
+            convert_result = converter.convert(safe_input, out, force=force,
+                                               dry_run=dry_run, verbose=verbose)
+            return {'success': convert_result.success}
 
         task_id = task_manager.submit('convert', desc, _run)
         if task_id is None:
@@ -715,9 +715,9 @@ def create_app(project_root=None):
             config = mp.ConfigManager(logger=logger)
             profile = _get_output_profile(config)
             tagger = mp.TaggerManager(logger, output_profile=profile)
-            success = tagger.update_tags(safe, new_album=album, new_artist=artist,
-                                         dry_run=dry_run, verbose=verbose)
-            return {'success': success}
+            tag_result = tagger.update_tags(safe, new_album=album, new_artist=artist,
+                                            dry_run=dry_run, verbose=verbose)
+            return {'success': tag_result.success}
 
         task_id = task_manager.submit('tag_update', desc, _run)
         if task_id is None:
@@ -749,14 +749,14 @@ def create_app(project_root=None):
             config = mp.ConfigManager(logger=logger)
             profile = _get_output_profile(config)
             tagger = mp.TaggerManager(logger, output_profile=profile)
-            success = tagger.restore_tags(
+            restore_result = tagger.restore_tags(
                 safe,
                 restore_album=restore_all or restore_album,
                 restore_title=restore_all or restore_title,
                 restore_artist=restore_all or restore_artist,
                 dry_run=dry_run, verbose=verbose,
             )
-            return {'success': success}
+            return {'success': restore_result.success}
 
         task_id = task_manager.submit('tag_restore', desc, _run)
         if task_id is None:
@@ -827,10 +827,12 @@ def create_app(project_root=None):
                 force = data.get('force', False)
                 if source:
                     source = _safe_dir(project_root / source)
-                return {'success': cam.embed(safe, source_dir=source, force=force,
-                                             dry_run=dry_run, verbose=verbose)}
+                r = cam.embed(safe, source_dir=source, force=force,
+                              dry_run=dry_run, verbose=verbose)
+                return {'success': r.success}
             elif action == 'extract':
-                return {'success': cam.extract(safe, dry_run=dry_run, verbose=verbose)}
+                r = cam.extract(safe, dry_run=dry_run, verbose=verbose)
+                return {'success': r.success}
             elif action == 'update':
                 image = data.get('image', '')
                 if not image:
@@ -838,14 +840,17 @@ def create_app(project_root=None):
                 safe_img = _safe_dir(project_root / image)
                 if not safe_img:
                     return {'success': False, 'error': 'invalid image path'}
-                return {'success': cam.update(safe, safe_img,
-                                              dry_run=dry_run, verbose=verbose)}
+                r = cam.update(safe, safe_img,
+                               dry_run=dry_run, verbose=verbose)
+                return {'success': r.success}
             elif action == 'strip':
-                return {'success': cam.strip(safe, dry_run=dry_run, verbose=verbose)}
+                r = cam.strip(safe, dry_run=dry_run, verbose=verbose)
+                return {'success': r.success}
             elif action == 'resize':
                 max_size = data.get('max_size', 100)
-                return {'success': cam.resize(safe, max_size,
-                                              dry_run=dry_run, verbose=verbose)}
+                r = cam.resize(safe, max_size,
+                               dry_run=dry_run, verbose=verbose)
+                return {'success': r.success}
 
         task_id = task_manager.submit(f'cover_art_{action}', desc, _run)
         if task_id is None:
@@ -877,15 +882,15 @@ def create_app(project_root=None):
         def _run(task_id):
             logger = _make_logger(task_id, verbose=verbose)
             usb_mgr = mp.USBManager(logger)
-            success, stats = usb_mgr.sync_to_usb(
+            usb_result = usb_mgr.sync_to_usb(
                 source_dir, usb_dir=usb_dir, dry_run=dry_run, volume=volume,
             )
             return {
-                'success': success,
-                'files_found': stats.files_found,
-                'files_copied': stats.files_copied,
-                'files_skipped': stats.files_skipped,
-                'files_failed': stats.files_failed,
+                'success': usb_result.success,
+                'files_found': usb_result.files_found,
+                'files_copied': usb_result.files_copied,
+                'files_skipped': usb_result.files_skipped,
+                'files_failed': usb_result.files_failed,
             }
 
         task_id = task_manager.submit('usb_sync', desc, _run)

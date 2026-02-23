@@ -1448,13 +1448,17 @@ class TaggerManager:
         directory = Path(directory)
         if not directory.is_dir():
             self.logger.error(f"Directory not found: {directory}")
-            return False
+            return TagUpdateResult(success=False, directory=str(directory),
+                                   duration=0, files_processed=0, files_updated=0,
+                                   files_skipped=0, errors=1)
 
         mp3_files = list(directory.rglob("*.mp3"))
 
         if not mp3_files:
             self.logger.info(f"No MP3 files found in '{directory}'")
-            return True
+            return TagUpdateResult(success=True, directory=str(directory),
+                                   duration=0, files_processed=0, files_updated=0,
+                                   files_skipped=0, errors=0)
 
         self.logger.info(f"Found {len(mp3_files)} MP3 file(s)")
         self.logger.info(f"New Album:  {new_album or '—'}")
@@ -1574,7 +1578,21 @@ class TaggerManager:
 
         duration = time.time() - start_time
         self._print_update_summary(directory, duration, updated, skipped, errors)
-        return errors == 0
+        return TagUpdateResult(
+            success=errors == 0,
+            directory=str(directory),
+            duration=duration,
+            files_processed=updated + skipped,
+            files_updated=updated,
+            files_skipped=skipped,
+            errors=errors,
+            title_updated=self.stats.title_updated,
+            album_updated=self.stats.album_updated,
+            artist_updated=self.stats.artist_updated,
+            title_stored=self.stats.title_stored,
+            artist_stored=self.stats.artist_stored,
+            album_stored=self.stats.album_stored,
+        )
 
     def _print_update_summary(self, directory, duration, updated, skipped, errors):
         """Print formatted summary after tag updates."""
@@ -1627,13 +1645,17 @@ class TaggerManager:
         directory = Path(directory)
         if not directory.is_dir():
             self.logger.error(f"Directory not found: {directory}")
-            return False
+            return TagRestoreResult(success=False, directory=str(directory),
+                                    duration=0, files_processed=0, files_restored=0,
+                                    files_skipped=0, errors=1)
 
         mp3_files = list(directory.rglob("*.mp3"))
 
         if not mp3_files:
             self.logger.info(f"No MP3 files found in '{directory}'")
-            return True
+            return TagRestoreResult(success=True, directory=str(directory),
+                                    duration=0, files_processed=0, files_restored=0,
+                                    files_skipped=0, errors=0)
 
         self.logger.info(f"Found {len(mp3_files)} MP3 file(s)")
         self.logger.info(f"Restoring Album:  {restore_album}")
@@ -1762,7 +1784,18 @@ class TaggerManager:
 
         duration = time.time() - start_time
         self._print_restore_summary(directory, duration, restored, skipped, errors)
-        return errors == 0
+        return TagRestoreResult(
+            success=errors == 0,
+            directory=str(directory),
+            duration=duration,
+            files_processed=restored + skipped,
+            files_restored=restored,
+            files_skipped=skipped,
+            errors=errors,
+            title_restored=self.stats.title_restored,
+            artist_restored=self.stats.artist_restored,
+            album_restored=self.stats.album_restored,
+        )
 
     def _print_restore_summary(self, directory, duration, restored, skipped, errors):
         """Print formatted summary after tag restoration."""
@@ -1814,11 +1847,15 @@ class TaggerManager:
 
         if not input_path.is_dir():
             self.logger.error(f"Input directory not found: {input_path}")
-            return False
+            return TagResetResult(success=False, input_dir=str(input_path),
+                                  output_dir=str(output_path), duration=0,
+                                  files_matched=0, files_reset=0, files_skipped=0, errors=1)
 
         if not output_path.is_dir():
             self.logger.error(f"Output directory not found: {output_path}")
-            return False
+            return TagResetResult(success=False, input_dir=str(input_path),
+                                  output_dir=str(output_path), duration=0,
+                                  files_matched=0, files_reset=0, files_skipped=0, errors=1)
 
         # Find all M4A files
         m4a_files = [
@@ -1828,7 +1865,9 @@ class TaggerManager:
 
         if not m4a_files:
             self.logger.info(f"No .m4a files found in '{input_path}'")
-            return True
+            return TagResetResult(success=True, input_dir=str(input_path),
+                                  output_dir=str(output_path), duration=0,
+                                  files_matched=0, files_reset=0, files_skipped=0, errors=0)
 
         total = len(m4a_files)
         count = 0
@@ -1847,7 +1886,9 @@ class TaggerManager:
                    f"This cannot be undone.")
             if not self.prompt_handler.confirm_destructive(msg):
                 self.logger.info("Cancelled. No files were modified.")
-                return False
+                return TagResetResult(success=False, input_dir=str(input_path),
+                                      output_dir=str(output_path), duration=0,
+                                      files_matched=0, files_reset=0, files_skipped=0, errors=0)
 
         for input_file in m4a_files:
             count += 1
@@ -1978,7 +2019,18 @@ class TaggerManager:
             print(f"  Status:                  ✅ Completed successfully")
         print(f"{'=' * 60}")
 
-        return errors == 0
+        return TagResetResult(
+            success=errors == 0,
+            input_dir=str(input_dir),
+            output_dir=str(output_dir),
+            duration=duration,
+            files_matched=total,
+            files_reset=updated,
+            files_skipped=skipped,
+            errors=errors,
+            tags_reset=tags_reset,
+            tags_rewritten=updated * 3,
+        )
 
     def _sanitize_filename(self, name):
         """Remove invalid filename characters."""
@@ -2252,7 +2304,13 @@ class Converter:
 
         if input_path.resolve() == output_path.resolve():
             self.logger.error("Input and output directories cannot be the same")
-            return False
+            return ConversionResult(
+                success=False, input_dir=str(input_dir), output_dir=str(output_dir),
+                duration=0, quality_preset=self.quality_preset,
+                quality_mode=self.quality_settings['mode'],
+                quality_value=self.quality_settings['value'],
+                workers=self.workers, total_found=0, converted=0,
+                overwritten=0, skipped=0, errors=1)
 
         # Find all M4A files recursively
         m4a_files = [
@@ -2262,7 +2320,13 @@ class Converter:
 
         if not m4a_files:
             self.logger.info(f"No .m4a files found in '{input_dir}'")
-            return True
+            return ConversionResult(
+                success=True, input_dir=str(input_dir), output_dir=str(output_dir),
+                duration=0, quality_preset=self.quality_preset,
+                quality_mode=self.quality_settings['mode'],
+                quality_value=self.quality_settings['value'],
+                workers=self.workers, total_found=0, converted=0,
+                overwritten=0, skipped=0, errors=0)
 
         self.stats.total_found = len(m4a_files)
         self.logger.info(f"Found {self.stats.total_found} .m4a file(s) (recursive)")
@@ -2317,7 +2381,21 @@ class Converter:
         duration = time.time() - start_time
         self._print_summary(input_dir, output_dir, duration)
 
-        return self.stats.errors == 0
+        return ConversionResult(
+            success=self.stats.errors == 0,
+            input_dir=str(input_dir),
+            output_dir=str(output_dir),
+            duration=duration,
+            quality_preset=self.quality_preset,
+            quality_mode=self.quality_settings['mode'],
+            quality_value=self.quality_settings['value'],
+            workers=self.workers,
+            total_found=self.stats.total_found,
+            converted=self.stats.converted,
+            overwritten=self.stats.overwritten,
+            skipped=self.stats.skipped,
+            errors=self.stats.errors,
+        )
 
     def _print_summary(self, input_dir, output_dir, duration):
         """Print conversion summary statistics."""
@@ -2432,7 +2510,7 @@ class Downloader:
                  validate_cookies=True, auto_refresh=False):
         """
         Download playlist from Apple Music using gamdl.
-        Returns (success, key, album_name, download_stats)
+        Returns DownloadResult.
         """
         import re
 
@@ -2441,11 +2519,12 @@ class Downloader:
             key, album_name = self.extract_url_info(url)
             if not key:
                 self.logger.error(f"Could not extract playlist info from URL: {url}")
-                return False, None, None, None
+                return DownloadResult(success=False, key=None, album_name=None, duration=0)
         else:
             _, album_name = self.extract_url_info(url)
 
         output_path = Path(output_dir)
+        start_time = time.time()
 
         self.logger.info(f"Downloading playlist: {key}")
         self.logger.info(f"  Album name: {album_name}")
@@ -2470,11 +2549,11 @@ class Downloader:
                         else:
                             self.logger.error("Cookies still invalid after refresh")
                             self.cookie_manager.show_manual_instructions()
-                            return False, None, None, None
+                            return DownloadResult(success=False, key=key, album_name=album_name, duration=0)
                     else:
                         self.logger.error("Automatic cookie refresh failed")
                         self.cookie_manager.show_manual_instructions()
-                        return False, None, None, None
+                        return DownloadResult(success=False, key=key, album_name=album_name, duration=0)
                 else:
                     self.cookie_manager.show_manual_instructions()
 
@@ -2489,37 +2568,33 @@ class Downloader:
                                     self.logger.ok("Cookie refresh successful, continuing with download")
                                 else:
                                     self.logger.error("Cookies still invalid after refresh")
-                                    return False, None, None, None
+                                    return DownloadResult(success=False, key=key, album_name=album_name, duration=0)
                             else:
                                 self.logger.error("Automatic cookie refresh failed")
                                 # Ask if they want to continue anyway
                                 if not self.prompt_handler.confirm("Continue without valid cookies?", default=False):
                                     self.logger.info("Aborted")
-                                    return False, None, None, None
+                                    return DownloadResult(success=False, key=key, album_name=album_name, duration=0)
                         else:
                             # User declined auto-refresh, ask if they want to continue
                             if not self.prompt_handler.confirm("Continue without valid cookies?", default=False):
                                 self.logger.info("Aborted")
-                                return False, None, None, None
+                                return DownloadResult(success=False, key=key, album_name=album_name, duration=0)
                     else:
                         # In auto/non-interactive mode, fail immediately
                         self.logger.error("Cannot continue without valid cookies")
-                        return False, None, None, None
+                        return DownloadResult(success=False, key=key, album_name=album_name, duration=0)
 
         # Confirmation prompt (unless auto mode)
         if confirm:
             if not self.prompt_handler.confirm(f"Download {key}?", default=False):
                 self.logger.info(f"Skipping download for {key}")
-                return False, key, album_name, None
+                return DownloadResult(success=False, key=key, album_name=album_name, duration=0)
 
         if dry_run:
             self.logger.dry_run(f"Would download: {url}")
             self.logger.dry_run(f"  → Output: {output_path}")
-            stats = DownloadStatistics()
-            stats.playlist_total = 0
-            stats.downloaded = 0
-            stats.skipped = 0
-            return True, key, album_name, stats
+            return DownloadResult(success=True, key=key, album_name=album_name, duration=0)
 
         # Create output directory
         output_path.mkdir(parents=True, exist_ok=True)
@@ -2633,16 +2708,30 @@ class Downloader:
             stats.downloaded = files_after - files_before  # New files
             stats.skipped = files_before  # Existing files
 
+            duration = time.time() - start_time
             if process.returncode == 0:
                 self.logger.ok(f"Download complete: {key}")
-                return True, key, album_name, stats
+                return DownloadResult(
+                    success=True, key=key, album_name=album_name,
+                    duration=duration, playlist_total=stats.playlist_total,
+                    downloaded=stats.downloaded, skipped=stats.skipped,
+                    failed=stats.failed)
             else:
                 self.logger.error(f"Download failed with exit code {process.returncode}")
-                return False, key, album_name, stats
+                return DownloadResult(
+                    success=False, key=key, album_name=album_name,
+                    duration=duration, playlist_total=stats.playlist_total,
+                    downloaded=stats.downloaded, skipped=stats.skipped,
+                    failed=stats.failed)
 
         except Exception as e:
             self.logger.error(f"Failed to download {key}: {e}")
-            return False, key, album_name, stats
+            duration = time.time() - start_time
+            return DownloadResult(
+                success=False, key=key, album_name=album_name,
+                duration=duration, playlist_total=stats.playlist_total,
+                downloaded=stats.downloaded, skipped=stats.skipped,
+                failed=stats.failed)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -3519,7 +3608,7 @@ class USBManager:
         """
         Copy files from source_dir to USB drive with incremental sync.
         Only copies new or modified files, skips unchanged files.
-        Returns (success boolean, USBSyncStatistics).
+        Returns USBSyncResult.
 
         Args:
             volume: Pre-selected volume name. Skips interactive selection if provided.
@@ -3530,7 +3619,8 @@ class USBManager:
 
         if not source_path.exists():
             self.logger.error(f"Source directory does not exist: {source_path}")
-            return False, stats
+            return USBSyncResult(success=False, source=str(source_dir),
+                                 destination='', volume_name='', duration=0)
 
         # Collect all .mp3 files to process
         mp3_files = []
@@ -3550,7 +3640,8 @@ class USBManager:
         if volume is None:
             volume = self.select_usb_drive()
         if not volume:
-            return False, stats
+            return USBSyncResult(success=False, source=str(source_dir),
+                                 destination='', volume_name='', duration=0)
 
         dest = self._get_usb_base_path(volume) / usb_dir
 
@@ -3572,7 +3663,11 @@ class USBManager:
             self.logger.dry_run("Would prompt to eject USB drive after copy")
             duration = time.time() - start_time
             self._print_usb_summary(str(source_path), str(dest), stats, duration)
-            return True, stats
+            return USBSyncResult(
+                success=True, source=str(source_path), destination=str(dest),
+                volume_name=volume, duration=duration, files_found=stats.files_found,
+                files_copied=stats.files_copied, files_skipped=stats.files_skipped,
+                files_failed=stats.files_failed)
 
         # Create destination directory
         try:
@@ -3582,7 +3677,11 @@ class USBManager:
             stats.files_failed = stats.files_found
             duration = time.time() - start_time
             self._print_usb_summary(str(source_path), str(dest), stats, duration)
-            return False, stats
+            return USBSyncResult(
+                success=False, source=str(source_path), destination=str(dest),
+                volume_name=volume, duration=duration, files_found=stats.files_found,
+                files_copied=stats.files_copied, files_skipped=stats.files_skipped,
+                files_failed=stats.files_failed)
 
         # Copy files with incremental check
         progress = ProgressBar(
@@ -3637,7 +3736,11 @@ class USBManager:
             # Note: eject operation is non-critical, doesn't affect return status
 
         # Success if no failures (skipped files are OK)
-        return stats.files_failed == 0, stats
+        return USBSyncResult(
+            success=stats.files_failed == 0, source=str(source_path),
+            destination=str(dest), volume_name=volume, duration=duration,
+            files_found=stats.files_found, files_copied=stats.files_copied,
+            files_skipped=stats.files_skipped, files_failed=stats.files_failed)
 
     def _print_usb_summary(self, source, destination, stats, duration):
         """Print formatted summary after USB sync."""
@@ -3835,9 +3938,10 @@ class SummaryManager:
             no_library: Skip music directory scan
 
         Returns:
-            bool: True if successful
+            LibrarySummaryResult
         """
         # Print library stats first (unless skipped)
+        music_stats = None
         if not no_library:
             music_stats = self.scan_music_library(
                 music_dir=music_dir,
@@ -3863,7 +3967,10 @@ class SummaryManager:
             print("    • Run: ./music-porter pipeline --auto")
             print("    • Or specify custom directory: --export-dir /path/to/export")
             print()
-            return True  # Not an error, just no data
+            mode = "quick" if quick else ("detailed" if detailed else "default")
+            return LibrarySummaryResult(
+                success=True, export_dir=str(export_dir), scan_duration=0,
+                mode=mode, music_library_stats=music_stats)
 
         # Scan playlists
         playlist_dirs = self._scan_playlists(export_path)
@@ -3884,7 +3991,10 @@ class SummaryManager:
             print("    • Run: ./music-porter pipeline --auto")
             print("    • Or download a playlist: ./music-porter download --playlist 1")
             print()
-            return True  # Not an error
+            mode = "quick" if quick else ("detailed" if detailed else "default")
+            return LibrarySummaryResult(
+                success=True, export_dir=str(export_dir), scan_duration=0,
+                mode=mode, music_library_stats=music_stats)
 
         # Analyze each playlist
         for playlist_dir in playlist_dirs:
@@ -3911,7 +4021,28 @@ class SummaryManager:
         else:
             self._print_summary(export_dir)
 
-        return True
+        mode = "quick" if quick else ("detailed" if detailed else "default")
+        avg_size = (self.stats.total_size_bytes / self.stats.total_files
+                    if self.stats.total_files > 0 else 0.0)
+        return LibrarySummaryResult(
+            success=True,
+            export_dir=str(export_dir),
+            scan_duration=self.stats.scan_duration,
+            mode=mode,
+            total_playlists=self.stats.total_playlists,
+            total_files=self.stats.total_files,
+            total_size_bytes=self.stats.total_size_bytes,
+            avg_file_size=avg_size,
+            files_with_protection_tags=self.stats.files_with_protection_tags,
+            files_missing_protection_tags=self.stats.files_missing_protection_tags,
+            sample_size=self.stats.sample_size,
+            files_with_cover_art=self.stats.files_with_cover_art,
+            files_without_cover_art=self.stats.files_without_cover_art,
+            files_with_original_cover_art=self.stats.files_with_original_cover_art,
+            files_with_resized_cover_art=self.stats.files_with_resized_cover_art,
+            playlist_summaries=[p for p in self.stats.playlists],
+            music_library_stats=music_stats,
+        )
 
     def _scan_playlists(self, export_path):
         """Discover playlist directories in export directory."""
@@ -4347,10 +4478,11 @@ class CoverArtManager:
         from mutagen.id3 import ID3, APIC, TXXX, ID3NoHeaderError
         import hashlib
 
+        start_time = time.time()
         dir_path = Path(directory)
         if not dir_path.exists():
             self.logger.error(f"Directory not found: '{directory}'")
-            return False
+            return CoverArtResult(success=False, action="embed", directory=str(directory), duration=0, errors=1)
 
         # Auto-derive source directory
         if source_dir is None:
@@ -4369,17 +4501,22 @@ class CoverArtManager:
                     source_dir = f"{DEFAULT_MUSIC_DIR}/{remainder}"
             else:
                 self.logger.error("Cannot auto-derive source directory. Use --source to specify.")
-                return False
+                return CoverArtResult(success=False, action="embed", directory=str(directory),
+                                      duration=time.time() - start_time, errors=1)
 
         source_path = Path(source_dir)
         if not source_path.exists():
             self.logger.error(f"Source directory not found: '{source_dir}'")
-            return False
+            return CoverArtResult(success=False, action="embed", directory=str(directory),
+                                  duration=time.time() - start_time, errors=1,
+                                  source_dir=str(source_dir))
 
         mp3_files = sorted(dir_path.rglob("*.mp3"))
         if not mp3_files:
             self.logger.info(f"No MP3 files found in '{directory}'")
-            return True
+            return CoverArtResult(success=True, action="embed", directory=str(directory),
+                                  duration=time.time() - start_time,
+                                  source_dir=str(source_dir))
 
         # Build lookup of M4A files by profile-aware filename
         m4a_lookup = {}
@@ -4513,16 +4650,22 @@ class CoverArtManager:
         print(f"  Errors:                  {errors}")
         print(f"{'=' * 60}")
 
-        return errors == 0
+        return CoverArtResult(
+            success=errors == 0, action="embed", directory=str(directory),
+            duration=time.time() - start_time,
+            files_processed=len(mp3_files), files_modified=embedded,
+            files_skipped=skipped, errors=errors,
+            source_dir=str(source_dir), no_source=no_source)
 
     def extract(self, directory, output_dir=None, dry_run=False, verbose=False):
         """Extract cover art from MP3 files to image files."""
         from mutagen.id3 import ID3, ID3NoHeaderError
 
+        start_time = time.time()
         dir_path = Path(directory)
         if not dir_path.exists():
             self.logger.error(f"Directory not found: '{directory}'")
-            return False
+            return CoverArtResult(success=False, action="extract", directory=str(directory), duration=0, errors=1)
 
         # Default output to same directory
         if output_dir is None:
@@ -4533,7 +4676,8 @@ class CoverArtManager:
         mp3_files = sorted(dir_path.rglob("*.mp3"))
         if not mp3_files:
             self.logger.info(f"No MP3 files found in '{directory}'")
-            return True
+            return CoverArtResult(success=True, action="extract", directory=str(directory),
+                                  duration=time.time() - start_time)
 
         if not dry_run:
             out_path.mkdir(parents=True, exist_ok=True)
@@ -4608,22 +4752,29 @@ class CoverArtManager:
         print(f"  Errors:                  {errors}")
         print(f"{'=' * 60}")
 
-        return errors == 0
+        return CoverArtResult(
+            success=errors == 0, action="extract", directory=str(directory),
+            duration=time.time() - start_time,
+            files_processed=len(mp3_files), files_modified=extracted,
+            files_skipped=skipped, errors=errors)
 
     def update(self, directory, image_path, dry_run=False, verbose=False):
         """Replace cover art on all MP3s in a directory from a single image file."""
         from mutagen.id3 import ID3, APIC, ID3NoHeaderError
 
+        start_time = time.time()
         dir_path = Path(directory)
         img_path = Path(image_path)
 
         if not dir_path.exists():
             self.logger.error(f"Directory not found: '{directory}'")
-            return False
+            return CoverArtResult(success=False, action="update", directory=str(directory),
+                                  duration=0, errors=1, image_path=str(image_path))
 
         if not img_path.exists():
             self.logger.error(f"Image file not found: '{image_path}'")
-            return False
+            return CoverArtResult(success=False, action="update", directory=str(directory),
+                                  duration=0, errors=1, image_path=str(image_path))
 
         # Detect MIME type from extension
         ext = img_path.suffix.lower()
@@ -4633,7 +4784,9 @@ class CoverArtManager:
             mime_type = APIC_MIME_PNG
         else:
             self.logger.error(f"Unsupported image format: '{ext}' (use .jpg or .png)")
-            return False
+            return CoverArtResult(success=False, action="update", directory=str(directory),
+                                  duration=time.time() - start_time, errors=1,
+                                  image_path=str(image_path))
 
         cover_data = img_path.read_bytes()
         self.logger.info(f"Image: {img_path.name} ({len(cover_data) / 1024:.1f} KB, {mime_type})")
@@ -4641,7 +4794,8 @@ class CoverArtManager:
         mp3_files = sorted(dir_path.rglob("*.mp3"))
         if not mp3_files:
             self.logger.info(f"No MP3 files found in '{directory}'")
-            return True
+            return CoverArtResult(success=True, action="update", directory=str(directory),
+                                  duration=time.time() - start_time, image_path=str(image_path))
 
         updated = 0
         errors = 0
@@ -4704,21 +4858,32 @@ class CoverArtManager:
         print(f"  Errors:                  {errors}")
         print(f"{'=' * 60}")
 
-        return errors == 0
+        return CoverArtResult(
+            success=errors == 0, action="update", directory=str(directory),
+            duration=time.time() - start_time,
+            files_processed=len(mp3_files), files_modified=updated,
+            errors=errors, image_path=str(image_path))
 
     def strip(self, directory, dry_run=False, verbose=False):
         """Remove cover art from all MP3s in a directory."""
         from mutagen.id3 import ID3, ID3NoHeaderError
 
+        start_time = time.time()
         dir_path = Path(directory)
         if not dir_path.exists():
             self.logger.error(f"Directory not found: '{directory}'")
-            return False
+            return CoverArtResult(
+                success=False, action="strip", directory=str(directory),
+                duration=time.time() - start_time,
+                files_processed=0, files_modified=0, files_skipped=0, errors=1)
 
         mp3_files = sorted(dir_path.rglob("*.mp3"))
         if not mp3_files:
             self.logger.info(f"No MP3 files found in '{directory}'")
-            return True
+            return CoverArtResult(
+                success=True, action="strip", directory=str(directory),
+                duration=time.time() - start_time,
+                files_processed=0, files_modified=0, files_skipped=0, errors=0)
 
         stripped = 0
         skipped = 0
@@ -4772,18 +4937,11 @@ class CoverArtManager:
         finally:
             progress.close()
 
-        # Print summary
-        print(f"\n{'=' * 60}")
-        print(f"  COVER ART STRIP SUMMARY")
-        print(f"{'=' * 60}")
-        print(f"  Directory:               '{directory}'")
-        print(f"{'─' * 60}")
-        print(f"  Stripped:                {stripped}")
-        print(f"  Skipped (no art):        {skipped}")
-        print(f"  Errors:                  {errors}")
-        print(f"{'=' * 60}")
-
-        return errors == 0
+        return CoverArtResult(
+            success=errors == 0, action="strip", directory=str(directory),
+            duration=time.time() - start_time,
+            files_processed=stripped + skipped + errors,
+            files_modified=stripped, files_skipped=skipped, errors=errors)
 
     def resize(self, directory, max_size, dry_run=False, verbose=False):
         """Resize embedded cover art to a maximum dimension, preserving aspect ratio."""
@@ -4791,15 +4949,22 @@ class CoverArtManager:
         import io
         from mutagen.id3 import ID3, ID3NoHeaderError
 
+        start_time = time.time()
         dir_path = Path(directory)
         if not dir_path.exists():
             self.logger.error(f"Directory not found: '{directory}'")
-            return False
+            return CoverArtResult(
+                success=False, action="resize", directory=str(directory),
+                duration=time.time() - start_time,
+                files_processed=0, files_modified=0, files_skipped=0, errors=1)
 
         mp3_files = sorted(dir_path.rglob("*.mp3"))
         if not mp3_files:
             self.logger.info(f"No MP3 files found in '{directory}'")
-            return True
+            return CoverArtResult(
+                success=True, action="resize", directory=str(directory),
+                duration=time.time() - start_time,
+                files_processed=0, files_modified=0, files_skipped=0, errors=0)
 
         resized = 0
         skipped_small = 0
@@ -4900,32 +5065,12 @@ class CoverArtManager:
         finally:
             progress.close()
 
-        # Format sizes for summary
-        def fmt_size(b):
-            if b >= 1024 * 1024:
-                return f"{b / (1024 * 1024):.1f} MB"
-            return f"{b / 1024:.1f} KB"
-
-        # Print summary
-        print(f"\n{'=' * 60}")
-        print(f"  COVER ART RESIZE SUMMARY")
-        print(f"{'=' * 60}")
-        print(f"  Directory:               '{directory}'")
-        print(f"  Max dimension:           {max_size}px")
-        print(f"{'─' * 60}")
-        print(f"  Resized:                 {resized}")
-        print(f"  Skipped (already small): {skipped_small}")
-        print(f"  Skipped (no art):        {skipped_no_art}")
-        print(f"  Errors:                  {errors}")
-        if total_before > 0 and not dry_run:
-            print(f"{'─' * 60}")
-            print(f"  Total cover art:         {fmt_size(total_before)} → {fmt_size(total_after)}")
-        elif total_before > 0:
-            print(f"{'─' * 60}")
-            print(f"  Total cover art:         {fmt_size(total_before)}")
-        print(f"{'=' * 60}")
-
-        return errors == 0
+        return CoverArtResult(
+            success=errors == 0, action="resize", directory=str(directory),
+            duration=time.time() - start_time,
+            files_processed=resized + skipped_small + skipped_no_art + errors,
+            files_modified=resized, files_skipped=skipped_small + skipped_no_art,
+            errors=errors)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -5123,7 +5268,7 @@ class PipelineOrchestrator:
         converter = Converter(self.logger, quality_preset=preset, workers=self.workers,
                               embed_cover_art=self.embed_cover_art,
                               output_profile=self.output_profile)
-        success = converter.convert(
+        convert_result = converter.convert(
             music_dir,
             export_dir,
             force=False,
@@ -5131,7 +5276,7 @@ class PipelineOrchestrator:
             verbose=verbose
         )
 
-        if success:
+        if convert_result.success:
             self.stats.stages_completed.append("convert")
             self.stats.conversion_stats = converter.stats
         else:
@@ -5153,7 +5298,7 @@ class PipelineOrchestrator:
             new_artist = None
 
         tagger = TaggerManager(self.logger, output_profile=self.output_profile)
-        success = tagger.update_tags(
+        tag_result = tagger.update_tags(
             export_dir,
             new_album=new_album,
             new_artist=new_artist,
@@ -5161,7 +5306,7 @@ class PipelineOrchestrator:
             verbose=verbose
         )
 
-        if success:
+        if tag_result.success:
             self.stats.stages_completed.append("tag")
             self.stats.tagging_stats = tagger.stats
             self.stats.tagging_album = new_album
@@ -5178,15 +5323,15 @@ class PipelineOrchestrator:
         if copy_to_usb:
             self.logger.info("\n=== STAGE 4: Copy to USB ===")
             usb_manager = USBManager(self.logger, prompt_handler=self.prompt_handler)
-            success, usb_stats = usb_manager.sync_to_usb(
+            usb_result = usb_manager.sync_to_usb(
                 export_dir,
                 usb_dir=usb_dir,
                 dry_run=dry_run
             )
 
-            if success:
+            if usb_result.success:
                 self.stats.stages_completed.append("usb-sync")
-                self.stats.usb_stats = usb_stats
+                self.stats.usb_stats = {"files_copied": usb_result.files_copied, "files_skipped": usb_result.files_skipped}
                 self.stats.usb_success = True
                 if IS_MACOS:
                     usb_placeholder = f"/Volumes/[drive]/{usb_dir}"
@@ -5202,7 +5347,21 @@ class PipelineOrchestrator:
         # ── Print final summary ────────────────────────────────────────
         self._print_pipeline_summary()
 
-        return len(self.stats.stages_failed) == 0
+        duration = time.time() - self.stats.start_time
+        return PipelineResult(
+            success=len(self.stats.stages_failed) == 0,
+            playlist_name=self.stats.playlist_name,
+            playlist_key=self.stats.playlist_key,
+            duration=duration,
+            stages_completed=list(self.stats.stages_completed),
+            stages_failed=list(self.stats.stages_failed),
+            stages_skipped=list(self.stats.stages_skipped),
+            tagging_album=self.stats.tagging_album,
+            tagging_artist=self.stats.tagging_artist,
+            cover_art_embedded=self.stats.cover_art_embedded,
+            cover_art_missing=self.stats.cover_art_missing,
+            usb_destination=self.stats.usb_destination,
+        )
 
     def _download_from_url(self, url, auto, dry_run, verbose,
                            validate_cookies=True, auto_refresh_cookies=False):
@@ -5223,7 +5382,7 @@ class PipelineOrchestrator:
         if not dry_run and not auto:
             self._ask_save_to_config(key, url, album_name)
 
-        success, key, album_name, download_stats = downloader.download(
+        dl_result = downloader.download(
             url,
             output_dir,
             key=key,
@@ -5233,20 +5392,20 @@ class PipelineOrchestrator:
             auto_refresh=auto_refresh_cookies
         )
 
-        if success:
+        if dl_result.success:
             self.stats.download_success = True
-            self.stats.playlist_key = key
-            self.stats.playlist_name = album_name
-            self.stats.download_stats = download_stats
+            self.stats.playlist_key = dl_result.key
+            self.stats.playlist_name = dl_result.album_name
+            self.stats.download_stats = dl_result
             self.stats.stages_completed.append("download")
 
             return True
         else:
-            # Check if user skipped (download_stats is None and we have key/album_name)
+            # Check if user skipped (no stats and we have key/album_name)
             # In this case, store the info and allow pipeline to continue
-            if download_stats is None and key and album_name:
-                self.stats.playlist_key = key
-                self.stats.playlist_name = album_name
+            if dl_result.downloaded == 0 and dl_result.failed == 0 and dl_result.key and dl_result.album_name:
+                self.stats.playlist_key = dl_result.key
+                self.stats.playlist_name = dl_result.album_name
                 self.stats.stages_skipped.append("download")
                 return True  # Continue to next stage
             else:
@@ -5277,7 +5436,7 @@ class PipelineOrchestrator:
         downloader = Downloader(self.logger, self.deps.venv_python,
                                cookie_path=self.cookie_path,
                                prompt_handler=self.prompt_handler)
-        success, _, _, download_stats = downloader.download(
+        dl_result = downloader.download(
             playlist.url,
             output_dir,
             key=playlist.key,
@@ -5287,15 +5446,15 @@ class PipelineOrchestrator:
             auto_refresh=auto_refresh_cookies
         )
 
-        if success:
+        if dl_result.success:
             self.stats.download_success = True
-            self.stats.download_stats = download_stats
+            self.stats.download_stats = dl_result
             self.stats.stages_completed.append("download")
             return True
         else:
-            # Check if user skipped (download_stats is None and we have playlist info)
+            # Check if user skipped (no stats and we have playlist info)
             # In this case, allow pipeline to continue
-            if download_stats is None and self.stats.playlist_key:
+            if dl_result.downloaded == 0 and dl_result.failed == 0 and self.stats.playlist_key:
                 self.stats.stages_skipped.append("download")
                 return True  # Continue to next stage
             else:
