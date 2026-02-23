@@ -654,35 +654,49 @@ def render_pipeline_summary(r: PipelineResult) -> None:
             print(f"  Status:                  ❌ Failed")
 
     # Conversion stage
-    if r.conversion_result:
-        cr = r.conversion_result
+    if r.conversion_result or "convert" in r.stages_failed:
         print(f"{'─' * 70}")
         print(f"  CONVERSION STAGE")
         print(f"{'─' * 70}")
-        print(f"  Files converted:         {cr.converted}")
-        print(f"  Files overwritten:       {cr.overwritten}")
-        print(f"  Files skipped:           {cr.skipped}")
-        print(f"  Conversion errors:       {cr.errors}")
+        if r.conversion_result:
+            cr = r.conversion_result
+            print(f"  Files converted:         {cr.converted}")
+            print(f"  Files overwritten:       {cr.overwritten}")
+            print(f"  Files skipped:           {cr.skipped}")
+            print(f"  Conversion errors:       {cr.errors}")
+            if cr.success:
+                print(f"  Status:                  ✅ Success")
+            else:
+                print(f"  Status:                  ❌ Failed")
+        elif "convert" in r.stages_failed:
+            print(f"  Status:                  ❌ Failed")
 
     # Tagging stage
-    if r.tag_result:
-        tr = r.tag_result
+    if r.tag_result or "tag" in r.stages_failed:
         print(f"{'─' * 70}")
         print(f"  TAGGING STAGE")
         print(f"{'─' * 70}")
-        if r.tagging_album:
-            print(f"  Album set to:            {r.tagging_album}")
-        if r.tagging_artist:
-            print(f"  Artist set to:           {r.tagging_artist}")
-        print(f"  Title updated:           {tr.title_updated}")
-        print(f"  Album updated:           {tr.album_updated}")
-        print(f"  Artist updated:          {tr.artist_updated}")
-        print(f"  OriginalTitle stored:    {tr.title_stored}")
-        print(f"  OriginalArtist stored:   {tr.artist_stored}")
-        print(f"  OriginalAlbum stored:    {tr.album_stored}")
-        if r.cover_art_embedded > 0 or r.cover_art_missing > 0:
-            print(f"  Cover art embedded:      {r.cover_art_embedded}")
-            print(f"  Cover art missing:       {r.cover_art_missing}")
+        if r.tag_result:
+            tr = r.tag_result
+            if r.tagging_album:
+                print(f"  Album set to:            {r.tagging_album}")
+            if r.tagging_artist:
+                print(f"  Artist set to:           {r.tagging_artist}")
+            print(f"  Title updated:           {tr.title_updated}")
+            print(f"  Album updated:           {tr.album_updated}")
+            print(f"  Artist updated:          {tr.artist_updated}")
+            print(f"  OriginalTitle stored:    {tr.title_stored}")
+            print(f"  OriginalArtist stored:   {tr.artist_stored}")
+            print(f"  OriginalAlbum stored:    {tr.album_stored}")
+            if r.cover_art_embedded > 0 or r.cover_art_missing > 0:
+                print(f"  Cover art embedded:      {r.cover_art_embedded}")
+                print(f"  Cover art missing:       {r.cover_art_missing}")
+            if tr.success:
+                print(f"  Status:                  ✅ Success")
+            else:
+                print(f"  Status:                  ❌ Failed")
+        elif "tag" in r.stages_failed:
+            print(f"  Status:                  ❌ Failed")
 
     # USB sync stage
     if r.usb_result or "usb-sync" in r.stages_failed:
@@ -1096,14 +1110,14 @@ class InteractiveMenu:
             if not result.success:
                 self.logger.error(f"Failed to process {playlist.name}")
 
-        # Ask about USB copy after all playlists
-        if not dry_run:
-            self._ask_copy_to_usb(get_export_dir(self.output_profile.name), dry_run)
-
         # Print aggregate summary (only for multiple playlists)
         if len(self.config.playlists) > 1:
             aggregate_stats.end_time = time.time()
             render_aggregate_summary(aggregate_stats.to_result())
+
+        # Ask about USB copy after summary
+        if not dry_run:
+            self._ask_copy_to_usb(get_export_dir(self.output_profile.name), dry_run)
 
         return aggregate_stats.failed_playlists == 0
 
@@ -1331,11 +1345,12 @@ class InteractiveMenu:
             if response == 'y':
                 usb_manager = USBManager(self.logger, prompt_handler=self.prompt_handler,
                                          display_handler=self.display_handler)
-                usb_manager.sync_to_usb(
+                usb_result = usb_manager.sync_to_usb(
                     source_dir,
                     usb_dir=DEFAULT_USB_DIR,
                     dry_run=dry_run
                 )
+                render_usb_sync_summary(usb_result)
         except KeyboardInterrupt:
             print()
             pass

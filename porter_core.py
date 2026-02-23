@@ -4900,6 +4900,9 @@ class PipelineOrchestrator:
         Execute the complete pipeline: download → convert → tag → USB sync.
         """
         self.stats.start_time = time.time()
+        convert_result = None
+        tag_result = None
+        usb_result = None
 
         # ── Stage 1: Determine source ─────────────────────────────────
         if url:
@@ -5071,6 +5074,10 @@ class PipelineOrchestrator:
             stages_completed=list(self.stats.stages_completed),
             stages_failed=list(self.stats.stages_failed),
             stages_skipped=list(self.stats.stages_skipped),
+            download_result=self.stats.download_stats,
+            conversion_result=convert_result,
+            tag_result=tag_result,
+            usb_result=usb_result,
             tagging_album=self.stats.tagging_album,
             tagging_artist=self.stats.tagging_artist,
             cover_art_embedded=self.stats.cover_art_embedded,
