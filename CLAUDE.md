@@ -76,17 +76,7 @@ The system follows an integrated pipeline:
 - 4,270 lines of production-ready Python code
 - See `MUSIC-PORTER-GUIDE.md` for complete documentation
 
-**do-it-all** (bash) - **DEPRECATED**
-- Legacy orchestration script (now a compatibility wrapper)
-- Calls `music-porter` internally
-- Will be removed in a future version
-- Migrate to: `./music-porter`
-
-**ride-command-mp3-export** (python) - **DEPRECATED**
-- Legacy conversion and tag management tool (now a compatibility wrapper)
-- Calls `music-porter` internally
-- Will be removed in a future version
-- Migrate to: `./music-porter`
+**do-it-all** and **ride-command-mp3-export** are deprecated wrappers — both call `music-porter` internally.
 
 ### Tag Preservation System
 
@@ -126,537 +116,142 @@ The codebase uses a "hard gate" protection system for original metadata:
 
 ## MP3 Quality Presets
 
-The conversion system supports configurable quality presets to balance file size and audio quality:
+Presets via `--preset` flag: `lossless` (default, CBR 320kbps), `high` (VBR q2, ~190-250kbps), `medium` (VBR q4, ~165-210kbps), `low` (VBR q6, ~115-150kbps), `custom` (requires `--quality 0-9`).
 
-| Preset | Mode | Value | Est. Bitrate | Use Case |
-|--------|------|-------|--------------|----------|
-| `lossless` | CBR | 320kbps | 320kbps | **Default** - Maximum quality, no compromises |
-| `high` | VBR | 2 | ~190-250kbps | High quality, smaller files than lossless |
-| `medium` | VBR | 4 | ~165-210kbps | Balanced quality and file size |
-| `low` | VBR | 6 | ~115-150kbps | Space-constrained devices |
-| `custom` | VBR | 0-9 | Variable | Advanced users (0=best quality, 9=worst) |
-
-**Usage:**
-
-- All `convert` and `pipeline` commands support `--preset` flag
-- Default is `lossless` (320kbps CBR) for maximum quality
-- VBR (Variable Bit Rate) adjusts bitrate dynamically based on audio complexity
-- Custom quality requires both `--preset custom` and `--quality 0-9` flags
-
-### Full Pipeline Workflows
+### Subcommands Reference
 
 ```bash
-# Process a specific playlist (download → convert → tag)
-./music-porter pipeline --playlist "Pop_Workout"
-./music-porter pipeline --playlist 1
+# Pipeline (download → convert → tag)
+./music-porter pipeline --playlist "Pop_Workout"    # Single playlist
+./music-porter pipeline --playlist 1                # By number
+./music-porter pipeline --url "https://..."         # Direct URL
+./music-porter pipeline --auto                      # All playlists
+./music-porter pipeline --playlist X --preset high  # Quality preset
+./music-porter pipeline --playlist X --copy-to-usb  # Include USB sync
 
-# Process from direct URL
-./music-porter pipeline --url "https://music.apple.com/us/playlist/..."
-
-# Process all playlists (auto mode, no prompts)
-./music-porter pipeline --auto
-
-# With quality presets (lossless, high, medium, low, custom)
-./music-porter pipeline --playlist "Pop_Workout" --preset high
-./music-porter pipeline --auto --preset medium
-
-# Include USB copy after processing
-./music-porter pipeline --playlist "Pop_Workout" --copy-to-usb
-
-# Custom USB directory
-./music-porter pipeline --playlist "Pop_Workout" --copy-to-usb --usb-dir "RZR/Music"
-```
-
-### Granular Control (Individual Commands)
-
-**Download:**
-
-```bash
-# Download specific playlist
+# Download
 ./music-porter download --playlist "Pop_Workout"
-
-# Download from URL
 ./music-porter download --url "https://music.apple.com/..."
 
-# Custom output directory
-./music-porter download --playlist "Pop_Workout" --output custom/path
-```
+# Convert (M4A → MP3)
+./music-porter convert music/Pop_Workout                          # Default lossless
+./music-porter convert music/Pop_Workout --preset high            # VBR preset
+./music-porter convert music/Pop_Workout --preset custom --quality 0  # Custom VBR
+./music-porter convert music/Pop_Workout --force                  # Re-convert existing
 
-**Convert:**
-
-```bash
-# Convert M4A files to MP3 (default: lossless 320kbps)
-./music-porter convert music/Pop_Workout
-
-# Specify output directory (profile-scoped by default)
-./music-porter convert music/Pop_Workout --output export/ride-command/Pop_Workout
-
-# Use quality presets (lossless, high, medium, low)
-./music-porter convert music/Pop_Workout --preset high
-./music-porter convert music/Pop_Workout --preset medium
-
-# Custom VBR quality (0=best, 9=worst)
-./music-porter convert music/Pop_Workout --preset custom --quality 0
-
-# Force re-conversion of existing files
-./music-porter convert music/Pop_Workout --force
-```
-
-**Tag Operations:**
-
-```bash
-# Update album tag
-./music-porter tag export/ride-command/Pop_Workout --album "Pop Workout"
-
-# Update album and artist
+# Tags
 ./music-porter tag export/ride-command/Pop_Workout --album "Pop Workout" --artist "Various"
-```
+./music-porter restore export/ride-command/Pop_Workout --all      # Restore originals
+./music-porter reset music/Pop_Workout export/ride-command/Pop_Workout  # Reset from source
 
-**Restore Original Tags:**
-
-```bash
-# Restore all original tags
-./music-porter restore export/ride-command/Pop_Workout --all
-
-# Restore specific tags
-./music-porter restore export/ride-command/Pop_Workout --album
-./music-porter restore export/ride-command/Pop_Workout --title
-./music-porter restore export/ride-command/Pop_Workout --artist
-```
-
-**Reset Tags from Source (⚠️ Overwrites Protection):**
-
-```bash
-# Reset all protection tags from source M4A files
-./music-porter reset music/Pop_Workout export/ride-command/Pop_Workout
-# Requires confirmation prompt
-```
-
-**USB Operations:**
-
-```bash
-# Copy to USB drive
+# USB
 ./music-porter sync-usb export/ride-command/Pop_Workout
+./music-porter sync-usb --usb-dir "RZR/Music"
 
-# Copy entire export directory
-./music-porter sync-usb
+# Summary
+./music-porter summary              # Default (balanced)
+./music-porter summary --quick      # Aggregate only
+./music-porter summary --detailed   # Extended info
 
-# Custom USB directory
-./music-porter sync-usb export/ride-command/Pop_Workout --usb-dir "RZR/Music"
-```
-
-**Library Summary:**
-
-```bash
-# Display export library statistics (default mode)
-# Always checks all files for tag integrity
-./music-porter summary
-
-# Quick mode (aggregate statistics only)
-./music-porter summary --quick
-
-# Detailed mode (extended per-playlist information)
-./music-porter summary --detailed
-
-# Analyze custom directory
-./music-porter summary --export-dir /path/to/export
-```
-
-**Cover Art Management:**
-
-```bash
-# Embed cover art from M4A sources into existing MP3s
-./music-porter cover-art embed export/ride-command/Pop_Workout
-
-# Embed with explicit source directory
-./music-porter cover-art embed export/ride-command/Pop_Workout --source music/Pop_Workout
-
-# Extract cover art to image files
-./music-porter cover-art extract export/ride-command/Pop_Workout
-
-# Replace cover art from a single image
+# Cover Art
+./music-porter cover-art embed export/ride-command/Pop_Workout    # From M4A sources
+./music-porter cover-art extract export/ride-command/Pop_Workout  # To image files
 ./music-porter cover-art update export/ride-command/Pop_Workout --image artwork.jpg
-
-# Strip cover art to reduce file size
-./music-porter cover-art strip export/ride-command/Pop_Workout
-
-# Convert without cover art
-./music-porter convert music/Pop_Workout --no-cover-art
+./music-porter cover-art strip export/ride-command/Pop_Workout    # Remove APIC frames
 ```
 
-### Global Flags (Apply to All Commands)
+### Global Flags
 
-```bash
-# Preview changes without modifying files
-./music-porter --dry-run convert music/Pop_Workout
-
-# Verbose output for detailed information
-./music-porter --verbose tag export/ride-command/Pop_Workout --album "Test"
-
-# Combine flags
-./music-porter --dry-run --verbose convert music/Pop_Workout
-
-# Show version
-./music-porter --version
-```
+- `--dry-run` — Preview changes without modifying files
+- `--verbose` — Detailed output for debugging
+- `--version` — Show version
+- Combine: `./music-porter --dry-run --verbose convert music/Pop_Workout`
 
 ### Output Type Profiles
 
-Profiles control conversion behavior, tag handling, artwork, and quality defaults. Use `--output-type` to select.
+Use `--output-type` to select. CLI flags override profile defaults.
 
-| Profile | ID3 | Artwork | Quality | Album Tag | Artist Tag | Description |
-|---------|-----|---------|---------|-----------|------------|-------------|
-| `ride-command` | v2.3 | 100px | lossless | playlist name | "Various" | Polaris Ride Command (default) |
-| `basic` | v2.4 | original | lossless | original | original | Standard MP3, original tags & art |
+| Profile | ID3 | Artwork | Quality | Album Tag | Artist Tag |
+|---------|-----|---------|---------|-----------|------------|
+| `ride-command` (default) | v2.3 | 100px | lossless | playlist name | "Various" |
+| `basic` | v2.4 | original | lossless | original | original |
 
-**Profile fields:**
-
-- `artwork_size`: `>0` = resize to max px, `0` = embed original, `-1` = strip artwork
-- `quality_preset`: Default conversion quality (`lossless`, `high`, `medium`, `low`)
-- `pipeline_album`: `"playlist_name"` or `"original"` — controls album tag in pipeline
-- `pipeline_artist`: `"various"` or `"original"` — controls artist tag in pipeline
-
-**Precedence:** CLI flags override profile defaults (`--no-cover-art` > `artwork_size`, `--preset` > `quality_preset`).
+Profile fields: `artwork_size` (px, 0=original, -1=strip), `quality_preset`, `pipeline_album` ("playlist\_name"/"original"), `pipeline_artist` ("various"/"original").
 
 ### Legacy Commands (Deprecated)
 
-⚠️ **The following commands still work but are deprecated:**
-
-```bash
-# Old commands (show deprecation warnings, call new tool internally)
-./do-it-all                                    # Use: ./music-porter
-./ride-command-mp3-export music/Pop_Workout/   # Use: ./music-porter convert music/Pop_Workout
-```
-
-**Migration:** Replace all `do-it-all` and `ride-command-mp3-export` calls with `music-porter`. See `MUSIC-PORTER-GUIDE.md` for detailed migration instructions.
+`do-it-all` and `ride-command-mp3-export` still work as wrappers but show deprecation warnings. Replace with `music-porter`.
 
 ## Development Setup
 
 ### Platform Support
 
-The tool supports **macOS**, **Linux**, and **Windows**. Platform is auto-detected at startup.
+Supports **macOS**, **Linux**, and **Windows** (auto-detected at startup). Platform-specific USB detection, ejection, and ffmpeg installation.
 
-| Platform | USB Detection | Eject Method | FFmpeg Install |
-|----------|--------------|--------------|----------------|
-| macOS | `/Volumes/` | `diskutil eject` | `brew install ffmpeg` |
-| Linux | `/media/$USER/`, `/mnt/` | `udisksctl`, `umount` | `apt-get`, `dnf`, `pacman` |
-| Windows | Drive letters (C:, D:, etc.) | Manual (Explorer) | Chocolatey or direct download |
+### Prerequisites & Setup
 
-### Prerequisites
+- Python 3.8+, ffmpeg (system binary), and pip dependencies in venv
+- `python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`
+- Pip packages: gamdl, mutagen, ffmpeg-python, selenium, webdriver-manager, Pillow, PyYAML
+- `config.yaml` auto-created on first run
 
-- Python 3.8+ (uses Python virtual environment)
-- ffmpeg (for audio conversion, system binary required)
-  - **macOS:** `brew install ffmpeg`
-  - **Linux:** `sudo apt-get install ffmpeg` (Ubuntu/Debian), `sudo dnf install ffmpeg` (Fedora/RHEL), `sudo pacman -S ffmpeg` (Arch)
-  - **Windows:** `choco install ffmpeg` or download from <https://ffmpeg.org/download.html>
-- gamdl (Apple Music downloader, installed via pip in venv)
-- mutagen (Python ID3 tag library, installed via pip in venv)
-- ffmpeg-python (Python wrapper for FFmpeg, installed via pip in venv)
-- selenium (Browser automation for cookie extraction, installed via pip in venv)
-- webdriver-manager (Automatic browser driver management, installed via pip in venv)
-- Pillow (Image processing for cover art resizing, installed via pip in venv)
-- PyYAML (YAML configuration file parsing, installed via pip in venv)
+### Testing
 
-### Initial Setup
-
-```bash
-# Create virtual environment
-python3 -m venv .venv
-
-# Activate virtual environment
-# macOS/Linux:
-source .venv/bin/activate
-# Windows:
-.venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Configure playlists
-# Edit config.yaml (auto-created on first run with defaults)
-```
-
-### Testing Changes
-
-- Use `--dry-run` flag extensively to preview behavior
-- Use `--verbose` to inspect tag transformations
-- Test tag preservation by running updates multiple times
-- Verify TXXX frames with: `./music-porter --verbose tag export/ride-command/PlaylistName`
+Use `--dry-run` to preview, `--verbose` to inspect tag transformations. Test tag preservation by running updates multiple times.
 
 ### Linting
 
-The project uses **Ruff** (Python), **PyMarkdown** (Markdown), and **djLint** (Jinja2/HTML templates) for linting. All config lives in `pyproject.toml`.
+Uses **Ruff** (Python), **PyMarkdown** (Markdown), **djLint** (Jinja2/HTML). Config in `pyproject.toml`. Install: `pip install -r requirements-dev.txt`.
 
 ```bash
-# Install dev dependencies (once)
-pip install -r requirements-dev.txt
-
-# Python linting
-ruff check .                # Check for issues
-ruff check --fix .          # Auto-fix safe issues
-
-# Markdown linting
-pymarkdown scan -r --respect-gitignore .        # Check for issues
-pymarkdown fix -r --respect-gitignore .         # Auto-fix safe issues
-
-# Template linting (Jinja2/HTML)
-djlint templates/ --lint    # Check for issues
-djlint templates/ --check   # Check formatting
-djlint templates/ --reformat  # Auto-fix formatting
+ruff check . && ruff check --fix .                          # Python
+pymarkdown scan -r --respect-gitignore .                     # Markdown
+djlint templates/ --lint && djlint templates/ --reformat     # Templates
 ```
 
-All three linters should pass clean before merging to main.
+All three must pass clean before merging to main.
 
 ### Feature Branch Workflow
 
-**When to use feature branches vs direct commits:**
+**Use feature branches** for new features, multi-commit changes, refactoring. **Commit directly to main** only for single-commit fixes, docs, config, typos.
 
-| Use Feature Branch | Commit Directly to Main |
-|---|---|
-| New features | Single-commit bug fixes |
-| Multi-commit changes | Documentation-only updates |
-| Refactoring | Config changes (config.yaml) |
-| Experimental or risky changes | Typo corrections |
+**Branch naming:** `feature/`, `bugfix/`, `refactor/`, `docs/` prefix + lowercase-hyphenated description (2-4 words). Examples: `feature/playlist-search`, `bugfix/tag-double-prefix`.
 
-**Branch naming conventions:**
+**Creating:** Start from main, create branch, set `VERSION = "X.Y.Z-branch-name"` in `porter_core.py` line 48 as first commit.
 
-| Prefix | Use Case | Example |
-|--------|----------|---------|
-| `feature/` | New features | `feature/playlist-search` |
-| `bugfix/` | Bug fixes | `bugfix/tag-double-prefix` |
-| `refactor/` | Refactoring | `refactor/converter-class` |
-| `docs/` | Documentation | `docs/cookie-guide` |
+**Working:** Keep branch version throughout dev. For long-lived branches, rebase on `origin/main` periodically.
 
-- Lowercase with hyphens (no underscores or slashes in the description)
-- Keep descriptions to 2-4 words
+**Pre-merge checklist:** Clean working tree, tested with `--dry-run`/`--verbose`, no debug code, up to date with main, README future features updated, all SRS `[x]`.
 
-**Creating a feature branch:**
-
-```bash
-# 1. Start from up-to-date main
-git checkout main
-git pull origin main
-
-# 2. Create and switch to feature branch
-git checkout -b feature/my-feature
-
-# 3. Set branch version in porter_core.py (line 48)
-VERSION = "1.5.3-my-feature"
-
-# 4. Commit the version change as first commit
-git add porter_core.py
-git commit -m "Start my-feature branch"
-```
-
-**Working on the branch:**
-
-- Commit regularly with descriptive messages
-- Keep the branch version (e.g. `1.5.3-my-feature`) throughout development
-- Don't bump the base version number during dev — that happens at merge time
-- For long-lived branches, periodically sync with main:
-  
-  ```bash
-  # Option A: Rebase (cleaner history, preferred for solo branches)
-  git fetch origin
-  git rebase origin/main
-
-  # Option B: Merge (safer for shared branches)
-  git fetch origin
-  git merge origin/main
-  ```
-
-**Pre-merge checklist:**
-
-- [ ] Working tree is clean (`git status` shows nothing)
-- [ ] All changes tested with `--dry-run` and `--verbose`
-- [ ] No temporary or debug code left in
-- [ ] Commit history is clean and descriptive
-- [ ] Branch is up to date with main
-- [ ] README future features updated if applicable (strikethrough implemented items)
-- [ ] All SRS requirements marked `[x]` (if SRS exists for this branch)
-
-**Merging to main:**
-Use the `/merge-to-main` skill, which automates version bump, README updates, tagging, and branch cleanup. See the Version Management section below for version numbering details.
+**Merging:** Use `/merge-to-main` skill (automates version bump, tagging, cleanup).
 
 ### Version Management
 
-**IMPORTANT: Version number strategy depends on branch context.**
+Version defined in `porter_core.py` line 48. Uses semantic versioning (MAJOR.MINOR.PATCH).
 
-The version number is defined in `porter_core.py` at line 48:
+**On feature branches:** `VERSION = "X.Y.Z-branch-name"` (e.g., `"1.2.0-cookie-management"`). Set as first commit.
 
-```python
-VERSION = "1.1.0"
-```
+**On merge to main:** Remove branch suffix, bump version, create git tag (`git tag vX.Y.Z`). PATCH for fixes, MINOR for features, MAJOR for breaking changes.
 
-**Branch-Based Version Workflow:**
+**Direct commits to main:** Always ask user before bumping version. Suggest appropriate level based on changes.
 
-**While working on a feature branch:**
-
-- Include branch name in version: `VERSION = "1.1.0-feature-name"`
-- Format: `MAJOR.MINOR.PATCH-branch-name`
-- Use lowercase with hyphens (no underscores or slashes)
-- Examples:
-  - `VERSION = "1.1.0-cookie-management"`
-  - `VERSION = "1.2.0-usb-sync-improvements"`
-  - `VERSION = "1.1.1-bugfix-tag-restoration"`
-
-**When merging to main:**
-
-- Update to clean release version (remove branch name)
-- Increment version number according to semantic versioning
-- **Create a git tag** for the new version: `git tag v1.2.0`
-- Examples:
-  - `1.1.0-cookie-management` → `1.2.0` (new feature)
-  - `1.1.1-bugfix-tag-restoration` → `1.1.1` (bug fix)
-  - `2.0.0-breaking-cli-refactor` → `2.0.0` (breaking change)
-
-**When committing directly to main:**
-
-- **ALWAYS ask the user if the version should be bumped** before committing
-- Present the current version and suggest appropriate bump level based on changes
-- Examples of prompts:
-  - "Current version is 1.2.1. Should I bump to 1.2.2 for this bug fix? [Y/n]"
-  - "Current version is 1.2.0. Should I bump to 1.3.0 for this new feature? [Y/n]"
-  - "Current version is 1.2.0. This is just documentation. Skip version bump? [Y/n]"
-- After user confirms, update VERSION, commit, and **create a git tag** for the new version
-- Never assume - always ask!
-
-**Semantic Versioning (MAJOR.MINOR.PATCH):**
-
-- **PATCH** (1.1.0 → 1.1.1): Bug fixes, documentation updates, minor improvements
-- **MINOR** (1.1.0 → 1.2.0): New features, non-breaking changes
-- **MAJOR** (1.1.0 → 2.0.0): Breaking changes, major refactors
-
-**Complete Workflow Example:**
-
-```bash
-# Create feature branch
-git checkout -b feature/cookie-management
-
-# Update version to include branch name
-# In porter_core.py line 48:
-VERSION = "1.1.0-cookie-management"
-git commit -m "Start cookie management feature"
-
-# Work on feature... make commits...
-# (version stays "1.1.0-cookie-management" throughout development)
-
-# Ready to merge to main
-git checkout main
-git merge feature/cookie-management
-
-# Update version to clean release number
-# In porter_core.py line 48:
-VERSION = "1.2.0"  # MINOR bump for new feature
-git commit -m "Bump version to 1.2.0 for cookie management feature"
-
-# Tag the release
-git tag v1.2.0
-```
-
-**Benefits:**
-
-- Branch versions clearly identify development builds
-- Clean versions on main identify stable releases
-- Easy to see if running development vs release build
-- Version in startup banner shows branch: `v1.2.0-new-feature`
-
-**Version Display:**
-
-- Shown in startup banner: `Apple Music to Ride Command MP3 Converter v1.1.0`
-- With branch: `Apple Music to Ride Command MP3 Converter v1.2.0-new-feature`
-- Shown with `--version` flag
-- Logged to all log files
+**Display:** Shown in startup banner, `--version` flag, and log files.
 
 ### Common Gotchas
 
-**Apple Music Authentication & Cookie Management:**
+**Cookies:** Requires `cookies.txt` with Apple Music session cookies. Auto-validates at startup; expired cookies trigger interactive refresh via Selenium (Chrome/Firefox/Safari/Edge). Backup at `cookies.txt.backup`. Flags: `--auto-refresh-cookies`, `--skip-cookie-validation`. See `COOKIE-MANAGEMENT-GUIDE.md`.
 
-- Requires `cookies.txt` file with Apple Music session cookies
-- Tool automatically validates cookies at startup and before downloads
-- Expired cookies trigger interactive prompt: "Attempt automatic cookie refresh? [Y/n]"
-- Automatic refresh uses selenium to extract cookies from browser (Chrome, Firefox, Safari, Edge)
-- Selenium is installed via requirements.txt
-- Backup created before overwriting: `cookies.txt.backup`
-- Cookie validation checks `media-user-token` for `.music.apple.com` domain
-- Expiration shown in days: "Cookies valid until 2026-08-16 (178 days remaining)"
-- Use `--auto-refresh-cookies` flag for non-interactive refresh
-- Use `--skip-cookie-validation` to bypass checks (not recommended)
-- Manual refresh via browser extension still supported as fallback
-- See `COOKIE-MANAGEMENT-GUIDE.md` for complete documentation
+**Virtual Environment:** Must activate before running: `source .venv/bin/activate` (macOS/Linux) or `.venv\Scripts\activate` (Windows).
 
-**Virtual Environment:**
+**Temp Directories:** `gamdl_temp_*` directories safe to delete after downloads.
 
-- Must activate venv before running
-  - **macOS/Linux:** `source .venv/bin/activate`
-  - **Windows:** `.venv\Scripts\activate`
-- Dependencies (gamdl, mutagen) only available inside venv
-- Deactivate with `deactivate` command
-
-**Temporary Directories:**
-
-- gamdl creates `gamdl_temp_*` directories during downloads
-- Safe to delete after successful downloads
-- Not tracked in git (.gitignore)
-
-**USB Drive Detection:**
-
-- Tool auto-detects mounted volumes based on platform:
-  - **macOS:** `/Volumes/` (excludes "Macintosh HD", "Macintosh HD - Data")
-  - **Linux:** `/media/$USER/` and `/mnt/` (excludes "boot", "root")
-  - **Windows:** Drive letters A:-Z: (excludes C:)
-- If USB not detected, check mount status:
-  - **macOS:** `ls /Volumes/`
-  - **Linux:** `ls /media/$USER/` or `ls /mnt/`
-  - **Windows:** Check File Explorer for removable drives
-
-**USB Ejection:**
-
-- **macOS:** Automatic via `diskutil eject`
-- **Linux:** Automatic via `udisksctl` or `umount`
-- **Windows:** Manual via Windows Explorer (automatic eject not implemented)
+**USB Detection:** Auto-detects by platform — macOS: `/Volumes/`, Linux: `/media/$USER/` + `/mnt/`, Windows: drive letters. Eject: automatic on macOS/Linux, manual on Windows.
 
 ## Directory Structure
 
-```text
-.
-├── music-porter                     # ⭐ Unified CLI tool (RECOMMENDED)
-├── porter_core.py                   # Business logic (all classes and utilities)
-├── web_ui.py                        # Web dashboard (Flask API + UI)
-├── templates/                       # Jinja2 HTML templates for web UI
-├── config.yaml                      # Configuration file (playlists + settings)
-├── cookies.txt                      # Apple Music authentication cookies
-├── cookies.txt.backup               # Automatic backup before refresh
-├── music/                           # Downloaded M4A files (organized by playlist)
-│   └── Pop_Workout/                 # Nested: Artist/Album/Track.m4a
-├── export/                          # Converted MP3 files (profile-scoped, flat per playlist)
-│   ├── ride-command/                # Profile: ride-command
-│   │   └── Pop_Workout/            # Flat: "Artist - Title.mp3"
-│   └── basic/                       # Profile: basic
-│       └── Pop_Workout/            # Flat: "Artist - Title.mp3"
-├── logs/                            # Execution logs (timestamped)
-├── SRS/                             # Software Requirements Specifications
-│   └── SRS.md                       # Master SRS archive
-├── .venv/                           # Python virtual environment
-├── .claude/                         # Claude Code project settings
-├── pyproject.toml                   # Lint config (Ruff + PyMarkdown)
-├── requirements.txt                 # All Python dependencies
-├── requirements-dev.txt             # Dev dependencies (ruff, pymarkdownlnt)
-├── ios/                             # iOS companion app (Xcode project)
-│   └── MusicPorter/                 # Xcode project root
-│       ├── MusicPorter.xcodeproj/   # Xcode project file
-│       └── MusicPorter/             # Swift source files
-│           ├── Models/              # Data models (Codable structs)
-│           ├── Services/            # API client, SSE, Bonjour, MusicKit
-│           ├── ViewModels/          # Observable view models
-│           ├── Views/               # SwiftUI views
-│           │   └── Components/      # Reusable UI components
-│           └── Extensions/          # Swift extensions
-├── todos.md                         # Project task tracking
-├── CLAUDE.md                        # Developer guide and AI assistant context
-├── MUSIC-PORTER-GUIDE.md            # Complete usage guide
-└── COOKIE-MANAGEMENT-GUIDE.md       # Cookie validation and refresh guide
-```
+**Key files:** `music-porter` (CLI), `porter_core.py` (business logic), `web_ui.py` (web dashboard), `config.yaml` (playlists + settings), `cookies.txt` (auth).
+
+**Directories:** `music/` (M4A downloads, nested by artist/album), `export/<profile>/<playlist>/` (MP3s, flat "Artist - Title.mp3"), `templates/` (Jinja2), `logs/`, `SRS/`, `ios/` (companion app — see `ios/CLAUDE.md`).
 
 ## Web Dashboard
 
@@ -667,337 +262,50 @@ The web dashboard (`web_ui.py`) provides a browser-based interface with full fea
 ### Launch
 
 ```bash
-# Start web dashboard (default: http://127.0.0.1:5555, no auth)
-./music-porter web
-
-# Custom host/port
-./music-porter web --host 0.0.0.0 --port 8080
-
-# Start API server with authentication (for iOS companion app)
-./music-porter server
-
-# Server with all options
-./music-porter server --host 0.0.0.0 --port 5555 --show-api-key
-
-# Server without auth (not recommended)
-./music-porter server --no-auth
-
-# Server without Bonjour discovery
-./music-porter server --no-bonjour
+./music-porter web                              # Local browser UI (127.0.0.1:5555, no auth)
+./music-porter web --host 0.0.0.0 --port 8080   # Network access
+./music-porter server                            # API server (0.0.0.0, auth + Bonjour, for iOS)
+./music-porter server --show-api-key             # Display API key on startup
 ```
 
-**`web` vs `server` commands:**
+**`web` vs `server`:** `web` is local-only, no auth. `server` enables API key auth, Bonjour/mDNS, QR pairing, and iOS app support.
 
-| Feature | `web` | `server` |
-|---------|-------|----------|
-| Default host | `127.0.0.1` (local only) | `0.0.0.0` (network) |
-| API key auth | Disabled | Required |
-| Bonjour/mDNS | Disabled | Enabled |
-| QR code pairing | No | Yes |
-| iOS app support | No | Yes |
-| Use case | Local browser UI | iOS companion + browser |
+### Pages & Templates
 
-### Pages (10 templates)
+10 Jinja2 templates in `templates/` using Bootstrap 5.3.3 dark theme (CDN from jsDelivr). `base.html` provides shared layout (sidebar, log panel, SSE handler). Pages: `/` (dashboard), `/playlists`, `/pipeline`, `/convert`, `/tags`, `/cover-art`, `/usb`, `/settings`, `/operations`.
 
-| Route | Template | Purpose |
-|-------|----------|---------|
-| `GET /` | `dashboard.html` | Library stats, cookie status, sortable playlist table |
-| `GET /playlists` | `playlists.html` | Playlist CRUD management |
-| `GET /pipeline` | `pipeline.html` | Full pipeline workflow (download + convert + tag) |
-| `GET /convert` | `convert.html` | M4A to MP3 conversion |
-| `GET /tags` | `tags.html` | Tag update, restore, and reset operations |
-| `GET /cover-art` | `cover_art.html` | Cover art embed, extract, strip, resize |
-| `GET /usb` | `usb_sync.html` | USB drive sync |
-| `GET /settings` | `settings.html` | Profile, settings, and cookie management |
-| `GET /operations` | `operations.html` | Task history and status |
-| — | `base.html` | Base layout with sidebar, log panel, SSE handler |
+### API Endpoints (~32)
 
-### API Endpoints (~32 endpoints)
-
-**Auth & Server Info (server mode only):**
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/auth/validate` | Validate API key, returns server identity |
-| GET | `/api/server-info` | Server metadata (name, version, platform, profiles) |
-
-**Status & Info:**
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/status` | System status, cookies, library stats, profile, busy flag |
-| GET | `/api/summary` | Export library statistics with per-playlist breakdown |
-| GET | `/api/library-stats` | Source `music/` directory statistics |
-
-**Cookie Management:**
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/cookies/browsers` | Available browsers (default + installed list) |
-| POST | `/api/cookies/refresh` | Auto-refresh cookies from browser (background task) |
-
-**Playlist CRUD:**
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/playlists` | List all playlists |
-| POST | `/api/playlists` | Add new playlist (key, url, name) |
-| PUT | `/api/playlists/<key>` | Update playlist url/name |
-| DELETE | `/api/playlists/<key>` | Remove playlist |
-
-**Settings:**
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/settings` | Get settings, profiles, valid presets/structures/formats |
-| POST | `/api/settings` | Update settings (output\_type, usb\_dir, workers) |
-
-**Directory Listings:**
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/directories/music` | List `music/` subdirectories |
-| GET | `/api/directories/export` | List `export/<profile>/` playlists with file counts |
-
-**Operations (background tasks):**
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/pipeline/run` | Execute full pipeline (playlist/url/auto mode) |
-| POST | `/api/convert/run` | Convert M4A to MP3 |
-| POST | `/api/tags/update` | Update album/artist tags |
-| POST | `/api/tags/restore` | Restore original tags from TXXX frames |
-| POST | `/api/tags/reset` | Reset tags from source M4A files |
-| POST | `/api/cover-art/<action>` | Cover art: embed, extract, update, strip, resize |
-| POST | `/api/usb/sync` | Sync files to USB drive |
-
-**File Serving (for iOS companion app):**
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/files/<playlist_key>` | File listing with ID3 metadata |
-| GET | `/api/files/<playlist_key>/<filename>` | Download single MP3 file |
-| GET | `/api/files/<playlist_key>/<filename>/artwork` | Extract cover art image |
-| GET | `/api/files/<playlist_key>/download-all` | Streaming ZIP of all MP3s |
-
-**USB:**
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/usb/drives` | List connected USB drives |
-
-**Task Management & Streaming:**
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/tasks` | List all background tasks |
-| GET | `/api/tasks/<task_id>` | Get task details |
-| POST | `/api/tasks/<task_id>/cancel` | Cancel running task |
-| GET | `/api/stream/<task_id>` | SSE live log/progress stream |
+- **Status:** `GET /api/status`, `/api/summary`, `/api/library-stats`
+- **Auth (server only):** `POST /api/auth/validate`, `GET /api/server-info`
+- **Cookies:** `GET /api/cookies/browsers`, `POST /api/cookies/refresh`
+- **Playlists CRUD:** `GET|POST /api/playlists`, `PUT|DELETE /api/playlists/<key>`
+- **Settings:** `GET|POST /api/settings`
+- **Directories:** `GET /api/directories/music`, `GET /api/directories/export`
+- **Operations:** `POST /api/pipeline/run`, `/api/convert/run`, `/api/tags/update`, `/api/tags/restore`, `/api/tags/reset`, `/api/cover-art/<action>`, `/api/usb/sync`
+- **Files:** `GET /api/files/<key>`, `/<key>/<filename>`, `/<key>/<filename>/artwork`, `/<key>/download-all`
+- **USB:** `GET /api/usb/drives`
+- **Tasks:** `GET /api/tasks`, `/api/tasks/<id>`, `POST /api/tasks/<id>/cancel`, `GET /api/stream/<id>` (SSE)
 
 ### Architecture
 
-**Key classes in `web_ui.py`:**
+**Key classes in `web_ui.py`:** `WebLogger` (routes to SSE queue), `WebDisplayHandler` (SSE progress), `TaskState` (dataclass), `TaskManager` (one-at-a-time with `RLock`).
 
-- `WebLogger` — Subclass of `Logger` that routes messages to SSE queue (strips ANSI codes)
-- `WebDisplayHandler` — Implements DisplayHandler protocol for SSE progress events
-- `TaskState` — Dataclass holding task id, status, result, thread, cancel\_event, log\_queue
-- `TaskManager` — Manages one background operation at a time with `threading.RLock()`
+**Background task model:** POST submits task -> `task_manager.submit()` -> returns `task_id` (409 if busy). Background thread runs with `WebLogger`. Frontend subscribes to `GET /api/stream/<task_id>` for SSE events (`log`/`progress`/`heartbeat`/`done`).
 
-**Background task model:**
-
-1. POST request submits task → `task_manager.submit()` → returns `task_id` (or 409 if busy)
-2. Background thread runs operation with `WebLogger` wired to SSE queue
-3. Frontend subscribes to `GET /api/stream/<task_id>` for real-time `log`/`progress`/`heartbeat`/`done` events
-4. Sentinel (`None`) in queue signals task completion
-
-**Security:**
-
-- `_safe_dir()` validates all directory parameters are within project root (prevents path traversal)
-- No authentication or CORS (local development/trusted-network tool)
-
-### Template Structure
-
-10 Jinja2 templates in `templates/` using Bootstrap 5.3.3 dark theme (CDN-served from jsDelivr). `base.html` provides the shared layout with sidebar navigation, log panel, toast notifications, and SSE handler. All page templates extend `base.html`.
+**Security:** `_safe_dir()` validates directories within project root. `web` has no auth; `server` uses Bearer token auth.
 
 ### Limitations
 
-- No authentication on `web` command — use `server` command for API key auth
-- No concurrent operations — one background task at a time (HTTP 409 if busy)
-- No custom VBR quality via web UI (only named presets: lossless, high, medium, low)
-- Local-only by default (`127.0.0.1`); use `--host 0.0.0.0` for network access
+- One background task at a time (HTTP 409 if busy)
+- No custom VBR quality via web UI (only named presets)
+- `web` command has no auth — use `server` for network access
 
 ## iOS Companion App
 
-### Overview
+See `ios/CLAUDE.md` for full iOS companion app documentation (architecture, models, services, views, Bonjour, pairing flow).
 
-The iOS companion app (`ios/MusicPorter/`) is a native SwiftUI app that connects to the music-porter server over the local network. It provides a mobile interface for browsing playlists, triggering server-side operations, downloading MP3s, and exporting to USB drives.
-
-### Requirements
-
-- iOS 17+ (uses `@Observable` macro)
-- Xcode 15+
-- Apple Developer Program membership for MusicKit entitlement and device testing
-- Server running with `./music-porter server` (not `web`)
-
-### Server Command
-
-```bash
-# Start API server with authentication (for iOS companion app)
-./music-porter server
-
-# Server with all options
-./music-porter server --host 0.0.0.0 --port 5555 --show-api-key
-
-# Server without auth (not recommended)
-./music-porter server --no-auth
-
-# Server without Bonjour discovery
-./music-porter server --no-bonjour
-```
-
-**`web` vs `server` commands:**
-
-| Feature | `web` | `server` |
-|---------|-------|----------|
-| Default host | `127.0.0.1` (local only) | `0.0.0.0` (network) |
-| API key auth | Disabled | Required |
-| Bonjour/mDNS | Disabled | Enabled |
-| QR code pairing | No | Yes |
-| iOS app support | No | Yes |
-| Use case | Local browser UI | iOS companion + browser |
-
-### API Endpoints (iOS-Specific)
-
-These endpoints were added for the iOS companion app (in addition to existing web dashboard endpoints):
-
-**Auth & Server Info:**
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/auth/validate` | Validate API key, returns server identity |
-| GET | `/api/server-info` | Server metadata (name, version, platform, profiles) |
-
-**File Serving:**
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/files/<playlist_key>` | File listing with ID3 metadata (title, artist, album, duration, size, cover art, protection tags) |
-| GET | `/api/files/<playlist_key>/<filename>` | Download single MP3 file (`audio/mpeg`) |
-| GET | `/api/files/<playlist_key>/<filename>/artwork` | Extract cover art image from APIC frame |
-| GET | `/api/files/<playlist_key>/download-all` | Streaming ZIP archive of all MP3s (ZIP\_STORED, 64KB chunks) |
-
-**Authentication Middleware:**
-
-- All `/api/` routes require `Authorization: Bearer <api_key>` header
-- API key generated via `secrets.token_urlsafe(32)`, persisted in `config.yaml` under `settings.api_key`
-- CORS headers: `Access-Control-Allow-Origin: *`, permits `Authorization` header
-- OPTIONS (preflight) requests skip auth check
-
-### Architecture
-
-**Models (8 files):** Codable structs matching server JSON responses
-
-- `ServerConnection` — Host, port, name, version, platform; computed `baseURL` and `apiURL(path:)` helper
-- `ServerStatus` — Version, `CookieStatus` (validity, days remaining), `LibraryStats` (playlists, files, size), profile, busy flag
-- `Playlist` — Key, URL, name
-- `Track` — Filename, size, duration, title, artist, album, hasCoverArt, hasProtectionTags; computed `displayTitle`
-- `ExportDirectory` — Name and file count
-- `FileListResponse` — Playlist key, profile, fileCount, files array
-- `SSEEvent` — Enum: `.log(level, message)`, `.progress(current, total, percent, stage)`, `.heartbeat`, `.done(status, result, error)`
-- `TaskInfo` — Task id, operation, description, status, result, error, elapsed; computed `isRunning`, `isCompleted`, `isFailed`
-
-**Services (7 files):** Network and platform services
-
-- `APIClient` — `@MainActor @Observable` REST client; all endpoint methods (status, playlists CRUD, pipeline/convert/tag operations, file downloads, settings); `APIError` enum with `.notConfigured`, `.unauthorized`, `.serverBusy`, `.serverError`
-- `SSEClient` — Swift actor; `events(taskId:)` returns `AsyncStream<SSEEvent>` from `GET /api/stream/<task_id>`; parses `"data: {json}"` lines
-- `ServerDiscovery` — `@MainActor @Observable`; uses `NWBrowser` for `_music-porter._tcp` Bonjour browsing; resolves endpoints to IP:port; 10-second auto-stop
-- `MusicKitService` — `@MainActor @Observable`; `requestAuthorization()`, `fetchLibraryPlaylists()`, `searchPlaylists(query:)` (limit 25); read-only due to DRM
-- `FileDownloadManager` — `@MainActor @Observable`; `downloadFile()`, `downloadAll()` (ZIP), `localFiles()`, `deletePlaylist()`; stores in `~/Documents/MusicPorter/<playlist>/`; background `URLSession`
-- `USBExportService` — `@Observable`; `UIDocumentPickerViewController` integration; `exportFiles()` with progress tracking; security-scoped URL access
-- `KeychainService` — Static methods: `save(apiKey:)`, `load()`, `delete()`; service ID: `com.musicporter.apikey`
-
-**ViewModels (5 files):** `@MainActor @Observable` state management
-
-- `AppState` — Global state injected via SwiftUI environment; owns all services; `connect()`, `disconnect()`, `attemptAutoReconnect()` (3-second timeout); persists `savedServer` in UserDefaults
-- `DashboardViewModel` — Loads `ServerStatus` and `SummaryResponse` in parallel
-- `PlaylistsViewModel` — Playlists + export directories; add/delete playlist methods
-- `PlaylistDetailViewModel` — Track listing for a single playlist
-- `OperationViewModel` — Operation lifecycle: `run()` triggers API call then SSE streaming; `handleEvent()` processes log/progress/done; `reset()` clears state
-
-**Views (13 files + 3 components):** SwiftUI with enforced dark theme
-
-| View | Purpose |
-|------|---------|
-| `MusicPorterApp` | App entry point; creates `AppState`, injects as environment, enforces `.dark` color scheme |
-| `ContentView` | Root view: shows `ServerDiscoveryView` if disconnected, `MainTabView` if connected |
-| `MainTabView` | Bottom tab bar: Dashboard, Playlists, Pipeline, Downloads, Settings |
-| `ServerDiscoveryView` | Bonjour discovery list + manual IP entry; presents `PairingView` as sheet |
-| `PairingView` | SecureField for API key; validates and stores credentials |
-| `DashboardView` | Server status card, library stats card, playlist overview; pull-to-refresh |
-| `PlaylistsView` | Playlist list with add (+) and swipe-to-delete; navigates to detail |
-| `PlaylistDetailView` | Track list with `TrackRow` components; pull-to-refresh |
-| `PipelineView` | Pipeline form (source, preset, USB toggle) + `ProgressPanel` |
-| `DownloadView` | Server playlists with download buttons; local storage display |
-| `SettingsView` | Server info, profiles, disconnect, navigation to operations/Apple Music/USB |
-| `OperationsView` | Task history with status badges (green/blue/red/orange) |
-| `AppleMusicBrowserView` | MusicKit authorization, library browse, catalog search, send-to-server |
-| `USBSyncView` | Playlist selection with checkmarks, export button, progress bar |
-| `TrackRow` | Reusable: artwork thumbnail (44x44), title, artist, size |
-| `StatusBadge` | Colored capsule badge (Valid/Invalid, Idle/Busy, completed/failed) |
-| `ProgressPanel` | Progress bar + scrollable monospace log; color-coded levels |
-
-### Bonjour/mDNS Discovery
-
-**Server side (`BonjourAdvertiser` in `web_ui.py`):**
-
-- Registers `_music-porter._tcp.local.` service via `zeroconf` library
-- Broadcasts: service name, host IP, port, TXT record with version/platform/api\_version
-- Local IP determined via UDP socket trick (connect to `10.255.255.255:1`)
-- Only starts when `host != '127.0.0.1'`; gracefully skips if zeroconf not installed
-- Unregistered on server shutdown in `finally` block
-
-**iOS side (`ServerDiscovery`):**
-
-- Uses `NWBrowser` to discover `_music-porter._tcp` services
-- Resolves Bonjour endpoints to IP:port connections
-- Extracts IPv4 from IPv6-mapped addresses (`::ffff:192.168.1.100` → `192.168.1.100`)
-- Strips interface scope IDs (`%bridge101`, `%en0`) from resolved addresses
-- Auto-stops after 10 seconds; manual refresh available
-- Deduplicates (one entry per unique host:port)
-
-### QR Code Pairing
-
-- Server generates QR code using `segno` library
-- JSON payload: `{"host": "<ip>", "port": <port>, "key": "<api_key>"}`
-- Rendered to terminal via `segno.terminal()` with compact mode
-- Graceful fallback if `segno` not installed (prints install hint)
-
-### Connection Flow
-
-1. App launches → `ServerDiscoveryView` browses for `_music-porter._tcp` via Bonjour
-2. User selects discovered server (or enters IP manually)
-3. `PairingView` — enter API key (displayed on server startup) or scan QR code
-4. Key validated via `POST /api/auth/validate`, stored in iOS Keychain
-5. Auto-reconnect on next launch using saved server + Keychain key (3-second timeout)
-
-### Key Constraints
-
-- **DRM protection**: MusicKit can browse playlists/metadata but CANNOT export audio. All downloads and conversions must happen on the server.
-- **USB drives**: iOS supports USB drives since iOS 13 via `UIDocumentPickerViewController` (FAT, ExFAT, HFS+, APFS).
-- **Background downloads**: Uses `URLSession` for file downloads with progress tracking.
-- **One operation at a time**: Server enforces single background task (HTTP 409 if busy).
-
-### Key Implementation Notes
-
-- All `@Observable` classes must be annotated with `@MainActor` for thread-safe UI updates
-- URL construction uses `URLComponents` (never string interpolation) to handle IPv6 addresses and special characters
-- `ServerConnection.baseURL` is a computed property constructing `http://host:port`
-- `APIClient` includes Bearer token in all requests via a shared `authenticatedRequest(for:)` helper
-- `SSEClient` is a Swift actor (not `@MainActor`) for background streaming without blocking UI
-- `FileDownloadManager` uses background `URLSessionConfiguration` for resilient downloads
-- `AppState` is injected as SwiftUI environment object; all services instantiated there
-- Dark color scheme enforced at app level via `.preferredColorScheme(.dark)`
+**Quick reference:** Native SwiftUI app (iOS 17+) connecting to `./music-porter server` over local network. Requires `server` command (not `web`) for API key auth, Bonjour discovery, and file serving endpoints.
 
 ## Important Implementation Notes
 
@@ -1029,276 +337,54 @@ These endpoints were added for the iOS companion app (in addition to existing we
 
 ### Cookie Management (CookieManager class)
 
-- **Validation:** Uses `http.cookiejar.MozillaCookieJar` to parse Netscape format cookies
-- **Browser Detection:** Detects OS default browser via LaunchServices (macOS), xdg-settings (Linux), registry (Windows)
-- **Multi-Browser Support:** Chrome, Firefox, Safari, Edge with automatic fallback
-- **Selenium Integration:** Launches browser headless first, falls back to visible if login needed
-- **Login Detection:** Checks for sign-in button presence to determine if user is logged in
-- **Cookie Extraction:** Converts Selenium cookies to `http.cookiejar.Cookie` objects
-- **Backup Strategy:** Creates `.backup` file before overwriting (preserves working cookies)
-- **Interactive Prompts:** Menu-level checks before batch operations, per-download checks for single operations
-- **Dependencies:** Selenium and webdriver-manager installed via `requirements.txt`
-- **Non-Interactive Mode:** Fails immediately with clear error if cookies invalid (prevents hanging)
-- **Key Methods:** `validate()`, `auto_refresh()`, `_extract_with_selenium()`, `_detect_default_browser()`
+Uses `MozillaCookieJar` for validation, Selenium for auto-refresh (headless first, visible fallback). Detects default browser per platform. Creates `.backup` before overwriting. Key methods: `validate()`, `auto_refresh()`, `_extract_with_selenium()`, `_detect_default_browser()`.
 
 ### Error Handling
 
-- Scripts continue on individual file errors (don't fail entire batch)
-- Comprehensive logging to timestamped log files
-- Summary statistics printed at completion (converted, skipped, errors)
-- USB drive selection with auto-detection and excluded volume list
-- Cookie validation errors fail fast with clear instructions
-- Browser automation errors trigger fallback to manual instructions
+Continues on individual file errors (batch processing). Logs to timestamped files. Cookie errors fail fast. Summary stats at completion.
 
 ### FFmpeg Integration
 
-- Uses ffmpeg-python library for cleaner API and better error handling
-- Still requires system ffmpeg binary (ffmpeg-python is a wrapper, not a replacement)
-- Quality setting: VBR mode with libmp3lame, quality level 2 (high quality)
-- Error handling: Catches ffmpeg.Error, logs details, continues processing remaining files
-- Silent operation: Uses quiet=True to suppress ffmpeg output during batch processing
+Uses `ffmpeg-python` wrapper (requires system `ffmpeg` binary). Catches `ffmpeg.Error`, logs details, continues batch. Uses `quiet=True`.
 
 ## Configuration
 
 ### config.yaml
 
-YAML configuration file containing both playlists and application settings. Auto-created with defaults if missing.
-
-**Format:**
-
-```yaml
-# Music Porter Configuration
-# CLI flags override these settings when specified.
-
-settings:
-  output_type: ride-command
-  usb_dir: RZR/Music
-  workers: 6
-
-playlists:
-  - key: Pop_Workout
-    url: https://music.apple.com/us/playlist/...
-    name: Pop Workout
-  - key: Thumbs_Up
-    url: https://music.apple.com/us/playlist/...
-    name: Thumbs Up
-```
-
-**Playlist fields:**
-
-- `key`: Short identifier (used for directory names)
-- `url`: Apple Music playlist URL
-- `name`: Display name for the playlist
-
-**Settings fields:**
-
-- `output_type`: Default output profile (`ride-command`, `basic`, etc.)
-- `usb_dir`: Default USB subdirectory for sync operations
-- `workers`: Number of parallel workers for batch operations
-
-**Settings precedence:** CLI flag > `config.yaml` settings > hardcoded constant. For example, `--output-type basic` on the CLI overrides `output_type: ride-command` in config.yaml, which overrides the `DEFAULT_OUTPUT_TYPE` constant.
-
-**Migration from playlists.conf:** The old pipe-delimited `playlists.conf` format (`key|url|name`) has been replaced by `config.yaml`. The `ConfigManager` class now reads and writes YAML exclusively.
+YAML file with `settings` (output\_type, usb\_dir, workers) and `playlists` (key, url, name). Auto-created if missing. **Precedence:** CLI flag > config.yaml > hardcoded constant.
 
 ### USB Drive Exclusions
 
-Excluded volumes are configured in `music-porter` (constant: `EXCLUDED_USB_VOLUMES`):
+Constant `EXCLUDED_USB_VOLUMES` in `music-porter`: `["Macintosh HD", "Macintosh HD - Data"]`.
 
-```python
-EXCLUDED_USB_VOLUMES = [
-    "Macintosh HD",
-    "Macintosh HD - Data",
-]
-```
+## Implementation Details
 
-## Unified Command Architecture
+### Key Classes in `porter_core.py`
 
-### Overview
+21 classes organized by concern: `Logger`, `PlaylistConfig`, `ConfigManager`, `DependencyChecker`, `TagStatistics`, `TaggerManager`, `ConversionStatistics`, `Converter`, `Downloader`, `CookieStatus`, `CookieManager`, `USBManager`, `PlaylistSummary`, `LibrarySummaryStatistics`, `SummaryManager`, `PipelineStatistics`, `PipelineOrchestrator`, `InteractiveMenu`, `PlaylistResult`, `AggregateStatistics`, `CoverArtManager`.
 
-The `music-porter` script is a modern, unified Python tool (3,065 lines) that replaces both legacy scripts with a professional subcommand architecture.
+### ConfigManager
 
-### Key Components
-
-**21 Classes:**
-
-1. `Logger` - Timestamped logging to console and file
-2. `PlaylistConfig` - Playlist configuration representation
-3. `ConfigManager` - Loads and manages config.yaml (playlists + settings)
-4. `DependencyChecker` - Checks and installs dependencies
-5. `TagStatistics` - Tracks tagging operation statistics
-6. `TaggerManager` - Manages MP3 tag operations
-7. `ConversionStatistics` - Tracks conversion statistics
-8. `Converter` - M4A → MP3 conversion with ffmpeg
-9. `Downloader` - Downloads from Apple Music via gamdl
-10. `CookieStatus` - Cookie validation result data structure
-11. `CookieManager` - Cookie validation, refresh, and browser automation
-12. `USBManager` - USB drive detection and syncing
-13. `PlaylistSummary` - Statistics for a single playlist
-14. `LibrarySummaryStatistics` - Statistics for entire export library
-15. `SummaryManager` - Generates export library summaries
-16. `PipelineStatistics` - Aggregates statistics across stages
-17. `PipelineOrchestrator` - Coordinates multi-stage workflows
-18. `InteractiveMenu` - Interactive user interface
-19. `PlaylistResult` - Results for single playlist in batch processing
-20. `AggregateStatistics` - Cumulative statistics across multiple playlists
-21. `CoverArtManager` - Cover art embed, extract, update, and strip operations
-
-**Subcommands:**
-
-- `pipeline` - Full download + convert + tag workflow (default)
-- `download` - Download from Apple Music using gamdl
-- `convert` - Convert M4A → MP3 with tag preservation
-- `tag` - Update tags on existing MP3s
-- `restore` - Restore original tags from TXXX frames
-- `reset` - Reset tags from source M4A files (⚠️ overwrites TXXX frames)
-- `sync-usb` - Copy files to USB drive
-- `cover-art` - Cover art management (embed, extract, update, strip)
-- `summary` - Display export library statistics
-
-**Features:**
-
-- Professional CLI with `--help` for every command
-- Global flags: `--dry-run`, `--verbose`, `--version`
-- Comprehensive error handling (continues on failures)
-- Detailed statistics and summary reports
-- Pipeline orchestration with stage tracking
-- Interactive menu with playlist selection
-- Backward compatible wrappers for legacy scripts
-
-### Migration from Legacy Scripts
-
-**Automatic migration via wrappers:**
-
-- Old scripts still work but show deprecation warnings
-- Internally call `music-porter` with mapped arguments
-- No immediate changes required
-- Update scripts gradually
-
-**Recommended migration:**
-
-```bash
-# Old: do-it-all
-./do-it-all --auto
-# New: music-porter
-./music-porter pipeline --auto
-
-# Old: ride-command-mp3-export
-./ride-command-mp3-export music/Pop_Workout/ --output export/Pop_Workout
-# New: music-porter
-./music-porter convert music/Pop_Workout --output export/ride-command/Pop_Workout
-```
-
-### Benefits Over Legacy Scripts
-
-1. **Unified interface** - Single command for all operations
-2. **Subcommand architecture** - Professional, extensible CLI
-3. **Pipeline orchestration** - Automated multi-stage workflows
-4. **Better error handling** - Continues on failures, detailed reporting
-5. **Comprehensive statistics** - Aggregated across pipeline stages
-6. **Pure Python** - No bash subprocess overhead
-7. **Modular design** - 21 classes, easy to extend
-8. **Interactive menu** - User-friendly for occasional use
-9. **Complete documentation** - 3 comprehensive guides
-
-### Implementation Notes for music-porter
-
-**Tag Management (TaggerManager class):**
-
-- Implements same TXXX hard-gate protection as legacy script
-- Uses identical helper functions: `_get_txxx()`, `_txxx_exists()`, `save_original_tag()`
-- Maintains full backward compatibility with tag format
-- Statistics tracking for all operations
-
-**Conversion (Converter class):**
-
-- Uses ffmpeg with configurable quality presets
-- Default: lossless 320kbps CBR (libmp3lame -b:a 320k)
-- VBR presets: high (q:a 2), medium (q:a 4), low (q:a 6)
-- Custom VBR quality 0-9 supported (0=best, 9=worst)
-- Immediate tag application after conversion
-- Preserves TXXX frames on force re-conversion
-- Identical filename sanitization and output structure
-
-**Configuration Management (ConfigManager class):**
-
-- Reads and writes `config.yaml` using PyYAML
-- Auto-creates default `config.yaml` if missing (`_create_default()`)
+- Reads/writes `config.yaml` using PyYAML; auto-creates if missing
 - Key methods: `get_setting()`, `update_setting()`, `_save()`, `_create_default()`
-- Settings resolved via `resolve_config_settings()` helper: CLI flag > config.yaml > hardcoded constant
-- Constant: `DEFAULT_CONFIG_FILE = "config.yaml"` (renamed from `DEFAULT_PLAYLISTS_CONF`)
+- Settings precedence: CLI flag > config.yaml > hardcoded constant
 - IMPORT_MAP includes `'PyYAML': 'yaml'` for dependency checking
 
-**Profile-Scoped Export Directories:**
+### Profile-Scoped Export Directories
 
-- Export paths are now scoped by output profile: `export/<profile>/<playlist>/`
-- Examples: `export/ride-command/Pop_Workout/`, `export/basic/Pop_Workout/`
-- Helper function `get_export_dir(profile_name, playlist_key=None)` builds these paths
-- Without `playlist_key`: returns `export/<profile>/`
-- With `playlist_key`: returns `export/<profile>/<playlist_key>/`
+- Paths scoped by profile: `export/<profile>/<playlist>/`
+- Helper: `get_export_dir(profile_name, playlist_key=None)`
 
-**Pipeline Orchestration (PipelineOrchestrator class):**
+### Interactive Menu
 
-- Coordinates: download → convert → tag → USB sync
-- Stage dependency handling
-- Aggregate statistics across all stages
-- Comprehensive summary reports
-- Error recovery (continues on individual failures)
+- Numbered playlist selection (1-N) + letter actions: A (all), U (URL), C (USB), S (summary), P (profile), X (exit)
+- Returns to menu after each operation; saves new URLs to config
 
-**Interactive Menu (InteractiveMenu class):**
+### Cover Art (CoverArtManager)
 
-- Beautiful formatted menu display with automatic loop-back
-- Numbered playlist selection (1-N)
-- Letter-based action options:
-  - A (All playlists)
-  - U (Enter URL)
-  - C (Copy to USB)
-  - S (Show library summary)
-  - P (Change output profile — shows current profile, persists selection to config.yaml)
-  - X (Exit)
-- Case-insensitive input handling
-- Post-processing prompts for USB copy
-- Save new URLs to config
-- Returns to main menu after each operation (except X to exit)
-- Summary display with pause-to-review before returning to menu
-
-**Library Summary (SummaryManager class):**
-
-- Displays comprehensive export library statistics
-- Three output modes: default (balanced), quick (aggregate only), detailed (extended)
-- Always scans all files for both size/count and tag integrity (no sampling)
-- Graceful error handling: continues on permission errors, displays partial results
-- Performance: ~0.4 seconds for full library scan (643 files)
-- Statistics tracked: total files, total size, per-playlist breakdowns, tag integrity percentages
-- Uses same TXXX protection detection as other managers for consistency
-- Available in interactive menu as "S. Show library summary" option
-- Cover art statistics: tracks files with/without embedded APIC frames
-
-**Cover Art Management (CoverArtManager class):**
-
-- Manages cover art operations on existing MP3 files
-- Four actions: `embed`, `extract`, `update`, `strip`
-- `embed`: Reads cover art from matching M4A source files (auto-derives `export/` → `music/`)
-- `extract`: Saves embedded cover art to image files in `cover-art/` subdirectory
-- `update`: Replaces cover art on all MP3s from a single image file (.jpg or .png)
-- `strip`: Removes all APIC frames to reduce file size
-- Automatic cover art embedding during conversion (APIC frame from M4A source)
-- SHA-256 hash prefix stored in `TXXX:OriginalCoverArtHash` with hard-gate protection
-- `--no-cover-art` flag on `convert` and `pipeline` commands to skip embedding
-- Progress bars for all operations
-- Dry-run and verbose support
-
-### Testing Workflow
-
-```bash
-# Always use --dry-run first for new operations
-./music-porter --dry-run --verbose convert music/NewPlaylist
-
-# Verify with verbose mode
-./music-porter --verbose tag export/ride-command/NewPlaylist --album "Test"
-
-# Check logs for detailed information
-tail -100 logs/$(ls -t logs/ | head -1)
-```
+- Actions: `embed` (from M4A source), `extract` (to files), `update` (from image), `strip` (remove APIC)
+- SHA-256 hash stored in `TXXX:OriginalCoverArtHash` with hard-gate protection
+- `--no-cover-art` flag on `convert` and `pipeline` to skip embedding
 
 ## Additional Resources
 
