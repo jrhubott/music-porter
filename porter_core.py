@@ -151,7 +151,7 @@ DEFAULT_OUTPUT_PROFILES: dict = {
     },
     "basic": {
         "description": "Standard MP3 with original tags and artwork",
-        "directory_structure": "flat",
+        "directory_structure": "nested-artist-album",
         "filename_format": "full",
         "id3_version": 4,
         "strip_id3v1": True,
