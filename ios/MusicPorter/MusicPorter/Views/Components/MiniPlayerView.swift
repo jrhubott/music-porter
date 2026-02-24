@@ -6,6 +6,7 @@ struct MiniPlayerView: View {
 
     @State private var sliderValue: Double = 0
     @State private var isDragging = false
+    @State private var dragOffset: CGFloat = 0
 
     private var audioPlayer: AudioPlayerService { appState.audioPlayer }
 
@@ -76,6 +77,29 @@ struct MiniPlayerView: View {
             .padding(.vertical, 8)
             .background(.ultraThinMaterial)
         }
+        .offset(y: max(0, dragOffset))
+        .gesture(
+            DragGesture()
+                .onChanged { value in
+                    // Only track downward drags
+                    dragOffset = value.translation.height
+                }
+                .onEnded { value in
+                    if value.translation.height > 50 || value.velocity.height > 300 {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            dragOffset = 200
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                            audioPlayer.stop()
+                            dragOffset = 0
+                        }
+                    } else {
+                        withAnimation(.spring(duration: 0.3)) {
+                            dragOffset = 0
+                        }
+                    }
+                }
+        )
         .onChange(of: audioPlayer.playbackProgress) { _, newValue in
             if !isDragging {
                 sliderValue = newValue
