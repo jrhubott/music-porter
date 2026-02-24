@@ -24,6 +24,8 @@ def _auto_activate_venv():
     # sys.prefix != sys.base_prefix is Python's own way to detect a venv
     if sys.prefix != sys.base_prefix:
         return  # Already running inside a venv
+    if '--no-venv' in sys.argv:
+        return  # Docker / manual override — skip venv activation
 
     if platform.system() == 'Windows':
         venv_python = Path('.venv/Scripts/python.exe')
@@ -1528,6 +1530,8 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
     parser.add_argument('--workers', type=positive_int, default=None,
                        metavar='N',
                        help=f'Parallel conversion workers (default: {DEFAULT_WORKERS})')
+    parser.add_argument('--no-venv', action='store_true',
+                       help='Skip virtual environment detection and dependency checks')
     parser.add_argument('--output-type',
                        default=None,
                        choices=list(OUTPUT_PROFILES.keys()),
@@ -1716,10 +1720,13 @@ def main():
 
     # Ensure Python packages (especially PyYAML) are installed before config loading.
     # If missing, installs from requirements.txt and re-execs — code below won't run.
-    bootstrap_deps = DependencyChecker(temp_logger)
-    if not bootstrap_deps.check_python_packages():
-        temp_logger.error("Failed to install required Python packages")
-        sys.exit(1)
+    if '--no-venv' not in sys.argv:
+        bootstrap_deps = DependencyChecker(temp_logger)
+        if not bootstrap_deps.check_python_packages():
+            temp_logger.error("Failed to install required Python packages")
+            sys.exit(1)
+    else:
+        _init_third_party()
 
     # Load config and output profiles BEFORE argparse so --output-type choices
     # reflect config-defined profiles (including user-added ones).

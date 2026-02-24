@@ -11,7 +11,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN grep -viE 'selenium|webdriver.manager' requirements.txt > requirements-docker.txt \
     && pip install --no-cache-dir -r requirements-docker.txt \
-    && rm requirements-docker.txt
+    && rm requirements-docker.txt requirements.txt
 
 # Copy application files
 COPY music-porter porter_core.py web_ui.py ./

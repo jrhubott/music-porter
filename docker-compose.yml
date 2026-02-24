@@ -7,6 +7,11 @@ services:
     #     - "5555:5555"
     network_mode: host
     volumes:
+      # IMPORTANT: config.yaml and cookies.txt must exist as FILES on the host
+      # before starting. If missing, Docker creates them as empty directories,
+      # which breaks the app. Before first run:
+      #   touch config.yaml    (auto-populated by the app on startup)
+      #   cp /path/to/your/cookies.txt .   (must be user-supplied)
       - ./config.yaml:/app/config.yaml
       - ./cookies.txt:/app/cookies.txt
       - ./music:/app/music
