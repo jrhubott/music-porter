@@ -105,7 +105,8 @@ Merge the current feature branch into main following the project's version workf
    - If yes, run `git branch -d <branch-name>`
 
 7. **Push to remote**
-   - Run `git push origin main --tags`
+   - Ask the user if they want to push to origin now
+   - If yes, run `git push origin main --tags`
    - If push fails (e.g. rejected), warn the user and show the error — do NOT force push
 
 8. **Report**
