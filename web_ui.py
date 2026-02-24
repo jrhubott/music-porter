@@ -715,6 +715,46 @@ def create_app(project_root=None, no_auth=False):
             'files': files,
         })
 
+    @app.route('/api/list/unconverted')
+    def api_list_unconverted():
+        """List unconverted M4A files across playlists."""
+        config = _get_config()
+        profile = _get_output_profile(config)
+        quiet_logger = mp.Logger(verbose=False)
+        mgr = mp.SummaryManager(logger=quiet_logger)
+
+        playlist_filter = request.args.get('playlist')
+        if playlist_filter and ('/' in playlist_filter or '..' in playlist_filter):
+            return jsonify({'error': 'Invalid playlist name'}), 400
+
+        result = mgr.list_unconverted(
+            music_dir=mp.DEFAULT_MUSIC_DIR,
+            export_profile=profile.name,
+            output_profile=profile,
+            playlist_filter=playlist_filter,
+        )
+        return jsonify(result.to_dict())
+
+    @app.route('/api/list/diff')
+    def api_list_diff():
+        """List unconverted and orphaned files across playlists."""
+        config = _get_config()
+        profile = _get_output_profile(config)
+        quiet_logger = mp.Logger(verbose=False)
+        mgr = mp.SummaryManager(logger=quiet_logger)
+
+        playlist_filter = request.args.get('playlist')
+        if playlist_filter and ('/' in playlist_filter or '..' in playlist_filter):
+            return jsonify({'error': 'Invalid playlist name'}), 400
+
+        result = mgr.list_diff(
+            music_dir=mp.DEFAULT_MUSIC_DIR,
+            export_profile=profile.name,
+            output_profile=profile,
+            playlist_filter=playlist_filter,
+        )
+        return jsonify(result.to_dict())
+
     @app.route('/api/convert/batch', methods=['POST'])
     def api_convert_batch():
         """Convert multiple playlists in a single background task."""
