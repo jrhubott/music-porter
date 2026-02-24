@@ -336,6 +336,40 @@ def render_usb_sync_summary(r: USBSyncResult) -> None:
     print("=" * 60)
 
 
+def render_delete_summary(r: DeleteResult) -> None:
+    """Render delete data summary."""
+    print()
+    print("=" * 60)
+    if r.dry_run:
+        print("  DELETE DATA PREVIEW (DRY-RUN)")
+    else:
+        print("  DELETE DATA SUMMARY")
+    print("=" * 60)
+    print(f"  Playlist:                {r.playlist_key}")
+    print("─" * 60)
+    if r.files_deleted > 0 or r.dry_run:
+        print(f"  Files deleted:           {r.files_deleted}")
+        print(f"  Space freed:             {_format_size_for_renderer(r.bytes_freed)}")
+    if r.source_deleted:
+        print("  Source data:             ✅ Deleted")
+    if r.export_deleted:
+        print("  Export data:             ✅ Deleted")
+    if r.config_removed:
+        print("  Config entry:            ✅ Removed")
+    if r.errors:
+        print("─" * 60)
+        for err in r.errors:
+            print(f"  ❌ {err}")
+    print("─" * 60)
+    if not r.success and not r.errors:
+        print("  Status:                  ⚠️  Cancelled")
+    elif r.errors:
+        print(f"  Status:                  ❌ Completed with {len(r.errors)} error(s)")
+    else:
+        print("  Status:                  ✅ Completed successfully")
+    print("=" * 60)
+
+
 def _format_size_for_renderer(bytes_size: int) -> str:
     """Format bytes to human-readable size (shared by renderers)."""
     if bytes_size < 1024:
@@ -997,6 +1031,7 @@ class InteractiveMenu:
             print("  📊  S. Show library summary")
             print("  🖼️  R. Resize all cover art")
             print(f"  🔧  P. Change output profile (current: {self.output_profile.name})")
+            print("  🗑️   D. Delete playlist data")
             print("  ❌  X. Exit (or press Enter)")
 
             # Get user selection
@@ -1012,7 +1047,7 @@ class InteractiveMenu:
                 selection_upper = selection.upper()
 
                 # Validate input: must be digit (1-N) or valid letter (A, U, C, S, X)
-                valid_letters = ['A', 'U', 'C', 'S', 'R', 'P', 'X']
+                valid_letters = ['A', 'U', 'C', 'S', 'R', 'P', 'D', 'X']
 
                 is_valid_digit = selection.isdigit() and 1 <= int(selection) <= len(self.config.playlists)
                 is_valid_letter = selection_upper in valid_letters
@@ -1050,6 +1085,10 @@ class InteractiveMenu:
                 elif selection_upper == 'P':
                     self._handle_change_profile()
                     # Return to menu after profile change
+
+                elif selection_upper == 'D':
+                    self._handle_delete_data(dry_run)
+                    # Return to menu after deletion
 
                 elif selection.isdigit():
                     # Must be valid digit at this point (validated earlier)
@@ -1327,6 +1366,80 @@ class InteractiveMenu:
             self.logger.info(f"Exports will go to: {get_export_dir(name)}/")
         except KeyboardInterrupt:
             print()
+
+    def _handle_delete_data(self, dry_run):
+        """Handle 'Delete playlist data' selection."""
+        print("\n  Select playlist to delete data for:")
+        print()
+
+        for i, playlist in enumerate(self.config.playlists, 1):
+            # Show data existence indicators
+            source_dir = Path(DEFAULT_MUSIC_DIR) / playlist.key
+            export_dir = Path(get_export_dir(self.output_profile.name, playlist.key))
+            indicators = []
+            if source_dir.exists():
+                indicators.append("source")
+            if export_dir.exists():
+                indicators.append("export")
+            data_info = f" [{', '.join(indicators)}]" if indicators else " [no data]"
+            print(f"     {i}. {playlist.name} ({playlist.key}){data_info}")
+
+        print()
+
+        try:
+            selection = input("Enter playlist number (or Enter to cancel): ").strip()
+            if not selection:
+                return
+
+            if not selection.isdigit() or not (1 <= int(selection) <= len(self.config.playlists)):
+                self.logger.error(f"Invalid selection: {selection}")
+                return
+
+            playlist = self.config.playlists[int(selection) - 1]
+
+            # Ask what to delete
+            print(f"\n  What to delete for '{playlist.name}'?")
+            print("     1. Both source and export data")
+            print("     2. Source M4A files only")
+            print("     3. Export MP3 files only")
+            choice = input("\n  Selection [1]: ").strip()
+            if not choice:
+                choice = "1"
+
+            if choice == "1":
+                delete_source, delete_export = True, True
+            elif choice == "2":
+                delete_source, delete_export = True, False
+            elif choice == "3":
+                delete_source, delete_export = False, True
+            else:
+                self.logger.error(f"Invalid choice: {choice}")
+                return
+
+            # Ask about config removal
+            remove_config = False
+            remove_response = input("  Also remove from config.yaml? [y/N] ").strip().lower()
+            if remove_response in ('y', 'yes'):
+                remove_config = True
+
+            data_manager = DataManager(self.logger, self.config,
+                                       prompt_handler=self.prompt_handler,
+                                       output_profile=self.output_profile)
+            result = data_manager.delete_playlist_data(
+                playlist.key,
+                delete_source=delete_source,
+                delete_export=delete_export,
+                remove_config=remove_config,
+                dry_run=dry_run,
+            )
+            render_delete_summary(result)
+
+            # Reload config if entry was removed
+            if result.config_removed:
+                self.config = ConfigManager(logger=self.logger)
+
+        except KeyboardInterrupt:
+            print("\n\nCancelled by user")
 
     def _check_and_refresh_cookies(self, cookie_path='cookies.txt'):
         """
@@ -1618,6 +1731,18 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
         help='Reset tags from source M4A files (⚠️ overwrites TXXX frames)')
     reset_parser.add_argument('input_dir', help='Input directory with M4A files')
     reset_parser.add_argument('output_dir', help='Output directory with MP3 files')
+
+    # ── delete ─────────────────────────────────────────────────────
+    delete_parser = subparsers.add_parser('delete',
+        help='Delete playlist data (source M4A and/or export MP3 files)')
+    delete_parser.add_argument('playlist', help='Playlist key or number')
+    delete_group = delete_parser.add_mutually_exclusive_group()
+    delete_group.add_argument('--source-only', action='store_true',
+                              help='Only delete source M4A files')
+    delete_group.add_argument('--export-only', action='store_true',
+                              help='Only delete export MP3 files')
+    delete_parser.add_argument('--remove-config', action='store_true',
+                               help='Also remove the playlist from config.yaml')
 
     # ── sync-usb ──────────────────────────────────────────────────
     sync_parser = subparsers.add_parser('sync-usb',
@@ -1951,6 +2076,33 @@ def main():
             verbose=args.verbose
         )
         render_tag_reset_summary(result)
+        sys.exit(0 if result.success else 1)
+
+    elif args.command == 'delete':
+        # Delete playlist data
+        playlist = None
+        if args.playlist.isdigit():
+            playlist = config.get_playlist_by_index(int(args.playlist) - 1)
+        else:
+            playlist = config.get_playlist_by_key(args.playlist)
+
+        if not playlist:
+            logger.error(f"Playlist not found: {args.playlist}")
+            sys.exit(1)
+
+        delete_source = not args.export_only
+        delete_export = not args.source_only
+
+        data_manager = DataManager(logger, config, prompt_handler=cli_prompt,
+                                   output_profile=output_profile)
+        result = data_manager.delete_playlist_data(
+            playlist.key,
+            delete_source=delete_source,
+            delete_export=delete_export,
+            remove_config=args.remove_config,
+            dry_run=args.dry_run,
+        )
+        render_delete_summary(result)
         sys.exit(0 if result.success else 1)
 
     elif args.command == 'download':

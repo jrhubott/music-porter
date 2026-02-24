@@ -728,6 +728,39 @@ def create_app(project_root=None, no_auth=False):
             return jsonify({'ok': True})
         return jsonify({'error': f"Playlist '{key}' not found"}), 404
 
+    @app.route('/api/playlists/<key>/delete-data', methods=['POST'])
+    def api_playlist_delete_data(key):
+        data = request.get_json(force=True) if request.data else {}
+        delete_source = data.get('delete_source', True)
+        delete_export = data.get('delete_export', True)
+        remove_config = data.get('remove_config', False)
+        dry_run = data.get('dry_run', False)
+
+        config = _get_config()
+        profile = _get_output_profile(config)
+
+        # Validate playlist exists in config or has data on disk
+        source_dir = project_root / mp.DEFAULT_MUSIC_DIR / key
+        export_dir = project_root / mp.get_export_dir(profile.name, key)
+        playlist_exists = config.get_playlist_by_key(key) is not None
+        data_exists = source_dir.exists() or export_dir.exists()
+
+        if not playlist_exists and not data_exists:
+            return jsonify({'error': f"Playlist '{key}' not found and has no data on disk"}), 404
+
+        logger = mp.Logger(verbose=False)
+        prompt = WebPromptHandler()
+        data_manager = mp.DataManager(logger, config, prompt_handler=prompt,
+                                      output_profile=profile)
+        result = data_manager.delete_playlist_data(
+            key,
+            delete_source=delete_source,
+            delete_export=delete_export,
+            remove_config=remove_config,
+            dry_run=dry_run,
+        )
+        return jsonify(result.to_dict())
+
     # ── API: Settings ────────────────────────────────────────────
 
     @app.route('/api/settings', methods=['GET'])

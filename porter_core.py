@@ -1593,6 +1593,23 @@ class CoverArtResult:
 
 
 @dataclass
+class DeleteResult:
+    """Result of DataManager.delete_playlist_data()."""
+    success: bool
+    playlist_key: str
+    source_deleted: bool = False
+    export_deleted: bool = False
+    config_removed: bool = False
+    files_deleted: int = 0
+    bytes_freed: int = 0
+    errors: list = field(default_factory=list)
+    dry_run: bool = False
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
 class PipelineResult:
     """Result of PipelineOrchestrator.run_full_pipeline()."""
     success: bool
@@ -4896,6 +4913,143 @@ class CoverArtManager:
             files_processed=resized + skipped_small + skipped_no_art + errors,
             files_modified=resized, files_skipped=skipped_small + skipped_no_art,
             errors=errors)
+
+
+# ══════════════════════════════════════════════════════════════════
+# Section 8b: Data Management (Deletion)
+# ══════════════════════════════════════════════════════════════════
+
+class DataManager:
+    """Manages playlist data lifecycle (deletion, cleanup)."""
+
+    def __init__(self, logger=None, config=None, prompt_handler=None, output_profile=None):
+        self.logger = logger or Logger()
+        self.config = config or ConfigManager(logger=self.logger)
+        self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
+        self.output_profile = output_profile or OUTPUT_PROFILES[DEFAULT_OUTPUT_TYPE]
+
+    def delete_playlist_data(self, playlist_key, delete_source=True, delete_export=True,
+                             remove_config=False, dry_run=False):
+        """Delete source M4A and/or export MP3 directories for a playlist.
+
+        Returns DeleteResult with stats about what was deleted.
+        """
+        source_dir = Path(DEFAULT_MUSIC_DIR) / playlist_key
+        export_dir = Path(get_export_dir(self.output_profile.name, playlist_key))
+
+        errors = []
+        files_deleted = 0
+        bytes_freed = 0
+        source_deleted = False
+        export_deleted = False
+        config_removed = False
+
+        # Count files and sizes for each directory
+        source_files = 0
+        source_bytes = 0
+        export_files = 0
+        export_bytes = 0
+
+        if delete_source and source_dir.exists():
+            for f in source_dir.rglob('*'):
+                if f.is_file():
+                    source_files += 1
+                    source_bytes += f.stat().st_size
+        if delete_export and export_dir.exists():
+            for f in export_dir.rglob('*'):
+                if f.is_file():
+                    export_files += 1
+                    export_bytes += f.stat().st_size
+
+        total_files = source_files + export_files
+        total_bytes = source_bytes + export_bytes
+
+        if total_files == 0 and not remove_config:
+            self.logger.info(f"Nothing to delete for '{playlist_key}'")
+            return DeleteResult(success=True, playlist_key=playlist_key, dry_run=dry_run)
+
+        # Build summary for confirmation
+        parts = []
+        if source_files > 0:
+            parts.append(f"{source_files} source files ({_format_bytes(source_bytes)})")
+        if export_files > 0:
+            parts.append(f"{export_files} export files ({_format_bytes(export_bytes)})")
+        if remove_config:
+            parts.append("config entry")
+
+        summary = f"Delete {', '.join(parts)} for '{playlist_key}'?"
+        self.logger.info(f"\n  {summary}")
+
+        if dry_run:
+            if delete_source and source_dir.exists():
+                self.logger.info(f"  [DRY-RUN] Would delete: {source_dir}/ ({source_files} files, {_format_bytes(source_bytes)})")
+            if delete_export and export_dir.exists():
+                self.logger.info(f"  [DRY-RUN] Would delete: {export_dir}/ ({export_files} files, {_format_bytes(export_bytes)})")
+            if remove_config:
+                self.logger.info(f"  [DRY-RUN] Would remove config entry for '{playlist_key}'")
+            return DeleteResult(
+                success=True, playlist_key=playlist_key,
+                files_deleted=total_files, bytes_freed=total_bytes,
+                dry_run=True)
+
+        # Confirm destructive action
+        if not self.prompt_handler.confirm_destructive(summary):
+            self.logger.info("Cancelled")
+            return DeleteResult(success=False, playlist_key=playlist_key)
+
+        # Delete source directory
+        if delete_source and source_dir.exists():
+            try:
+                shutil.rmtree(source_dir)
+                source_deleted = True
+                files_deleted += source_files
+                bytes_freed += source_bytes
+                self.logger.info(f"  Deleted source: {source_dir}/ ({source_files} files, {_format_bytes(source_bytes)})")
+            except OSError as e:
+                errors.append(f"Failed to delete {source_dir}: {e}")
+                self.logger.error(errors[-1])
+
+        # Delete export directory
+        if delete_export and export_dir.exists():
+            try:
+                shutil.rmtree(export_dir)
+                export_deleted = True
+                files_deleted += export_files
+                bytes_freed += export_bytes
+                self.logger.info(f"  Deleted export: {export_dir}/ ({export_files} files, {_format_bytes(export_bytes)})")
+            except OSError as e:
+                errors.append(f"Failed to delete {export_dir}: {e}")
+                self.logger.error(errors[-1])
+
+        # Remove config entry
+        if remove_config:
+            if self.config.remove_playlist(playlist_key):
+                config_removed = True
+                self.logger.info(f"  Removed config entry for '{playlist_key}'")
+            else:
+                self.logger.info(f"  Config entry for '{playlist_key}' not found (may not be configured)")
+
+        return DeleteResult(
+            success=len(errors) == 0,
+            playlist_key=playlist_key,
+            source_deleted=source_deleted,
+            export_deleted=export_deleted,
+            config_removed=config_removed,
+            files_deleted=files_deleted,
+            bytes_freed=bytes_freed,
+            errors=errors)
+
+
+def _format_bytes(num_bytes):
+    """Format byte count as human-readable string."""
+    if num_bytes < 1024:
+        return f"{num_bytes} B"
+    elif num_bytes < 1024 * 1024:
+        return f"{num_bytes / 1024:.1f} KB"
+    elif num_bytes < 1024 * 1024 * 1024:
+        return f"{num_bytes / (1024 * 1024):.1f} MB"
+    else:
+        return f"{num_bytes / (1024 * 1024 * 1024):.1f} GB"
 
 
 # ══════════════════════════════════════════════════════════════════
