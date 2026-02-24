@@ -255,6 +255,144 @@ def _validate_profile(name, data):
             f"'original', got '{par}'")
 
 
+_KNOWN_SETTINGS_KEYS = {
+    'output_type', 'usb_dir', 'workers', 'dir_structure', 'filename_format',
+    'api_key',
+}
+
+
+def validate_config(conf_path=DEFAULT_CONFIG_FILE):
+    """Validate config.yaml independently and return a structured report.
+
+    Returns a list of (level, message) tuples where level is "ok", "warning",
+    or "error". Does not modify any state or raise exceptions.
+    """
+    import yaml
+
+    results = []
+    path = Path(conf_path)
+
+    # 1. File exists and is readable
+    if not path.exists():
+        results.append(("error", f"Config file not found: {conf_path}"))
+        return results
+
+    try:
+        raw = path.read_text()
+    except OSError as e:
+        results.append(("error", f"Cannot read config file: {e}"))
+        return results
+    results.append(("ok", f"Config file readable: {conf_path}"))
+
+    # 2. Valid YAML syntax
+    try:
+        data = yaml.safe_load(raw)
+    except yaml.YAMLError as e:
+        results.append(("error", f"Invalid YAML syntax: {e}"))
+        return results
+    results.append(("ok", "Valid YAML syntax"))
+
+    if not isinstance(data, dict):
+        results.append(("error", "Config root must be a YAML mapping"))
+        return results
+
+    # 3. settings section
+    settings = data.get('settings')
+    if settings is None:
+        results.append(("warning", "Missing 'settings' section"))
+        settings = {}
+    elif not isinstance(settings, dict):
+        results.append(("error", "'settings' must be a mapping"))
+        settings = {}
+    else:
+        results.append(("ok", "'settings' section present"))
+
+    # Collect profile names for output_type validation
+    raw_types = data.get('output_types')
+    profile_names = list(raw_types.keys()) if isinstance(raw_types, dict) else []
+
+    # 4. settings.output_type
+    if 'output_type' in settings:
+        ot = settings['output_type']
+        if not isinstance(ot, str):
+            results.append(("error", f"settings.output_type must be a string, got {type(ot).__name__}"))
+        elif profile_names and ot not in profile_names:
+            results.append(("error", f"settings.output_type '{ot}' not found in output_types "
+                            f"(available: {', '.join(profile_names)})"))
+        else:
+            results.append(("ok", f"settings.output_type = '{ot}'"))
+
+    # 5. settings.usb_dir
+    if 'usb_dir' in settings:
+        ud = settings['usb_dir']
+        if not isinstance(ud, str):
+            results.append(("error", f"settings.usb_dir must be a string, got {type(ud).__name__}"))
+        else:
+            results.append(("ok", f"settings.usb_dir = '{ud}'"))
+
+    # 6. settings.workers
+    if 'workers' in settings:
+        w = settings['workers']
+        if not isinstance(w, int) or isinstance(w, bool) or w < 1:
+            results.append(("error", f"settings.workers must be an integer >= 1, got {w!r}"))
+        else:
+            results.append(("ok", f"settings.workers = {w}"))
+
+    # 10. Warn on unknown settings keys
+    unknown = set(settings.keys()) - _KNOWN_SETTINGS_KEYS
+    for key in sorted(unknown):
+        results.append(("warning", f"Unknown settings key: '{key}'"))
+
+    # 7. output_types section
+    if raw_types is None:
+        results.append(("warning", "Missing 'output_types' section (will be auto-created on next run)"))
+    elif not isinstance(raw_types, dict):
+        results.append(("error", "'output_types' must be a mapping"))
+    elif len(raw_types) == 0:
+        results.append(("error", "'output_types' is empty — at least one profile is required"))
+    else:
+        results.append(("ok", f"'output_types' section has {len(raw_types)} profile(s)"))
+
+        # 8. Validate each profile
+        for name, fields in raw_types.items():
+            try:
+                _validate_profile(name, fields)
+                results.append(("ok", f"Profile '{name}' is valid"))
+            except ValueError as e:
+                results.append(("error", str(e)))
+
+    # 9. playlists section
+    playlists_raw = data.get('playlists')
+    if playlists_raw is None:
+        results.append(("warning", "Missing 'playlists' section"))
+    elif not isinstance(playlists_raw, list):
+        results.append(("error", "'playlists' must be a list"))
+    else:
+        results.append(("ok", f"'playlists' section has {len(playlists_raw)} entry/entries"))
+        for i, entry in enumerate(playlists_raw):
+            if not isinstance(entry, dict):
+                results.append(("error", f"Playlist entry {i + 1}: must be a mapping"))
+                continue
+            missing = [f for f in ('key', 'url', 'name') if not entry.get(f)]
+            if missing:
+                results.append(("error", f"Playlist entry {i + 1}: missing required field(s): "
+                                f"{', '.join(missing)}"))
+
+        # 11. Warn on duplicate playlist keys
+        seen_keys = {}
+        for i, entry in enumerate(playlists_raw):
+            if isinstance(entry, dict):
+                key = entry.get('key', '')
+                if key:
+                    if key in seen_keys:
+                        results.append(("warning", f"Duplicate playlist key '{key}' "
+                                        f"(entries {seen_keys[key]} and {i + 1})"))
+                    else:
+                        seen_keys[key] = i + 1
+
+    return results
+
+
 def load_output_profiles(config):
     """Populate the module-level OUTPUT_PROFILES dict from a ConfigManager instance.
 

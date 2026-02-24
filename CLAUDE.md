@@ -68,7 +68,7 @@ The system follows an integrated pipeline:
 
 **music-porter** (python) - **RECOMMENDED**
 - Unified tool combining all functionality in a single command
-- Professional subcommand architecture: `pipeline`, `download`, `convert`, `tag`, `restore`, `reset`, `delete`, `sync-usb`, `cover-art`, `summary`, `list`
+- Professional subcommand architecture: `pipeline`, `download`, `convert`, `tag`, `restore`, `reset`, `delete`, `sync-usb`, `cover-art`, `summary`, `list`, `config`
 - Interactive menu for easy operation
 - Comprehensive error handling and statistics
 - Full pipeline orchestration (download → convert → tag → USB)
@@ -170,6 +170,12 @@ Presets via `--preset` flag: `lossless` (default, CBR 320kbps), `high` (VBR q2, 
 ./music-porter cover-art extract export/ride-command/Pop_Workout  # To image files
 ./music-porter cover-art update export/ride-command/Pop_Workout --image artwork.jpg
 ./music-porter cover-art strip export/ride-command/Pop_Workout    # Remove APIC frames
+
+# Config
+./music-porter config                  # Show config format reference
+./music-porter config verify           # Validate config.yaml integrity
+./music-porter config reset            # Reset to defaults (backs up first)
+./music-porter config reset --force    # Reset without confirmation
 ```
 
 ### Global Flags
@@ -294,6 +300,7 @@ The web dashboard (`web_ui.py`) provides a browser-based interface with full fea
 - **Cookies:** `GET /api/cookies/browsers`, `POST /api/cookies/refresh`
 - **Playlists CRUD:** `GET|POST /api/playlists`, `PUT|DELETE /api/playlists/<key>`, `POST /api/playlists/<key>/delete-data`
 - **Settings:** `GET|POST /api/settings`
+- **Config:** `GET /api/config/verify`, `POST /api/config/reset`
 - **Directories:** `GET /api/directories/music`, `GET /api/directories/export`
 - **Operations:** `POST /api/pipeline/run`, `/api/convert/run`, `/api/tags/update`, `/api/tags/restore`, `/api/tags/reset`, `/api/cover-art/<action>`, `/api/usb/sync`
 - **Files:** `GET /api/files/<key>`, `/<key>/<filename>`, `/<key>/<filename>/artwork`, `/<key>/download-all`

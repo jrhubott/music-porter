@@ -1716,6 +1716,145 @@ def positive_int(value):
     return ivalue
 
 
+CONFIG_HELP_TEXT = """\
+config.yaml — Music Porter Configuration Reference
+
+FILE STRUCTURE
+  config.yaml has three top-level sections:
+
+    settings:        Global settings (overridden by CLI flags)
+    output_types:    Output profile definitions (at least one required)
+    playlists:       Playlist entries with key, url, and name
+
+SETTINGS
+  Key              Type     Default          Description
+  ─────────────────────────────────────────────────────────────────
+  output_type      string   ride-command     Active output profile name
+  usb_dir          string   RZR/Music        USB target subdirectory
+  workers          int      (CPU count)      Parallel conversion threads (>= 1)
+  dir_structure    string   (from profile)   flat | nested-artist | nested-artist-album
+  filename_format  string   (from profile)   full | title-only
+  api_key          string   (auto-generated) API key for server mode
+
+OUTPUT TYPE PROFILES
+  Each profile under output_types defines conversion behavior:
+
+    Field               Type     Valid Values
+    ────────────────────────────────────────────────────────────
+    description         string   Non-empty description text
+    directory_structure string   flat, nested-artist, nested-artist-album
+    filename_format     string   full, title-only
+    id3_version         int      3 (ID3v2.3) or 4 (ID3v2.4)
+    strip_id3v1         bool     true or false
+    title_tag_format    string   artist_title
+    artwork_size        int      >0 = resize px, 0 = original, -1 = strip
+    quality_preset      string   lossless, high, medium, low
+    pipeline_album      string   playlist_name or original
+    pipeline_artist     string   various or original
+
+QUALITY PRESETS
+  Preset     Mode   Bitrate
+  ─────────────────────────────────────────
+  lossless   CBR    320 kbps (default)
+  high       VBR    ~190-250 kbps (q2)
+  medium     VBR    ~165-210 kbps (q4)
+  low        VBR    ~115-150 kbps (q6)
+
+PLAYLISTS
+  Each playlist entry requires:
+    key:   Unique identifier (used for directory names)
+    url:   Apple Music playlist URL
+    name:  Human-readable display name
+
+PRECEDENCE
+  CLI flag > config.yaml > hardcoded default
+
+EXAMPLES
+  ./music-porter config                  Show this reference
+  ./music-porter config verify           Validate config.yaml
+  ./music-porter config reset            Reset to defaults (with backup)
+  ./music-porter config reset --force    Reset without confirmation
+"""
+
+
+def handle_config_command(args, config, config_load_error, config_parser):
+    """Handle all config subcommand actions."""
+    action = getattr(args, 'config_action', None)
+
+    if action is None:
+        # Bare "config" — print help (which includes CONFIG_HELP_TEXT as epilog)
+        config_parser.print_help()
+        sys.exit(0)
+
+    if action == 'verify':
+        results = validate_config(DEFAULT_CONFIG_FILE)
+
+        # If the config failed to load at startup, add that context
+        if config_load_error:
+            results.insert(0, ("error", f"Config load failed: {config_load_error}"))
+
+        errors = sum(1 for level, _ in results if level == "error")
+        warnings = sum(1 for level, _ in results if level == "warning")
+        oks = sum(1 for level, _ in results if level == "ok")
+
+        print(f"\n  Config Verification: {DEFAULT_CONFIG_FILE}")
+        print(f"  {'─' * 55}")
+        for level, message in results:
+            if level == "ok":
+                icon = "✓"
+            elif level == "warning":
+                icon = "⚠"
+            else:
+                icon = "✗"
+            print(f"  {icon} {message}")
+
+        print(f"  {'─' * 55}")
+        parts = []
+        if oks:
+            parts.append(f"{oks} passed")
+        if warnings:
+            parts.append(f"{warnings} warning(s)")
+        if errors:
+            parts.append(f"{errors} error(s)")
+        print(f"  Result: {', '.join(parts)}\n")
+
+        sys.exit(1 if errors else 0)
+
+    if action == 'reset':
+        config_path = Path(DEFAULT_CONFIG_FILE)
+
+        if not getattr(args, 'force', False):
+            print("\n  This will reset config.yaml to defaults.")
+            if config_path.exists():
+                print("  Your current config (including playlists) will be backed up.")
+            try:
+                response = input("  Continue? [y/N] ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print("\n  Cancelled.")
+                sys.exit(0)
+            if response != 'y':
+                print("  Cancelled.")
+                sys.exit(0)
+
+        # Backup existing config
+        backup_path = None
+        if config_path.exists():
+            import shutil
+            backup_path = Path(f"{DEFAULT_CONFIG_FILE}.backup")
+            shutil.copy2(config_path, backup_path)
+            config_path.unlink()
+
+        # Recreate with defaults
+        temp_logger = Logger(verbose=False)
+        ConfigManager(logger=temp_logger)
+
+        print(f"\n  Config reset to defaults: {DEFAULT_CONFIG_FILE}")
+        if backup_path:
+            print(f"  Backup saved: {backup_path}")
+        print()
+        sys.exit(0)
+
+
 def create_parser():
     """Create the argument parser with subcommands."""
     parser = argparse.ArgumentParser(
@@ -1957,6 +2096,23 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
     server_parser.add_argument('--no-bonjour', action='store_true', dest='no_bonjour',
                                help='Disable Bonjour/mDNS service advertisement')
 
+    # ── config ────────────────────────────────────────────────────
+    config_parser = subparsers.add_parser('config',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        help='View, verify, or reset configuration',
+        description='View, verify, or reset config.yaml',
+        epilog=CONFIG_HELP_TEXT)
+
+    config_sub = config_parser.add_subparsers(dest='config_action')
+
+    # config verify
+    config_sub.add_parser('verify', help='Validate config.yaml integrity')
+
+    # config reset
+    config_reset = config_sub.add_parser('reset', help='Reset config.yaml to defaults')
+    config_reset.add_argument('--force', action='store_true',
+                               help='Skip confirmation prompt')
+
     return parser
 
 
@@ -1985,15 +2141,32 @@ def main():
 
     # Load config and output profiles BEFORE argparse so --output-type choices
     # reflect config-defined profiles (including user-added ones).
+    config_load_error = None
+    config = None
     try:
         config = ConfigManager(logger=temp_logger)
         load_output_profiles(config)
-    except ValueError as e:
-        temp_logger.error(str(e))
-        sys.exit(1)
+    except Exception as e:
+        config_load_error = str(e)
 
     parser = create_parser()
     args = parser.parse_args()
+
+    # Fast-path: config command works even with broken config
+    if args.command == 'config':
+        # Find the config subparser for help printing
+        config_subparser = None
+        for action in parser._subparsers._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                config_subparser = action.choices.get('config')
+                break
+        handle_config_command(args, config, config_load_error,
+                              config_subparser or parser)
+
+    # For all other commands, a config load error is fatal
+    if config_load_error:
+        temp_logger.error(config_load_error)
+        sys.exit(1)
 
     # Initialize logger, CLI prompt handler, and display handler
     logger = Logger(verbose=args.verbose)
