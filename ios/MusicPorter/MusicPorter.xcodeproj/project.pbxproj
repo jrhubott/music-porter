@@ -43,6 +43,7 @@
 		A10000023 /* PlaylistsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000023 /* PlaylistsViewModel.swift */; };
 		A10000024 /* PlaylistDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000024 /* PlaylistDetailViewModel.swift */; };
 		A10000025 /* OperationViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000025 /* OperationViewModel.swift */; };
+		A10000028 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000028 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -84,6 +85,7 @@
 		A20000025 /* OperationViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationViewModel.swift; sourceTree = "<group>"; };
 		A20000030 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A20000031 /* MusicPorter.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MusicPorter.entitlements; sourceTree = "<group>"; };
+		A20000028 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A30000001 /* MusicPorter.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MusicPorter.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -96,6 +98,17 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A40000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000028 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXGroup section */
 		A50000001 = {
@@ -112,6 +125,7 @@
 				A20000001 /* MusicPorterApp.swift */,
 				A20000030 /* Info.plist */,
 				A20000031 /* MusicPorter.entitlements */,
+				A20000028 /* Assets.xcassets */,
 				A50000003 /* Models */,
 				A50000004 /* Services */,
 				A50000005 /* ViewModels */,
@@ -215,6 +229,7 @@
 			buildConfigurationList = A80000003 /* Build configuration list for PBXNativeTarget "MusicPorter" */;
 			buildPhases = (
 				A70000001 /* Sources */,
+				A40000002 /* Resources */,
 				A40000001 /* Frameworks */,
 			);
 			buildRules = (
