@@ -45,7 +45,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.15.0-list-command"
+VERSION = "2.15.0"
 
 DEFAULT_MUSIC_DIR = "music"
 DEFAULT_EXPORT_DIR = "export"
