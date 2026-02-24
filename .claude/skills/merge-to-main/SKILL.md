@@ -104,7 +104,10 @@ Merge the current feature branch into main following the project's version workf
    - Ask the user if they want to delete the feature branch
    - If yes, run `git branch -d <branch-name>`
 
-7. **Report**
+7. **Push to remote**
+   - Run `git push origin main --tags`
+   - If push fails (e.g. rejected), warn the user and show the error — do NOT force push
+
+8. **Report**
    - Show the final `git log --oneline -5` so the user can verify
    - Show the tag: `git tag -l 'vX.Y.Z'`
-   - Remind the user to `git push origin main --tags` when ready
