@@ -42,6 +42,7 @@ def _auto_activate_venv():
 _auto_activate_venv()
 
 from porter_core import *
+from porter_core import _init_third_party
 
 
 class CLIPromptHandler:
