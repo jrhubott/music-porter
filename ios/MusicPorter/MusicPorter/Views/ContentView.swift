@@ -41,5 +41,11 @@ struct MainTabView: View {
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gear") }
         }
+        .safeAreaInset(edge: .bottom) {
+            if appState.audioPlayer.hasCurrentTrack {
+                MiniPlayerView()
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: appState.audioPlayer.hasCurrentTrack)
     }
 }

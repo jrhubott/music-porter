@@ -12,6 +12,7 @@ final class AppState {
     let musicKit = MusicKitService()
     let downloadManager = FileDownloadManager()
     let usbExport = USBExportService()
+    let audioPlayer = AudioPlayerService()
 
     // Connection state
     var isConnected: Bool { apiClient.isConnected }
@@ -38,6 +39,7 @@ final class AppState {
     func connect(server: ServerConnection, apiKey: String) async throws {
         apiClient.configure(server: server, apiKey: apiKey)
         downloadManager.configure(apiClient: apiClient)
+        audioPlayer.configure(apiClient: apiClient)
         let response = try await apiClient.validateConnection()
         if response.valid {
             savedServer = server
@@ -64,6 +66,7 @@ final class AppState {
     }
 
     func disconnect() {
+        audioPlayer.stop()
         apiClient.disconnect()
         savedServer = nil
         apiVersionWarning = nil

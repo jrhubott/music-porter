@@ -5,11 +5,16 @@ struct TrackRow: View {
     let track: Track
     let playlist: String
     let api: APIClient
+    var isNowPlaying: Bool = false
 
     var body: some View {
         HStack(spacing: 12) {
-            // Artwork thumbnail
-            if track.hasCoverArt == true, let url = api.artworkURL(playlist: playlist, filename: track.filename) {
+            // Artwork thumbnail or now-playing indicator
+            if isNowPlaying {
+                Image(systemName: "speaker.wave.2.fill")
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 44, height: 44)
+            } else if track.hasCoverArt == true, let url = api.artworkURL(playlist: playlist, filename: track.filename) {
                 AsyncImage(url: url) { image in
                     image.resizable().aspectRatio(contentMode: .fill)
                 } placeholder: {
@@ -28,6 +33,7 @@ struct TrackRow: View {
                 Text(track.displayTitle)
                     .font(.body)
                     .lineLimit(1)
+                    .foregroundStyle(isNowPlaying ? Color.accentColor : .primary)
                 if let artist = track.artist {
                     Text(artist)
                         .font(.caption)
