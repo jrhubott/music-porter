@@ -32,7 +32,18 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 
-from flask import Flask, Response, jsonify, render_template, request, send_from_directory, stream_with_context
+from flask import (
+    Flask,
+    Response,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_from_directory,
+    session,
+    stream_with_context,
+    url_for,
+)
 
 import porter_core as mp
 
@@ -290,6 +301,12 @@ def create_app(project_root=None, no_auth=False):
     app.config['PROJECT_ROOT'] = str(project_root)
     app.config['NO_AUTH'] = no_auth
 
+    # Secret key for Flask session cookies (server mode login).
+    # Ephemeral — regenerated each server start, invalidating all sessions.
+    if not no_auth:
+        import secrets as _secrets
+        app.secret_key = _secrets.token_hex(32)
+
     task_manager = TaskManager()
 
     # ── CORS headers for iOS companion app ───────────────────
@@ -300,6 +317,10 @@ def create_app(project_root=None, no_auth=False):
         response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
         return response
 
+    @app.context_processor
+    def _inject_auth_context():
+        return {'server_mode': not no_auth}
+
     # ── API key authentication middleware ─────────────────────
     # Ensure an API key exists in config.yaml
     _boot_config = mp.ConfigManager(logger=mp.Logger(verbose=False))
@@ -307,22 +328,53 @@ def create_app(project_root=None, no_auth=False):
 
     @app.before_request
     def _check_api_auth():
-        # Skip auth for non-API routes (HTML pages, static files)
-        if not request.path.startswith('/api/'):
-            return
-        # Skip auth for CORS preflight
-        if request.method == 'OPTIONS':
-            return
-        # Skip auth when --no-auth is set (browser-only mode)
+        # Web mode (--no-auth): skip all authentication
         if app.config.get('NO_AUTH'):
-            return
-        # Validate Bearer token
+            return None
+        # Always allow the login/logout pages and static files
+        if request.path in ('/login', '/logout'):
+            return None
+        # Check auth sources
+        has_session = session.get('authenticated') is True
+        has_bearer = False
         auth_header = request.headers.get('Authorization', '')
         if auth_header.startswith('Bearer '):
-            token = auth_header[7:]
-            if token == _api_key:
-                return
-        return jsonify({'error': 'Unauthorized — provide Authorization: Bearer <api_key>'}), 401
+            if auth_header[7:] == _api_key:
+                has_bearer = True
+        # API routes: accept session OR Bearer token
+        if request.path.startswith('/api/'):
+            if request.method == 'OPTIONS':
+                return None
+            if has_session or has_bearer:
+                return None
+            return jsonify({'error': 'Unauthorized — provide Authorization: Bearer <api_key>'}), 401
+        # HTML pages: require session, redirect to login if missing
+        if not has_session:
+            return redirect(url_for('login_page'))
+        return None
+
+    # ── Login / Logout ────────────────────────────────────────
+
+    @app.route('/login', methods=['GET', 'POST'])
+    def login_page():
+        if app.config.get('NO_AUTH'):
+            return redirect(url_for('dashboard'))
+        if session.get('authenticated'):
+            return redirect(url_for('dashboard'))
+        error = None
+        if request.method == 'POST':
+            submitted_key = request.form.get('api_key', '').strip()
+            if submitted_key == _api_key:
+                session['authenticated'] = True
+                session.permanent = False
+                return redirect(url_for('dashboard'))
+            error = 'Invalid API key. Check the server terminal for the correct key.'
+        return render_template('login.html', error=error)
+
+    @app.route('/logout')
+    def logout():
+        session.clear()
+        return redirect(url_for('login_page'))
 
     # ── Helper to create a WebLogger for a task ──────────────────
     def _make_logger(task_id, verbose=False):
