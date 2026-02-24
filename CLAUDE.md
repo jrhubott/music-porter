@@ -68,7 +68,7 @@ The system follows an integrated pipeline:
 
 **music-porter** (python) - **RECOMMENDED**
 - Unified tool combining all functionality in a single command
-- Professional subcommand architecture: `pipeline`, `download`, `convert`, `tag`, `restore`, `reset`, `sync-usb`, `cover-art`, `summary`
+- Professional subcommand architecture: `pipeline`, `download`, `convert`, `tag`, `restore`, `reset`, `delete`, `sync-usb`, `cover-art`, `summary`
 - Interactive menu for easy operation
 - Comprehensive error handling and statistics
 - Full pipeline orchestration (download → convert → tag → USB)
@@ -143,6 +143,12 @@ Presets via `--preset` flag: `lossless` (default, CBR 320kbps), `high` (VBR q2, 
 ./music-porter tag export/ride-command/Pop_Workout --album "Pop Workout" --artist "Various"
 ./music-porter restore export/ride-command/Pop_Workout --all      # Restore originals
 ./music-porter reset music/Pop_Workout export/ride-command/Pop_Workout  # Reset from source
+
+# Delete playlist data
+./music-porter delete Pop_Workout                    # Delete both source + export
+./music-porter delete Pop_Workout --source-only      # Only source M4A files
+./music-porter delete Pop_Workout --export-only      # Only export MP3 files
+./music-porter delete Pop_Workout --remove-config    # Also remove from config.yaml
 
 # USB
 ./music-porter sync-usb export/ride-command/Pop_Workout
@@ -274,12 +280,12 @@ The web dashboard (`web_ui.py`) provides a browser-based interface with full fea
 
 10 Jinja2 templates in `templates/` using Bootstrap 5.3.3 dark theme (CDN from jsDelivr). `base.html` provides shared layout (sidebar, log panel, SSE handler). Pages: `/` (dashboard), `/playlists`, `/pipeline`, `/convert`, `/tags`, `/cover-art`, `/usb`, `/settings`, `/operations`.
 
-### API Endpoints (~32)
+### API Endpoints (~33)
 
 - **Status:** `GET /api/status`, `/api/summary`, `/api/library-stats`
 - **Auth (server only):** `POST /api/auth/validate`, `GET /api/server-info`
 - **Cookies:** `GET /api/cookies/browsers`, `POST /api/cookies/refresh`
-- **Playlists CRUD:** `GET|POST /api/playlists`, `PUT|DELETE /api/playlists/<key>`
+- **Playlists CRUD:** `GET|POST /api/playlists`, `PUT|DELETE /api/playlists/<key>`, `POST /api/playlists/<key>/delete-data`
 - **Settings:** `GET|POST /api/settings`
 - **Directories:** `GET /api/directories/music`, `GET /api/directories/export`
 - **Operations:** `POST /api/pipeline/run`, `/api/convert/run`, `/api/tags/update`, `/api/tags/restore`, `/api/tags/reset`, `/api/cover-art/<action>`, `/api/usb/sync`
@@ -361,7 +367,7 @@ Constant `EXCLUDED_USB_VOLUMES` in `music-porter`: `["Macintosh HD", "Macintosh 
 
 ### Key Classes in `porter_core.py`
 
-21 classes organized by concern: `Logger`, `PlaylistConfig`, `ConfigManager`, `DependencyChecker`, `TagStatistics`, `TaggerManager`, `ConversionStatistics`, `Converter`, `Downloader`, `CookieStatus`, `CookieManager`, `USBManager`, `PlaylistSummary`, `LibrarySummaryStatistics`, `SummaryManager`, `PipelineStatistics`, `PipelineOrchestrator`, `InteractiveMenu`, `PlaylistResult`, `AggregateStatistics`, `CoverArtManager`.
+22 classes organized by concern: `Logger`, `PlaylistConfig`, `ConfigManager`, `DependencyChecker`, `TagStatistics`, `TaggerManager`, `ConversionStatistics`, `Converter`, `Downloader`, `CookieStatus`, `CookieManager`, `USBManager`, `PlaylistSummary`, `LibrarySummaryStatistics`, `SummaryManager`, `DataManager`, `PipelineStatistics`, `PipelineOrchestrator`, `InteractiveMenu`, `PlaylistResult`, `AggregateStatistics`, `CoverArtManager`.
 
 ### ConfigManager
 
@@ -377,7 +383,7 @@ Constant `EXCLUDED_USB_VOLUMES` in `music-porter`: `["Macintosh HD", "Macintosh 
 
 ### Interactive Menu
 
-- Numbered playlist selection (1-N) + letter actions: A (all), U (URL), C (USB), S (summary), P (profile), X (exit)
+- Numbered playlist selection (1-N) + letter actions: A (all), U (URL), C (USB), S (summary), R (resize art), P (profile), D (delete data), X (exit)
 - Returns to menu after each operation; saves new URLs to config
 
 ### Cover Art (CoverArtManager)
@@ -385,6 +391,14 @@ Constant `EXCLUDED_USB_VOLUMES` in `music-porter`: `["Macintosh HD", "Macintosh 
 - Actions: `embed` (from M4A source), `extract` (to files), `update` (from image), `strip` (remove APIC)
 - SHA-256 hash stored in `TXXX:OriginalCoverArtHash` with hard-gate protection
 - `--no-cover-art` flag on `convert` and `pipeline` to skip embedding
+
+### Data Management (DataManager)
+
+- Deletes source M4A (`music/<key>/`) and/or export MP3 (`export/<profile>/<key>/`) directories
+- Counts files and sizes before deletion for confirmation prompt and reporting
+- Uses `confirm_destructive()` from prompt handler (CLI requires typing "yes", web auto-confirms)
+- Optional `remove_config` flag to also remove the playlist from `config.yaml`
+- Returns `DeleteResult` dataclass with stats (files_deleted, bytes_freed, etc.)
 
 ## Additional Resources
 
