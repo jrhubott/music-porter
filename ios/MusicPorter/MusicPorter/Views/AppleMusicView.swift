@@ -136,7 +136,12 @@ struct AppleMusicPlaylistDetailView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(tracks) { track in
-                    trackRow(track)
+                    Button {
+                        appState.audioPlayer.playAppleMusicTrack(track: track, in: tracks)
+                    } label: {
+                        trackRow(track)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -157,10 +162,25 @@ struct AppleMusicPlaylistDetailView: View {
         isLoading = false
     }
 
+    private var isNowPlayingAppleMusic: Bool {
+        appState.audioPlayer.nowPlaying?.source == .appleMusic
+    }
+
     private func trackRow(_ track: MusicKit.Track) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(track.title)
-                .font(.body)
+            HStack(spacing: 8) {
+                if isNowPlayingAppleMusic && appState.audioPlayer.currentAppleMusicTrackID == track.id {
+                    Image(systemName: "speaker.wave.2.fill")
+                        .foregroundStyle(Color.accentColor)
+                        .font(.caption)
+                }
+                Text(track.title)
+                    .font(.body)
+                    .foregroundStyle(
+                        isNowPlayingAppleMusic && appState.audioPlayer.currentAppleMusicTrackID == track.id
+                            ? Color.accentColor : .primary
+                    )
+            }
             HStack {
                 Text(track.artistName)
                     .font(.caption)

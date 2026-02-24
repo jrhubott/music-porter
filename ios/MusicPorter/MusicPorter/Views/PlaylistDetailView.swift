@@ -8,7 +8,22 @@ struct PlaylistDetailView: View {
     var body: some View {
         List {
             ForEach(vm.tracks) { track in
-                TrackRow(track: track, playlist: playlist.key, api: appState.apiClient)
+                Button {
+                    appState.audioPlayer.playServerTrack(
+                        track: track,
+                        in: vm.tracks,
+                        playlist: playlist.key,
+                        downloadManager: appState.downloadManager
+                    )
+                } label: {
+                    TrackRow(
+                        track: track,
+                        playlist: playlist.key,
+                        api: appState.apiClient,
+                        isNowPlaying: appState.audioPlayer.currentServerTrackID == track.filename
+                    )
+                }
+                .buttonStyle(.plain)
             }
 
             if vm.isLoading {
