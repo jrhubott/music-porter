@@ -4081,7 +4081,7 @@ class SummaryManager:
 
     def generate_summary(self, export_dir='export/', detailed=False, quick=False,
                          dry_run=False, music_dir=None, export_profile=None,
-                         no_library=False):
+                         no_library=False, output_profile=None):
         """
         Generate and display library stats and playlist summary.
 
@@ -4093,6 +4093,7 @@ class SummaryManager:
             music_dir: Music source directory for library stats
             export_profile: Profile name for conversion status comparison
             no_library: Skip music directory scan
+            output_profile: OutputProfile for accurate file-level matching
 
         Returns:
             LibrarySummaryResult
@@ -4103,6 +4104,7 @@ class SummaryManager:
             music_stats = self.scan_music_library(
                 music_dir=music_dir,
                 export_profile=export_profile,
+                output_profile=output_profile,
             )
 
         start_time = time.time()

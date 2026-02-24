@@ -1357,6 +1357,7 @@ class InteractiveMenu:
             dry_run=dry_run,
             music_dir=DEFAULT_MUSIC_DIR,
             export_profile=self.output_profile.name,
+            output_profile=self.output_profile,
         )
         render_library_summary(summary_result, mode=summary_result.mode)
 
@@ -2306,6 +2307,7 @@ def main():
             music_dir=DEFAULT_MUSIC_DIR,
             export_profile=output_profile.name,
             no_library=args.no_library,
+            output_profile=output_profile,
         )
         render_library_summary(result, mode=result.mode)
         sys.exit(0 if result.success else 1)
