@@ -60,6 +60,41 @@
   </div>
 </div>
 
+<!-- iOS Pairing (server mode only) -->
+{% if server_mode %}
+<div class="card mt-4">
+  <div class="card-body">
+    <h6 class="card-title"><i class="bi bi-phone"></i> iOS Pairing</h6>
+    <div class="row align-items-start mt-3">
+      <div class="col-auto">
+        <img id="pairingQR" src="/api/pairing-qr" alt="Pairing QR Code"
+             width="200" height="200"
+             style="border-radius:8px;" loading="lazy">
+      </div>
+      <div class="col">
+        <p class="text-muted mb-2">Scan with the Music Porter iOS app to connect instantly.</p>
+        <div class="mb-2">
+          <label class="form-label mb-1">Server Address</label>
+          <div id="pairingAddress" class="text-muted"><span class="spinner-border spinner-border-sm"></span></div>
+        </div>
+        <div class="mb-0">
+          <label class="form-label mb-1">API Key</label>
+          <div class="input-group input-group-sm" style="max-width:420px">
+            <input type="password" class="form-control form-control-sm font-monospace" id="pairingApiKey" readonly>
+            <button class="btn btn-outline-secondary" type="button" id="btnToggleKey" title="Show/hide API key">
+              <i class="bi bi-eye"></i>
+            </button>
+            <button class="btn btn-outline-secondary" type="button" id="btnCopyKey" title="Copy API key">
+              <i class="bi bi-clipboard"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <!-- Profile Details -->
 <div class="card mt-4">
   <div class="card-body">
@@ -189,5 +224,30 @@ document.getElementById('btnRefreshCookies').addEventListener('click', function(
 
 loadCookieStatus();
 loadBrowsers();
+
+// ── iOS Pairing ──
+(function() {
+  const addrEl = document.getElementById('pairingAddress');
+  const keyEl = document.getElementById('pairingApiKey');
+  if (!addrEl) return; // Not in server mode
+  fetch('/api/pairing-info').then(r=>r.json()).then(data => {
+    addrEl.textContent = data.address;
+    keyEl.value = data.api_key;
+  }).catch(() => {
+    addrEl.textContent = 'Unavailable';
+  });
+  const toggleBtn = document.getElementById('btnToggleKey');
+  toggleBtn.addEventListener('click', function() {
+    const isHidden = keyEl.type === 'password';
+    keyEl.type = isHidden ? 'text' : 'password';
+    toggleBtn.querySelector('i').className = isHidden ? 'bi bi-eye-slash' : 'bi bi-eye';
+  });
+  const copyBtn = document.getElementById('btnCopyKey');
+  copyBtn.addEventListener('click', function() {
+    navigator.clipboard.writeText(keyEl.value).then(() => {
+      showToast('API key copied', 'success');
+    });
+  });
+})();
 </script>
 {% endblock scripts %}

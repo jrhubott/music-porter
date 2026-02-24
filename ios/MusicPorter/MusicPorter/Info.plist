@@ -8,6 +8,8 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Music Porter needs local network access to discover and connect to the music-porter server on your network.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Music Porter uses the camera to scan QR codes for quick server pairing.</string>
 	<key>NSAppleMusicUsageDescription</key>
 	<string>Music Porter uses Apple Music access to browse your playlists and send them to the server for download and conversion.</string>
 	<key>UIBackgroundModes</key>
