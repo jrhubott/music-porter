@@ -13,6 +13,9 @@ struct AppleMusicView: View {
                 errorSection
             }
             .navigationTitle("Apple Music")
+            .navigationDestination(for: MusicKit.Playlist.self) { playlist in
+                AppleMusicPlaylistDetailView(playlist: playlist)
+            }
             .searchable(text: $vmBindable.searchQuery, prompt: "Search Apple Music")
             .onChange(of: vm.searchQuery) { _, newValue in
                 Task { await vm.searchAppleMusic(query: newValue, musicKit: appState.musicKit) }
@@ -45,7 +48,9 @@ struct AppleMusicView: View {
                     }
                 }
                 ForEach(vm.appleMusicPlaylists) { playlist in
-                    appleMusicRow(playlist)
+                    NavigationLink(value: playlist) {
+                        appleMusicRow(playlist)
+                    }
                 }
                 if let appleMusicError = vm.appleMusicError {
                     Label(appleMusicError, systemImage: "exclamationmark.triangle")
@@ -87,6 +92,7 @@ struct AppleMusicView: View {
                         Image(systemName: "plus.circle")
                             .foregroundStyle(.blue)
                     }
+                    .buttonStyle(.borderless)
                 }
             }
         }
@@ -102,5 +108,87 @@ struct AppleMusicView: View {
                     .foregroundStyle(.red)
             }
         }
+    }
+}
+
+// MARK: - Playlist Detail
+
+struct AppleMusicPlaylistDetailView: View {
+    @Environment(AppState.self) private var appState
+    let playlist: MusicKit.Playlist
+    @State private var tracks: [MusicKit.Track] = []
+    @State private var isLoading = true
+    @State private var error: String?
+
+    var body: some View {
+        List {
+            if isLoading {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                    Spacer()
+                }
+            } else if let error {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.red)
+            } else if tracks.isEmpty {
+                Text("No tracks found")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(tracks) { track in
+                    trackRow(track)
+                }
+            }
+        }
+        .navigationTitle(playlist.name)
+        .task {
+            await loadTracks()
+        }
+    }
+
+    private func loadTracks() async {
+        isLoading = true
+        error = nil
+        do {
+            tracks = try await appState.musicKit.fetchPlaylistTracks(playlist: playlist)
+        } catch {
+            self.error = error.localizedDescription
+        }
+        isLoading = false
+    }
+
+    private func trackRow(_ track: MusicKit.Track) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(track.title)
+                .font(.body)
+            HStack {
+                Text(track.artistName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let albumTitle = track.albumTitle {
+                    Text("·")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(albumTitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                if let duration = track.duration {
+                    Text(Self.formatDuration(duration))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private static func formatDuration(_ interval: TimeInterval) -> String {
+        let minutes = Int(interval) / 60
+        let seconds = Int(interval) % 60
+        return "\(minutes):\(String(format: "%02d", seconds))"
     }
 }
