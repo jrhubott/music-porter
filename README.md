@@ -418,6 +418,7 @@ The tool uses a "hard gate" protection system for original metadata:
 9. **Tag validation** - Verify tag integrity and fix common issues
 10. **Export formats** - Support for additional formats (FLAC, AAC, OGG)
 11. **Cover art resize on embed/convert** - Add `--cover-art-size` flag to `embed`, `update`, `convert`, and `pipeline` commands for automatic resizing during processing
+12. **Lock screen artwork** - Load album artwork image into MPNowPlayingInfoCenter for lock screen and Control Center display during iOS playback
 
 ### Low Priority / Nice to Have
 
@@ -440,7 +441,7 @@ The tool uses a "hard gate" protection system for original metadata:
 
 ## Version
 
-Current version: **v2.10.0**
+Current version: **v2.13.0**
 
 ## License
 
