@@ -454,13 +454,22 @@ class Logger:
     def __init__(self, log_dir=DEFAULT_LOG_DIR, verbose=False, echo_to_console=True):
         self.verbose = verbose
         self.echo_to_console = echo_to_console
-        self.log_dir = Path(log_dir)
-        self.log_dir.mkdir(exist_ok=True)
         self._lock = threading.Lock()
         self._active_bars = []
+        self.log_file = None
 
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        self.log_file = self.log_dir / f"{timestamp}.log"
+        try:
+            self.log_dir = Path(log_dir)
+            self.log_dir.mkdir(exist_ok=True)
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            self.log_file = self.log_dir / f"{timestamp}.log"
+            # Verify we can write to the log file
+            self.log_file.touch()
+        except PermissionError:
+            self.log_file = None
+            if echo_to_console:
+                print(f"Warning: Permission denied writing to {log_dir}/. "
+                      "File logging disabled for this session.")
 
     def register_bar(self, bar):
         """Register an active tqdm bar for write routing."""
@@ -487,18 +496,27 @@ class Logger:
                     print(message)
 
             # File: full format with timestamp and level
-            with open(self.log_file, 'a') as f:
-                f.write(formatted_with_prefix + '\n')
+            if self.log_file:
+                try:
+                    with open(self.log_file, 'a') as f:
+                        f.write(formatted_with_prefix + '\n')
+                except PermissionError:
+                    pass
 
     def _write_file_only(self, level, message):
         """Write message to log file only (no console output)."""
+        if not self.log_file:
+            return
         with self._lock:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             formatted_with_prefix = f"[{timestamp}] [{level}] {message}"
 
             # File only: full format with timestamp and level
-            with open(self.log_file, 'a') as f:
-                f.write(formatted_with_prefix + '\n')
+            try:
+                with open(self.log_file, 'a') as f:
+                    f.write(formatted_with_prefix + '\n')
+            except PermissionError:
+                pass
 
     def info(self, message):
         """Log informational message."""

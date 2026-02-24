@@ -1,6 +1,7 @@
 services:
   music-porter:
     build: .
+    user: "1000:1000"  # jrhubott:jrhubott — avoid running as root
     # Host networking lets Bonjour/mDNS work for iOS companion app discovery.
     # To use bridge networking instead (no Bonjour), replace with:
     #   ports:
