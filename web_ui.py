@@ -924,6 +924,42 @@ def create_app(project_root=None, no_auth=False):
             config.update_setting(key, value)
         return jsonify({'ok': True})
 
+    # ── API: Config ──────────────────────────────────────────────
+
+    @app.route('/api/config/verify')
+    def api_config_verify():
+        """Validate config.yaml and return structured report."""
+        results = mp.validate_config(mp.DEFAULT_CONFIG_FILE)
+        errors = sum(1 for level, _ in results if level == "error")
+        warnings = sum(1 for level, _ in results if level == "warning")
+        return jsonify({
+            'results': [{'level': level, 'message': msg} for level, msg in results],
+            'errors': errors,
+            'warnings': warnings,
+            'valid': errors == 0,
+        })
+
+    @app.route('/api/config/reset', methods=['POST'])
+    def api_config_reset():
+        """Back up config.yaml and recreate with defaults."""
+        import shutil
+        config_path = project_root / mp.DEFAULT_CONFIG_FILE
+        backup_path = None
+
+        if config_path.exists():
+            backup_path = project_root / f"{mp.DEFAULT_CONFIG_FILE}.backup"
+            shutil.copy2(config_path, backup_path)
+            config_path.unlink()
+
+        # Recreate with defaults
+        logger = mp.Logger(verbose=False)
+        mp.ConfigManager(logger=logger)
+
+        return jsonify({
+            'ok': True,
+            'backup': str(backup_path) if backup_path else None,
+        })
+
     # ── API: Directory Listings ──────────────────────────────────
 
     @app.route('/api/directories/music')
