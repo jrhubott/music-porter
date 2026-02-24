@@ -8,8 +8,12 @@ struct ServerConnection: Identifiable, Codable, Hashable {
     var name: String
     var version: String?
     var platform: String?
+    var url: String?
 
     var baseURL: URL? {
+        if let url, let parsed = URL(string: url) {
+            return parsed
+        }
         var components = URLComponents()
         components.scheme = "http"
         components.host = host  // URLComponents handles IPv6 bracketing automatically

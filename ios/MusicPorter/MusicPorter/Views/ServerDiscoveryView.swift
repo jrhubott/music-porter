@@ -142,7 +142,8 @@ struct ServerDiscoveryView: View {
         isConnectingFromScan = true
         scanError = nil
         let server = ServerConnection(
-            host: payload.host, port: payload.port, name: payload.host)
+            host: payload.host, port: payload.port, name: payload.host,
+            url: payload.url)
         Task {
             do {
                 try await appState.connect(server: server, apiKey: payload.key)

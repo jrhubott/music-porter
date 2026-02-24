@@ -1774,6 +1774,14 @@ EXAMPLES
   ./music-porter config verify           Validate config.yaml
   ./music-porter config reset            Reset to defaults (with backup)
   ./music-porter config reset --force    Reset without confirmation
+  ./music-porter config get <key>        Get a setting value
+  ./music-porter config set <key> <val>  Set a setting value
+
+VALID KEYS FOR get/set
+  output_type    Active output profile name
+  usb_dir        USB target subdirectory
+  workers        Parallel conversion threads (integer >= 1)
+  external_url   Public URL for QR code pairing (reverse proxy / Docker)
 """
 
 
@@ -1852,6 +1860,57 @@ def handle_config_command(args, config, config_load_error, config_parser):
         if backup_path:
             print(f"  Backup saved: {backup_path}")
         print()
+        sys.exit(0)
+
+    CONFIGURABLE_KEYS = {'output_type', 'usb_dir', 'workers', 'external_url'}
+
+    if action == 'get':
+        if config_load_error:
+            print(f"  Error: {config_load_error}")
+            sys.exit(1)
+        key = args.key
+        if key == 'api_key':
+            print("  Error: use './music-porter server --show-api-key' to view the API key")
+            sys.exit(1)
+        if key not in CONFIGURABLE_KEYS:
+            print(f"  Error: unknown setting '{key}'")
+            print(f"  Valid keys: {', '.join(sorted(CONFIGURABLE_KEYS))}")
+            sys.exit(1)
+        value = config.get_setting(key)
+        if value is not None:
+            print(f"  {key} = {value}")
+        else:
+            print(f"  {key} = (not set)")
+        sys.exit(0)
+
+    if action == 'set':
+        if config_load_error:
+            print(f"  Error: {config_load_error}")
+            sys.exit(1)
+        key = args.key
+        value = args.value
+        if key not in CONFIGURABLE_KEYS:
+            print(f"  Error: unknown setting '{key}'")
+            print(f"  Valid keys: {', '.join(sorted(CONFIGURABLE_KEYS))}")
+            sys.exit(1)
+        # Type conversion and validation
+        if key == 'workers':
+            try:
+                value = int(value)
+            except ValueError:
+                print(f"  Error: workers must be an integer, got '{value}'")
+                sys.exit(1)
+            if value < 1:
+                print(f"  Error: workers must be >= 1, got {value}")
+                sys.exit(1)
+        if key == 'output_type':
+            valid_profiles = list(OUTPUT_PROFILES.keys())
+            if value not in valid_profiles:
+                print(f"  Error: unknown profile '{value}'")
+                print(f"  Valid profiles: {', '.join(valid_profiles)}")
+                sys.exit(1)
+        config.update_setting(key, value)
+        print(f"  {key} = {value}")
         sys.exit(0)
 
 
@@ -2112,6 +2171,17 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
     config_reset = config_sub.add_parser('reset', help='Reset config.yaml to defaults')
     config_reset.add_argument('--force', action='store_true',
                                help='Skip confirmation prompt')
+
+    # config get
+    config_get = config_sub.add_parser('get', help='Get a configuration value')
+    config_get.add_argument('key',
+                            help='Setting name (output_type, usb_dir, workers, external_url)')
+
+    # config set
+    config_set = config_sub.add_parser('set', help='Set a configuration value')
+    config_set.add_argument('key',
+                            help='Setting name (output_type, usb_dir, workers, external_url)')
+    config_set.add_argument('value', help='Value to set')
 
     return parser
 

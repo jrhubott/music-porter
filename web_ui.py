@@ -306,7 +306,7 @@ def _get_freshness_level(last_modified: datetime | None, today: date) -> str:
 # ══════════════════════════════════════════════════════════════════
 
 def create_app(project_root=None, no_auth=False, server_host=None,
-               server_port=None):
+               server_port=None, external_url=None):
     """Create and configure the Flask application."""
     if project_root is None:
         project_root = Path(__file__).resolve().parent
@@ -319,6 +319,7 @@ def create_app(project_root=None, no_auth=False, server_host=None,
     app.config['NO_AUTH'] = no_auth
     app.config['SERVER_HOST'] = server_host
     app.config['SERVER_PORT'] = server_port
+    app.config['EXTERNAL_URL'] = external_url
 
     # Secret key for Flask session cookies (server mode login).
     # Ephemeral — regenerated each server start, invalidating all sessions.
@@ -1570,11 +1571,15 @@ def create_app(project_root=None, no_auth=False, server_host=None,
             import segno
         except ImportError:
             return jsonify({'error': 'segno not installed'}), 503
-        payload = json.dumps({"host": host, "port": port, "key": _api_key})
+        qr_data = {"host": host, "port": port, "key": _api_key}
+        external_url = app.config.get('EXTERNAL_URL')
+        if external_url:
+            qr_data["url"] = external_url
+        payload = json.dumps(qr_data)
         qr = segno.make(payload)
         buf = io.BytesIO()
         qr.save(buf, kind='svg', dark='#ffffff', light='#1a1a2e',
-                scale=4, xmldecl=False, svgns=False)
+                scale=4, xmldecl=False)
         return Response(buf.getvalue(), mimetype='image/svg+xml',
                         headers={'Cache-Control': 'no-store'})
 
@@ -1587,11 +1592,12 @@ def create_app(project_root=None, no_auth=False, server_host=None,
         port = app.config.get('SERVER_PORT')
         if not host or not port:
             return jsonify({'error': 'Server info not available'}), 500
+        external_url = app.config.get('EXTERNAL_URL')
         return jsonify({
             'api_key': _api_key,
             'host': host,
             'port': port,
-            'address': f"{host}:{port}",
+            'address': external_url if external_url else f"{host}:{port}",
         })
 
     return app
@@ -1640,17 +1646,20 @@ def _kill_port_process(port):
         print(f"  Warning: could not free port {port}: {e}")
 
 
-def _print_pairing_qr(host, port, api_key):
+def _print_pairing_qr(host, port, api_key, external_url=None):
     """Print a QR code to the terminal for iOS app pairing.
 
     The QR code encodes a JSON payload with the server address and API key:
-    {"host": "...", "port": 5555, "key": "..."}
+    {"host": "...", "port": 5555, "key": "...", "url": "..."}
     """
     try:
         import io
 
         import segno
-        payload = json.dumps({"host": host, "port": port, "key": api_key})
+        qr_data = {"host": host, "port": port, "key": api_key}
+        if external_url:
+            qr_data["url"] = external_url
+        payload = json.dumps(qr_data)
         qr = segno.make(payload)
         buf = io.StringIO()
         qr.terminal(out=buf, compact=True)
@@ -1679,26 +1688,33 @@ def start_server(host='127.0.0.1', port=5555, no_auth=False,
 
     # Determine local network IP for iOS connection info
     local_ip = BonjourAdvertiser._get_local_ip() or host
+    external_url = None
 
     if not no_auth:
         config = mp.ConfigManager(logger=mp.Logger(verbose=False))
         api_key = config.ensure_api_key()
+        external_url = config.get_setting('external_url')
 
         # Always show full API key and connection details for server mode
         print(f"\n  ── Server Mode ({'auth enabled' if not no_auth else 'no auth'}) ──")
         print(f"  Server:    http://{host}:{port}")
         if host == '0.0.0.0':
             print(f"  Local URL: http://{local_ip}:{port}")
+        if external_url:
+            print(f"  External:  {external_url}")
         print(f"  API Key:   {api_key}")
         print("  Auth:      Bearer token required on /api/* routes")
         print()
         print("  ── iOS Companion App Connection ──")
         print("  1. Open the Music Porter iOS app")
-        print(f"  2. Enter server address: {local_ip}:{port}")
+        if external_url:
+            print(f"  2. Enter server address: {external_url}")
+        else:
+            print(f"  2. Enter server address: {local_ip}:{port}")
         print(f"  3. Enter API key: {api_key}")
         print("  4. Or scan the QR code below:")
         print()
-        _print_pairing_qr(local_ip, port, api_key)
+        _print_pairing_qr(local_ip, port, api_key, external_url=external_url)
     else:
         print("\n  ── Web Dashboard Mode (no auth) ──")
         print(f"  Server:  http://{host}:{port}")
@@ -1706,7 +1722,7 @@ def start_server(host='127.0.0.1', port=5555, no_auth=False,
     print("\n  Press Ctrl+C to stop\n")
 
     app = create_app(no_auth=no_auth, server_host=local_ip,
-                      server_port=port)
+                      server_port=port, external_url=external_url)
 
     # Bonjour/mDNS advertisement
     bonjour = None

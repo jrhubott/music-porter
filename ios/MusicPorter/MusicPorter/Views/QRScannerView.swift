@@ -7,6 +7,7 @@ struct QRPairingPayload: Decodable {
     let host: String
     let port: Int
     let key: String
+    let url: String?
 }
 
 /// UIKit camera controller for QR code scanning.

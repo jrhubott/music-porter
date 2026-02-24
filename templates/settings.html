@@ -25,6 +25,11 @@
             <input type="text" class="form-control form-control-sm" id="settingUsbDir" placeholder="RZR/Music">
           </div>
           <div class="mb-3">
+            <label class="form-label">External URL</label>
+            <input type="text" class="form-control form-control-sm" id="settingExternalUrl" placeholder="https://host.domain">
+            <div class="form-text">Public URL for QR code pairing (reverse proxy / Docker setups)</div>
+          </div>
+          <div class="mb-3">
             <label class="form-label">Workers (parallel conversion threads)</label>
             <input type="number" class="form-control form-control-sm" id="settingWorkers" min="1" max="16">
           </div>
@@ -69,7 +74,7 @@
       <div class="col-auto">
         <img id="pairingQR" src="/api/pairing-qr" alt="Pairing QR Code"
              width="200" height="200"
-             style="border-radius:8px;" loading="lazy">
+             style="border-radius:8px;">
       </div>
       <div class="col">
         <p class="text-muted mb-2">Scan with the Music Porter iOS app to connect instantly.</p>
@@ -119,6 +124,7 @@ function loadSettings() {
   fetch('/api/settings').then(r=>r.json()).then(data => {
     currentSettings = data.settings;
     document.getElementById('settingUsbDir').value = data.settings.usb_dir || '';
+    document.getElementById('settingExternalUrl').value = data.settings.external_url || '';
     document.getElementById('settingWorkers').value = data.settings.workers || 6;
 
     // Profile cards
@@ -169,8 +175,10 @@ function loadSettings() {
 
 document.getElementById('settingsForm').addEventListener('submit', function(e) {
   e.preventDefault();
+  const externalUrl = document.getElementById('settingExternalUrl').value.trim();
   const data = {
     usb_dir: document.getElementById('settingUsbDir').value.trim(),
+    external_url: externalUrl || null,
     workers: parseInt(document.getElementById('settingWorkers').value),
   };
   fetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
