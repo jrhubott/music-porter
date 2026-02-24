@@ -6,6 +6,9 @@ struct ServerDiscoveryView: View {
     @State private var manualHost = ""
     @State private var manualPort = "5555"
     @State private var selectedServer: ServerConnection?
+    @State private var showScanner = false
+    @State private var scanError: String?
+    @State private var isConnectingFromScan = false
     @FocusState private var isManualFieldFocused: Bool
 
     var body: some View {
@@ -44,6 +47,40 @@ struct ServerDiscoveryView: View {
                     }
                 }
 
+                Section("Scan QR Code") {
+                    if isConnectingFromScan {
+                        HStack {
+                            ProgressView()
+                            Text("Connecting...")
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Button {
+                            scanError = nil
+                            showScanner = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "qrcode.viewfinder")
+                                    .font(.title2)
+                                    .foregroundStyle(.blue)
+                                VStack(alignment: .leading) {
+                                    Text("Scan QR Code")
+                                        .font(.headline)
+                                    Text("Scan the QR code from the server or web dashboard")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+
+                    if let scanError {
+                        Label(scanError, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.red)
+                            .font(.caption)
+                    }
+                }
+
                 Section("Manual Connection") {
                     TextField("Server Address", text: $manualHost)
                         .textContentType(.URL)
@@ -79,9 +116,40 @@ struct ServerDiscoveryView: View {
             .sheet(item: $selectedServer) { server in
                 PairingView(server: server)
             }
+            .fullScreenCover(isPresented: $showScanner) {
+                QRScannerView(
+                    onScan: { payload in
+                        showScanner = false
+                        connectFromScan(payload)
+                    },
+                    onError: { error in
+                        showScanner = false
+                        scanError = error
+                    },
+                    onCancel: {
+                        showScanner = false
+                    }
+                )
+                .ignoresSafeArea()
+            }
             .onAppear {
                 appState.discovery.startSearch()
             }
+        }
+    }
+
+    private func connectFromScan(_ payload: QRPairingPayload) {
+        isConnectingFromScan = true
+        scanError = nil
+        let server = ServerConnection(
+            host: payload.host, port: payload.port, name: payload.host)
+        Task {
+            do {
+                try await appState.connect(server: server, apiKey: payload.key)
+            } catch {
+                scanError = error.localizedDescription
+            }
+            isConnectingFromScan = false
         }
     }
 }

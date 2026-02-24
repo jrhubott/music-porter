@@ -305,7 +305,8 @@ def _get_freshness_level(last_modified: datetime | None, today: date) -> str:
 # Flask Application Factory
 # ══════════════════════════════════════════════════════════════════
 
-def create_app(project_root=None, no_auth=False):
+def create_app(project_root=None, no_auth=False, server_host=None,
+               server_port=None):
     """Create and configure the Flask application."""
     if project_root is None:
         project_root = Path(__file__).resolve().parent
@@ -316,6 +317,8 @@ def create_app(project_root=None, no_auth=False):
     app = Flask(__name__, template_folder=str(template_dir))
     app.config['PROJECT_ROOT'] = str(project_root)
     app.config['NO_AUTH'] = no_auth
+    app.config['SERVER_HOST'] = server_host
+    app.config['SERVER_PORT'] = server_port
 
     # Secret key for Flask session cookies (server mode login).
     # Ephemeral — regenerated each server start, invalidating all sessions.
@@ -1550,6 +1553,47 @@ def create_app(project_root=None, no_auth=False):
             }
         )
 
+    # ── iOS Pairing QR Code ─────────────────────────────────
+
+    @app.route('/api/pairing-qr')
+    def api_pairing_qr():
+        """Return QR code as SVG image for iOS app pairing."""
+        if app.config.get('NO_AUTH'):
+            return jsonify({'error': 'Not available in web mode'}), 404
+        host = app.config.get('SERVER_HOST')
+        port = app.config.get('SERVER_PORT')
+        if not host or not port:
+            return jsonify({'error': 'Server info not available'}), 500
+        try:
+            import io
+
+            import segno
+        except ImportError:
+            return jsonify({'error': 'segno not installed'}), 503
+        payload = json.dumps({"host": host, "port": port, "key": _api_key})
+        qr = segno.make(payload)
+        buf = io.BytesIO()
+        qr.save(buf, kind='svg', dark='#ffffff', light='#1a1a2e',
+                scale=4, xmldecl=False, svgns=False)
+        return Response(buf.getvalue(), mimetype='image/svg+xml',
+                        headers={'Cache-Control': 'no-store'})
+
+    @app.route('/api/pairing-info')
+    def api_pairing_info():
+        """Return server pairing details as JSON."""
+        if app.config.get('NO_AUTH'):
+            return jsonify({'error': 'Not available in web mode'}), 404
+        host = app.config.get('SERVER_HOST')
+        port = app.config.get('SERVER_PORT')
+        if not host or not port:
+            return jsonify({'error': 'Server info not available'}), 500
+        return jsonify({
+            'api_key': _api_key,
+            'host': host,
+            'port': port,
+            'address': f"{host}:{port}",
+        })
+
     return app
 
 
@@ -1661,7 +1705,8 @@ def start_server(host='127.0.0.1', port=5555, no_auth=False,
 
     print("\n  Press Ctrl+C to stop\n")
 
-    app = create_app(no_auth=no_auth)
+    app = create_app(no_auth=no_auth, server_host=local_ip,
+                      server_port=port)
 
     # Bonjour/mDNS advertisement
     bonjour = None

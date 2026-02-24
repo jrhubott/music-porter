@@ -9,6 +9,7 @@ struct PairingView: View {
     @State private var apiKey = ""
     @State private var isValidating = false
     @State private var error: String?
+    @State private var showScanner = false
 
     var body: some View {
         NavigationStack {
@@ -33,6 +34,15 @@ struct PairingView: View {
                         .textContentType(.password)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
+
+                    Button {
+                        showScanner = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "qrcode.viewfinder")
+                            Text("Scan QR Code")
+                        }
+                    }
 
                     Text("Find the API key in the server startup output or web dashboard.")
                         .font(.caption)
@@ -70,6 +80,23 @@ struct PairingView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
+            }
+            .fullScreenCover(isPresented: $showScanner) {
+                QRScannerView(
+                    onScan: { payload in
+                        showScanner = false
+                        apiKey = payload.key
+                        Task { await pair() }
+                    },
+                    onError: { errorMsg in
+                        showScanner = false
+                        error = errorMsg
+                    },
+                    onCancel: {
+                        showScanner = false
+                    }
+                )
+                .ignoresSafeArea()
             }
         }
     }

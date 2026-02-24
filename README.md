@@ -441,7 +441,7 @@ The tool uses a "hard gate" protection system for original metadata:
 
 ## Version
 
-Current version: **v2.17.0**
+Current version: **v2.18.0**
 
 ## License
 
