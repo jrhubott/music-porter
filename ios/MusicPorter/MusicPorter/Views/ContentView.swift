@@ -36,7 +36,7 @@ struct MainTabView: View {
                 .tabItem { Label("Apple Music", systemImage: "music.quarternote.3") }
 
             PipelineView()
-                .tabItem { Label("Pipeline", systemImage: "arrow.triangle.2.circlepath") }
+                .tabItem { Label("Process", systemImage: "arrow.triangle.2.circlepath") }
 
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gear") }

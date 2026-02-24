@@ -36,4 +36,11 @@ final class MusicKitService {
         let response = try await request.response()
         return Array(response.playlists)
     }
+
+    /// Fetch tracks for a specific playlist.
+    func fetchPlaylistTracks(playlist: MusicKit.Playlist) async throws -> [MusicKit.Track] {
+        let detailed = try await playlist.with(.tracks)
+        guard let tracks = detailed.tracks else { return [] }
+        return Array(tracks)
+    }
 }

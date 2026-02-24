@@ -891,7 +891,7 @@ def create_app(project_root=None, no_auth=False):
                 return {'success': True, 'playlists': len(config.playlists)}
             else:
                 pipeline_result = orchestrator.run_full_pipeline(
-                    playlist=playlist_key, url=url, auto=False,
+                    playlist=playlist_key, url=url, auto=True,
                     copy_to_usb=copy_to_usb, usb_dir=usb_dir,
                     dry_run=dry_run, verbose=verbose,
                     quality_preset=quality_preset,

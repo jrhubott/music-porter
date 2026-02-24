@@ -5,8 +5,8 @@ struct ServerDiscoveryView: View {
     @Environment(AppState.self) private var appState
     @State private var manualHost = ""
     @State private var manualPort = "5555"
-    @State private var showPairing = false
     @State private var selectedServer: ServerConnection?
+    @FocusState private var isManualFieldFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -28,7 +28,6 @@ struct ServerDiscoveryView: View {
                     ForEach(appState.discovery.discoveredServers) { server in
                         Button {
                             selectedServer = server
-                            showPairing = true
                         } label: {
                             HStack {
                                 Image(systemName: "desktopcomputer")
@@ -51,17 +50,20 @@ struct ServerDiscoveryView: View {
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                         .keyboardType(.URL)
+                        .focused($isManualFieldFocused)
 
                     TextField("Port", text: $manualPort)
                         .keyboardType(.numberPad)
+                        .focused($isManualFieldFocused)
 
                     Button("Connect") {
+                        isManualFieldFocused = false
+                        let host = manualHost.trimmingCharacters(in: .whitespaces)
                         let port = Int(manualPort) ?? 5555
                         selectedServer = ServerConnection(
-                            host: manualHost, port: port, name: manualHost)
-                        showPairing = true
+                            host: host, port: port, name: host)
                     }
-                    .disabled(manualHost.isEmpty)
+                    .disabled(manualHost.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
             .navigationTitle("Music Porter")
@@ -74,10 +76,8 @@ struct ServerDiscoveryView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showPairing) {
-                if let server = selectedServer {
-                    PairingView(server: server)
-                }
+            .sheet(item: $selectedServer) { server in
+                PairingView(server: server)
             }
             .onAppear {
                 appState.discovery.startSearch()

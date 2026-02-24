@@ -47,7 +47,7 @@ struct PipelineView: View {
                         } label: {
                             HStack {
                                 Spacer()
-                                Label("Run Pipeline", systemImage: "play.fill")
+                                Label("Process", systemImage: "play.fill")
                                     .fontWeight(.semibold)
                                 Spacer()
                             }
@@ -60,7 +60,7 @@ struct PipelineView: View {
                     ProgressPanel(vm: vm)
                 }
             }
-            .navigationTitle("Pipeline")
+            .navigationTitle("Process")
             .task { await loadPlaylists() }
         }
     }
