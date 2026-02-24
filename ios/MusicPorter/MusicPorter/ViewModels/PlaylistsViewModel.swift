@@ -58,6 +58,20 @@ final class PlaylistsViewModel {
         }
     }
 
+    func deletePlaylistData(api: APIClient, key: String, deleteSource: Bool,
+                            deleteExport: Bool, removeConfig: Bool) async {
+        do {
+            let result = try await api.deletePlaylistData(
+                key: key, deleteSource: deleteSource,
+                deleteExport: deleteExport, removeConfig: removeConfig)
+            if result.configRemoved {
+                await load(api: api)
+            }
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
     func fileCount(for key: String) -> Int {
         exportDirs.first { $0.name == key }?.files ?? 0
     }

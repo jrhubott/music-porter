@@ -20,6 +20,12 @@ struct PlaylistsView: View {
     @State private var downloadTask: Task<Void, Never>?
     @State private var downloadError: String?
 
+    // Delete server data state
+    @State private var serverDeleteKey: String?
+    @State private var serverDeleteSource = true
+    @State private var serverDeleteExport = true
+    @State private var serverDeleteConfig = false
+
     var body: some View {
         @Bindable var vmBindable = vm
         NavigationStack {
@@ -69,6 +75,31 @@ struct PlaylistsView: View {
             } message: {
                 if let name = playlistToDelete {
                     Text("All downloaded files for \"\(name)\" will be removed from this device.")
+                }
+            }
+            .alert("Delete Server Data?", isPresented: Binding(
+                get: { serverDeleteKey != nil },
+                set: { if !$0 { serverDeleteKey = nil } }
+            )) {
+                Toggle("Source files", isOn: $serverDeleteSource)
+                Toggle("Export files", isOn: $serverDeleteExport)
+                Toggle("Remove config", isOn: $serverDeleteConfig)
+                Button("Delete", role: .destructive) {
+                    if let key = serverDeleteKey {
+                        Task {
+                            await vm.deletePlaylistData(
+                                api: appState.apiClient, key: key,
+                                deleteSource: serverDeleteSource,
+                                deleteExport: serverDeleteExport,
+                                removeConfig: serverDeleteConfig)
+                            await load()
+                        }
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                if let key = serverDeleteKey {
+                    Text("Delete source and export data for \"\(key)\" from the server.")
                 }
             }
             .refreshable {
@@ -275,6 +306,14 @@ struct PlaylistsView: View {
             }
         }
         .swipeActions(edge: .trailing) {
+            Button(role: .destructive) {
+                serverDeleteSource = true
+                serverDeleteExport = true
+                serverDeleteConfig = false
+                serverDeleteKey = playlist.key
+            } label: {
+                Label("Delete Server Data", systemImage: "server.rack")
+            }
             if hasLocal {
                 Button(role: .destructive) {
                     playlistToDelete = playlist.key

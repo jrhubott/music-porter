@@ -69,6 +69,16 @@ final class APIClient {
         let _: OkResponse = try await delete("/api/playlists/\(key)")
     }
 
+    func deletePlaylistData(key: String, deleteSource: Bool = true,
+                            deleteExport: Bool = true, removeConfig: Bool = false) async throws -> DeleteDataResponse {
+        let body: [String: Any] = [
+            "delete_source": deleteSource,
+            "delete_export": deleteExport,
+            "remove_config": removeConfig,
+        ]
+        return try await postAny("/api/playlists/\(key)/delete-data", body: body)
+    }
+
     // MARK: - Directories
 
     func getMusicDirectories() async throws -> [String] {
@@ -318,6 +328,26 @@ struct ServerInfoResponse: Codable {
 struct OkResponse: Codable {
     let ok: Bool?
     let error: String?
+}
+
+struct DeleteDataResponse: Codable {
+    let success: Bool
+    let playlistKey: String
+    let sourceDeleted: Bool
+    let exportDeleted: Bool
+    let configRemoved: Bool
+    let filesDeleted: Int
+    let bytesFreed: Int
+
+    enum CodingKeys: String, CodingKey {
+        case success
+        case playlistKey = "playlist_key"
+        case sourceDeleted = "source_deleted"
+        case exportDeleted = "export_deleted"
+        case configRemoved = "config_removed"
+        case filesDeleted = "files_deleted"
+        case bytesFreed = "bytes_freed"
+    }
 }
 
 struct TaskIdResponse: Codable {
