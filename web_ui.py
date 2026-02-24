@@ -677,6 +677,7 @@ def create_app(project_root=None, no_auth=False):
                 'total_playlists': 0, 'total_files': 0,
                 'total_size_bytes': 0, 'total_exported': 0,
                 'total_unconverted': 0, 'scan_duration': 0,
+                'playlists': [],
             })
 
         return jsonify({
@@ -686,7 +687,100 @@ def create_app(project_root=None, no_auth=False):
             'total_exported': stats.total_exported,
             'total_unconverted': stats.total_unconverted,
             'scan_duration': round(stats.scan_duration, 2),
+            'playlists': stats.playlists,
         })
+
+    @app.route('/api/library-stats/<playlist_key>/unconverted')
+    def api_library_stats_unconverted(playlist_key):
+        """Return file-level unconverted details for one playlist."""
+        if '/' in playlist_key or '..' in playlist_key:
+            return jsonify({'error': 'Invalid playlist key'}), 400
+
+        music_path = Path(mp.DEFAULT_MUSIC_DIR) / playlist_key
+        if not music_path.exists():
+            return jsonify({'error': 'Playlist not found in music/'}), 404
+
+        config = _get_config()
+        profile = _get_output_profile(config)
+        quiet_logger = mp.Logger(verbose=False)
+        mgr = mp.SummaryManager(logger=quiet_logger)
+        files = mgr.get_unconverted_files(
+            playlist_key, mp.DEFAULT_MUSIC_DIR, profile.name, profile,
+        )
+
+        return jsonify({
+            'playlist': playlist_key,
+            'unconverted_count': len(files),
+            'files': files,
+        })
+
+    @app.route('/api/convert/batch', methods=['POST'])
+    def api_convert_batch():
+        """Convert multiple playlists in a single background task."""
+        data = request.get_json(force=True)
+        playlists = data.get('playlists', [])
+        force = data.get('force', False)
+        dry_run = data.get('dry_run', False)
+        verbose = data.get('verbose', False)
+        preset = data.get('preset', 'lossless')
+        no_cover_art = data.get('no_cover_art', False)
+
+        if not playlists:
+            return jsonify({'error': 'playlists list is required'}), 400
+
+        # Validate all playlist directories
+        for key in playlists:
+            if '/' in key or '..' in key:
+                return jsonify({'error': f'Invalid playlist key: {key}'}), 400
+            input_path = project_root / mp.DEFAULT_MUSIC_DIR / key
+            if not input_path.exists():
+                return jsonify({'error': f'Playlist not found: {key}'}), 404
+
+        names = ', '.join(playlists[:3])
+        if len(playlists) > 3:
+            names += f' (+{len(playlists) - 3} more)'
+        desc = f'Batch convert: {names}'
+
+        def _run(task_id):
+            logger = _make_logger(task_id, verbose=verbose)
+            config = mp.ConfigManager(logger=logger)
+            profile = _get_output_profile(config)
+            workers = config.get_setting('workers', mp.DEFAULT_WORKERS)
+            display = _make_display_handler(task_id)
+            task = task_manager.get(task_id)
+
+            total_success = 0
+            total_failed = 0
+
+            for i, key in enumerate(playlists):
+                if task.cancel_event.is_set():
+                    break
+                logger.info(f"[{i+1}/{len(playlists)}] Converting {key}...")
+                input_dir = str(project_root / mp.DEFAULT_MUSIC_DIR / key)
+                out = mp.get_export_dir(profile.name, key)
+                converter = mp.Converter(
+                    logger, quality_preset=preset, workers=workers,
+                    embed_cover_art=not no_cover_art, output_profile=profile,
+                    display_handler=display,
+                    cancel_event=task.cancel_event,
+                )
+                result = converter.convert(input_dir, out, force=force,
+                                           dry_run=dry_run, verbose=verbose)
+                if result.success:
+                    total_success += 1
+                else:
+                    total_failed += 1
+
+            return {
+                'success': total_failed == 0,
+                'playlists_converted': total_success,
+                'playlists_failed': total_failed,
+            }
+
+        task_id = task_manager.submit('convert_batch', desc, _run)
+        if task_id is None:
+            return jsonify({'error': 'Another operation is already running'}), 409
+        return jsonify({'task_id': task_id})
 
     # ── API: Playlists CRUD ──────────────────────────────────────
 

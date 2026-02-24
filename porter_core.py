@@ -45,7 +45,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.13.0"
+VERSION = "2.14.0"
 
 DEFAULT_MUSIC_DIR = "music"
 DEFAULT_EXPORT_DIR = "export"
@@ -1055,6 +1055,27 @@ def read_m4a_tags(input_file):
     artist = str(m4a.tags.get(M4A_TAG_ARTIST, ['Unknown Artist'])[0])
     album  = str(m4a.tags.get(M4A_TAG_ALBUM, ['Unknown Album'])[0])
     return title, artist, album
+
+
+def build_expected_mp3_path(m4a_file, export_dir, output_profile):
+    """Given an M4A file and profile, return the expected MP3 Path."""
+    title, artist, album = read_m4a_tags(m4a_file)
+    safe_title = sanitize_filename(title)
+    safe_artist = sanitize_filename(artist)
+    safe_album = sanitize_filename(album)
+
+    if output_profile.filename_format == "title-only":
+        filename = f"{safe_title}.mp3"
+    else:
+        filename = f"{safe_artist} - {safe_title}.mp3"
+
+    base = Path(export_dir)
+    structure = output_profile.directory_structure
+    if structure == "nested-artist":
+        return base / (safe_artist or "Unknown Artist") / filename
+    elif structure == "nested-artist-album":
+        return base / (safe_artist or "Unknown Artist") / (safe_album or "Unknown Album") / filename
+    return base / filename
 
 
 def read_m4a_cover_art(input_file):
@@ -4311,6 +4332,45 @@ class SummaryManager:
         stats.scan_duration = time.time() - start_time
 
         return stats
+
+    def get_unconverted_files(self, playlist_name, music_dir, export_profile, output_profile):
+        """Return list of unconverted M4A files for a playlist.
+
+        Each entry: {filename, artist, title, album, expected_mp3}
+        """
+        music_path = Path(music_dir) / playlist_name
+        if not music_path.exists():
+            return []
+
+        export_dir = get_export_dir(export_profile, playlist_name)
+        unconverted = []
+
+        for root, _dirs, files in os.walk(music_path):
+            for f in files:
+                if not f.lower().endswith('.m4a'):
+                    continue
+                m4a_path = Path(root) / f
+                try:
+                    expected = build_expected_mp3_path(m4a_path, export_dir, output_profile)
+                    if not expected.exists():
+                        title, artist, album = read_m4a_tags(m4a_path)
+                        unconverted.append({
+                            'filename': f,
+                            'artist': artist,
+                            'title': title,
+                            'album': album,
+                            'expected_mp3': expected.name,
+                        })
+                except Exception:
+                    unconverted.append({
+                        'filename': f,
+                        'artist': 'Unknown',
+                        'title': f,
+                        'album': 'Unknown',
+                        'expected_mp3': f.replace('.m4a', '.mp3'),
+                    })
+
+        return unconverted
 
     def _format_size(self, bytes_size):
         """Format bytes to human-readable size."""
