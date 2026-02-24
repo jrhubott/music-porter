@@ -984,6 +984,103 @@ def render_dependency_check(r: DependencyCheckResult, config=None) -> None:
     print()
 
 
+def render_unconverted_list(r: UnconvertedListResult) -> None:
+    """Render unconverted file listing."""
+    print()
+    print("╔" + "═" * 60 + "╗")
+    print("║" + "UNCONVERTED FILES".center(60) + "║")
+    print("╚" + "═" * 60 + "╝")
+    print()
+    print(f"  Profile: {r.profile}")
+
+    if r.total_unconverted == 0:
+        print()
+        print("  All source files have been converted  ✅")
+        print()
+        print("═" * 62)
+        print(f"  Scanned {r.total_playlists_scanned} playlist(s) in {r.scan_duration:.1f}s")
+        print("═" * 62)
+        print()
+        return
+
+    for entry in r.playlists:
+        if not entry['unconverted']:
+            continue
+        count = len(entry['unconverted'])
+        header = f" {entry['name']} ({count} unconverted) "
+        print()
+        print(f"───{header}" + "─" * max(0, 59 - len(header)))
+        for f in entry['unconverted']:
+            display = f"{f['artist']} - {f['title']}"
+            if len(display) > 34:
+                display = display[:31] + "..."
+            print(f"  {display:<36} -> {f['expected_mp3']}")
+
+    print()
+    print("═" * 62)
+    pcount = r.total_playlists_with_unconverted
+    print(f"  Total: {r.total_unconverted} unconverted file(s) "
+          f"across {pcount} playlist(s)  "
+          f"({r.scan_duration:.1f}s)")
+    print("═" * 62)
+    print()
+
+
+def render_diff_list(r: DiffListResult) -> None:
+    """Render diff listing showing unconverted and orphaned files."""
+    print()
+    print("╔" + "═" * 60 + "╗")
+    print("║" + "LIBRARY DIFF".center(60) + "║")
+    print("╚" + "═" * 60 + "╝")
+    print()
+    print(f"  Profile: {r.profile}")
+
+    if r.total_unconverted == 0 and r.total_orphaned == 0:
+        print()
+        print("  All playlists are in sync  ✅")
+        print()
+        print("═" * 62)
+        print(f"  Scanned {r.total_playlists_scanned} playlist(s) in {r.scan_duration:.1f}s")
+        print("═" * 62)
+        print()
+        return
+
+    for entry in r.playlists:
+        header = f" {entry['name']} "
+        print()
+        print(f"───{header}" + "─" * max(0, 59 - len(header)))
+
+        if entry['in_sync']:
+            print("  ✓ In sync")
+            continue
+
+        if entry['unconverted']:
+            print(f"  Unconverted ({len(entry['unconverted'])}):")
+            for f in entry['unconverted']:
+                display = f"{f['artist']} - {f['title']}"
+                if len(display) > 34:
+                    display = display[:31] + "..."
+                print(f"    {display:<34} -> {f['expected_mp3']}")
+
+        if entry['orphaned']:
+            print(f"  Orphaned ({len(entry['orphaned'])}):")
+            for f in entry['orphaned']:
+                print(f"    {f['filename']:<34} (no source M4A)")
+
+    print()
+    print("═" * 62)
+    parts = []
+    if r.total_unconverted > 0:
+        parts.append(f"{r.total_unconverted} unconverted")
+    if r.total_orphaned > 0:
+        parts.append(f"{r.total_orphaned} orphaned")
+    summary = ", ".join(parts)
+    print(f"  Total: {summary} "
+          f"across {r.total_playlists_with_differences} playlist(s)  "
+          f"({r.scan_duration:.1f}s)")
+    print("═" * 62)
+    print()
+
 
 # ══════════════════════════════════════════════════════════════════
 # Section 9b: Interactive Menu
@@ -1260,6 +1357,7 @@ class InteractiveMenu:
             dry_run=dry_run,
             music_dir=DEFAULT_MUSIC_DIR,
             export_profile=self.output_profile.name,
+            output_profile=self.output_profile,
         )
         render_library_summary(summary_result, mode=summary_result.mode)
 
@@ -1806,6 +1904,24 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
     summary_parser.add_argument('--no-library', action='store_true',
                                help='Skip music directory scan (only show playlist summary)')
 
+    # ── list ───────────────────────────────────────────────────────
+    list_parser = subparsers.add_parser('list',
+        help='Inspect library state (unconverted files, sync diff)')
+    list_sub = list_parser.add_subparsers(dest='list_action',
+                                          help='List action')
+
+    # list unconverted
+    list_unconv = list_sub.add_parser('unconverted',
+        help='Show M4A files missing their MP3 export')
+    list_unconv.add_argument('--playlist', default=None,
+                             help='Filter to a single playlist (name or number)')
+
+    # list diff
+    list_diff = list_sub.add_parser('diff',
+        help='Show unconverted files and orphaned MP3s')
+    list_diff.add_argument('--playlist', default=None,
+                           help='Filter to a single playlist (name or number)')
+
     # ── web ────────────────────────────────────────────────────────
     web_parser = subparsers.add_parser('web',
         help='Start the web dashboard UI (no auth, browser use)')
@@ -2191,9 +2307,56 @@ def main():
             music_dir=DEFAULT_MUSIC_DIR,
             export_profile=output_profile.name,
             no_library=args.no_library,
+            output_profile=output_profile,
         )
         render_library_summary(result, mode=result.mode)
         sys.exit(0 if result.success else 1)
+
+    elif args.command == 'list':
+        # List library state (unconverted, diff)
+        deps = DependencyChecker(logger)
+        if not deps.check_python_packages():
+            sys.exit(1)
+
+        summary_manager = SummaryManager(logger)
+
+        # Resolve optional --playlist filter
+        playlist_filter = None
+        playlist_arg = getattr(args, 'playlist', None)
+        if playlist_arg:
+            if playlist_arg.isdigit():
+                playlist = config.get_playlist_by_index(int(playlist_arg) - 1)
+            else:
+                playlist = config.get_playlist_by_key(playlist_arg)
+            if not playlist:
+                logger.error(f"Playlist not found: {playlist_arg}")
+                sys.exit(1)
+            playlist_filter = playlist.key
+
+        if args.list_action == 'unconverted':
+            result = summary_manager.list_unconverted(
+                music_dir=DEFAULT_MUSIC_DIR,
+                export_profile=output_profile.name,
+                output_profile=output_profile,
+                playlist_filter=playlist_filter,
+            )
+            render_unconverted_list(result)
+            sys.exit(0)
+
+        elif args.list_action == 'diff':
+            result = summary_manager.list_diff(
+                music_dir=DEFAULT_MUSIC_DIR,
+                export_profile=output_profile.name,
+                output_profile=output_profile,
+                playlist_filter=playlist_filter,
+            )
+            render_diff_list(result)
+            sys.exit(0)
+
+        else:
+            logger.error("Specify an action: unconverted or diff")
+            logger.info("Use: music-porter list --help")
+            sys.exit(1)
 
     elif args.command == 'cover-art':
         # Cover art management

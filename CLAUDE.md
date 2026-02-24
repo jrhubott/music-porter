@@ -68,7 +68,7 @@ The system follows an integrated pipeline:
 
 **music-porter** (python) - **RECOMMENDED**
 - Unified tool combining all functionality in a single command
-- Professional subcommand architecture: `pipeline`, `download`, `convert`, `tag`, `restore`, `reset`, `delete`, `sync-usb`, `cover-art`, `summary`
+- Professional subcommand architecture: `pipeline`, `download`, `convert`, `tag`, `restore`, `reset`, `delete`, `sync-usb`, `cover-art`, `summary`, `list`
 - Interactive menu for easy operation
 - Comprehensive error handling and statistics
 - Full pipeline orchestration (download → convert → tag → USB)
@@ -158,6 +158,12 @@ Presets via `--preset` flag: `lossless` (default, CBR 320kbps), `high` (VBR q2, 
 ./music-porter summary              # Default (balanced)
 ./music-porter summary --quick      # Aggregate only
 ./music-porter summary --detailed   # Extended info
+
+# List
+./music-porter list unconverted                          # All playlists
+./music-porter list unconverted --playlist "Pop_Workout"  # Single playlist
+./music-porter list diff                                  # All playlists
+./music-porter list diff --playlist 1                     # By number
 
 # Cover Art
 ./music-porter cover-art embed export/ride-command/Pop_Workout    # From M4A sources
@@ -280,9 +286,10 @@ The web dashboard (`web_ui.py`) provides a browser-based interface with full fea
 
 10 Jinja2 templates in `templates/` using Bootstrap 5.3.3 dark theme (CDN from jsDelivr). `base.html` provides shared layout (sidebar, log panel, SSE handler). Pages: `/` (dashboard), `/playlists`, `/pipeline`, `/convert`, `/tags`, `/cover-art`, `/usb`, `/settings`, `/operations`.
 
-### API Endpoints (~33)
+### API Endpoints (~35)
 
 - **Status:** `GET /api/status`, `/api/summary`, `/api/library-stats`
+- **List:** `GET /api/list/unconverted`, `GET /api/list/diff`
 - **Auth (server only):** `POST /api/auth/validate`, `GET /api/server-info`
 - **Cookies:** `GET /api/cookies/browsers`, `POST /api/cookies/refresh`
 - **Playlists CRUD:** `GET|POST /api/playlists`, `PUT|DELETE /api/playlists/<key>`, `POST /api/playlists/<key>/delete-data`

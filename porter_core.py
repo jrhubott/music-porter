@@ -45,7 +45,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.14.0"
+VERSION = "2.15.0"
 
 DEFAULT_MUSIC_DIR = "music"
 DEFAULT_EXPORT_DIR = "export"
@@ -1692,6 +1692,36 @@ class DependencyCheckResult:
     def to_dict(self) -> dict:
         return asdict(self)
 
+
+@dataclass
+class UnconvertedListResult:
+    """Result of listing unconverted files across playlists."""
+    success: bool
+    profile: str
+    playlists: list = field(default_factory=list)
+    total_unconverted: int = 0
+    total_playlists_with_unconverted: int = 0
+    total_playlists_scanned: int = 0
+    scan_duration: float = 0.0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class DiffListResult:
+    """Result of diff listing showing unconverted and orphaned files."""
+    success: bool
+    profile: str
+    playlists: list = field(default_factory=list)
+    total_unconverted: int = 0
+    total_orphaned: int = 0
+    total_playlists_scanned: int = 0
+    total_playlists_with_differences: int = 0
+    scan_duration: float = 0.0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
 
 
 class TaggerManager:
@@ -4051,7 +4081,7 @@ class SummaryManager:
 
     def generate_summary(self, export_dir='export/', detailed=False, quick=False,
                          dry_run=False, music_dir=None, export_profile=None,
-                         no_library=False):
+                         no_library=False, output_profile=None):
         """
         Generate and display library stats and playlist summary.
 
@@ -4063,6 +4093,7 @@ class SummaryManager:
             music_dir: Music source directory for library stats
             export_profile: Profile name for conversion status comparison
             no_library: Skip music directory scan
+            output_profile: OutputProfile for accurate file-level matching
 
         Returns:
             LibrarySummaryResult
@@ -4073,6 +4104,7 @@ class SummaryManager:
             music_stats = self.scan_music_library(
                 music_dir=music_dir,
                 export_profile=export_profile,
+                output_profile=output_profile,
             )
 
         start_time = time.time()
@@ -4393,6 +4425,173 @@ class SummaryManager:
                     })
 
         return unconverted
+
+    def get_orphaned_files(self, playlist_name, music_dir, export_profile, output_profile):
+        """Return list of orphaned MP3 files with no source M4A.
+
+        Each entry: {filename}
+        """
+        export_dir = get_export_dir(export_profile, playlist_name)
+        export_path = Path(export_dir)
+        if not export_path.exists():
+            return []
+
+        # Collect all MP3 files in the export directory
+        mp3_files = sorted(export_path.rglob("*.mp3"))
+        if not mp3_files:
+            return []
+
+        # Build set of expected MP3 paths from all M4A source files
+        music_path = Path(music_dir) / playlist_name
+        expected_paths = set()
+        if music_path.exists():
+            for root, _dirs, files in os.walk(music_path):
+                for f in files:
+                    if not f.lower().endswith('.m4a'):
+                        continue
+                    m4a_path = Path(root) / f
+                    try:
+                        expected = build_expected_mp3_path(
+                            m4a_path, export_dir, output_profile,
+                        )
+                        expected_paths.add(expected.resolve())
+                    except Exception:
+                        pass
+
+        # Any MP3 not in the expected set is orphaned
+        orphaned = []
+        for mp3 in mp3_files:
+            if mp3.resolve() not in expected_paths:
+                orphaned.append({'filename': mp3.name})
+
+        return orphaned
+
+    def list_unconverted(self, music_dir, export_profile, output_profile,
+                         playlist_filter=None):
+        """List unconverted M4A files across playlists.
+
+        Args:
+            music_dir: Music source directory
+            export_profile: Profile name for export paths
+            output_profile: Output profile object
+            playlist_filter: Optional playlist name to scope to
+
+        Returns:
+            UnconvertedListResult
+        """
+        start_time = time.time()
+        music_path = Path(music_dir)
+        result_playlists = []
+
+        if not music_path.exists():
+            return UnconvertedListResult(
+                success=True, profile=export_profile,
+                scan_duration=time.time() - start_time,
+            )
+
+        # Determine which playlists to scan
+        if playlist_filter:
+            playlist_dirs = [music_path / playlist_filter]
+        else:
+            playlist_dirs = sorted(
+                [d for d in music_path.iterdir() if d.is_dir() and not d.name.startswith('.')],
+                key=lambda p: p.name,
+            )
+
+        total_unconverted = 0
+        playlists_with_unconverted = 0
+
+        for pdir in playlist_dirs:
+            if not pdir.exists():
+                continue
+            name = pdir.name
+            files = self.get_unconverted_files(name, music_dir, export_profile, output_profile)
+            if files:
+                playlists_with_unconverted += 1
+                total_unconverted += len(files)
+            result_playlists.append({
+                'name': name,
+                'unconverted': files,
+            })
+
+        return UnconvertedListResult(
+            success=True,
+            profile=export_profile,
+            playlists=result_playlists,
+            total_unconverted=total_unconverted,
+            total_playlists_with_unconverted=playlists_with_unconverted,
+            total_playlists_scanned=len(result_playlists),
+            scan_duration=time.time() - start_time,
+        )
+
+    def list_diff(self, music_dir, export_profile, output_profile,
+                  playlist_filter=None):
+        """List unconverted and orphaned files across playlists.
+
+        Args:
+            music_dir: Music source directory
+            export_profile: Profile name for export paths
+            output_profile: Output profile object
+            playlist_filter: Optional playlist name to scope to
+
+        Returns:
+            DiffListResult
+        """
+        start_time = time.time()
+        music_path = Path(music_dir)
+        export_base = Path(get_export_dir(export_profile))
+
+        # Collect playlist names from both music/ and export/ (union)
+        playlist_names = set()
+        if music_path.exists():
+            for d in music_path.iterdir():
+                if d.is_dir() and not d.name.startswith('.'):
+                    playlist_names.add(d.name)
+        if export_base.exists():
+            for d in export_base.iterdir():
+                if d.is_dir() and not d.name.startswith('.'):
+                    playlist_names.add(d.name)
+
+        if playlist_filter:
+            playlist_names = {playlist_filter} & playlist_names
+            if not playlist_names:
+                # Include even if not found, to report empty
+                playlist_names = {playlist_filter}
+
+        result_playlists = []
+        total_unconverted = 0
+        total_orphaned = 0
+        playlists_with_differences = 0
+
+        for name in sorted(playlist_names):
+            unconverted = self.get_unconverted_files(
+                name, music_dir, export_profile, output_profile,
+            )
+            orphaned = self.get_orphaned_files(
+                name, music_dir, export_profile, output_profile,
+            )
+            in_sync = len(unconverted) == 0 and len(orphaned) == 0
+            if not in_sync:
+                playlists_with_differences += 1
+            total_unconverted += len(unconverted)
+            total_orphaned += len(orphaned)
+            result_playlists.append({
+                'name': name,
+                'unconverted': unconverted,
+                'orphaned': orphaned,
+                'in_sync': in_sync,
+            })
+
+        return DiffListResult(
+            success=True,
+            profile=export_profile,
+            playlists=result_playlists,
+            total_unconverted=total_unconverted,
+            total_orphaned=total_orphaned,
+            total_playlists_scanned=len(result_playlists),
+            total_playlists_with_differences=playlists_with_differences,
+            scan_duration=time.time() - start_time,
+        )
 
     def _format_size(self, bytes_size):
         """Format bytes to human-readable size."""
