@@ -414,7 +414,7 @@ The tool uses a "hard gate" protection system for original metadata:
 5. ~~**Cover art management** - Embed, extract, and update album artwork~~ *(implemented in v1.5.0)*
 6. **Playlist merging** - Combine multiple playlists into one
 7. **Smart playlists** - Auto-generate playlists based on criteria (genre, artist, etc.)
-8. **Duplicate detection** - Find and remove duplicate tracks across playlists
+8. ~~**Duplicate detection** - Find and remove duplicate tracks across playlists~~ *(implemented in v2.16.0)*
 9. **Tag validation** - Verify tag integrity and fix common issues
 10. **Export formats** - Support for additional formats (FLAC, AAC, OGG)
 11. **Cover art resize on embed/convert** - Add `--cover-art-size` flag to `embed`, `update`, `convert`, and `pipeline` commands for automatic resizing during processing

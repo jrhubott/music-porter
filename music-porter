@@ -1035,7 +1035,8 @@ def render_diff_list(r: DiffListResult) -> None:
     print()
     print(f"  Profile: {r.profile}")
 
-    if r.total_unconverted == 0 and r.total_orphaned == 0:
+    if (r.total_unconverted == 0 and r.total_orphaned == 0
+            and r.total_duplicates == 0):
         print()
         print("  All playlists are in sync  ✅")
         print()
@@ -1067,6 +1068,15 @@ def render_diff_list(r: DiffListResult) -> None:
             for f in entry['orphaned']:
                 print(f"    {f['filename']:<34} (no source M4A)")
 
+        if entry.get('duplicates'):
+            n = len(entry['duplicates'])
+            label = "collision" if n == 1 else "collisions"
+            print(f"  Duplicates ({n} {label}):")
+            for dup in entry['duplicates']:
+                print(f"    -> {dup['expected_mp3']}")
+                for src in dup['sources']:
+                    print(f"       {src['filename']}")
+
     print()
     print("═" * 62)
     parts = []
@@ -1074,6 +1084,9 @@ def render_diff_list(r: DiffListResult) -> None:
         parts.append(f"{r.total_unconverted} unconverted")
     if r.total_orphaned > 0:
         parts.append(f"{r.total_orphaned} orphaned")
+    if r.total_duplicates > 0:
+        label = "collision" if r.total_duplicates == 1 else "collisions"
+        parts.append(f"{r.total_duplicates} duplicate {label}")
     summary = ", ".join(parts)
     print(f"  Total: {summary} "
           f"across {r.total_playlists_with_differences} playlist(s)  "

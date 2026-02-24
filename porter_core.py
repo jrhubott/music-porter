@@ -45,7 +45,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.15.0"
+VERSION = "2.16.0"
 
 DEFAULT_MUSIC_DIR = "music"
 DEFAULT_EXPORT_DIR = "export"
@@ -1716,6 +1716,7 @@ class DiffListResult:
     playlists: list = field(default_factory=list)
     total_unconverted: int = 0
     total_orphaned: int = 0
+    total_duplicates: int = 0
     total_playlists_scanned: int = 0
     total_playlists_with_differences: int = 0
     scan_duration: float = 0.0
@@ -4466,6 +4467,45 @@ class SummaryManager:
 
         return orphaned
 
+    def get_duplicate_files(self, playlist_name, music_dir, export_profile, output_profile):
+        """Return list of duplicate M4A-to-MP3 collisions for a playlist.
+
+        Multiple M4A files that resolve to the same expected MP3 path.
+        Each entry: {expected_mp3, sources: [{filename, artist, title, album}]}
+        """
+        music_path = Path(music_dir) / playlist_name
+        if not music_path.exists():
+            return []
+
+        export_dir = get_export_dir(export_profile, playlist_name)
+        # Group M4A files by their expected MP3 path
+        path_groups = {}
+        for root, _dirs, files in os.walk(music_path):
+            for f in files:
+                if not f.lower().endswith('.m4a'):
+                    continue
+                m4a_path = Path(root) / f
+                try:
+                    expected = build_expected_mp3_path(
+                        m4a_path, export_dir, output_profile,
+                    )
+                    key = expected.resolve()
+                    if key not in path_groups:
+                        path_groups[key] = {'expected_mp3': expected.name, 'sources': []}
+                    title, artist, album = read_m4a_tags(m4a_path)
+                    rel = m4a_path.relative_to(Path(music_dir))
+                    path_groups[key]['sources'].append({
+                        'filename': str(rel),
+                        'artist': artist,
+                        'title': title,
+                        'album': album,
+                    })
+                except Exception:
+                    pass
+
+        # Return only groups with more than one source file
+        return [group for group in path_groups.values() if len(group['sources']) > 1]
+
     def list_unconverted(self, music_dir, export_profile, output_profile,
                          playlist_filter=None):
         """List unconverted M4A files across playlists.
@@ -4561,6 +4601,7 @@ class SummaryManager:
         result_playlists = []
         total_unconverted = 0
         total_orphaned = 0
+        total_duplicates = 0
         playlists_with_differences = 0
 
         for name in sorted(playlist_names):
@@ -4570,15 +4611,21 @@ class SummaryManager:
             orphaned = self.get_orphaned_files(
                 name, music_dir, export_profile, output_profile,
             )
-            in_sync = len(unconverted) == 0 and len(orphaned) == 0
+            duplicates = self.get_duplicate_files(
+                name, music_dir, export_profile, output_profile,
+            )
+            in_sync = (len(unconverted) == 0 and len(orphaned) == 0
+                       and len(duplicates) == 0)
             if not in_sync:
                 playlists_with_differences += 1
             total_unconverted += len(unconverted)
             total_orphaned += len(orphaned)
+            total_duplicates += len(duplicates)
             result_playlists.append({
                 'name': name,
                 'unconverted': unconverted,
                 'orphaned': orphaned,
+                'duplicates': duplicates,
                 'in_sync': in_sync,
             })
 
@@ -4588,6 +4635,7 @@ class SummaryManager:
             playlists=result_playlists,
             total_unconverted=total_unconverted,
             total_orphaned=total_orphaned,
+            total_duplicates=total_duplicates,
             total_playlists_scanned=len(result_playlists),
             total_playlists_with_differences=playlists_with_differences,
             scan_duration=time.time() - start_time,
