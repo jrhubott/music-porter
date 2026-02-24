@@ -54,7 +54,9 @@
     <div class="d-flex gap-2 flex-wrap mt-2">
       <a href="/pipeline" class="btn btn-primary btn-sm"><i class="bi bi-arrow-repeat"></i> Run Pipeline</a>
       <a href="/convert" class="btn btn-outline-primary btn-sm"><i class="bi bi-file-earmark-music"></i> Convert</a>
+      {% if not server_mode %}
       <a href="/usb" class="btn btn-outline-primary btn-sm"><i class="bi bi-usb-drive"></i> USB Sync</a>
+      {% endif %}
       <a href="/playlists" class="btn btn-outline-secondary btn-sm"><i class="bi bi-list-ul"></i> Manage Playlists</a>
       <a href="/settings" class="btn btn-outline-secondary btn-sm"><i class="bi bi-gear"></i> Settings</a>
     </div>

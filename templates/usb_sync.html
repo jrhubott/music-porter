@@ -3,6 +3,15 @@
 {% block content %}
 <h4 class="mb-4">USB Sync</h4>
 
+{% if server_mode %}
+<div class="card">
+  <div class="card-body text-center py-5">
+    <i class="bi bi-usb-drive fs-1 text-muted"></i>
+    <h5 class="mt-3">USB sync is not available in server mode</h5>
+    <p class="text-muted mb-0">USB drives are attached to the client machine, not the server. Use the CLI locally to sync files to USB.</p>
+  </div>
+</div>
+{% else %}
 <div class="card mb-4">
   <div class="card-body">
     <form id="usbForm">
@@ -53,9 +62,11 @@
     </div>
   </div>
 </div>
+{% endif %}
 {% endblock content %}
 
 {% block scripts %}
+{% if not server_mode %}
 <script>
 function loadSources() {
   fetch('/api/directories/export').then(r=>r.json()).then(dirs => {
@@ -114,4 +125,5 @@ document.getElementById('usbForm').addEventListener('submit', function(e) {
 loadSources();
 loadDrives();
 </script>
+{% endif %}
 {% endblock scripts %}

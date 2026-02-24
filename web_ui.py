@@ -461,6 +461,8 @@ def create_app(project_root=None, no_auth=False):
 
     @app.route('/usb')
     def usb_page():
+        if not app.config.get('NO_AUTH'):
+            return redirect(url_for('dashboard'))
         return render_template('usb_sync.html')
 
     @app.route('/settings')
@@ -780,6 +782,9 @@ def create_app(project_root=None, no_auth=False):
         verbose = data.get('verbose', False)
         preset = data.get('preset')
         copy_to_usb = data.get('copy_to_usb', False)
+        # USB sync is not available in server mode — force off
+        if not app.config.get('NO_AUTH'):
+            copy_to_usb = False
         dir_structure = data.get('dir_structure')
         filename_format = data.get('filename_format')
 
@@ -1224,12 +1229,16 @@ def create_app(project_root=None, no_auth=False):
 
     @app.route('/api/usb/drives')
     def api_usb_drives():
+        if not app.config.get('NO_AUTH'):
+            return jsonify({'error': 'USB sync is not available in server mode'}), 403
         usb_mgr = mp.USBManager(mp.Logger(verbose=False))
         drives = usb_mgr.find_usb_drives()
         return jsonify(drives)
 
     @app.route('/api/usb/sync', methods=['POST'])
     def api_usb_sync():
+        if not app.config.get('NO_AUTH'):
+            return jsonify({'error': 'USB sync is not available in server mode'}), 403
         data = request.get_json(force=True)
         source_dir = data.get('source_dir', '')
         volume = data.get('volume', '')

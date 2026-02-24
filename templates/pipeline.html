@@ -76,10 +76,12 @@
           <input class="form-check-input" type="checkbox" id="pipelineVerbose">
           <label class="form-check-label" for="pipelineVerbose">Verbose</label>
         </div>
+        {% if not server_mode %}
         <div class="form-check">
           <input class="form-check-input" type="checkbox" id="pipelineUsb">
           <label class="form-check-label" for="pipelineUsb">Copy to USB</label>
         </div>
+        {% endif %}
       </div>
 
       <button type="submit" class="btn btn-primary mt-3"><i class="bi bi-play-fill"></i> Run Pipeline</button>
@@ -124,7 +126,7 @@ document.getElementById('pipelineForm').addEventListener('submit', function(e) {
   const data = {
     dry_run: document.getElementById('pipelineDryRun').checked,
     verbose: document.getElementById('pipelineVerbose').checked,
-    copy_to_usb: document.getElementById('pipelineUsb').checked,
+    copy_to_usb: document.getElementById('pipelineUsb') ? document.getElementById('pipelineUsb').checked : false,
   };
   const preset = document.getElementById('pipelinePreset').value;
   if (preset) data.preset = preset;
