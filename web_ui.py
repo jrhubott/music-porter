@@ -12,6 +12,10 @@ User Prompt Handling (SRS 2.4.3):
     defaults: deny destructive actions, skip optional prompts, return
     default values for text input.
 
+    Exception: operations that require confirm_destructive() (e.g. tag reset)
+    use WebPromptHandler, which auto-confirms because the user already
+    initiated the action via the web UI.
+
 Display Handling (SRS 2.6.4):
     WebDisplayHandler translates show_progress() / show_status() calls into
     SSE events pushed to the frontend via /api/stream/<task_id>.
@@ -162,6 +166,18 @@ class WebDisplayHandler:
 
     def show_banner(self, title, subtitle=None):
         pass  # Web UI has its own page headers
+
+
+# ══════════════════════════════════════════════════════════════════
+# WebPromptHandler — auto-confirm for web-initiated actions
+# ══════════════════════════════════════════════════════════════════
+
+
+class WebPromptHandler(mp.NonInteractivePromptHandler):
+    """Auto-confirms destructive actions in web context (user already clicked the button)."""
+
+    def confirm_destructive(self, message: str) -> bool:
+        return True
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1017,6 +1033,7 @@ def create_app(project_root=None, no_auth=False):
             display = _make_display_handler(task_id)
             task = task_manager.get(task_id)
             tagger = mp.TaggerManager(logger, output_profile=profile,
+                                      prompt_handler=WebPromptHandler(),
                                       display_handler=display,
                                       cancel_event=task.cancel_event)
             success = tagger.reset_tags_from_source(safe_in, safe_out,
