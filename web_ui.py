@@ -1210,7 +1210,7 @@ def create_app(project_root=None, no_auth=False):
         if not str(file_path.resolve()).startswith(str(Path(safe).resolve())):
             return jsonify({'error': 'Invalid path'}), 400
 
-        return send_from_directory(safe, filename, mimetype='audio/mpeg')
+        return send_from_directory(safe, filename, mimetype='audio/mpeg', conditional=True)
 
     @app.route('/api/files/<playlist_key>/<filename>/artwork')
     def api_files_artwork(playlist_key, filename):
