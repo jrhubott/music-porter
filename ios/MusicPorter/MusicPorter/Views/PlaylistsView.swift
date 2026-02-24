@@ -77,14 +77,16 @@ struct PlaylistsView: View {
                     Text("All downloaded files for \"\(name)\" will be removed from this device.")
                 }
             }
-            .alert("Delete Server Data?", isPresented: Binding(
+            .sheet(isPresented: Binding(
                 get: { serverDeleteKey != nil },
                 set: { if !$0 { serverDeleteKey = nil } }
             )) {
-                Toggle("Source files", isOn: $serverDeleteSource)
-                Toggle("Export files", isOn: $serverDeleteExport)
-                Toggle("Remove config", isOn: $serverDeleteConfig)
-                Button("Delete", role: .destructive) {
+                DeleteServerDataSheet(
+                    key: serverDeleteKey ?? "",
+                    deleteSource: $serverDeleteSource,
+                    deleteExport: $serverDeleteExport,
+                    removeConfig: $serverDeleteConfig
+                ) {
                     if let key = serverDeleteKey {
                         Task {
                             await vm.deletePlaylistData(
@@ -95,12 +97,9 @@ struct PlaylistsView: View {
                             await load()
                         }
                     }
+                    serverDeleteKey = nil
                 }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                if let key = serverDeleteKey {
-                    Text("Delete source and export data for \"\(key)\" from the server.")
-                }
+                .presentationDetents([.medium])
             }
             .refreshable {
                 await load()
@@ -435,6 +434,53 @@ struct PlaylistsView: View {
             storageUsed = appState.downloadManager.localStorageUsed()
         } catch {
             downloadError = error.localizedDescription
+        }
+    }
+}
+
+/// Sheet for selecting what server data to delete for a playlist.
+struct DeleteServerDataSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let key: String
+    @Binding var deleteSource: Bool
+    @Binding var deleteExport: Bool
+    @Binding var removeConfig: Bool
+    let onDelete: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("Delete data for \"\(key)\" from the server.")
+                        .foregroundStyle(.secondary)
+                }
+                Section("Options") {
+                    Toggle("Source files", isOn: $deleteSource)
+                    Toggle("Export files", isOn: $deleteExport)
+                    Toggle("Remove from config", isOn: $removeConfig)
+                }
+                Section {
+                    Button(role: .destructive) {
+                        onDelete()
+                    } label: {
+                        HStack {
+                            Spacer()
+                            Text("Delete")
+                                .fontWeight(.semibold)
+                            Spacer()
+                        }
+                    }
+                    .disabled(!deleteSource && !deleteExport && !removeConfig)
+                }
+            }
+            .navigationTitle("Delete Server Data")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
         }
     }
 }
