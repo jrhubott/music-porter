@@ -113,7 +113,7 @@
       </div>
     </div>
     <div class="col-md-3">
-      <div class="card h-100">
+      <div class="card h-100" id="libStatUnconvertedCard">
         <div class="card-body text-center">
           <div class="text-muted small">Unconverted</div>
           <div class="fs-2 fw-bold" id="libStatUnconverted">-</div>
@@ -282,12 +282,38 @@
     </div>
   </div>
 </div>
+<!-- Unconverted Files Modal -->
+<div class="modal fade" id="unconvertedModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title"><i class="bi bi-file-earmark-music"></i> Unconverted Files</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <span id="unconvertedSummary" class="text-muted"></span>
+          <button class="btn btn-primary btn-sm" id="convertAllBtn" onclick="convertAllUnconverted()">
+            <i class="bi bi-arrow-repeat"></i> Convert All
+          </button>
+        </div>
+        <div class="accordion" id="unconvertedAccordion"></div>
+        <div id="unconvertedLogWrapper" class="d-none mt-3">
+          <h6 class="mb-2"><i class="bi bi-terminal"></i> Conversion Output</h6>
+          <div id="unconvertedLog" class="log-panel" style="max-height:300px;overflow-y:auto;min-height:0"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock content %}
 
 {% block scripts %}
 <style>
   .sortable { cursor: pointer; user-select: none; }
   .sortable:hover { color: #fff; }
+  #libStatUnconvertedCard.clickable { cursor: pointer; transition: border-color 0.15s; }
+  #libStatUnconvertedCard.clickable:hover { border-color: var(--bs-danger); }
 </style>
 <script>
 // ── Dashboard status ──
@@ -350,6 +376,9 @@ document.getElementById('dashRefreshCookies').addEventListener('click', function
 });
 
 // ── Library Stats (music/ directory) ──
+let libStatsPlaylistData = [];
+let unconvertedFileCache = {};
+
 function loadLibraryStats() {
   const spinner = document.getElementById('libStatsLoading');
   const content = document.getElementById('libStatsContent');
@@ -383,16 +412,25 @@ function loadLibraryStats() {
       document.getElementById('libStatExported').textContent = data.total_exported.toLocaleString();
       document.getElementById('libStatExportedBar').style.width = exportPct + '%';
 
+      // Cache playlist data for the modal
+      libStatsPlaylistData = data.playlists || [];
+      unconvertedFileCache = {};
+
       const unconvEl = document.getElementById('libStatUnconverted');
+      const card = document.getElementById('libStatUnconvertedCard');
       unconvEl.textContent = data.total_unconverted.toLocaleString();
       if (data.total_unconverted === 0) {
         unconvEl.classList.remove('text-danger');
         unconvEl.classList.add('text-success');
+        card.classList.remove('clickable');
+        card.onclick = null;
         document.getElementById('libStatUnconvertedLabel').innerHTML = '&#10003; all converted';
       } else {
         unconvEl.classList.remove('text-success');
         unconvEl.classList.add('text-danger');
-        document.getElementById('libStatUnconvertedLabel').textContent = 'files need conversion';
+        card.classList.add('clickable');
+        card.onclick = showUnconvertedModal;
+        document.getElementById('libStatUnconvertedLabel').textContent = 'click to view details';
       }
     })
     .catch(err => {
@@ -402,6 +440,117 @@ function loadLibraryStats() {
     });
 }
 loadLibraryStats();
+
+// ── Unconverted Files Modal ──
+function showUnconvertedModal() {
+  const unconverted = libStatsPlaylistData.filter(p => p.unconverted_count > 0);
+  if (unconverted.length === 0) return;
+
+  const totalFiles = unconverted.reduce((s, p) => s + p.unconverted_count, 0);
+  document.getElementById('unconvertedSummary').textContent =
+    totalFiles + ' file' + (totalFiles !== 1 ? 's' : '') + ' across ' +
+    unconverted.length + ' playlist' + (unconverted.length !== 1 ? 's' : '');
+  document.getElementById('convertAllBtn').disabled = false;
+
+  const accordion = document.getElementById('unconvertedAccordion');
+  accordion.innerHTML = unconverted.map((p, i) => `
+    <div class="accordion-item">
+      <h2 class="accordion-header">
+        <button class="accordion-button collapsed py-2" type="button"
+                data-bs-toggle="collapse" data-bs-target="#uncollapse${i}"
+                onclick="loadUnconvertedFiles('${p.name}', 'unconvertedBody${i}')">
+          ${p.name}
+          <span class="badge bg-danger ms-2">${p.unconverted_count}</span>
+        </button>
+      </h2>
+      <div id="uncollapse${i}" class="accordion-collapse collapse" data-bs-parent="#unconvertedAccordion">
+        <div class="accordion-body p-2" id="unconvertedBody${i}">
+          <div class="text-center py-2">
+            <div class="spinner-border spinner-border-sm"></div> Loading...
+          </div>
+        </div>
+      </div>
+    </div>
+  `).join('');
+
+  // Hide log panel from previous run
+  document.getElementById('unconvertedLogWrapper').classList.add('d-none');
+  document.getElementById('unconvertedLog').innerHTML = '';
+
+  new bootstrap.Modal(document.getElementById('unconvertedModal')).show();
+}
+
+function loadUnconvertedFiles(playlist, containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  // Use cache if available
+  if (unconvertedFileCache[playlist]) {
+    renderUnconvertedFiles(playlist, container, unconvertedFileCache[playlist]);
+    return;
+  }
+
+  fetch('/api/library-stats/' + encodeURIComponent(playlist) + '/unconverted')
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) {
+        container.innerHTML = '<span class="text-danger">' + data.error + '</span>';
+        return;
+      }
+      unconvertedFileCache[playlist] = data.files;
+      renderUnconvertedFiles(playlist, container, data.files);
+    })
+    .catch(err => {
+      container.innerHTML = '<span class="text-danger">Failed to load: ' + err + '</span>';
+    });
+}
+
+function renderUnconvertedFiles(playlist, container, files) {
+  if (files.length === 0) {
+    container.innerHTML = '<span class="text-success">All files converted!</span>';
+    return;
+  }
+  let html = '<div class="table-responsive"><table class="table table-sm table-hover mb-2">' +
+    '<thead><tr><th>Artist</th><th>Title</th><th>Expected MP3</th></tr></thead><tbody>';
+  files.forEach(f => {
+    html += '<tr><td>' + f.artist + '</td><td>' + f.title + '</td><td class="text-muted small">' + f.expected_mp3 + '</td></tr>';
+  });
+  html += '</tbody></table></div>';
+  html += '<button class="btn btn-outline-primary btn-sm" onclick="convertPlaylist(\'' +
+    playlist.replace(/'/g, "\\'") + '\')"><i class="bi bi-arrow-repeat"></i> Convert ' + playlist + '</button>';
+  container.innerHTML = html;
+}
+
+function convertPlaylist(name) {
+  _startConvert('/api/convert/run', {input_dir: 'music/' + name});
+}
+
+function convertAllUnconverted() {
+  const playlists = libStatsPlaylistData.filter(p => p.unconverted_count > 0).map(p => p.name);
+  if (playlists.length === 0) return;
+  _startConvert('/api/convert/batch', {playlists: playlists});
+}
+
+function _startConvert(url, payload) {
+  // Disable all convert buttons in the modal
+  const modal = document.getElementById('unconvertedModal');
+  modal.querySelectorAll('button[onclick*="convert"]').forEach(b => b.disabled = true);
+  document.getElementById('convertAllBtn').disabled = true;
+
+  // Show log panel
+  const wrapper = document.getElementById('unconvertedLogWrapper');
+  wrapper.classList.remove('d-none');
+
+  submitOperation(url, payload, 'unconvertedLog', function(msg) {
+    // Re-enable buttons
+    modal.querySelectorAll('button[onclick*="convert"]').forEach(b => b.disabled = false);
+    document.getElementById('convertAllBtn').disabled = false;
+
+    // Clear cache and refresh stats
+    unconvertedFileCache = {};
+    loadLibraryStats();
+  });
+}
 
 // ── Playlist Summary ──
 let summaryData = null;
