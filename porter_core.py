@@ -4259,13 +4259,15 @@ class SummaryManager:
         self.stats.sample_size = sum(p.sample_files_checked for p in self.stats.playlists)
 
 
-    def scan_music_library(self, music_dir=None, export_profile=None):
+    def scan_music_library(self, music_dir=None, export_profile=None,
+                           output_profile=None):
         """
         Scan the music/ directory for source M4A library stats.
 
         Args:
             music_dir: Path to music directory (default: DEFAULT_MUSIC_DIR)
             export_profile: Profile name to check export status against
+            output_profile: OutputProfile for file-level unconverted matching
 
         Returns:
             MusicLibraryStats or None if directory doesn't exist
@@ -4287,12 +4289,14 @@ class SummaryManager:
                 playlist_name = item.name
                 m4a_count = 0
                 size_bytes = 0
+                m4a_files = []
 
                 # Walk recursively — music/ has nested Artist/Album/Track.m4a structure
                 for root, _dirs, files in os.walk(item):
                     for f in files:
                         if f.lower().endswith('.m4a'):
                             m4a_count += 1
+                            m4a_files.append(Path(root) / f)
                             try:
                                 size_bytes += os.path.getsize(os.path.join(root, f))
                             except OSError:
@@ -4301,14 +4305,32 @@ class SummaryManager:
                 if m4a_count == 0:
                     continue
 
-                # Check export status
+                # Check export status using file-level matching
                 exported_count = 0
-                if export_profile:
+                unconverted_count = 0
+                if export_profile and output_profile:
+                    export_dir = get_export_dir(export_profile, playlist_name)
+                    seen_paths = set()
+                    for m4a_path in m4a_files:
+                        try:
+                            expected = build_expected_mp3_path(
+                                m4a_path, export_dir, output_profile,
+                            )
+                            if expected in seen_paths:
+                                continue  # duplicate mapping, already counted
+                            seen_paths.add(expected)
+                            if expected.exists():
+                                exported_count += 1
+                            else:
+                                unconverted_count += 1
+                        except Exception:
+                            unconverted_count += 1
+                elif export_profile:
+                    # Fallback: simple count when no output_profile given
                     export_path = Path(get_export_dir(export_profile, playlist_name))
                     if export_path.exists():
                         exported_count = len(list(export_path.rglob('*.mp3')))
-
-                unconverted_count = max(0, m4a_count - exported_count)
+                    unconverted_count = max(0, m4a_count - exported_count)
 
                 stats.playlists.append({
                     'name': playlist_name,

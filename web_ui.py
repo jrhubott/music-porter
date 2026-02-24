@@ -670,6 +670,7 @@ def create_app(project_root=None, no_auth=False):
         stats = mgr.scan_music_library(
             music_dir=mp.DEFAULT_MUSIC_DIR,
             export_profile=profile.name,
+            output_profile=profile,
         )
 
         if stats is None:
