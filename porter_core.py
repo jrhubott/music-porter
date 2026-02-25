@@ -3224,6 +3224,7 @@ class Downloader:
         cmd = [
             self.venv_python, "-m", "gamdl",
             "--log-level", "INFO",  # Show download progress, suppress DEBUG
+            "--cookies-path", str(self.cookie_manager.cookie_path),
             "--config-path", str(config_path),
             "--temp-path", str(temp_path),
             "-o", str(output_path) + "/",
