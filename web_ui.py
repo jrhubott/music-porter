@@ -417,6 +417,10 @@ def create_app(project_root=None, no_auth=False, server_host=None,
             output_type = mp.DEFAULT_OUTPUT_TYPE
         return mp.OUTPUT_PROFILES[output_type]
 
+    def _get_server_name():
+        config = _get_config()
+        return config.get_setting('server_name') or socket.gethostname()
+
     def _safe_dir(directory):
         """Validate directory is within project root."""
         try:
@@ -436,7 +440,7 @@ def create_app(project_root=None, no_auth=False, server_host=None,
         return jsonify({
             'valid': True,
             'version': mp.VERSION,
-            'server_name': socket.gethostname(),
+            'server_name': _get_server_name(),
             'api_version': 1,
         })
 
@@ -446,7 +450,7 @@ def create_app(project_root=None, no_auth=False, server_host=None,
         config = _get_config()
         mp.load_output_profiles(config)
         return jsonify({
-            'name': socket.gethostname(),
+            'name': _get_server_name(),
             'version': mp.VERSION,
             'platform': mp.get_os_display_name(),
             'profiles': list(mp.OUTPUT_PROFILES.keys()),
@@ -1763,7 +1767,9 @@ class BonjourAdvertiser:
             print("  Bonjour: skipped (zeroconf not installed)")
             return
 
-        hostname = socket.gethostname()
+        logger = mp.Logger(verbose=False)
+        config = mp.ConfigManager(logger=logger)
+        hostname = config.get_setting('server_name') or socket.gethostname()
         # Get local IP for service registration
         local_ip = self._get_local_ip()
         if not local_ip:

@@ -758,6 +758,7 @@ class ConfigManager:
             'output_type': DEFAULT_OUTPUT_TYPE,
             'usb_dir': DEFAULT_USB_DIR,
             'workers': DEFAULT_WORKERS,
+            'server_name': '',
         }
         self._raw_output_types = copy.deepcopy(DEFAULT_OUTPUT_PROFILES)
         # Build OutputProfile instances from defaults

@@ -51,7 +51,9 @@ final class AppState {
         audioPlayer.configure(apiClient: apiClient)
         let response = try await apiClient.validateConnection()
         if response.valid {
-            savedServer = server
+            apiClient.server?.name = response.serverName
+            apiClient.server?.version = response.version
+            savedServer = apiClient.server ?? server
             checkAPIVersion(response.apiVersion)
         } else {
             throw APIError.unauthorized

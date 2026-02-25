@@ -1782,6 +1782,7 @@ VALID KEYS FOR get/set
   usb_dir        USB target subdirectory
   workers        Parallel conversion threads (integer >= 1)
   external_url   Public URL for QR code pairing (reverse proxy / Docker)
+  server_name    Custom server display name (default: hostname)
 """
 
 
@@ -1862,7 +1863,7 @@ def handle_config_command(args, config, config_load_error, config_parser):
         print()
         sys.exit(0)
 
-    CONFIGURABLE_KEYS = {'output_type', 'usb_dir', 'workers', 'external_url'}
+    CONFIGURABLE_KEYS = {'output_type', 'usb_dir', 'workers', 'external_url', 'server_name'}
 
     if action == 'get':
         if config_load_error:
@@ -2175,12 +2176,12 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
     # config get
     config_get = config_sub.add_parser('get', help='Get a configuration value')
     config_get.add_argument('key',
-                            help='Setting name (output_type, usb_dir, workers, external_url)')
+                            help='Setting name (output_type, usb_dir, workers, external_url, server_name)')
 
     # config set
     config_set = config_sub.add_parser('set', help='Set a configuration value')
     config_set.add_argument('key',
-                            help='Setting name (output_type, usb_dir, workers, external_url)')
+                            help='Setting name (output_type, usb_dir, workers, external_url, server_name)')
     config_set.add_argument('value', help='Value to set')
 
     return parser
