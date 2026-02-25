@@ -56,6 +56,9 @@ import porter_core as mp
 # This avoids DependencyChecker's pip/os.execv() in background threads.
 mp._init_third_party()
 
+# Ensure data directory exists and migrate legacy files
+mp.migrate_data_dir()
+
 # Load output profiles from config at import time so OUTPUT_PROFILES is
 # populated before any request handler accesses it.
 _startup_config = mp.ConfigManager(logger=mp.Logger(verbose=False))
@@ -225,10 +228,11 @@ class TaskManager:
         self._tasks = {}
         self._lock = threading.RLock()
 
-    def submit(self, operation, description, target):
+    def submit(self, operation, description, target, audit_callback=None):
         """Submit a new background task. Returns task_id or None if busy.
 
         target is called as target(task_id) so it can create a WebLogger.
+        audit_callback is called with (task) in finally block for audit logging.
         """
         with self._lock:
             # Check for running tasks
@@ -257,6 +261,12 @@ class TaskManager:
                     task.finished_at = time.time()
                     # Send sentinel so SSE stream knows we're done
                     task.log_queue.put(None)
+                    # Audit callback for completion logging
+                    if audit_callback:
+                        try:
+                            audit_callback(task)
+                        except Exception:
+                            pass
 
             thread = threading.Thread(target=_run, daemon=True)
             task.thread = thread
@@ -329,6 +339,40 @@ def create_app(project_root=None, no_auth=False, server_host=None,
 
     task_manager = TaskManager()
 
+    # ── Audit Logger ─────────────────────────────────────────
+    audit_logger = mp.AuditLogger(str(project_root / mp.DEFAULT_DB_FILE))
+
+    def _detect_source():
+        ua = request.headers.get('User-Agent', '')
+        if 'MusicPorter-iOS' in ua:
+            return 'ios'
+        if request.headers.get('Authorization', '').startswith('Bearer '):
+            return 'api'
+        return 'web'
+
+    def _client_info():
+        return {
+            'ip': request.remote_addr,
+            'user_agent': request.headers.get('User-Agent', ''),
+            'method': request.method,
+            'path': request.path,
+        }
+
+    def _audit_task_callback(task):
+        """Called from TaskManager._run() finally block to log completion."""
+        status_map = {
+            'completed': 'completed',
+            'failed': 'failed',
+            'cancelled': 'cancelled',
+        }
+        audit_status = status_map.get(task.status, task.status)
+        duration = task.finished_at - task.started_at if task.started_at else None
+        audit_logger.log(
+            task.operation, task.description, audit_status,
+            params=task.result if task.result else None,
+            duration_s=duration,
+            source=_detect_source() if hasattr(request, 'path') else 'web')
+
     # ── CORS headers for iOS companion app ───────────────────
     @app.after_request
     def _add_cors_headers(response):
@@ -367,6 +411,8 @@ def create_app(project_root=None, no_auth=False, server_host=None,
                 return None
             if has_session or has_bearer:
                 return None
+            audit_logger.log('auth_denied', f"Unauthorized: {request.path}",
+                             'failed', params=_client_info(), source=_detect_source())
             return jsonify({'error': 'Unauthorized — provide Authorization: Bearer <api_key>'}), 401
         # HTML pages: require session, redirect to login if missing
         if not has_session:
@@ -387,12 +433,18 @@ def create_app(project_root=None, no_auth=False, server_host=None,
             if submitted_key == _api_key:
                 session['authenticated'] = True
                 session.permanent = False
+                audit_logger.log('login', 'Login success', 'completed',
+                                 params=_client_info(), source='web')
                 return redirect(url_for('dashboard'))
+            audit_logger.log('login', 'Login failed', 'failed',
+                             params=_client_info(), source='web')
             error = 'Invalid API key. Check the server terminal for the correct key.'
         return render_template('login.html', error=error)
 
     @app.route('/logout')
     def logout():
+        audit_logger.log('logout', 'User logged out', 'completed',
+                         params=_client_info(), source='web')
         session.clear()
         return redirect(url_for('login_page'))
 
@@ -408,7 +460,8 @@ def create_app(project_root=None, no_auth=False, server_host=None,
 
     def _get_config():
         logger = mp.Logger(verbose=False)
-        return mp.ConfigManager(logger=logger)
+        return mp.ConfigManager(logger=logger, audit_logger=audit_logger,
+                                audit_source='web')
 
     def _get_output_profile(config):
         mp.load_output_profiles(config)  # refresh from config.yaml
@@ -437,6 +490,8 @@ def create_app(project_root=None, no_auth=False, server_host=None,
     @app.route('/api/auth/validate', methods=['POST'])
     def api_auth_validate():
         """Validate API key and return server identity."""
+        audit_logger.log('auth_validate', 'API key validated', 'completed',
+                         params=_client_info(), source=_detect_source())
         return jsonify({
             'valid': True,
             'version': mp.VERSION,
@@ -505,7 +560,7 @@ def create_app(project_root=None, no_auth=False, server_host=None,
         profile = _get_output_profile(config)
 
         # Cookie status
-        cookie_mgr = mp.CookieManager('cookies.txt', mp.Logger(verbose=False))
+        cookie_mgr = mp.CookieManager(mp.DEFAULT_COOKIES, mp.Logger(verbose=False))
         cs = cookie_mgr.validate()
         cookie_data = {
             'valid': cs.valid,
@@ -544,7 +599,7 @@ def create_app(project_root=None, no_auth=False, server_host=None,
 
     @app.route('/api/cookies/browsers')
     def api_cookies_browsers():
-        cookie_mgr = mp.CookieManager('cookies.txt', mp.Logger(verbose=False))
+        cookie_mgr = mp.CookieManager(mp.DEFAULT_COOKIES, mp.Logger(verbose=False))
         default_browser = cookie_mgr._detect_default_browser()
         installed = cookie_mgr._detect_installed_browsers()
         return jsonify({
@@ -564,7 +619,7 @@ def create_app(project_root=None, no_auth=False, server_host=None,
             logger = _make_logger(task_id, verbose=verbose)
 
             # Log current status first
-            cookie_mgr = mp.CookieManager('cookies.txt', logger)
+            cookie_mgr = mp.CookieManager(mp.DEFAULT_COOKIES, logger)
             status = cookie_mgr.validate()
             if status.valid:
                 logger.ok(f"Current status: {status.reason}")
@@ -789,10 +844,12 @@ def create_app(project_root=None, no_auth=False, server_host=None,
         if len(playlists) > 3:
             names += f' (+{len(playlists) - 3} more)'
         desc = f'Batch convert: {names}'
+        source = _detect_source()
 
         def _run(task_id):
             logger = _make_logger(task_id, verbose=verbose)
-            config = mp.ConfigManager(logger=logger)
+            config = mp.ConfigManager(logger=logger, audit_logger=audit_logger,
+                                      audit_source=source)
             profile = _get_output_profile(config)
             workers = config.get_setting('workers', mp.DEFAULT_WORKERS)
             display = _make_display_handler(task_id)
@@ -812,6 +869,8 @@ def create_app(project_root=None, no_auth=False, server_host=None,
                     embed_cover_art=not no_cover_art, output_profile=profile,
                     display_handler=display,
                     cancel_event=task.cancel_event,
+                    audit_logger=audit_logger,
+                    audit_source=source,
                 )
                 result = converter.convert(input_dir, out, force=force,
                                            dry_run=dry_run, verbose=verbose)
@@ -894,7 +953,9 @@ def create_app(project_root=None, no_auth=False, server_host=None,
         logger = mp.Logger(verbose=False)
         prompt = WebPromptHandler()
         data_manager = mp.DataManager(logger, config, prompt_handler=prompt,
-                                      output_profile=profile)
+                                      output_profile=profile,
+                                      audit_logger=audit_logger,
+                                      audit_source=_detect_source())
         result = data_manager.delete_playlist_data(
             key,
             delete_source=delete_source,
@@ -1020,10 +1081,12 @@ def create_app(project_root=None, no_auth=False, server_host=None,
             return jsonify({'error': 'Specify playlist, url, or auto'}), 400
 
         desc = 'Pipeline: all playlists' if auto else f'Pipeline: {playlist_key or url}'
+        source = _detect_source()
 
         def _run(task_id):
             logger = _make_logger(task_id, verbose=verbose)
-            config = mp.ConfigManager(logger=logger)
+            config = mp.ConfigManager(logger=logger, audit_logger=audit_logger,
+                                      audit_source=source)
             profile = _get_output_profile(config)
             # Apply dir_structure/filename_format overrides
             if dir_structure or filename_format:
@@ -1051,6 +1114,8 @@ def create_app(project_root=None, no_auth=False, server_host=None,
                 output_profile=profile,
                 display_handler=display,
                 cancel_event=task.cancel_event,
+                audit_logger=audit_logger,
+                audit_source=source,
             )
 
             if auto:
@@ -1105,10 +1170,12 @@ def create_app(project_root=None, no_auth=False, server_host=None,
             return jsonify({'error': 'Invalid input directory'}), 400
 
         desc = f'Convert: {Path(input_dir).name}'
+        source = _detect_source()
 
         def _run(task_id):
             logger = _make_logger(task_id, verbose=verbose)
-            config = mp.ConfigManager(logger=logger)
+            config = mp.ConfigManager(logger=logger, audit_logger=audit_logger,
+                                      audit_source=source)
             profile = _get_output_profile(config)
             # Apply dir_structure/filename_format overrides
             if dir_structure or filename_format:
@@ -1129,6 +1196,8 @@ def create_app(project_root=None, no_auth=False, server_host=None,
                 embed_cover_art=not no_cover_art, output_profile=profile,
                 display_handler=display,
                 cancel_event=task.cancel_event,
+                audit_logger=audit_logger,
+                audit_source=source,
             )
             convert_result = converter.convert(safe_input, out, force=force,
                                                dry_run=dry_run, verbose=verbose)
@@ -1158,16 +1227,20 @@ def create_app(project_root=None, no_auth=False, server_host=None,
             return jsonify({'error': 'Invalid directory'}), 400
 
         desc = f'Tag update: {Path(directory).name}'
+        source = _detect_source()
 
         def _run(task_id):
             logger = _make_logger(task_id, verbose=verbose)
-            config = mp.ConfigManager(logger=logger)
+            config = mp.ConfigManager(logger=logger, audit_logger=audit_logger,
+                                      audit_source=source)
             profile = _get_output_profile(config)
             display = _make_display_handler(task_id)
             task = task_manager.get(task_id)
             tagger = mp.TaggerManager(logger, output_profile=profile,
                                       display_handler=display,
-                                      cancel_event=task.cancel_event)
+                                      cancel_event=task.cancel_event,
+                                      audit_logger=audit_logger,
+                                      audit_source=source)
             tag_result = tagger.update_tags(safe, new_album=album, new_artist=artist,
                                             dry_run=dry_run, verbose=verbose)
             return {'success': tag_result.success}
@@ -1196,16 +1269,20 @@ def create_app(project_root=None, no_auth=False, server_host=None,
             return jsonify({'error': 'Invalid directory'}), 400
 
         desc = f'Tag restore: {Path(directory).name}'
+        source = _detect_source()
 
         def _run(task_id):
             logger = _make_logger(task_id, verbose=verbose)
-            config = mp.ConfigManager(logger=logger)
+            config = mp.ConfigManager(logger=logger, audit_logger=audit_logger,
+                                      audit_source=source)
             profile = _get_output_profile(config)
             display = _make_display_handler(task_id)
             task = task_manager.get(task_id)
             tagger = mp.TaggerManager(logger, output_profile=profile,
                                       display_handler=display,
-                                      cancel_event=task.cancel_event)
+                                      cancel_event=task.cancel_event,
+                                      audit_logger=audit_logger,
+                                      audit_source=source)
             restore_result = tagger.restore_tags(
                 safe,
                 restore_album=restore_all or restore_album,
@@ -1237,17 +1314,21 @@ def create_app(project_root=None, no_auth=False, server_host=None,
             return jsonify({'error': 'Invalid directory'}), 400
 
         desc = f'Tag reset: {Path(output_dir).name}'
+        source = _detect_source()
 
         def _run(task_id):
             logger = _make_logger(task_id, verbose=verbose)
-            config = mp.ConfigManager(logger=logger)
+            config = mp.ConfigManager(logger=logger, audit_logger=audit_logger,
+                                      audit_source=source)
             profile = _get_output_profile(config)
             display = _make_display_handler(task_id)
             task = task_manager.get(task_id)
             tagger = mp.TaggerManager(logger, output_profile=profile,
                                       prompt_handler=WebPromptHandler(),
                                       display_handler=display,
-                                      cancel_event=task.cancel_event)
+                                      cancel_event=task.cancel_event,
+                                      audit_logger=audit_logger,
+                                      audit_source=source)
             success = tagger.reset_tags_from_source(safe_in, safe_out,
                                                      dry_run=dry_run, verbose=verbose)
             return {'success': success}
@@ -1277,16 +1358,20 @@ def create_app(project_root=None, no_auth=False, server_host=None,
             return jsonify({'error': 'Invalid directory'}), 400
 
         desc = f'Cover art {action}: {Path(directory).name}'
+        source = _detect_source()
 
         def _run(task_id):
             logger = _make_logger(task_id, verbose=verbose)
-            config = mp.ConfigManager(logger=logger)
+            config = mp.ConfigManager(logger=logger, audit_logger=audit_logger,
+                                      audit_source=source)
             profile = _get_output_profile(config)
             display = _make_display_handler(task_id)
             task = task_manager.get(task_id)
             cam = mp.CoverArtManager(logger, output_profile=profile,
                                      display_handler=display,
-                                     cancel_event=task.cancel_event)
+                                     cancel_event=task.cancel_event,
+                                     audit_logger=audit_logger,
+                                     audit_source=source)
 
             if action == 'embed':
                 source = data.get('source')
@@ -1603,6 +1688,50 @@ def create_app(project_root=None, no_auth=False, server_host=None,
             'port': port,
             'address': external_url if external_url else f"{host}:{port}",
         })
+
+    # ── Audit Log ──────────────────────────────────────────────
+
+    @app.route('/audit')
+    def audit_page():
+        return render_template('audit.html')
+
+    @app.route('/api/audit')
+    def api_audit_list():
+        """Paginated audit entries with optional filters."""
+        limit = request.args.get('limit', 50, type=int)
+        offset = request.args.get('offset', 0, type=int)
+        operation = request.args.get('operation') or None
+        status = request.args.get('status') or None
+        date_from = request.args.get('from') or None
+        date_to = request.args.get('to') or None
+        entries, total = audit_logger.get_entries(
+            limit=limit, offset=offset,
+            operation=operation, status=status,
+            date_from=date_from, date_to=date_to,
+        )
+        return jsonify({
+            'entries': entries,
+            'total': total,
+            'limit': limit,
+            'offset': offset,
+        })
+
+    @app.route('/api/audit/stats')
+    def api_audit_stats():
+        return jsonify(audit_logger.get_stats())
+
+    @app.route('/api/audit/clear', methods=['POST'])
+    def api_audit_clear():
+        data = request.get_json(silent=True) or {}
+        if not data.get('confirm'):
+            return jsonify({'error': 'Set confirm: true to clear'}), 400
+        before_date = data.get('before_date')
+        count = audit_logger.clear(before_date=before_date)
+        audit_logger.log('audit_clear', f'Cleared {count} audit entries',
+                         'completed', params={'count': count,
+                                              'before_date': before_date},
+                         source=_detect_source())
+        return jsonify({'deleted': count})
 
     return app
 
