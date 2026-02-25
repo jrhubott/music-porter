@@ -102,6 +102,10 @@ def api_status():
                     total_files += 1
                     total_size += f.stat().st_size
 
+    scheduler_data = None
+    if ctx.scheduler:
+        scheduler_data = ctx.scheduler.status()
+
     return jsonify({
         'version': mp.VERSION,
         'cookies': cookie_data,
@@ -112,6 +116,7 @@ def api_status():
         },
         'profile': profile.name,
         'busy': ctx.task_manager.is_busy(),
+        'scheduler': scheduler_data,
     })
 
 
@@ -592,6 +597,89 @@ def api_config_reset():
         'ok': True,
         'backup': str(backup_path) if backup_path else None,
     })
+
+
+# ══════════════════════════════════════════════════════════════════
+# API: Scheduler
+# ══════════════════════════════════════════════════════════════════
+
+@api_bp.route('/api/scheduler/status')
+def api_scheduler_status():
+    """Return current scheduler status and configuration."""
+    ctx = _ctx()
+    if ctx.scheduler is None:
+        return jsonify({'error': 'Scheduler not available'}), 404
+    return jsonify(ctx.scheduler.status())
+
+
+@api_bp.route('/api/scheduler/config', methods=['POST'])
+def api_scheduler_config():
+    """Update scheduler configuration.
+
+    Body: {enabled, interval_hours, playlists, preset, retry_minutes, max_retries}
+    All fields optional — only provided fields are updated.
+    """
+    ctx = _ctx()
+    if ctx.scheduler is None:
+        return jsonify({'error': 'Scheduler not available'}), 404
+
+    data = request.get_json(force=True)
+
+    interval = data.get('interval_hours')
+    if interval is not None:
+        if not isinstance(interval, (int, float)) or interval < 0.5:
+            return jsonify({'error': 'interval_hours must be >= 0.5'}), 400
+
+    playlists = data.get('playlists')
+    if playlists is not None:
+        if not isinstance(playlists, list):
+            return jsonify({'error': 'playlists must be a list of keys'}), 400
+
+    preset = data.get('preset')
+    if preset is not None and preset != '':
+        if preset not in mp.QUALITY_PRESETS:
+            return jsonify({'error': f'Invalid preset: {preset}'}), 400
+
+    # Merge with current config
+    current = ctx.scheduler.status()
+    new_settings = {
+        'enabled': data.get('enabled', current['enabled']),
+        'interval_hours': data.get('interval_hours', current['interval_hours']),
+        'playlists': data.get('playlists', current['playlists']),
+        'preset': data.get('preset', current['preset']) or None,
+        'retry_minutes': data.get('retry_minutes', current['retry_minutes']),
+        'max_retries': data.get('max_retries', current['max_retries']),
+    }
+
+    ctx.scheduler.reconfigure(new_settings)
+
+    ctx.audit_logger.log(
+        'scheduler_config',
+        f"Scheduler {'enabled' if new_settings['enabled'] else 'disabled'}",
+        'completed',
+        params=new_settings,
+        source=ctx.detect_source(),
+    )
+
+    return jsonify({'ok': True, 'status': ctx.scheduler.status()})
+
+
+@api_bp.route('/api/scheduler/run-now', methods=['POST'])
+def api_scheduler_run_now():
+    """Trigger an immediate scheduled pipeline execution."""
+    ctx = _ctx()
+    if ctx.scheduler is None:
+        return jsonify({'error': 'Scheduler not available'}), 404
+
+    status = ctx.scheduler.status()
+    if not status['enabled']:
+        return jsonify({'error': 'Scheduler is not enabled'}), 400
+
+    success = ctx.scheduler.run_now()
+    if not success:
+        return jsonify({'error': 'Another operation is already running'}), 409
+
+    return jsonify({'ok': True, 'status': ctx.scheduler.status()})
 
 
 # ══════════════════════════════════════════════════════════════════

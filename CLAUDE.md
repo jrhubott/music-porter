@@ -219,12 +219,15 @@ Use `--dry-run` to preview, `--verbose` to inspect tag transformations. Test tag
 
 ### Linting
 
-Uses **Ruff** (Python), **PyMarkdown** (Markdown), **djLint** (Jinja2/HTML). Config in `pyproject.toml`. Install: `pip install -r requirements-dev.txt`.
+Uses **Ruff** (Python), **PyMarkdown** (Markdown), **djLint** (Jinja2/HTML). Config in `pyproject.toml`. Install: `source .venv/bin/activate && pip install -r requirements-dev.txt`.
 
 ```bash
-ruff check . && ruff check --fix .                          # Python
+source .venv/bin/activate
+ruff check .                                                 # Python (lint)
+ruff check --fix .                                           # Python (auto-fix)
 pymarkdown scan -r --respect-gitignore .                     # Markdown
-djlint templates/ --lint && djlint templates/ --reformat     # Templates
+djlint templates/ --lint                                     # Templates (lint)
+djlint templates/ --reformat                                 # Templates (auto-fix)
 ```
 
 All three must pass clean before merging to main.

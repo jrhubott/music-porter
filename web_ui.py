@@ -290,6 +290,273 @@ class TaskManager:
 
 
 # ══════════════════════════════════════════════════════════════════
+# PipelineScheduler — recurring automatic pipeline execution
+# ══════════════════════════════════════════════════════════════════
+
+_SCHEDULER_DEFAULTS = {
+    'enabled': False,
+    'interval_hours': 24,
+    'playlists': [],
+    'preset': None,
+    'retry_minutes': 15,
+    'max_retries': 3,
+}
+
+
+class PipelineScheduler:
+    """Runs the pipeline on a recurring schedule using threading.Timer chains.
+
+    Each timer firing schedules the next one, allowing clean cancellation
+    and reconfiguration without blocked sleeping threads.
+
+    Lifecycle: created in start_server(), stored on AppContext.
+    start() begins the timer chain if config says enabled.
+    stop() cancels any pending timer (called on server shutdown).
+    reconfigure() updates settings and restarts the timer if needed.
+    """
+
+    def __init__(self, ctx):
+        self._ctx = ctx
+        self._timer = None
+        self._lock = threading.RLock()
+
+        # Config (loaded from config.yaml)
+        self._enabled = False
+        self._interval_hours = 24
+        self._playlists = []
+        self._preset = None
+        self._retry_minutes = 15
+        self._max_retries = 3
+
+        # Runtime state
+        self._last_run_time = None
+        self._last_run_status = ''
+        self._last_run_error = ''
+        self._next_run_time = None
+        self._retry_count = 0
+        self._running = False
+
+    def _load_config(self):
+        """Read scheduler settings from config.yaml."""
+        config = self._ctx.get_config()
+        sched = config.get_setting('scheduler') or {}
+        self._enabled = sched.get('enabled', False)
+        self._interval_hours = sched.get('interval_hours', 24)
+        self._playlists = sched.get('playlists', [])
+        self._preset = sched.get('preset')
+        self._retry_minutes = sched.get('retry_minutes', 15)
+        self._max_retries = sched.get('max_retries', 3)
+
+    def start(self):
+        """Load config and start timer chain if enabled. Called at server startup."""
+        with self._lock:
+            self._load_config()
+            if self._enabled:
+                self._schedule_next(self._interval_hours * 3600)
+
+    def stop(self):
+        """Cancel any pending timer. Called at server shutdown."""
+        with self._lock:
+            if self._timer:
+                self._timer.cancel()
+                self._timer = None
+            self._next_run_time = None
+
+    def reconfigure(self, new_settings):
+        """Update scheduler config and restart timer chain.
+
+        Called by POST /api/scheduler/config.
+        new_settings is the full scheduler dict to write to config.yaml.
+        """
+        with self._lock:
+            config = self._ctx.get_config()
+            config.update_setting('scheduler', new_settings)
+
+            if self._timer:
+                self._timer.cancel()
+                self._timer = None
+                self._next_run_time = None
+
+            self._load_config()
+            self._retry_count = 0
+            if self._enabled:
+                self._schedule_next(self._interval_hours * 3600)
+
+    def run_now(self):
+        """Trigger an immediate scheduled run. Returns True if submitted."""
+        with self._lock:
+            if self._timer:
+                self._timer.cancel()
+                self._timer = None
+                self._next_run_time = None
+            return self._execute()
+
+    def _schedule_next(self, delay_seconds):
+        """Schedule the next execution after delay_seconds."""
+        self._timer = threading.Timer(delay_seconds, self._on_timer)
+        self._timer.daemon = True
+        self._timer.name = 'PipelineScheduler'
+        self._timer.start()
+        self._next_run_time = time.time() + delay_seconds
+
+    def _on_timer(self):
+        """Timer callback. Attempts to execute, retries or reschedules."""
+        with self._lock:
+            self._timer = None
+            self._next_run_time = None
+            success = self._execute()
+
+            if not success and self._retry_count < self._max_retries:
+                self._retry_count += 1
+                self._schedule_next(self._retry_minutes * 60)
+            elif not success:
+                # Exhausted retries — schedule next full cycle
+                self._last_run_status = 'skipped'
+                self._last_run_error = (
+                    f'Skipped after {self._max_retries} retries (busy)')
+                self._last_run_time = time.time()
+                self._retry_count = 0
+                if self._enabled:
+                    self._schedule_next(self._interval_hours * 3600)
+
+    def _execute(self):
+        """Submit pipeline task to TaskManager. Returns True if submitted."""
+        if self._ctx.task_manager.is_busy():
+            return False
+
+        self._running = True
+        # Capture current config for the closure
+        playlists_filter = list(self._playlists)
+        preset = self._preset
+
+        def _run(task_id):
+            logger = self._ctx.make_logger(task_id, verbose=False)
+            config = mp.ConfigManager(
+                logger=logger,
+                audit_logger=self._ctx.audit_logger,
+                audit_source='scheduler',
+            )
+            profile = self._ctx.get_output_profile(config)
+            workers = config.get_setting('workers', mp.DEFAULT_WORKERS)
+            deps = mp.DependencyChecker(logger)
+            quality_preset = preset or profile.quality_preset
+            display = self._ctx.make_display_handler(task_id)
+            task = self._ctx.task_manager.get(task_id)
+
+            orchestrator = mp.PipelineOrchestrator(
+                logger, deps, config,
+                quality_preset=quality_preset,
+                workers=workers,
+                output_profile=profile,
+                display_handler=display,
+                cancel_event=task.cancel_event,
+                audit_logger=self._ctx.audit_logger,
+                audit_source='scheduler',
+            )
+
+            # Determine which playlists to process
+            if playlists_filter:
+                to_run = [
+                    p for p in config.playlists
+                    if p.key in playlists_filter
+                ]
+            else:
+                to_run = list(config.playlists)
+
+            if not to_run:
+                logger.warning("No playlists to process")
+                return {'success': True, 'total': 0, 'ok': 0, 'failed': 0}
+
+            logger.info(
+                f"Scheduled pipeline: {len(to_run)} playlist"
+                f"{'s' if len(to_run) != 1 else ''}")
+            aggregate = mp.AggregateStatistics()
+
+            for i, pl in enumerate(to_run):
+                if task.cancel_event.is_set():
+                    break
+                logger.info(f"\n{'=' * 60}")
+                logger.info(
+                    f"Processing {i + 1}/{len(to_run)}: {pl.name}")
+                logger.info(f"{'=' * 60}")
+                idx = config.playlists.index(pl) + 1
+                orchestrator.run_full_pipeline(
+                    playlist=str(idx), auto=True,
+                    copy_to_usb=False, dry_run=False, verbose=False,
+                    quality_preset=quality_preset,
+                )
+                aggregate.add_playlist_result(orchestrator.stats)
+
+            aggregate.end_time = time.time()
+            agg_result = aggregate.to_result()
+            return {
+                'success': agg_result.success,
+                'total': agg_result.total_playlists,
+                'ok': agg_result.successful_playlists,
+                'failed': agg_result.failed_playlists,
+            }
+
+        def _audit_callback(task):
+            with self._lock:
+                self._running = False
+                self._last_run_time = time.time()
+                self._last_run_status = task.status
+                self._last_run_error = task.error or ''
+                self._retry_count = 0
+                if self._enabled and not self._timer:
+                    self._schedule_next(self._interval_hours * 3600)
+
+            self._ctx.audit_logger.log(
+                'scheduled_pipeline',
+                f"Scheduled pipeline {task.status}",
+                task.status,
+                params={'result': task.result, 'error': task.error},
+                duration_s=task.elapsed(),
+                source='scheduler',
+            )
+
+        pl_desc = ', '.join(playlists_filter) if playlists_filter else 'all'
+        desc = f'Scheduled pipeline: {pl_desc}'
+
+        task_id = self._ctx.task_manager.submit(
+            'scheduled_pipeline', desc, _run,
+            audit_callback=_audit_callback,
+        )
+
+        if task_id is None:
+            self._running = False
+            return False
+
+        return True
+
+    def status(self):
+        """Return scheduler status for API/UI consumption."""
+        with self._lock:
+            return {
+                'enabled': self._enabled,
+                'interval_hours': self._interval_hours,
+                'playlists': list(self._playlists),
+                'preset': self._preset,
+                'retry_minutes': self._retry_minutes,
+                'max_retries': self._max_retries,
+                'running': self._running,
+                'last_run_time': self._last_run_time,
+                'last_run_iso': (
+                    datetime.fromtimestamp(self._last_run_time).isoformat()
+                    if self._last_run_time else None
+                ),
+                'last_run_status': self._last_run_status,
+                'last_run_error': self._last_run_error,
+                'next_run_time': self._next_run_time,
+                'next_run_iso': (
+                    datetime.fromtimestamp(self._next_run_time).isoformat()
+                    if self._next_run_time else None
+                ),
+                'retry_count': self._retry_count,
+            }
+
+
+# ══════════════════════════════════════════════════════════════════
 # AppContext — shared state for Flask routes (replaces closures)
 # ══════════════════════════════════════════════════════════════════
 
@@ -306,6 +573,7 @@ class AppContext:
     audit_logger: object  # mp.AuditLogger
     api_key: str
     project_root: Path
+    scheduler: 'PipelineScheduler | None' = None
 
     # ── Request-scoped helpers ─────────────────────────────────
 
@@ -688,6 +956,11 @@ def start_server(host='127.0.0.1', port=5555, no_auth=False,
                       server_port=port, external_url=external_url,
                       behind_proxy=behind_proxy, proxy_count=proxy_count)
 
+    # Initialize and start the pipeline scheduler
+    ctx = app.config['CTX']
+    ctx.scheduler = PipelineScheduler(ctx)
+    ctx.scheduler.start()
+
     # Bonjour/mDNS advertisement
     bonjour = None
     if enable_bonjour and host != '127.0.0.1':
@@ -697,6 +970,7 @@ def start_server(host='127.0.0.1', port=5555, no_auth=False,
     try:
         app.run(host=host, port=port, debug=False, threaded=True)
     finally:
+        ctx.scheduler.stop()
         if bonjour:
             bonjour.stop()
 

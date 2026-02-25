@@ -5,7 +5,7 @@
 
 <div class="row g-3">
   <!-- Cookie Status -->
-  <div class="col-md-4">
+  <div class="col-md-3">
     <div class="card h-100">
       <div class="card-body">
         <div class="d-flex justify-content-between align-items-center">
@@ -23,7 +23,7 @@
   </div>
 
   <!-- Active Operations -->
-  <div class="col-md-4">
+  <div class="col-md-3">
     <div class="card h-100">
       <div class="card-body">
         <h6 class="card-title"><i class="bi bi-activity"></i> Operations</h6>
@@ -34,8 +34,20 @@
     </div>
   </div>
 
+  <!-- Scheduler -->
+  <div class="col-md-3">
+    <div class="card h-100">
+      <div class="card-body">
+        <h6 class="card-title"><i class="bi bi-clock"></i> Scheduler</h6>
+        <div id="schedulerDashStatus" class="mt-2">
+          <span class="text-muted">Loading...</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Current Profile -->
-  <div class="col-md-4">
+  <div class="col-md-3">
     <div class="card h-100">
       <div class="card-body">
         <h6 class="card-title"><i class="bi bi-sliders"></i> Current Profile</h6>
@@ -354,6 +366,30 @@ function loadDashboard() {
       ).join('');
     }
   }).catch(()=>{});
+
+  // Scheduler status
+  fetch('/api/scheduler/status').then(r => {
+    if (!r.ok) return null;
+    return r.json();
+  }).then(data => {
+    const el = document.getElementById('schedulerDashStatus');
+    if (!data || !el) return;
+    if (data.running) {
+      el.innerHTML = '<span class="badge bg-primary badge-running">Running</span>';
+    } else if (data.enabled) {
+      const next = data.next_run_iso ? new Date(data.next_run_iso) : null;
+      const timeStr = next ? next.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : '--';
+      let html = '<span class="badge bg-success">Active</span>';
+      html += '<div class="text-muted small mt-1">Next: ' + timeStr + '</div>';
+      if (data.last_run_status) {
+        const cls = data.last_run_status === 'completed' ? 'text-success' : 'text-danger';
+        html += '<div class="' + cls + ' small">Last: ' + data.last_run_status + '</div>';
+      }
+      el.innerHTML = html;
+    } else {
+      el.innerHTML = '<span class="text-muted">Disabled</span><div class="small mt-1"><a href="/settings">Enable in Settings</a></div>';
+    }
+  }).catch(() => {});
 }
 loadDashboard();
 setInterval(loadDashboard, 10000);
