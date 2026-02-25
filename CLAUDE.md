@@ -267,7 +267,7 @@ Version defined in `porter_core.py` line 48. Uses semantic versioning (MAJOR.MIN
 
 ## Directory Structure
 
-**Key files:** `music-porter` (CLI), `porter_core.py` (business logic), `web_ui.py` (web dashboard), `config.yaml` (playlists + settings), `cookies.txt` (auth).
+**Key files:** `music-porter` (CLI), `porter_core.py` (business logic), `web_ui.py` (web dashboard — app factory, classes, page routes), `web_api.py` (REST API blueprint — all `/api/*` routes), `config.yaml` (playlists + settings), `cookies.txt` (auth).
 
 **Directories:** `music/` (M4A downloads, nested by artist/album), `export/<profile>/<playlist>/` (MP3s, flat "Artist - Title.mp3"), `templates/` (Jinja2), `logs/`, `SRS/`, `ios/` (companion app — see `ios/CLAUDE.md`).
 

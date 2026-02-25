@@ -45,6 +45,9 @@ ignore = [
 "web_ui.py" = [
     "E402",  # module-level import not at top (path setup)
 ]
+"web_api.py" = [
+    "E402",  # module-level import not at top (lazy imports in route handlers)
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["porter_core"]
