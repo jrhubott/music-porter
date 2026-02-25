@@ -232,5 +232,13 @@ document.getElementById('tagResetForm').addEventListener('submit', function(e) {
 });
 
 loadDirs();
+
+document.getElementById('resetInputDir').addEventListener('change', function() {
+  const key = this.value.replace('music/', '');
+  const target = document.getElementById('resetOutputDir');
+  if (target.querySelector(`option[value="${key}"]`)) {
+    target.value = key;
+  }
+});
 </script>
 {% endblock scripts %}
