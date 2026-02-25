@@ -10,7 +10,11 @@ struct SettingsView: View {
             List {
                 Section("Server") {
                     if let server = appState.currentServer {
-                        LabeledContent("Host", value: "\(server.host):\(server.port)")
+                        if let url = server.url {
+                            LabeledContent("URL", value: url)
+                        } else {
+                            LabeledContent("Host", value: "\(server.host):\(server.port)")
+                        }
                         LabeledContent("Name", value: server.name)
                     }
                     Button("Disconnect", role: .destructive) {

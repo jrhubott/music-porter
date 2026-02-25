@@ -237,7 +237,7 @@ final class APIClient {
         let request = try makeRequest(path, method: "GET")
         let (data, response) = try await session.data(for: request)
         try checkResponse(response, data: data)
-        return try JSONDecoder().decode(T.self, from: data)
+        return try decodeResponse(data, response: response)
     }
 
     private func post<T: Decodable, B: Encodable>(_ path: String, body: B) async throws -> T {
@@ -245,7 +245,7 @@ final class APIClient {
         request.httpBody = try JSONEncoder().encode(body)
         let (data, response) = try await session.data(for: request)
         try checkResponse(response, data: data)
-        return try JSONDecoder().decode(T.self, from: data)
+        return try decodeResponse(data, response: response)
     }
 
     private func postAny<T: Decodable>(_ path: String, body: [String: Any]) async throws -> T {
@@ -253,7 +253,7 @@ final class APIClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response) = try await session.data(for: request)
         try checkResponse(response, data: data)
-        return try JSONDecoder().decode(T.self, from: data)
+        return try decodeResponse(data, response: response)
     }
 
     private func put<T: Decodable, B: Encodable>(_ path: String, body: B) async throws -> T {
@@ -261,14 +261,32 @@ final class APIClient {
         request.httpBody = try JSONEncoder().encode(body)
         let (data, response) = try await session.data(for: request)
         try checkResponse(response, data: data)
-        return try JSONDecoder().decode(T.self, from: data)
+        return try decodeResponse(data, response: response)
     }
 
     private func delete<T: Decodable>(_ path: String) async throws -> T {
         let request = try makeRequest(path, method: "DELETE")
         let (data, response) = try await session.data(for: request)
         try checkResponse(response, data: data)
-        return try JSONDecoder().decode(T.self, from: data)
+        return try decodeResponse(data, response: response)
+    }
+
+    private func decodeResponse<T: Decodable>(_ data: Data, response: URLResponse) throws -> T {
+        do {
+            return try JSONDecoder().decode(T.self, from: data)
+        } catch is DecodingError {
+            let preview = String(data: data.prefix(200), encoding: .utf8) ?? "(binary)"
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if preview.trimmingCharacters(in: .whitespaces).hasPrefix("<") {
+                throw APIError.serverError(
+                    status: status,
+                    message: "Server returned HTML instead of JSON. "
+                        + "If using a reverse proxy, ensure it forwards /api/ requests correctly.")
+            }
+            throw APIError.serverError(
+                status: status,
+                message: "Unexpected response format from server")
+        }
     }
 
     private func checkResponse(_ response: URLResponse, data: Data) throws {
