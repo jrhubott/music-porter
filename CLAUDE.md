@@ -68,7 +68,7 @@ The system follows an integrated pipeline:
 
 **music-porter** (python) - **RECOMMENDED**
 - Unified tool combining all functionality in a single command
-- Professional subcommand architecture: `pipeline`, `download`, `convert`, `tag`, `restore`, `reset`, `delete`, `sync-usb`, `cover-art`, `summary`, `list`, `config`
+- Professional subcommand architecture: `pipeline`, `download`, `convert`, `tag`, `restore`, `reset`, `delete`, `sync-usb`, `cover-art`, `summary`, `list`, `config`, `web`, `server`
 - Interactive menu for easy operation
 - Comprehensive error handling and statistics
 - Full pipeline orchestration (download → convert → tag → USB)
@@ -267,9 +267,9 @@ Version defined in `porter_core.py` line 48. Uses semantic versioning (MAJOR.MIN
 
 ## Directory Structure
 
-**Key files:** `music-porter` (CLI), `porter_core.py` (business logic), `web_ui.py` (web dashboard — app factory, classes, page routes), `web_api.py` (REST API blueprint — all `/api/*` routes), `config.yaml` (playlists + settings), `cookies.txt` (auth).
+**Key files:** `music-porter` (CLI), `porter_core.py` (business logic), `web_ui.py` (web dashboard — app factory, classes, page routes), `web_api.py` (REST API blueprint — all `/api/*` routes), `config.yaml` (playlists + settings), `cookies.txt` (auth), `data/music-porter.db` (SQLite audit trail).
 
-**Directories:** `music/` (M4A downloads, nested by artist/album), `export/<profile>/<playlist>/` (MP3s, flat "Artist - Title.mp3"), `templates/` (Jinja2), `logs/`, `SRS/`, `ios/` (companion app — see `ios/CLAUDE.md`).
+**Directories:** `music/` (M4A downloads, nested by artist/album), `export/<profile>/<playlist>/` (MP3s, flat "Artist - Title.mp3"), `templates/` (Jinja2), `logs/`, `data/` (config, cookies, audit DB), `SRS/`, `ios/` (companion app — see `ios/CLAUDE.md`).
 
 ## Web Dashboard
 
@@ -290,9 +290,11 @@ The web dashboard (`web_ui.py`) provides a browser-based interface with full fea
 
 ### Pages & Templates
 
-10 Jinja2 templates in `templates/` using Bootstrap 5.3.3 dark theme (CDN from jsDelivr). `base.html` provides shared layout (sidebar, log panel, SSE handler). Pages: `/` (dashboard), `/playlists`, `/pipeline`, `/convert`, `/tags`, `/cover-art`, `/usb`, `/settings`, `/operations`.
+11 Jinja2 templates in `templates/` using Bootstrap 5.3.3 dark theme (CDN from jsDelivr). `base.html` provides shared layout (sidebar, log panel, SSE handler). Pages: `/` (dashboard), `/playlists`, `/pipeline`, `/convert`, `/tags`, `/cover-art`, `/usb`, `/settings`, `/operations`, `/audit`.
 
-### API Endpoints (~35)
+### API Endpoints (~38)
+
+All API routes are defined in `web_api.py` as a Flask Blueprint.
 
 - **Status:** `GET /api/status`, `/api/summary`, `/api/library-stats`
 - **List:** `GET /api/list/unconverted`, `GET /api/list/diff`
@@ -302,18 +304,22 @@ The web dashboard (`web_ui.py`) provides a browser-based interface with full fea
 - **Settings:** `GET|POST /api/settings`
 - **Config:** `GET /api/config/verify`, `POST /api/config/reset`
 - **Directories:** `GET /api/directories/music`, `GET /api/directories/export`
-- **Operations:** `POST /api/pipeline/run`, `/api/convert/run`, `/api/tags/update`, `/api/tags/restore`, `/api/tags/reset`, `/api/cover-art/<action>`, `/api/usb/sync`
+- **Operations:** `POST /api/pipeline/run`, `/api/convert/run`, `/api/convert/batch`, `/api/tags/update`, `/api/tags/restore`, `/api/tags/reset`, `/api/cover-art/<action>`, `/api/usb/sync`
 - **Files:** `GET /api/files/<key>`, `/<key>/<filename>`, `/<key>/<filename>/artwork`, `/<key>/download-all`
 - **USB:** `GET /api/usb/drives`
 - **Tasks:** `GET /api/tasks`, `/api/tasks/<id>`, `POST /api/tasks/<id>/cancel`, `GET /api/stream/<id>` (SSE)
+- **iOS Pairing:** `GET /api/pairing-qr`, `GET /api/pairing-info`
+- **Audit:** `GET /api/audit`, `GET /api/audit/stats`, `POST /api/audit/clear`
 
 ### Architecture
 
-**Key classes in `web_ui.py`:** `WebLogger` (routes to SSE queue), `WebDisplayHandler` (SSE progress), `TaskState` (dataclass), `TaskManager` (one-at-a-time with `RLock`).
+**Key classes in `web_ui.py`:** `WebLogger` (routes to SSE queue), `WebDisplayHandler` (SSE progress), `WebPromptHandler` (auto-confirm for web), `TaskState` (dataclass), `TaskManager` (one-at-a-time with `RLock`), `AppContext` (shared state for routes).
+
+**AppContext pattern:** Shared state (`task_manager`, `audit_logger`, `api_key`, `project_root`) stored in `app.config['CTX']`. API routes in `web_api.py` access it via `current_app.config['CTX']`. Helper methods: `detect_source()`, `client_info()`, `make_logger()`, `make_display_handler()`, `get_config()`, `get_output_profile()`, `get_server_name()`, `safe_dir()`.
 
 **Background task model:** POST submits task -> `task_manager.submit()` -> returns `task_id` (409 if busy). Background thread runs with `WebLogger`. Frontend subscribes to `GET /api/stream/<task_id>` for SSE events (`log`/`progress`/`heartbeat`/`done`).
 
-**Security:** `_safe_dir()` validates directories within project root. `web` has no auth; `server` uses Bearer token auth.
+**Security:** `safe_dir()` validates directories within project root. `web` has no auth; `server` uses Bearer token auth.
 
 ### Limitations
 
@@ -369,9 +375,13 @@ Uses `ffmpeg-python` wrapper (requires system `ffmpeg` binary). Catches `ffmpeg.
 
 ## Configuration
 
+### Data Directory (`data/`)
+
+All persistent state lives in `data/`: `config.yaml`, `cookies.txt`, `music-porter.db` (audit). Auto-created on first run; legacy files migrated from project root via `migrate_data_dir()`.
+
 ### config.yaml
 
-YAML file with `settings` (output\_type, usb\_dir, workers) and `playlists` (key, url, name). Auto-created if missing. **Precedence:** CLI flag > config.yaml > hardcoded constant.
+YAML file with `settings` (output\_type, usb\_dir, workers) and `playlists` (key, url, name). Path: `data/config.yaml`. Auto-created if missing. **Precedence:** CLI flag > config.yaml > hardcoded constant.
 
 ### USB Drive Exclusions
 
@@ -381,7 +391,7 @@ Constant `EXCLUDED_USB_VOLUMES` in `music-porter`: `["Macintosh HD", "Macintosh 
 
 ### Key Classes in `porter_core.py`
 
-22 classes organized by concern: `Logger`, `PlaylistConfig`, `ConfigManager`, `DependencyChecker`, `TagStatistics`, `TaggerManager`, `ConversionStatistics`, `Converter`, `Downloader`, `CookieStatus`, `CookieManager`, `USBManager`, `PlaylistSummary`, `LibrarySummaryStatistics`, `SummaryManager`, `DataManager`, `PipelineStatistics`, `PipelineOrchestrator`, `InteractiveMenu`, `PlaylistResult`, `AggregateStatistics`, `CoverArtManager`.
+23 classes organized by concern: `Logger`, `PlaylistConfig`, `ConfigManager`, `DependencyChecker`, `TagStatistics`, `TaggerManager`, `ConversionStatistics`, `Converter`, `Downloader`, `CookieStatus`, `CookieManager`, `USBManager`, `PlaylistSummary`, `LibrarySummaryStatistics`, `SummaryManager`, `DataManager`, `PipelineStatistics`, `PipelineOrchestrator`, `InteractiveMenu`, `PlaylistResult`, `AggregateStatistics`, `CoverArtManager`, `AuditLogger`.
 
 ### ConfigManager
 
@@ -413,6 +423,17 @@ Constant `EXCLUDED_USB_VOLUMES` in `music-porter`: `["Macintosh HD", "Macintosh 
 - Uses `confirm_destructive()` from prompt handler (CLI requires typing "yes", web auto-confirms)
 - Optional `remove_config` flag to also remove the playlist from `config.yaml`
 - Returns `DeleteResult` dataclass with stats (files_deleted, bytes_freed, etc.)
+
+### Audit Trail (AuditLogger)
+
+- SQLite-backed persistent audit log in `data/music-porter.db`
+- Thread-safe writes via `RLock`, lockless reads via WAL mode
+- Schema: `audit_entries` table with `id`, `timestamp`, `operation`, `description`, `params` (JSON), `status`, `duration_s`, `source`
+- Source field: `'cli'`, `'web'`, `'ios'`, or `'api'` — set by caller
+- Audited operations: `login`, `logout`, `auth_denied`, `auth_validate`, `settings_update`, `playlist_add`, `playlist_update`, `playlist_delete`, `playlist_delete_data`, `tag_update`, `tag_restore`, `tag_reset`, `convert`, `cover_art`, `cookie_refresh`, `pipeline`, `audit_clear`
+- Business classes accept `audit_logger` and `audit_source` params — audit logging is wired at the call site, not inside the class
+- Web dashboard: `/audit` page with filtering, pagination, stats cards, and clear tool
+- No dedicated CLI subcommand — audit log is populated by all operations but viewed/managed via web only
 
 ## Additional Resources
 
