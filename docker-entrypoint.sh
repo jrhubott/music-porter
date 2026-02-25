@@ -4,7 +4,7 @@ set -e
 # Docker bind-mount check: if the host file didn't exist when
 # docker-compose started, Docker creates it as an empty directory.
 # Detect this and give a clear error instead of a confusing Python traceback.
-for f in config.yaml cookies.txt; do
+for f in data/config.yaml data/cookies.txt; do
     if [ -d "/app/$f" ]; then
         echo "ERROR: /app/$f is a directory — Docker created it because the file"
         echo "       didn't exist on the host when the container started."

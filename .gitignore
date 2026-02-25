@@ -1,12 +1,10 @@
-config.yaml
-cookies.txt
+data/
 __pycache__/
 export/
 gamdl_temp_*/
 logs/
 music/
 .DS_Store
-cookies.txt.backup
 .ruff_cache/
 .venv/
 test_m4a_input/
