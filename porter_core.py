@@ -3215,12 +3215,16 @@ class Downloader:
             url_display = url[:80] + "..." if len(url) > 80 else url
             self.logger.info(f"URL: {url_display}")
 
-        temp_path = Path(DEFAULT_DATA_DIR) / "temp"
-        temp_path.mkdir(parents=True, exist_ok=True)
+        gamdl_data = Path(DEFAULT_DATA_DIR) / "gamdl"
+        gamdl_data.mkdir(parents=True, exist_ok=True)
+        temp_path = gamdl_data / "temp"
+        temp_path.mkdir(exist_ok=True)
+        config_path = gamdl_data / "config.json"
 
         cmd = [
             self.venv_python, "-m", "gamdl",
             "--log-level", "INFO",  # Show download progress, suppress DEBUG
+            "--config-path", str(config_path),
             "--temp-path", str(temp_path),
             "-o", str(output_path) + "/",
             url
