@@ -85,8 +85,66 @@
       </div>
 
       <button type="submit" class="btn btn-primary mt-3"><i class="bi bi-play-fill"></i> Run Pipeline</button>
+      <button type="button" class="btn btn-outline-primary mt-3 ms-2" id="runAllBtn"><i class="bi bi-collection-play"></i> All Playlists</button>
     </form>
   </div>
+</div>
+
+<!-- Pipeline Summary (hidden until a run completes) -->
+<div id="pipelineSummary" class="d-none mb-4">
+
+  <!-- Single playlist summary -->
+  <div id="singleSummary" class="d-none">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-clipboard-data"></i> Pipeline Summary &mdash; <span id="sumPlaylist"></span></span>
+        <span>
+          <span class="text-muted me-2" id="sumDuration"></span>
+          <span id="sumStatus"></span>
+        </span>
+      </div>
+      <div class="card-body">
+        <div class="row g-3" id="stageCards"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Aggregate (auto mode) summary -->
+  <div id="aggregateSummary" class="d-none">
+    <div class="card mb-3">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-clipboard-data"></i> Pipeline Summary &mdash; All Playlists</span>
+        <span>
+          <span class="text-muted me-2" id="aggDuration"></span>
+          <span id="aggStatus"></span>
+        </span>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-sm table-dark table-striped mb-0">
+            <thead>
+              <tr>
+                <th>Playlist</th>
+                <th class="text-center">Downloaded</th>
+                <th class="text-center">Converted</th>
+                <th class="text-center">Tagged</th>
+                <th class="text-center">Status</th>
+              </tr>
+            </thead>
+            <tbody id="aggPlaylistRows"></tbody>
+            <tfoot id="aggTotals"></tfoot>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><i class="bi bi-bar-chart"></i> Cumulative Statistics</div>
+      <div class="card-body">
+        <div class="row g-3" id="aggCumulativeCards"></div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <!-- Log Output -->
@@ -147,12 +205,244 @@ document.getElementById('pipelineForm').addEventListener('submit', function(e) {
 
   document.getElementById('pipelineStatus').textContent = 'Running';
   document.getElementById('pipelineStatus').className = 'badge bg-primary badge-running';
+  document.getElementById('pipelineSummary').classList.add('d-none');
 
   submitOperation('/api/pipeline/run', data, 'pipelineLog', function(msg) {
     const badge = document.getElementById('pipelineStatus');
     if (msg.status === 'completed') { badge.textContent = 'Completed'; badge.className = 'badge bg-success'; }
     else { badge.textContent = msg.status; badge.className = 'badge bg-danger'; }
+    if (msg.result && msg.result.type) renderPipelineSummary(msg.result);
   });
 });
+
+// All Playlists button
+document.getElementById('runAllBtn').addEventListener('click', function() {
+  const data = {
+    auto: true,
+    dry_run: document.getElementById('pipelineDryRun').checked,
+    verbose: document.getElementById('pipelineVerbose').checked,
+    copy_to_usb: document.getElementById('pipelineUsb') ? document.getElementById('pipelineUsb').checked : false,
+  };
+  const preset = document.getElementById('pipelinePreset').value;
+  if (preset) data.preset = preset;
+  const dirStructure = document.getElementById('pipelineDirStructure').value;
+  if (dirStructure) data.dir_structure = dirStructure;
+  const filenameFormat = document.getElementById('pipelineFilenameFormat').value;
+  if (filenameFormat) data.filename_format = filenameFormat;
+
+  document.getElementById('pipelineStatus').textContent = 'Running';
+  document.getElementById('pipelineStatus').className = 'badge bg-primary badge-running';
+  document.getElementById('pipelineSummary').classList.add('d-none');
+
+  submitOperation('/api/pipeline/run', data, 'pipelineLog', function(msg) {
+    const badge = document.getElementById('pipelineStatus');
+    if (msg.status === 'completed') { badge.textContent = 'Completed'; badge.className = 'badge bg-success'; }
+    else { badge.textContent = msg.status; badge.className = 'badge bg-danger'; }
+    if (msg.result && msg.result.type) renderPipelineSummary(msg.result);
+  });
+});
+
+// ── Pipeline summary rendering ──
+
+function formatDuration(seconds) {
+  if (seconds == null) return '--';
+  if (seconds < 60) return seconds.toFixed(1) + 's';
+  const m = Math.floor(seconds / 60);
+  const s = (seconds % 60).toFixed(0);
+  return m + 'm ' + s + 's';
+}
+
+function stageBadge(success) {
+  if (success === true) return '<span class="badge bg-success">OK</span>';
+  if (success === false) return '<span class="badge bg-danger">Failed</span>';
+  return '<span class="badge bg-secondary">Skipped</span>';
+}
+
+function summaryRow(label, value) {
+  if (value == null || value === 0) return '';
+  return '<div class="d-flex justify-content-between"><span class="text-muted">' + label + '</span><span>' + value + '</span></div>';
+}
+
+function renderPipelineSummary(result) {
+  const container = document.getElementById('pipelineSummary');
+  container.classList.remove('d-none');
+  document.getElementById('singleSummary').classList.add('d-none');
+  document.getElementById('aggregateSummary').classList.add('d-none');
+  if (result.type === 'single') renderSingleSummary(result);
+  else if (result.type === 'aggregate') renderAggregateSummary(result);
+}
+
+function renderSingleSummary(r) {
+  document.getElementById('singleSummary').classList.remove('d-none');
+  document.getElementById('sumPlaylist').textContent = r.playlist_name || r.playlist_key || 'Unknown';
+  document.getElementById('sumDuration').textContent = formatDuration(r.duration);
+  document.getElementById('sumStatus').innerHTML = r.success
+    ? '<span class="badge bg-success">Success</span>'
+    : '<span class="badge bg-danger">Failed</span>';
+
+  const cards = document.getElementById('stageCards');
+  cards.innerHTML = '';
+  const stages = [
+    {name: 'Download', icon: 'bi-cloud-download', data: r.download_result, key: 'download'},
+    {name: 'Convert', icon: 'bi-arrow-repeat', data: r.conversion_result, key: 'convert'},
+    {name: 'Tag', icon: 'bi-tag', data: r.tag_result, key: 'tag'},
+    {name: 'USB Sync', icon: 'bi-usb-drive', data: r.usb_result, key: 'usb-sync'},
+  ];
+
+  stages.forEach(function(stage) {
+    const completed = (r.stages_completed || []).indexOf(stage.key) >= 0;
+    const failed = (r.stages_failed || []).indexOf(stage.key) >= 0;
+    const skipped = !completed && !failed && !stage.data;
+    if (skipped && stage.key === 'usb-sync') return; // hide USB if not used
+
+    let body = '';
+    if (stage.key === 'download' && stage.data) {
+      var m4aFiles = (stage.data.downloaded || 0) + (stage.data.skipped || 0);
+      body += '<div class="d-flex justify-content-between"><span class="text-muted">M4A files</span><span>' + m4aFiles + '</span></div>';
+      body += summaryRow('New downloads', stage.data.downloaded);
+      body += summaryRow('Already existed', stage.data.skipped);
+      if (stage.data.playlist_total && stage.data.playlist_total > m4aFiles) {
+        body += '<div class="d-flex justify-content-between"><span class="text-muted">Playlist entries</span><span>' + stage.data.playlist_total + ' <small class="text-muted">(includes duplicates)</small></span></div>';
+      }
+      body += summaryRow('Failed', stage.data.failed);
+      body += summaryRow('Duration', formatDuration(stage.data.duration));
+    } else if (stage.key === 'convert' && stage.data) {
+      var mp3Total = stage.data.mp3_total || 0;
+      var mp3New = (stage.data.converted || 0) + (stage.data.overwritten || 0);
+      var mp3Existing = mp3Total - mp3New;
+      body += '<div class="d-flex justify-content-between"><span class="text-muted">MP3 files</span><span>' + mp3Total + '</span></div>';
+      body += summaryRow('New conversions', mp3New);
+      body += summaryRow('Already existed', mp3Existing > 0 ? mp3Existing : null);
+      var duplicates = (stage.data.total_found || 0) - mp3Total;
+      if (duplicates > 0) {
+        body += '<div class="d-flex justify-content-between"><span class="text-muted">Duplicates</span><span>' + duplicates + ' <small class="text-muted">(same output name)</small></span></div>';
+      }
+      body += summaryRow('Errors', stage.data.errors);
+      body += summaryRow('Duration', formatDuration(stage.data.duration));
+    } else if (stage.key === 'tag' && stage.data) {
+      body += summaryRow('Files processed', stage.data.files_processed);
+      body += summaryRow('Files updated', stage.data.files_updated);
+      body += summaryRow('Titles updated', stage.data.title_updated);
+      body += summaryRow('Albums updated', stage.data.album_updated);
+      body += summaryRow('Artists updated', stage.data.artist_updated);
+      body += summaryRow('Originals stored', (stage.data.title_stored || 0) + (stage.data.artist_stored || 0) + (stage.data.album_stored || 0));
+      body += summaryRow('Duration', formatDuration(stage.data.duration));
+    } else if (stage.key === 'usb-sync' && stage.data) {
+      body += summaryRow('Files found', stage.data.files_found);
+      body += summaryRow('Copied', stage.data.files_copied);
+      body += summaryRow('Skipped', stage.data.files_skipped);
+      body += summaryRow('Failed', stage.data.files_failed);
+      body += summaryRow('Duration', formatDuration(stage.data.duration));
+    }
+
+    if (!body && skipped) body = '<span class="text-muted">Skipped</span>';
+    if (!body && failed) body = '<span class="text-danger">Stage failed</span>';
+
+    const status = failed ? stageBadge(false) : (completed ? stageBadge(true) : stageBadge(null));
+    cards.innerHTML += '<div class="col-md-6 col-xl-3">' +
+      '<div class="card h-100">' +
+        '<div class="card-header d-flex justify-content-between align-items-center py-2">' +
+          '<span><i class="bi ' + stage.icon + ' me-1"></i>' + stage.name + '</span>' + status +
+        '</div>' +
+        '<div class="card-body py-2" style="font-size:.85rem">' + body + '</div>' +
+      '</div></div>';
+  });
+}
+
+function renderAggregateSummary(r) {
+  document.getElementById('aggregateSummary').classList.remove('d-none');
+  document.getElementById('aggDuration').textContent = formatDuration(r.duration);
+  document.getElementById('aggStatus').innerHTML = r.success
+    ? '<span class="badge bg-success">' + r.successful_playlists + '/' + r.total_playlists + ' OK</span>'
+    : '<span class="badge bg-danger">' + r.failed_playlists + ' failed</span>';
+
+  // Playlist rows
+  const tbody = document.getElementById('aggPlaylistRows');
+  tbody.innerHTML = '';
+  (r.playlists || []).forEach(function(pl) {
+    const dl = pl.download_stats;
+    const cv = pl.conversion_stats;
+    const tg = pl.tagging_stats;
+    const status = pl.success
+      ? '<span class="badge bg-success">OK</span>'
+      : '<span class="badge bg-danger">' + (pl.failed_stage || 'Failed') + '</span>';
+    var dlTotal = dl ? (dl.downloaded || 0) + (dl.skipped || 0) : 0;
+    var dlText = dl ? dl.downloaded + ' new / ' + dlTotal + ' total' : '--';
+    var cvNew = cv ? (cv.converted || 0) + (cv.overwritten || 0) : 0;
+    var cvText = cv ? cvNew + ' new / ' + (cv.mp3_total || 0) + ' total' : '--';
+    tbody.innerHTML += '<tr>' +
+      '<td>' + (pl.name || pl.key) + '</td>' +
+      '<td class="text-center">' + dlText + '</td>' +
+      '<td class="text-center">' + cvText + '</td>' +
+      '<td class="text-center">' + (tg ? tg.title_updated : '--') + '</td>' +
+      '<td class="text-center">' + status + '</td></tr>';
+  });
+
+  // Totals row
+  const cum = r.cumulative || {};
+  var cumDlTotal = (cum.downloaded || 0) + (cum.skipped_download || 0);
+  var cumCvNew = (cum.converted || 0) + (cum.overwritten || 0);
+  document.getElementById('aggTotals').innerHTML =
+    '<tr class="fw-bold"><td>Total</td>' +
+    '<td class="text-center">' + (cum.downloaded || 0) + ' new / ' + cumDlTotal + ' total</td>' +
+    '<td class="text-center">' + cumCvNew + ' new / ' + (cum.mp3_total || 0) + ' total</td>' +
+    '<td class="text-center">' + (cum.title_updated || 0) + '</td>' +
+    '<td class="text-center">' + r.successful_playlists + '/' + r.total_playlists + '</td></tr>';
+
+  // Cumulative stats cards
+  const cumCards = document.getElementById('aggCumulativeCards');
+  cumCards.innerHTML = '';
+  const sections = [
+    {name: 'Download', icon: 'bi-cloud-download', rows: (function() {
+      var cumM4a = (cum.downloaded || 0) + (cum.skipped_download || 0);
+      var rows = [
+        ['M4A files', cumM4a],
+        ['New downloads', cum.downloaded],
+        ['Already existed', cum.skipped_download],
+      ];
+      if (cum.playlist_total && cum.playlist_total > cumM4a) {
+        rows.push(['Playlist entries', cum.playlist_total + ' <small class="text-muted">(includes duplicates)</small>']);
+      }
+      rows.push(['Failed', cum.failed_download]);
+      return rows;
+    })()},
+    {name: 'Convert', icon: 'bi-arrow-repeat', rows: (function() {
+      var cvMp3 = cum.mp3_total || 0;
+      var cvNew = (cum.converted || 0) + (cum.overwritten || 0);
+      var cvExisting = cvMp3 - cvNew;
+      var cvTotalFound = (cum.converted || 0) + (cum.overwritten || 0) + (cum.skipped_conversion || 0);
+      var cvDuplicates = cvTotalFound - cvMp3;
+      var rows = [
+        ['MP3 files', cvMp3],
+        ['New conversions', cvNew],
+        ['Already existed', cvExisting > 0 ? cvExisting : null],
+      ];
+      if (cvDuplicates > 0) {
+        rows.push(['Duplicates', cvDuplicates + ' <small class="text-muted">(same output name)</small>']);
+      }
+      rows.push(['Errors', cum.errors_conversion]);
+      return rows;
+    })()},
+    {name: 'Tag', icon: 'bi-tag', rows: [
+      ['Titles updated', cum.title_updated],
+      ['Originals stored', cum.original_tags_stored],
+    ]},
+  ];
+  if (cum.files_on_usb) {
+    sections.push({name: 'USB', icon: 'bi-usb-drive', rows: [
+      ['Files on USB', cum.files_on_usb],
+    ]});
+  }
+
+  sections.forEach(function(sec) {
+    let body = '';
+    sec.rows.forEach(function(row) { body += summaryRow(row[0], row[1]); });
+    cumCards.innerHTML += '<div class="col-md-6 col-xl-3">' +
+      '<div class="card h-100">' +
+        '<div class="card-header py-2"><i class="bi ' + sec.icon + ' me-1"></i>' + sec.name + '</div>' +
+        '<div class="card-body py-2" style="font-size:.85rem">' + body + '</div>' +
+      '</div></div>';
+  });
+}
 </script>
 {% endblock scripts %}

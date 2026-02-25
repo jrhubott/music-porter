@@ -631,6 +631,73 @@ def api_dirs_export():
 
 
 # ══════════════════════════════════════════════════════════════════
+# Pipeline result serialization helpers
+# ══════════════════════════════════════════════════════════════════
+
+def _serialize_pipeline_result(r):
+    """Serialize PipelineResult (dataclass) for frontend consumption."""
+    d = r.to_dict()
+    d['type'] = 'single'
+    return d
+
+
+def _serialize_playlist_result(pr):
+    """Serialize a PlaylistResult (plain class) to dict."""
+    d = {
+        'key': pr.key,
+        'name': pr.name,
+        'success': pr.success,
+        'failed_stage': pr.failed_stage,
+        'usb_success': pr.usb_success,
+        'duration': pr.duration,
+        'download_stats': None,
+        'conversion_stats': None,
+        'tagging_stats': None,
+    }
+    if pr.download_stats:
+        d['download_stats'] = {
+            'playlist_total': pr.download_stats.playlist_total,
+            'downloaded': pr.download_stats.downloaded,
+            'skipped': pr.download_stats.skipped,
+            'failed': pr.download_stats.failed,
+        }
+    if pr.conversion_stats:
+        d['conversion_stats'] = {
+            'total_found': pr.conversion_stats.total_found,
+            'converted': pr.conversion_stats.converted,
+            'overwritten': pr.conversion_stats.overwritten,
+            'skipped': pr.conversion_stats.skipped,
+            'errors': pr.conversion_stats.errors,
+            'mp3_total': pr.conversion_stats.mp3_total,
+        }
+    if pr.tagging_stats:
+        d['tagging_stats'] = {
+            'title_updated': pr.tagging_stats.title_updated,
+            'album_updated': pr.tagging_stats.album_updated,
+            'artist_updated': pr.tagging_stats.artist_updated,
+            'title_stored': pr.tagging_stats.title_stored,
+            'artist_stored': pr.tagging_stats.artist_stored,
+            'album_stored': pr.tagging_stats.album_stored,
+        }
+    return d
+
+
+def _serialize_aggregate_result(r):
+    """Serialize AggregateResult for frontend consumption."""
+    return {
+        'type': 'aggregate',
+        'success': r.success,
+        'duration': r.duration,
+        'total_playlists': r.total_playlists,
+        'successful_playlists': r.successful_playlists,
+        'failed_playlists': r.failed_playlists,
+        'cumulative': r.cumulative_stats,
+        'usb_destination': r.usb_destination,
+        'playlists': [_serialize_playlist_result(pr) for pr in r.playlist_results],
+    }
+
+
+# ══════════════════════════════════════════════════════════════════
 # API: Pipeline
 # ══════════════════════════════════════════════════════════════════
 
@@ -706,7 +773,11 @@ def api_pipeline_run():
                     quality_preset=quality_preset,
                 )
                 aggregate.add_playlist_result(orchestrator.stats)
-            return {'success': True, 'playlists': len(config.playlists)}
+            aggregate.end_time = time.time()
+            agg_result = aggregate.to_result()
+            result_dict = _serialize_aggregate_result(agg_result)
+            result_dict['success'] = agg_result.success
+            return result_dict
         else:
             pipeline_result = orchestrator.run_full_pipeline(
                 playlist=playlist_key, url=url, auto=True,
@@ -714,7 +785,9 @@ def api_pipeline_run():
                 dry_run=dry_run, verbose=verbose,
                 quality_preset=quality_preset,
             )
-            return {'success': pipeline_result.success}
+            result_dict = _serialize_pipeline_result(pipeline_result)
+            result_dict['success'] = pipeline_result.success
+            return result_dict
 
     task_id = ctx.task_manager.submit('pipeline', desc, _run)
     if task_id is None:

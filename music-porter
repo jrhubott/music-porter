@@ -791,9 +791,13 @@ def render_pipeline_summary(r: PipelineResult) -> None:
 
         if r.conversion_result:
             c = r.conversion_result
-            total_processed = c.converted + c.overwritten + c.skipped
-            print(f"  MP3s after conversion:   {total_processed} "
-                  f"({c.converted + c.overwritten} converted, {c.skipped} skipped)")
+            mp3_new = c.converted + c.overwritten
+            mp3_existing = c.mp3_total - mp3_new
+            print(f"  MP3s after conversion:   {c.mp3_total} "
+                  f"({mp3_new} new, {mp3_existing} existing)")
+            duplicates = c.total_found - c.mp3_total
+            if duplicates > 0:
+                print(f"  Duplicate M4A sources:   {duplicates}")
 
         if r.tag_result:
             t = r.tag_result
