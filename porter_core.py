@@ -7,10 +7,12 @@ and supporting utilities. CLI-specific code lives in music-porter.
 
 from __future__ import annotations
 
+import json
 import os
 import platform
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -47,11 +49,13 @@ def get_os_display_name():
 
 VERSION = "2.19.0-audit-trail-data-dir"
 
+DEFAULT_DATA_DIR = "data"
 DEFAULT_MUSIC_DIR = "music"
 DEFAULT_EXPORT_DIR = "export"
 DEFAULT_LOG_DIR = "logs"
-DEFAULT_CONFIG_FILE = "config.yaml"
-DEFAULT_COOKIES = "cookies.txt"
+DEFAULT_CONFIG_FILE = "data/config.yaml"
+DEFAULT_COOKIES = "data/cookies.txt"
+DEFAULT_DB_FILE = "data/music-porter.db"
 DEFAULT_USB_DIR = "RZR/Music"
 
 # Excluded USB volumes by OS
@@ -650,6 +654,212 @@ class ProgressBar:
 
 
 # ══════════════════════════════════════════════════════════════════
+# Section 2b: Data Directory Migration & Audit Logger
+# ══════════════════════════════════════════════════════════════════
+
+def migrate_data_dir(logger=None):
+    """Create data/ dir and migrate config.yaml/cookies.txt from project root if needed."""
+    data_dir = Path(DEFAULT_DATA_DIR)
+    data_dir.mkdir(exist_ok=True)
+
+    migrations = [
+        ('config.yaml', DEFAULT_CONFIG_FILE),
+        ('cookies.txt', DEFAULT_COOKIES),
+        ('cookies.txt.backup', 'data/cookies.txt.backup'),
+        ('config.yaml.backup', 'data/config.yaml.backup'),
+    ]
+    for old, new in migrations:
+        old_path, new_path = Path(old), Path(new)
+        if old_path.exists() and not new_path.exists():
+            shutil.move(str(old_path), str(new_path))
+            if logger:
+                logger.info(f"Migrated {old} → {new}")
+
+
+class AuditLogger:
+    """Persistent audit trail using SQLite.
+
+    Thread-safe via a write lock; reads are lockless (WAL mode).
+    Each call opens/closes its own connection for thread safety.
+    """
+
+    def __init__(self, db_path=DEFAULT_DB_FILE):
+        self._db_path = str(db_path)
+        Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._write_lock = threading.Lock()
+        self._init_db()
+
+    def _connect(self):
+        conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_db(self):
+        conn = self._connect()
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS audit_entries (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp   TEXT NOT NULL,
+                    operation   TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    params      TEXT,
+                    status      TEXT NOT NULL,
+                    duration_s  REAL,
+                    source      TEXT NOT NULL DEFAULT 'cli'
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_audit_timestamp
+                ON audit_entries(timestamp)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_audit_operation
+                ON audit_entries(operation)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_audit_status
+                ON audit_entries(status)
+            """)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def log(self, operation, description, status,
+            params=None, duration_s=None, source='cli'):
+        """Insert an audit entry."""
+        ts = datetime.now(UTC).isoformat()
+        params_json = json.dumps(params) if params else None
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    """INSERT INTO audit_entries
+                       (timestamp, operation, description, params,
+                        status, duration_s, source)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (ts, operation, description, params_json,
+                     status, duration_s, source),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def get_entries(self, limit=50, offset=0,
+                    operation=None, status=None,
+                    date_from=None, date_to=None):
+        """Return (entries, total) with optional filtering."""
+        where_clauses = []
+        params = []
+        if operation:
+            where_clauses.append("operation = ?")
+            params.append(operation)
+        if status:
+            where_clauses.append("status = ?")
+            params.append(status)
+        if date_from:
+            where_clauses.append("timestamp >= ?")
+            params.append(date_from)
+        if date_to:
+            where_clauses.append("timestamp <= ?")
+            params.append(date_to + "T23:59:59")
+
+        where_sql = ""
+        if where_clauses:
+            where_sql = "WHERE " + " AND ".join(where_clauses)
+
+        conn = self._connect()
+        try:
+            total = conn.execute(
+                f"SELECT COUNT(*) FROM audit_entries {where_sql}",
+                params,
+            ).fetchone()[0]
+
+            rows = conn.execute(
+                f"""SELECT * FROM audit_entries {where_sql}
+                    ORDER BY id DESC LIMIT ? OFFSET ?""",
+                params + [limit, offset],
+            ).fetchall()
+
+            entries = []
+            for row in rows:
+                entry = dict(row)
+                if entry.get('params'):
+                    try:
+                        entry['params'] = json.loads(entry['params'])
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                entries.append(entry)
+
+            return entries, total
+        finally:
+            conn.close()
+
+    def get_stats(self):
+        """Return aggregate statistics."""
+        conn = self._connect()
+        try:
+            total = conn.execute(
+                "SELECT COUNT(*) FROM audit_entries"
+            ).fetchone()[0]
+
+            today = datetime.now(UTC).strftime('%Y-%m-%d')
+            today_count = conn.execute(
+                "SELECT COUNT(*) FROM audit_entries WHERE timestamp >= ?",
+                (today,),
+            ).fetchone()[0]
+
+            by_operation = {}
+            for row in conn.execute(
+                "SELECT operation, COUNT(*) as cnt FROM audit_entries "
+                "GROUP BY operation ORDER BY cnt DESC"
+            ):
+                by_operation[row['operation']] = row['cnt']
+
+            by_status = {}
+            for row in conn.execute(
+                "SELECT status, COUNT(*) as cnt FROM audit_entries "
+                "GROUP BY status ORDER BY cnt DESC"
+            ):
+                by_status[row['status']] = row['cnt']
+
+            return {
+                'total': total,
+                'today': today_count,
+                'by_operation': by_operation,
+                'by_status': by_status,
+            }
+        finally:
+            conn.close()
+
+    def clear(self, before_date=None):
+        """Delete entries, return count deleted."""
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                if before_date:
+                    count = conn.execute(
+                        "SELECT COUNT(*) FROM audit_entries "
+                        "WHERE timestamp < ?",
+                        (before_date + "T00:00:00",),
+                    ).fetchone()[0]
+                    conn.execute(
+                        "DELETE FROM audit_entries WHERE timestamp < ?",
+                        (before_date + "T00:00:00",),
+                    )
+                else:
+                    count = conn.execute(
+                        "SELECT COUNT(*) FROM audit_entries"
+                    ).fetchone()[0]
+                    conn.execute("DELETE FROM audit_entries")
+                conn.commit()
+                return count
+            finally:
+                conn.close()
+
+
+# ══════════════════════════════════════════════════════════════════
 # Section 3: Configuration Management
 # ══════════════════════════════════════════════════════════════════
 
@@ -668,9 +878,12 @@ class PlaylistConfig:
 class ConfigManager:
     """Manages configuration from config.yaml (YAML format)."""
 
-    def __init__(self, conf_path=DEFAULT_CONFIG_FILE, logger=None):
+    def __init__(self, conf_path=DEFAULT_CONFIG_FILE, logger=None,
+                 audit_logger=None, audit_source='cli'):
         self.conf_path = Path(conf_path)
         self.logger = logger or Logger()
+        self.audit_logger = audit_logger
+        self._audit_source = audit_source
         self.playlists = []
         self.settings = {}
         self.output_profiles = {}
@@ -806,6 +1019,11 @@ class ConfigManager:
         """Update a setting and persist to config.yaml."""
         self.settings[key] = value
         self._save()
+        if self.audit_logger:
+            self.audit_logger.log(
+                'settings_update', f"Updated setting '{key}'",
+                'completed', params={'key': key, 'value': value},
+                source=self._audit_source)
 
     def get_playlist_by_key(self, key):
         """Get playlist by key (case-insensitive)."""
@@ -830,6 +1048,11 @@ class ConfigManager:
         self.playlists.append(PlaylistConfig(key, url, name))
         self._save()
         self.logger.info(f"Added playlist '{name}' to configuration")
+        if self.audit_logger:
+            self.audit_logger.log(
+                'playlist_add', f"Added playlist '{name}' ({key})",
+                'completed', params={'key': key, 'name': name},
+                source=self._audit_source)
         return True
 
     def update_playlist(self, key, url=None, name=None):
@@ -844,6 +1067,11 @@ class ConfigManager:
             playlist.name = name
         self._save()
         self.logger.info(f"Updated playlist '{key}'")
+        if self.audit_logger:
+            self.audit_logger.log(
+                'playlist_update', f"Updated playlist '{key}'",
+                'completed', params={'key': key, 'url': url, 'name': name},
+                source=self._audit_source)
         return True
 
     def remove_playlist(self, key):
@@ -856,6 +1084,11 @@ class ConfigManager:
             return False
         self._save()
         self.logger.info(f"Removed playlist '{key}' from configuration")
+        if self.audit_logger:
+            self.audit_logger.log(
+                'playlist_delete', f"Removed playlist '{key}'",
+                'completed', params={'key': key},
+                source=self._audit_source)
         return True
 
     def ensure_api_key(self):
@@ -1886,11 +2119,14 @@ class TaggerManager:
     """Manages MP3 tag operations (update, restore, reset)."""
 
     def __init__(self, logger=None, cleanup_options=None, output_profile=None,
-                 prompt_handler=None, display_handler=None, cancel_event=None):
+                 prompt_handler=None, display_handler=None, cancel_event=None,
+                 audit_logger=None, audit_source='cli'):
         self.logger = logger or Logger()
         self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
         self.display_handler = display_handler or NullDisplayHandler()
         self.cancel_event = cancel_event
+        self.audit_logger = audit_logger
+        self._audit_source = audit_source
         self.output_profile = output_profile or OUTPUT_PROFILES[DEFAULT_OUTPUT_TYPE]
         if output_profile is not None:
             self.cleanup_options = {
@@ -2045,6 +2281,13 @@ class TaggerManager:
             progress.close()
 
         duration = time.time() - start_time
+        if self.audit_logger:
+            self.audit_logger.log(
+                'tag_update', f"Tag update: {directory}",
+                'completed' if errors == 0 else 'failed',
+                params={'directory': str(directory), 'files_updated': updated,
+                        'errors': errors},
+                duration_s=duration, source=self._audit_source)
         return TagUpdateResult(
             success=errors == 0,
             directory=str(directory),
@@ -2213,6 +2456,13 @@ class TaggerManager:
             progress.close()
 
         duration = time.time() - start_time
+        if self.audit_logger:
+            self.audit_logger.log(
+                'tag_restore', f"Tag restore: {directory}",
+                'completed' if errors == 0 else 'failed',
+                params={'directory': str(directory), 'files_restored': restored,
+                        'errors': errors},
+                duration_s=duration, source=self._audit_source)
         return TagRestoreResult(
             success=errors == 0,
             directory=str(directory),
@@ -2391,6 +2641,13 @@ class TaggerManager:
 
         duration = time.time() - start_time
 
+        if self.audit_logger:
+            self.audit_logger.log(
+                'tag_reset', f"Tag reset: {input_dir} → {output_dir}",
+                'completed' if errors == 0 else 'failed',
+                params={'input_dir': str(input_dir), 'output_dir': str(output_dir),
+                        'files_reset': updated, 'errors': errors},
+                duration_s=duration, source=self._audit_source)
         return TagResetResult(
             success=errors == 0,
             input_dir=str(input_dir),
@@ -2441,10 +2698,13 @@ class Converter:
     """Manages M4A to MP3 conversion with tag preservation."""
 
     def __init__(self, logger=None, quality_preset='lossless', workers=None, embed_cover_art=True,
-                 output_profile=None, display_handler=None, cancel_event=None):
+                 output_profile=None, display_handler=None, cancel_event=None,
+                 audit_logger=None, audit_source='cli'):
         self.logger = logger or Logger()
         self.display_handler = display_handler or NullDisplayHandler()
         self.cancel_event = cancel_event
+        self.audit_logger = audit_logger
+        self._audit_source = audit_source
         self.stats = ConversionStatistics()
         self.quality_preset = quality_preset
         self.quality_settings = self._get_quality_settings(quality_preset)
@@ -2764,6 +3024,14 @@ class Converter:
 
         duration = time.time() - start_time
 
+        if self.audit_logger:
+            self.audit_logger.log(
+                'convert', f"Convert: {input_dir}",
+                'completed' if self.stats.errors == 0 else 'failed',
+                params={'input_dir': str(input_dir), 'output_dir': str(output_dir),
+                        'preset': self.quality_preset, 'converted': self.stats.converted,
+                        'errors': self.stats.errors},
+                duration_s=duration, source=self._audit_source)
         return ConversionResult(
             success=self.stats.errors == 0,
             input_dir=str(input_dir),
@@ -2799,7 +3067,7 @@ class DownloadStatistics:
 class Downloader:
     """Manages downloads from Apple Music using gamdl."""
 
-    def __init__(self, logger=None, venv_python=None, cookie_path='cookies.txt',
+    def __init__(self, logger=None, venv_python=None, cookie_path=DEFAULT_COOKIES,
                  prompt_handler=None, display_handler=None, cancel_event=None):
         self.logger = logger or Logger()
         self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
@@ -3098,10 +3366,13 @@ class CookieStatus:
 class CookieManager:
     """Manages Apple Music cookie validation and refresh."""
 
-    def __init__(self, cookie_path='cookies.txt', logger=None, prompt_handler=None):
+    def __init__(self, cookie_path=DEFAULT_COOKIES, logger=None, prompt_handler=None,
+                 audit_logger=None, audit_source='cli'):
         self.cookie_path = Path(cookie_path)
         self.logger = logger or Logger()
         self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
+        self.audit_logger = audit_logger
+        self._audit_source = audit_source
         self.required_domain = '.music.apple.com'
         self.required_cookie_name = 'media-user-token'
 
@@ -3701,6 +3972,10 @@ class CookieManager:
 
         if not cookie_jar:
             self.logger.error("Automatic cookie refresh failed")
+            if self.audit_logger:
+                self.audit_logger.log(
+                    'cookie_refresh', 'Cookie auto-refresh failed',
+                    'failed', source=self._audit_source)
             return False
 
         # Create backup if requested and file exists
@@ -3718,13 +3993,25 @@ class CookieManager:
             status = self.validate()
             if status.valid:
                 self.logger.ok(status.reason)
+                if self.audit_logger:
+                    self.audit_logger.log(
+                        'cookie_refresh', 'Cookie auto-refresh succeeded',
+                        'completed', source=self._audit_source)
                 return True
             else:
                 self.logger.error(f"Saved cookies are not valid: {status.reason}")
+                if self.audit_logger:
+                    self.audit_logger.log(
+                        'cookie_refresh', 'Cookie refresh: saved cookies invalid',
+                        'failed', source=self._audit_source)
                 return False
 
         except Exception as e:
             self.logger.error(f"Failed to save cookies: {e}")
+            if self.audit_logger:
+                self.audit_logger.log(
+                    'cookie_refresh', f'Cookie refresh error: {e}',
+                    'failed', source=self._audit_source)
             return False
 
     def clean_cookies(self):
@@ -4818,11 +5105,24 @@ class CoverArtManager:
     """Manages cover art operations: embed, extract, update, strip."""
 
     def __init__(self, logger=None, output_profile=None, display_handler=None,
-                 cancel_event=None):
+                 cancel_event=None, audit_logger=None, audit_source='cli'):
         self.logger = logger or Logger()
         self.output_profile = output_profile or OUTPUT_PROFILES[DEFAULT_OUTPUT_TYPE]
         self.display_handler = display_handler or NullDisplayHandler()
         self.cancel_event = cancel_event
+        self.audit_logger = audit_logger
+        self._audit_source = audit_source
+
+    def _audit_cover_art(self, result):
+        """Log a cover art operation to audit trail."""
+        if self.audit_logger:
+            self.audit_logger.log(
+                'cover_art', f"Cover art {result.action}: {result.directory}",
+                'completed' if result.success else 'failed',
+                params={'action': result.action, 'directory': result.directory,
+                        'files_processed': result.files_processed,
+                        'errors': result.errors},
+                duration_s=result.duration, source=self._audit_source)
 
     def embed(self, directory, source_dir=None, force=False, dry_run=False, verbose=False):
         """
@@ -4994,12 +5294,14 @@ class CoverArtManager:
         finally:
             progress.close()
 
-        return CoverArtResult(
+        result = CoverArtResult(
             success=errors == 0, action="embed", directory=str(directory),
             duration=time.time() - start_time,
             files_processed=len(mp3_files), files_modified=embedded,
             files_skipped=skipped, errors=errors,
             source_dir=str(source_dir), no_source=no_source)
+        self._audit_cover_art(result)
+        return result
 
     def extract(self, directory, output_dir=None, dry_run=False, verbose=False):
         """Extract cover art from MP3 files to image files."""
@@ -5086,11 +5388,13 @@ class CoverArtManager:
         finally:
             progress.close()
 
-        return CoverArtResult(
+        result = CoverArtResult(
             success=errors == 0, action="extract", directory=str(directory),
             duration=time.time() - start_time,
             files_processed=len(mp3_files), files_modified=extracted,
             files_skipped=skipped, errors=errors)
+        self._audit_cover_art(result)
+        return result
 
     def update(self, directory, image_path, dry_run=False, verbose=False):
         """Replace cover art on all MP3s in a directory from a single image file."""
@@ -5183,11 +5487,13 @@ class CoverArtManager:
         finally:
             progress.close()
 
-        return CoverArtResult(
+        result = CoverArtResult(
             success=errors == 0, action="update", directory=str(directory),
             duration=time.time() - start_time,
             files_processed=len(mp3_files), files_modified=updated,
             errors=errors, image_path=str(image_path))
+        self._audit_cover_art(result)
+        return result
 
     def strip(self, directory, dry_run=False, verbose=False):
         """Remove cover art from all MP3s in a directory."""
@@ -5264,11 +5570,13 @@ class CoverArtManager:
         finally:
             progress.close()
 
-        return CoverArtResult(
+        result = CoverArtResult(
             success=errors == 0, action="strip", directory=str(directory),
             duration=time.time() - start_time,
             files_processed=stripped + skipped + errors,
             files_modified=stripped, files_skipped=skipped, errors=errors)
+        self._audit_cover_art(result)
+        return result
 
     def resize(self, directory, max_size, dry_run=False, verbose=False):
         """Resize embedded cover art to a maximum dimension, preserving aspect ratio."""
@@ -5393,12 +5701,14 @@ class CoverArtManager:
         finally:
             progress.close()
 
-        return CoverArtResult(
+        result = CoverArtResult(
             success=errors == 0, action="resize", directory=str(directory),
             duration=time.time() - start_time,
             files_processed=resized + skipped_small + skipped_no_art + errors,
             files_modified=resized, files_skipped=skipped_small + skipped_no_art,
             errors=errors)
+        self._audit_cover_art(result)
+        return result
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -5408,11 +5718,14 @@ class CoverArtManager:
 class DataManager:
     """Manages playlist data lifecycle (deletion, cleanup)."""
 
-    def __init__(self, logger=None, config=None, prompt_handler=None, output_profile=None):
+    def __init__(self, logger=None, config=None, prompt_handler=None, output_profile=None,
+                 audit_logger=None, audit_source='cli'):
         self.logger = logger or Logger()
         self.config = config or ConfigManager(logger=self.logger)
         self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
         self.output_profile = output_profile or OUTPUT_PROFILES[DEFAULT_OUTPUT_TYPE]
+        self.audit_logger = audit_logger
+        self._audit_source = audit_source
 
     def delete_playlist_data(self, playlist_key, delete_source=True, delete_export=True,
                              remove_config=False, dry_run=False):
@@ -5515,7 +5828,7 @@ class DataManager:
             else:
                 self.logger.info(f"  Config entry for '{playlist_key}' not found (may not be configured)")
 
-        return DeleteResult(
+        result = DeleteResult(
             success=len(errors) == 0,
             playlist_key=playlist_key,
             source_deleted=source_deleted,
@@ -5524,6 +5837,15 @@ class DataManager:
             files_deleted=files_deleted,
             bytes_freed=bytes_freed,
             errors=errors)
+        if self.audit_logger and not dry_run:
+            self.audit_logger.log(
+                'playlist_delete_data', f"Delete data: {playlist_key}",
+                'completed' if result.success else 'failed',
+                params={'playlist_key': playlist_key,
+                        'files_deleted': files_deleted,
+                        'bytes_freed': bytes_freed},
+                source=self._audit_source)
+        return result
 
 
 def _format_bytes(num_bytes):
@@ -5692,13 +6014,15 @@ class PipelineOrchestrator:
     """Coordinates multi-stage workflows: download → convert → tag → USB sync."""
 
     def __init__(self, logger=None, deps=None, config=None, quality_preset='lossless',
-                 cookie_path='cookies.txt', workers=None, embed_cover_art=True,
+                 cookie_path=DEFAULT_COOKIES, workers=None, embed_cover_art=True,
                  output_profile=None, prompt_handler=None, display_handler=None,
-                 cancel_event=None):
+                 cancel_event=None, audit_logger=None, audit_source='cli'):
         self.logger = logger or Logger()
         self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
         self.display_handler = display_handler or NullDisplayHandler()
         self.cancel_event = cancel_event
+        self.audit_logger = audit_logger
+        self._audit_source = audit_source
         self.deps = deps or DependencyChecker(self.logger)
         self.config = config or ConfigManager(logger=self.logger)
         self.stats = PipelineStatistics()
@@ -5882,6 +6206,15 @@ class PipelineOrchestrator:
                 self.logger.error("USB sync stage failed")
 
         duration = time.time() - self.stats.start_time
+        if self.audit_logger:
+            self.audit_logger.log(
+                'pipeline',
+                f"Pipeline: {self.stats.playlist_name or 'unknown'}",
+                'completed' if len(self.stats.stages_failed) == 0 else 'failed',
+                params={'playlist_key': self.stats.playlist_key,
+                        'stages_completed': list(self.stats.stages_completed),
+                        'stages_failed': list(self.stats.stages_failed)},
+                duration_s=duration, source=self._audit_source)
         return PipelineResult(
             success=len(self.stats.stages_failed) == 0,
             playlist_name=self.stats.playlist_name,
