@@ -1,4 +1,5 @@
 data/
+design/
 __pycache__/
 export/
 gamdl_temp_*/
