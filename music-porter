@@ -2207,6 +2207,19 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
                             help='Setting name (output_type, usb_dir, workers, external_url, server_name)')
     config_set.add_argument('value', help='Value to set')
 
+    # ── Scheduler ──
+    scheduler_parser = subparsers.add_parser('scheduler',
+        help='Configure automatic pipeline scheduling (runs in web/server mode)')
+    scheduler_parser.add_argument('action', nargs='?', choices=['enable', 'disable'],
+                                  help='Enable or disable the scheduler')
+    scheduler_parser.add_argument('--interval', type=float, metavar='HOURS',
+                                  help='Interval in hours between runs (min 0.5)')
+    scheduler_parser.add_argument('--playlists', type=str,
+                                  help='Comma-separated playlist keys, or "all"')
+    scheduler_parser.add_argument('--preset', type=str,
+                                  choices=['lossless', 'high', 'medium', 'low', ''],
+                                  help='Quality preset (empty to use profile default)')
+
     return parser
 
 
@@ -2262,6 +2275,55 @@ def main():
                 break
         handle_config_command(args, config, config_load_error,
                               config_subparser or parser)
+
+    if args.command == 'scheduler':
+        if config_load_error:
+            temp_logger.error(config_load_error)
+            sys.exit(1)
+        sched = config.get_setting('scheduler') or {
+            'enabled': False, 'interval_hours': 24, 'playlists': [],
+            'preset': None, 'retry_minutes': 15, 'max_retries': 3,
+        }
+
+        changed = False
+        if args.action == 'enable':
+            sched['enabled'] = True
+            changed = True
+        elif args.action == 'disable':
+            sched['enabled'] = False
+            changed = True
+
+        if args.interval is not None:
+            if args.interval < 0.5:
+                temp_logger.error("Interval must be >= 0.5 hours")
+                sys.exit(1)
+            sched['interval_hours'] = args.interval
+            changed = True
+        if args.playlists is not None:
+            if args.playlists.lower() == 'all':
+                sched['playlists'] = []
+            else:
+                sched['playlists'] = [k.strip() for k in args.playlists.split(',') if k.strip()]
+            changed = True
+        if args.preset is not None:
+            sched['preset'] = args.preset if args.preset else None
+            changed = True
+
+        if changed:
+            config.update_setting('scheduler', sched)
+            temp_logger.ok("Scheduler configuration updated")
+
+        status = "Enabled" if sched.get('enabled') else "Disabled"
+        pls = sched.get('playlists', [])
+        print("\n  Scheduled Pipeline Configuration")
+        print(f"  {'─' * 34}")
+        print(f"  Status:    {status}")
+        print(f"  Interval:  {sched.get('interval_hours', 24)} hours")
+        print(f"  Playlists: {'all' if not pls else ', '.join(pls)}")
+        print(f"  Preset:    {sched.get('preset') or 'profile default'}")
+        print(f"  Retry:     {sched.get('retry_minutes', 15)} min, max {sched.get('max_retries', 3)} retries")
+        print("\n  Note: Scheduler runs only in web/server mode\n")
+        sys.exit(0)
 
     # For all other commands, a config load error is fatal
     if config_load_error:
@@ -2861,6 +2923,7 @@ def main():
             web_ui_path = Path(__file__).resolve().parent / 'web_ui.py'
             spec = importlib.util.spec_from_file_location('web_ui', web_ui_path)
             web_ui = importlib.util.module_from_spec(spec)
+            sys.modules['web_ui'] = web_ui
             spec.loader.exec_module(web_ui)
             web_ui.start_server(host=args.host, port=args.port, no_auth=True,
                                 behind_proxy=args.behind_proxy,
@@ -2877,6 +2940,7 @@ def main():
             web_ui_path = Path(__file__).resolve().parent / 'web_ui.py'
             spec = importlib.util.spec_from_file_location('web_ui', web_ui_path)
             web_ui = importlib.util.module_from_spec(spec)
+            sys.modules['web_ui'] = web_ui
             spec.loader.exec_module(web_ui)
             web_ui.start_server(
                 host=args.host,

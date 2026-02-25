@@ -7,7 +7,11 @@ services:
     #   ports:
     #     - "5555:5555"
     network_mode: host
+    environment:
+      - TZ=America/Los_Angeles
     volumes:
+      # Sync container clock with host timezone
+      - /etc/localtime:/etc/localtime:ro
       # data/ contains config.yaml, cookies.txt, and music-porter.db.
       # Auto-created on first run; pre-populate data/cookies.txt if needed.
       - ./data:/app/data
