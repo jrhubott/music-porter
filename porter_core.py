@@ -47,7 +47,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.19.0-audit-trail-data-dir"
+VERSION = "2.19.0"
 
 DEFAULT_DATA_DIR = "data"
 DEFAULT_MUSIC_DIR = "music"
