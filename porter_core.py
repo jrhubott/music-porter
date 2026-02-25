@@ -3242,6 +3242,7 @@ class Downloader:
                 self.display_handler, total=0, desc="Downloading",
             )
             verbose = self.logger.verbose
+            unrecognized_lines = []
 
             try:
                 for line in process.stdout:
@@ -3306,6 +3307,14 @@ class Downloader:
                             if error_match:
                                 stats.failed = int(error_match.group(1))
 
+                        # Collect unrecognized output
+                        else:
+                            unrecognized_lines.append(cleaned)
+                            if '[ERROR' in cleaned or '[CRITICAL' in cleaned:
+                                self.logger.error(f"gamdl: {cleaned}")
+                            else:
+                                self.logger.file_info(f"gamdl: {cleaned}")
+
                     except Exception as parse_error:
                         # If parsing fails for a line, log and continue without crashing
                         self.logger.file_info(f"Output parse error: {parse_error}")
@@ -3331,6 +3340,11 @@ class Downloader:
                     failed=stats.failed)
             else:
                 self.logger.error(f"Download failed with exit code {process.returncode}")
+                if unrecognized_lines:
+                    tail = unrecognized_lines[-10:]
+                    self.logger.error("gamdl output:")
+                    for err_line in tail:
+                        self.logger.error(f"  {err_line}")
                 return DownloadResult(
                     success=False, key=key, album_name=album_name,
                     duration=duration, playlist_total=stats.playlist_total,
