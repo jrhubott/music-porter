@@ -8,13 +8,9 @@ services:
     #     - "5555:5555"
     network_mode: host
     volumes:
-      # IMPORTANT: config.yaml and cookies.txt must exist as FILES on the host
-      # before starting. If missing, Docker creates them as empty directories,
-      # which breaks the app. Before first run:
-      #   touch config.yaml    (auto-populated by the app on startup)
-      #   cp /path/to/your/cookies.txt .   (must be user-supplied)
-      - ./config.yaml:/app/config.yaml
-      - ./cookies.txt:/app/cookies.txt
+      # data/ contains config.yaml, cookies.txt, and music-porter.db.
+      # Auto-created on first run; pre-populate data/cookies.txt if needed.
+      - ./data:/app/data
       - ./music:/app/music
       - ./export:/app/export
       - ./logs:/app/logs
@@ -26,5 +22,5 @@ services:
     #   command: ["server", "--no-auth"]
 
     # Limitations:
-    # - Cookie refresh: No browser in container. Provide cookies.txt from host.
+    # - Cookie refresh: No browser in container. Provide data/cookies.txt from host.
     # - USB sync: Not available in container. Use host CLI for USB operations.
