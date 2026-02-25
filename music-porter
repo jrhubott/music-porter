@@ -2148,6 +2148,12 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
                             help='Host to bind (default: 127.0.0.1)')
     web_parser.add_argument('--port', type=int, default=5555,
                             help='Port (default: 5555)')
+    web_parser.add_argument('--behind-proxy', action='store_true',
+                            dest='behind_proxy',
+                            help='Trust X-Forwarded-* headers from reverse proxy')
+    web_parser.add_argument('--proxy-count', type=int, default=1,
+                            dest='proxy_count',
+                            help='Number of trusted proxy hops (default: 1)')
 
     # ── server ────────────────────────────────────────────────────
     server_parser = subparsers.add_parser('server',
@@ -2162,6 +2168,12 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
                                help='Display the full API key at startup')
     server_parser.add_argument('--no-bonjour', action='store_true', dest='no_bonjour',
                                help='Disable Bonjour/mDNS service advertisement')
+    server_parser.add_argument('--behind-proxy', action='store_true',
+                               dest='behind_proxy',
+                               help='Trust X-Forwarded-* headers from reverse proxy')
+    server_parser.add_argument('--proxy-count', type=int, default=1,
+                               dest='proxy_count',
+                               help='Number of trusted proxy hops (default: 1)')
 
     # ── config ────────────────────────────────────────────────────
     config_parser = subparsers.add_parser('config',
@@ -2846,7 +2858,9 @@ def main():
             spec = importlib.util.spec_from_file_location('web_ui', web_ui_path)
             web_ui = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(web_ui)
-            web_ui.start_server(host=args.host, port=args.port, no_auth=True)
+            web_ui.start_server(host=args.host, port=args.port, no_auth=True,
+                                behind_proxy=args.behind_proxy,
+                                proxy_count=args.proxy_count)
         except ImportError as e:
             logger.error(f"Web UI requires Flask: {e}")
             logger.info("Install with: pip install flask")
@@ -2866,6 +2880,8 @@ def main():
                 no_auth=args.no_auth,
                 show_api_key=args.show_api_key,
                 enable_bonjour=not args.no_bonjour,
+                behind_proxy=args.behind_proxy,
+                proxy_count=args.proxy_count,
             )
         except ImportError as e:
             logger.error(f"API server requires Flask: {e}")
