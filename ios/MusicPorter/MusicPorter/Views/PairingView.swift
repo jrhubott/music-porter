@@ -112,6 +112,7 @@ struct PairingView: View {
         isValidating = true
         error = nil
         do {
+            appState.cancelAutoReconnect()
             try await appState.connect(server: server, apiKey: apiKey)
             dismiss()
         } catch {

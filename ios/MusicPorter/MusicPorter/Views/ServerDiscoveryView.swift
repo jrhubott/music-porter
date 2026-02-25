@@ -151,6 +151,7 @@ struct ServerDiscoveryView: View {
             host: payload.host, port: payload.port, name: payload.host,
             url: payload.url)
         Task {
+            appState.cancelAutoReconnect()
             // Try 1: connect using full QR payload (may use external URL)
             do {
                 try await appState.connect(server: server, apiKey: payload.key)

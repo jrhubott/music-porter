@@ -45,7 +45,6 @@ final class AppState {
     }
 
     func connect(server: ServerConnection, apiKey: String) async throws {
-        cancelAutoReconnect()
         apiClient.configure(server: server, apiKey: apiKey)
         downloadManager.configure(apiClient: apiClient)
         audioPlayer.configure(apiClient: apiClient)
