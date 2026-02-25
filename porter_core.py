@@ -779,7 +779,7 @@ class AuditLogger:
             rows = conn.execute(
                 f"""SELECT * FROM audit_entries {where_sql}
                     ORDER BY id DESC LIMIT ? OFFSET ?""",
-                params + [limit, offset],
+                [*params, limit, offset],
             ).fetchall()
 
             entries = []
