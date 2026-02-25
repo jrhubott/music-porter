@@ -1905,6 +1905,7 @@ class ConversionResult:
     overwritten: int
     skipped: int
     errors: int
+    mp3_total: int = 0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -2679,6 +2680,7 @@ class ConversionStatistics:
         self.overwritten = 0
         self.skipped = 0
         self.errors = 0
+        self.mp3_total = 0
         self._lock = threading.Lock()
         self._progress_counter = 0
 
@@ -3024,6 +3026,9 @@ class Converter:
 
         duration = time.time() - start_time
 
+        mp3_count = len([f for f in output_path.rglob("*.mp3") if not f.name.startswith('._')])
+        self.stats.mp3_total = mp3_count
+
         if self.audit_logger:
             self.audit_logger.log(
                 'convert', f"Convert: {input_dir}",
@@ -3046,6 +3051,7 @@ class Converter:
             overwritten=self.stats.overwritten,
             skipped=self.stats.skipped,
             errors=self.stats.errors,
+            mp3_total=mp3_count,
         )
 
 
@@ -5983,6 +5989,7 @@ class AggregateStatistics:
             'overwritten': 0,
             'skipped_conversion': 0,
             'errors_conversion': 0,
+            'mp3_total': 0,
             'title_updated': 0,
             'original_tags_stored': 0,
             'files_on_usb': 0
@@ -6000,6 +6007,7 @@ class AggregateStatistics:
                 totals['overwritten'] += result.conversion_stats.overwritten
                 totals['skipped_conversion'] += result.conversion_stats.skipped
                 totals['errors_conversion'] += result.conversion_stats.errors
+                totals['mp3_total'] += result.conversion_stats.mp3_total
 
             if result.tagging_stats:
                 totals['title_updated'] += result.tagging_stats.title_updated
@@ -6010,11 +6018,7 @@ class AggregateStatistics:
                 )
 
             if result.usb_success and result.conversion_stats:
-                totals['files_on_usb'] += (
-                    result.conversion_stats.converted +
-                    result.conversion_stats.overwritten +
-                    result.conversion_stats.skipped
-                )
+                totals['files_on_usb'] += result.conversion_stats.mp3_total
 
         return totals
 

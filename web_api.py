@@ -668,6 +668,7 @@ def _serialize_playlist_result(pr):
             'overwritten': pr.conversion_stats.overwritten,
             'skipped': pr.conversion_stats.skipped,
             'errors': pr.conversion_stats.errors,
+            'mp3_total': pr.conversion_stats.mp3_total,
         }
     if pr.tagging_stats:
         d['tagging_stats'] = {
