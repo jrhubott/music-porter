@@ -284,6 +284,8 @@ The web dashboard (`web_ui.py`) provides a browser-based interface with full fea
 ./music-porter web --host 0.0.0.0 --port 8080   # Network access
 ./music-porter server                            # API server (0.0.0.0, auth + Bonjour, for iOS)
 ./music-porter server --show-api-key             # Display API key on startup
+./music-porter server --behind-proxy             # Trust X-Forwarded-* headers (behind nginx, etc.)
+./music-porter server --behind-proxy --proxy-count 2  # Two proxy hops
 ```
 
 **`web` vs `server`:** `web` is local-only, no auth. `server` enables API key auth, Bonjour/mDNS, QR pairing, and iOS app support.
@@ -326,6 +328,7 @@ All API routes are defined in `web_api.py` as a Flask Blueprint.
 - One background task at a time (HTTP 409 if busy)
 - No custom VBR quality via web UI (only named presets)
 - `web` command has no auth — use `server` for network access
+- Proxy headers (`X-Forwarded-For`, etc.) are only trusted when `--behind-proxy` is set
 
 ## iOS Companion App
 

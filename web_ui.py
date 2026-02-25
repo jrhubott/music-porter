@@ -394,7 +394,8 @@ def _get_freshness_level(last_modified: datetime | None, today: date) -> str:
 # ══════════════════════════════════════════════════════════════════
 
 def create_app(project_root=None, no_auth=False, server_host=None,
-               server_port=None, external_url=None):
+               server_port=None, external_url=None,
+               behind_proxy=False, proxy_count=1):
     """Create and configure the Flask application."""
     if project_root is None:
         project_root = Path(__file__).resolve().parent
@@ -547,6 +548,15 @@ def create_app(project_root=None, no_auth=False, server_host=None,
     def audit_page():
         return render_template('audit.html')
 
+    if behind_proxy:
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(
+            app.wsgi_app,
+            x_for=proxy_count,
+            x_proto=proxy_count,
+            x_host=proxy_count,
+        )
+
     return app
 
 
@@ -621,7 +631,8 @@ def _print_pairing_qr(host, port, api_key, external_url=None):
 
 
 def start_server(host='127.0.0.1', port=5555, no_auth=False,
-                  show_api_key=False, enable_bonjour=False):
+                  show_api_key=False, enable_bonjour=False,
+                  behind_proxy=False, proxy_count=1):
     """Start the Flask development server.
 
     Args:
@@ -630,6 +641,8 @@ def start_server(host='127.0.0.1', port=5555, no_auth=False,
         no_auth: If True, skip API key authentication on /api/* routes.
         show_api_key: If True, print the API key at startup.
         enable_bonjour: If True, advertise via mDNS/Bonjour.
+        behind_proxy: If True, trust X-Forwarded-* headers from reverse proxy.
+        proxy_count: Number of trusted proxy hops (default: 1).
     """
     _kill_port_process(port)
 
@@ -666,10 +679,14 @@ def start_server(host='127.0.0.1', port=5555, no_auth=False,
         print("\n  ── Web Dashboard Mode (no auth) ──")
         print(f"  Server:  http://{host}:{port}")
 
+    if behind_proxy:
+        print(f"\n  Proxy:   enabled ({proxy_count} hop{'s' if proxy_count != 1 else ''})")
+
     print("\n  Press Ctrl+C to stop\n")
 
     app = create_app(no_auth=no_auth, server_host=local_ip,
-                      server_port=port, external_url=external_url)
+                      server_port=port, external_url=external_url,
+                      behind_proxy=behind_proxy, proxy_count=proxy_count)
 
     # Bonjour/mDNS advertisement
     bonjour = None

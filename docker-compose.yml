@@ -15,11 +15,15 @@ services:
       - ./export:/app/export
       - ./logs:/app/logs
     restart: unless-stopped
-    # Default: server mode (auth enabled, 0.0.0.0, Bonjour)
+    # Default: server mode with --behind-proxy (auth enabled, 0.0.0.0, Bonjour).
+    # Containers typically sit behind a reverse proxy, so proxy header trust is on.
+    command: ["server", "--behind-proxy"]
     # For web mode (no auth, local browser UI):
-    #   command: ["web", "--host", "0.0.0.0"]
+    #   command: ["web", "--host", "0.0.0.0", "--behind-proxy"]
     # For server without auth:
-    #   command: ["server", "--no-auth"]
+    #   command: ["server", "--no-auth", "--behind-proxy"]
+    # For direct access (no reverse proxy):
+    #   command: ["server"]
 
     # Limitations:
     # - Cookie refresh: No browser in container. Provide data/cookies.txt from host.
