@@ -113,14 +113,18 @@
   </div>
 </div>
 
-<!-- Params Detail Panel -->
-<div class="card d-none mb-4" id="paramsCard">
-  <div class="card-header d-flex justify-content-between align-items-center">
-    <span><i class="bi bi-code-square"></i> Entry Details</span>
-    <button type="button" class="btn-close btn-close-white" id="closeParams"></button>
-  </div>
-  <div class="card-body">
-    <pre class="mb-0" id="paramsContent" style="max-height:300px;overflow:auto;font-size:.8rem;"></pre>
+<!-- Entry Details Modal -->
+<div class="modal fade" id="paramsModal" tabindex="-1" aria-labelledby="paramsModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="paramsModalLabel"><i class="bi bi-code-square"></i> Entry Details</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <pre class="mb-0" id="paramsContent" style="font-size:.8rem;"></pre>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -274,8 +278,6 @@ function loadStats() {
 
 function showParams(jsonStr) {
   const entry = JSON.parse(jsonStr);
-  const card = document.getElementById('paramsCard');
-  card.classList.remove('d-none');
   const content = {
     id: entry.id,
     timestamp: entry.timestamp,
@@ -287,6 +289,7 @@ function showParams(jsonStr) {
     params: entry.params,
   };
   document.getElementById('paramsContent').textContent = JSON.stringify(content, null, 2);
+  new bootstrap.Modal(document.getElementById('paramsModal')).show();
 }
 
 // Event listeners
@@ -313,10 +316,6 @@ document.getElementById('prevPage').addEventListener('click', function() {
 document.getElementById('nextPage').addEventListener('click', function() {
   currentOffset += PAGE_SIZE;
   loadAudit();
-});
-
-document.getElementById('closeParams').addEventListener('click', function() {
-  document.getElementById('paramsCard').classList.add('d-none');
 });
 
 document.getElementById('autoRefresh').addEventListener('change', function() {
