@@ -9,6 +9,7 @@ struct ServerDiscoveryView: View {
     @State private var showScanner = false
     @State private var scanError: String?
     @State private var isConnectingFromScan = false
+    @State private var scannedApiKey: String?
     @FocusState private var isManualFieldFocused: Bool
 
     var body: some View {
@@ -114,7 +115,12 @@ struct ServerDiscoveryView: View {
                 }
             }
             .sheet(item: $selectedServer) { server in
-                PairingView(server: server)
+                PairingView(server: server, initialApiKey: scannedApiKey)
+            }
+            .onChange(of: selectedServer) {
+                if selectedServer == nil {
+                    scannedApiKey = nil
+                }
             }
             .fullScreenCover(isPresented: $showScanner) {
                 QRScannerView(
@@ -145,12 +151,29 @@ struct ServerDiscoveryView: View {
             host: payload.host, port: payload.port, name: payload.host,
             url: payload.url)
         Task {
+            // Try 1: connect using full QR payload (may use external URL)
             do {
                 try await appState.connect(server: server, apiKey: payload.key)
-            } catch {
-                scanError = error.localizedDescription
+                isConnectingFromScan = false
+                return
+            } catch {}
+
+            // Try 2: if payload had a URL, retry with direct host:port only
+            if payload.url != nil {
+                let directServer = ServerConnection(
+                    host: payload.host, port: payload.port, name: payload.host)
+                do {
+                    try await appState.connect(server: directServer, apiKey: payload.key)
+                    isConnectingFromScan = false
+                    return
+                } catch {}
             }
+
+            // Fallback: open PairingView with pre-filled API key
             isConnectingFromScan = false
+            scannedApiKey = payload.key
+            selectedServer = ServerConnection(
+                host: payload.host, port: payload.port, name: payload.host)
         }
     }
 }

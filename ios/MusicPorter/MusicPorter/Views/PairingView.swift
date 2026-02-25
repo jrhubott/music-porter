@@ -6,6 +6,7 @@ struct PairingView: View {
     @Environment(\.dismiss) private var dismiss
 
     let server: ServerConnection
+    var initialApiKey: String?
     @State private var apiKey = ""
     @State private var isValidating = false
     @State private var error: String?
@@ -97,6 +98,12 @@ struct PairingView: View {
                     }
                 )
                 .ignoresSafeArea()
+            }
+            .onAppear {
+                if let initialApiKey, apiKey.isEmpty {
+                    apiKey = initialApiKey
+                    Task { await pair() }
+                }
             }
         }
     }

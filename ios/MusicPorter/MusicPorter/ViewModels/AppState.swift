@@ -21,6 +21,9 @@ final class AppState {
     /// Non-nil when the server's API version doesn't match what this app expects.
     var apiVersionWarning: String?
 
+    // Auto-reconnect task (cancellable to avoid race with QR scan connect)
+    private var autoReconnectTask: Task<Bool, Never>?
+
     // Saved connection for auto-reconnect
     var savedServer: ServerConnection? {
         get {
@@ -36,7 +39,13 @@ final class AppState {
         }
     }
 
+    func cancelAutoReconnect() {
+        autoReconnectTask?.cancel()
+        autoReconnectTask = nil
+    }
+
     func connect(server: ServerConnection, apiKey: String) async throws {
+        cancelAutoReconnect()
         apiClient.configure(server: server, apiKey: apiKey)
         downloadManager.configure(apiClient: apiClient)
         audioPlayer.configure(apiClient: apiClient)
@@ -74,27 +83,36 @@ final class AppState {
 
     /// Try to reconnect using saved server and keychain API key.
     /// Times out after 3 seconds to avoid blocking the UI.
+    /// Stores the task so it can be cancelled by a QR scan connect.
     func attemptAutoReconnect() async -> Bool {
         guard let server = savedServer, let apiKey = KeychainService.load() else { return false }
-        do {
-            try await withThrowingTaskGroup(of: Bool.self) { group in
-                group.addTask {
-                    try await self.connect(server: server, apiKey: apiKey)
-                    return true
+        let task = Task<Bool, Never> {
+            do {
+                try await withThrowingTaskGroup(of: Bool.self) { group in
+                    group.addTask {
+                        try await self.connect(server: server, apiKey: apiKey)
+                        return true
+                    }
+                    group.addTask {
+                        try await Task.sleep(for: .seconds(3))
+                        throw CancellationError()
+                    }
+                    let result = try await group.next() ?? false
+                    group.cancelAll()
+                    return result
                 }
-                group.addTask {
-                    try await Task.sleep(for: .seconds(3))
-                    throw CancellationError()
+                return true
+            } catch {
+                if !Task.isCancelled {
+                    // Clear stale saved connection on failure (but not if cancelled by QR scan)
+                    savedServer = nil
                 }
-                let result = try await group.next() ?? false
-                group.cancelAll()
-                return result
+                return false
             }
-            return true
-        } catch {
-            // Clear stale saved connection on failure
-            savedServer = nil
-            return false
         }
+        autoReconnectTask = task
+        let result = await task.value
+        autoReconnectTask = nil
+        return result
     }
 }
