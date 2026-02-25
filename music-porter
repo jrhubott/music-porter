@@ -1103,7 +1103,8 @@ class InteractiveMenu:
     """Provides interactive menu for playlist selection and operations."""
 
     def __init__(self, logger=None, config=None, deps=None, workers=None,
-                 output_profile=None, prompt_handler=None, display_handler=None):
+                 output_profile=None, prompt_handler=None, display_handler=None,
+                 audit_logger=None):
         self.logger = logger or Logger()
         self.config = config or ConfigManager(logger=self.logger)
         self.deps = deps or DependencyChecker(self.logger)
@@ -1111,6 +1112,7 @@ class InteractiveMenu:
         self.output_profile = output_profile or OUTPUT_PROFILES[DEFAULT_OUTPUT_TYPE]
         self.prompt_handler = prompt_handler or CLIPromptHandler()
         self.display_handler = display_handler or CLIDisplayHandler(self.logger)
+        self.audit_logger = audit_logger
 
     def show(self, dry_run=False, verbose=False):
         """Display interactive menu and handle user selection."""
@@ -1232,7 +1234,8 @@ class InteractiveMenu:
         orchestrator = PipelineOrchestrator(self.logger, self.deps, self.config, workers=self.workers,
                                             output_profile=self.output_profile,
                                             prompt_handler=self.prompt_handler,
-                                            display_handler=self.display_handler)
+                                            display_handler=self.display_handler,
+                                            audit_logger=self.audit_logger)
 
         result = orchestrator.run_full_pipeline(
             playlist=str(index + 1),
@@ -1274,7 +1277,8 @@ class InteractiveMenu:
             orchestrator = PipelineOrchestrator(self.logger, self.deps, self.config, workers=self.workers,
                                                 output_profile=self.output_profile,
                                                 prompt_handler=self.prompt_handler,
-                                                display_handler=self.display_handler)
+                                                display_handler=self.display_handler,
+                                                audit_logger=self.audit_logger)
             result = orchestrator.run_full_pipeline(
                 playlist=str(i + 1),
                 auto=True,
@@ -1321,7 +1325,8 @@ class InteractiveMenu:
             orchestrator = PipelineOrchestrator(self.logger, self.deps, self.config, workers=self.workers,
                                                 output_profile=self.output_profile,
                                                 prompt_handler=self.prompt_handler,
-                                                display_handler=self.display_handler)
+                                                display_handler=self.display_handler,
+                                                audit_logger=self.audit_logger)
             result = orchestrator.run_full_pipeline(
                 url=url,
                 auto=False,
@@ -1420,7 +1425,8 @@ class InteractiveMenu:
             return False
 
         cam = CoverArtManager(self.logger, output_profile=self.output_profile,
-                              display_handler=self.display_handler)
+                              display_handler=self.display_handler,
+                              audit_logger=self.audit_logger)
         all_success = True
 
         if max_size == -1:
@@ -1535,7 +1541,8 @@ class InteractiveMenu:
 
             data_manager = DataManager(self.logger, self.config,
                                        prompt_handler=self.prompt_handler,
-                                       output_profile=self.output_profile)
+                                       output_profile=self.output_profile,
+                                       audit_logger=self.audit_logger)
             result = data_manager.delete_playlist_data(
                 playlist.key,
                 delete_source=delete_source,
@@ -1552,7 +1559,7 @@ class InteractiveMenu:
         except KeyboardInterrupt:
             print("\n\nCancelled by user")
 
-    def _check_and_refresh_cookies(self, cookie_path='cookies.txt'):
+    def _check_and_refresh_cookies(self, cookie_path=DEFAULT_COOKIES):
         """
         Check cookie validity and offer to refresh if invalid.
         Returns True if cookies are valid or successfully refreshed, False otherwise.
@@ -1688,8 +1695,8 @@ def _create_quality_args_parser():
 def _create_cookie_args_parser():
     """Create shared parent parser for cookie-related arguments."""
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument('--cookies', default='cookies.txt',
-                        help='Path to cookies.txt file (default: cookies.txt)')
+    parser.add_argument('--cookies', default=DEFAULT_COOKIES,
+                        help=f'Path to cookies.txt file (default: {DEFAULT_COOKIES})')
     parser.add_argument('--auto-refresh-cookies', action='store_true',
                         help='Automatically refresh cookies if expired (requires selenium, opens browser)')
     parser.add_argument('--skip-cookie-validation', action='store_true',
@@ -2200,6 +2207,9 @@ def main():
 
     temp_logger = Logger(verbose=False)
 
+    # Create data directory and migrate legacy files from project root
+    migrate_data_dir(temp_logger)
+
     # Ensure Python packages (especially PyYAML) are installed before config loading.
     # If missing, installs from requirements.txt and re-execs — code below won't run.
     if '--no-venv' not in sys.argv:
@@ -2210,12 +2220,15 @@ def main():
     else:
         _init_third_party()
 
+    # Initialize audit logger (uses data/music-porter.db)
+    audit_logger = AuditLogger()
+
     # Load config and output profiles BEFORE argparse so --output-type choices
     # reflect config-defined profiles (including user-added ones).
     config_load_error = None
     config = None
     try:
-        config = ConfigManager(logger=temp_logger)
+        config = ConfigManager(logger=temp_logger, audit_logger=audit_logger)
         load_output_profiles(config)
     except Exception as e:
         config_load_error = str(e)
@@ -2332,8 +2345,9 @@ def main():
         logger.file_info("Mode: DRY-RUN")
 
     # Check cookie status on startup (informational only, not blocking)
-    cookie_path = getattr(args, 'cookies', 'cookies.txt')
-    cookie_manager = CookieManager(cookie_path, logger, prompt_handler=cli_prompt)
+    cookie_path = getattr(args, 'cookies', DEFAULT_COOKIES)
+    cookie_manager = CookieManager(cookie_path, logger, prompt_handler=cli_prompt,
+                                   audit_logger=audit_logger)
     cookie_status = cookie_manager.validate()
 
     # Display cookie status
@@ -2359,8 +2373,8 @@ def main():
             print("            ⚠ Downloads will fail - required cookie not found")
             logger.file_info("Warning: Downloads will fail - required cookie not found")
         else:
-            print("            ⚠ Downloads will fail until cookies.txt is created")
-            logger.file_info("Warning: Downloads will fail until cookies.txt is created")
+            print(f"            ⚠ Downloads will fail until {DEFAULT_COOKIES} is created")
+            logger.file_info(f"Warning: Downloads will fail until {DEFAULT_COOKIES} is created")
 
     # Display default paths
     export_path_display = get_export_dir(output_profile.name)
@@ -2388,7 +2402,8 @@ def main():
         quality_preset = resolve_quality_preset(args, logger, output_profile)
         converter = Converter(logger, quality_preset=quality_preset, workers=workers,
                               embed_cover_art=embed_cover_art, output_profile=output_profile,
-                              display_handler=cli_display)
+                              display_handler=cli_display,
+                              audit_logger=audit_logger)
         result = converter.convert(
             args.input_dir,
             output_dir,
@@ -2405,7 +2420,8 @@ def main():
         if not deps.check_python_packages():
             sys.exit(1)
 
-        tagger = TaggerManager(logger, output_profile=output_profile, display_handler=cli_display)
+        tagger = TaggerManager(logger, output_profile=output_profile, display_handler=cli_display,
+                               audit_logger=audit_logger)
         result = tagger.update_tags(
             args.directory,
             new_album=args.album,
@@ -2422,7 +2438,8 @@ def main():
         if not deps.check_python_packages():
             sys.exit(1)
 
-        tagger = TaggerManager(logger, output_profile=output_profile, display_handler=cli_display)
+        tagger = TaggerManager(logger, output_profile=output_profile, display_handler=cli_display,
+                               audit_logger=audit_logger)
         result = tagger.restore_tags(
             args.directory,
             restore_album=args.all or args.album,
@@ -2441,7 +2458,8 @@ def main():
             sys.exit(1)
 
         tagger = TaggerManager(logger, output_profile=output_profile,
-                               prompt_handler=cli_prompt, display_handler=cli_display)
+                               prompt_handler=cli_prompt, display_handler=cli_display,
+                               audit_logger=audit_logger)
         result = tagger.reset_tags_from_source(
             args.input_dir,
             args.output_dir,
@@ -2467,7 +2485,8 @@ def main():
         delete_export = not args.source_only
 
         data_manager = DataManager(logger, config, prompt_handler=cli_prompt,
-                                   output_profile=output_profile)
+                                   output_profile=output_profile,
+                                   audit_logger=audit_logger)
         result = data_manager.delete_playlist_data(
             playlist.key,
             delete_source=delete_source,
@@ -2621,7 +2640,8 @@ def main():
         if not deps.check_python_packages():
             sys.exit(1)
 
-        cam = CoverArtManager(logger, output_profile=output_profile, display_handler=cli_display)
+        cam = CoverArtManager(logger, output_profile=output_profile, display_handler=cli_display,
+                              audit_logger=audit_logger)
 
         if args.cover_art_action == 'embed':
             if getattr(args, 'all_playlists', False) and args.directory:
@@ -2758,7 +2778,8 @@ def main():
                                           embed_cover_art=embed_cover_art,
                                           output_profile=output_profile,
                                           prompt_handler=cli_prompt,
-                                          display_handler=cli_display)
+                                          display_handler=cli_display,
+                                          audit_logger=audit_logger)
 
         # Determine what to process
         if args.auto:
@@ -2863,7 +2884,8 @@ def main():
         menu = InteractiveMenu(logger, config, deps, workers=workers,
                                output_profile=output_profile,
                                prompt_handler=cli_prompt,
-                               display_handler=cli_display)
+                               display_handler=cli_display,
+                               audit_logger=audit_logger)
 
         success = menu.show(dry_run=args.dry_run, verbose=args.verbose)
         sys.exit(0 if success else 1)
