@@ -1,3 +1,12 @@
+Version 2.27.0:
+• Add sync action buttons to sync keys and playlist breakdown tables (web and iOS)
+• Web: sync buttons in keys table and playlist detail rows with availability-based enable/disable
+• iOS: swipe-to-sync on key and playlist rows using OperationViewModel with ProgressPanel
+• Dashboard sync status labels and icons updated for destination types (USB vs saved)
+• Conditional sync key icons on sync page based on destination type
+• Auto-save custom paths as sync destinations for reuse (CLI interactive, CLI --dest, web API)
+• Remove dead sync_status.html template (replaced by unified sync.html)
+
 Version 2.26.0:
 • Generalize USB sync into unified sync destinations: saved named paths, USB drives, and custom paths
 • Add SyncDestination dataclass and ConfigManager CRUD (add/remove/get destinations in config.yaml)
