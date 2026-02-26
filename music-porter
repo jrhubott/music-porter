@@ -2436,8 +2436,10 @@ def _handle_tasks_command():
         print(f"Expected: {db_path}")
         return
 
-    migrate_db_schema()
+    events = migrate_db_schema()
     db = TaskHistoryDB(str(db_path))
+    if events:
+        flush_migration_events(events, AuditLogger(str(db_path)), source='cli')
 
     if args.stats:
         _render_task_stats(db)
@@ -2549,7 +2551,7 @@ def main():
     temp_logger = Logger(verbose=False)
 
     # Create data directory and migrate legacy files from project root
-    migrate_data_dir(temp_logger)
+    migration_events = migrate_data_dir(temp_logger)
 
     # Ensure Python packages (especially PyYAML) are installed before config loading.
     # If missing, installs from requirements.txt and re-execs — code below won't run.
@@ -2562,11 +2564,15 @@ def main():
         _init_third_party()
 
     # Apply schema migrations before any DB or config class is instantiated
-    migrate_db_schema(logger=temp_logger)
-    migrate_config_schema(logger=temp_logger)
+    migration_events += migrate_db_schema(logger=temp_logger)
+    migration_events += migrate_config_schema(logger=temp_logger)
 
     # Initialize audit logger (uses data/music-porter.db)
     audit_logger = AuditLogger()
+
+    # Flush deferred migration events into the audit trail
+    if migration_events:
+        flush_migration_events(migration_events, audit_logger, source='cli')
 
     # Load config and output profiles BEFORE argparse so --output-type choices
     # reflect config-defined profiles (including user-added ones).
@@ -2577,6 +2583,13 @@ def main():
         load_output_profiles(config)
     except Exception as e:
         config_load_error = str(e)
+
+    # Prune old log files based on retention setting
+    retention = config.get_setting('log_retention_days', DEFAULT_LOG_RETENTION_DAYS) if config else DEFAULT_LOG_RETENTION_DAYS
+    pruned = prune_logs(DEFAULT_LOG_DIR, retention, logger=temp_logger)
+    if pruned:
+        audit_logger.log('log_prune', f'Pruned {pruned} log files older than {retention} days',
+                         'completed', {'count': pruned, 'retention_days': retention}, source='cli')
 
     parser = create_parser()
     args = parser.parse_args()

@@ -54,11 +54,14 @@ import porter_core as mp
 mp._init_third_party()
 
 # Ensure data directory exists and migrate legacy files
-mp.migrate_data_dir()
+_migration_events = mp.migrate_data_dir()
 
 # Apply schema migrations before any DB or config class is instantiated
-mp.migrate_db_schema()
-mp.migrate_config_schema()
+_migration_events += mp.migrate_db_schema()
+_migration_events += mp.migrate_config_schema()
+
+# Prune old log files at startup (uses default retention; config not loaded yet)
+mp.prune_logs()
 
 # Load output profiles from config at import time so OUTPUT_PROFILES is
 # populated before any request handler accesses it.
@@ -740,6 +743,12 @@ def create_app(project_root=None, no_auth=False, server_host=None,
         project_root=project_root,
     )
     app.config['CTX'] = ctx
+
+    # Flush deferred migration events into the audit trail
+    global _migration_events
+    if _migration_events:
+        mp.flush_migration_events(_migration_events, ctx.audit_logger, source='web')
+        _migration_events = []
 
     # ── Register API Blueprint ───────────────────────────────
     from web_api import api_bp

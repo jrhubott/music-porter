@@ -258,6 +258,8 @@ The project uses a 3-tier branch model: **feature -> dev -> main**.
 
 **Creating:** Start from dev, create branch, set `VERSION = "X.Y.Z-branch-name"` in `porter_core.py` line 50 (base version from dev, replacing `-dev` with `-branch-name`) as first commit.
 
+**Planning mode:** When planning mode is used from the `dev` branch, a feature branch must always be created before implementation begins.
+
 **Working:** Keep branch version throughout development. For long-lived branches, rebase on `origin/dev` periodically.
 
 **Small fixes:** Single-commit fixes, docs, and config changes can go directly to dev (never directly to main).
