@@ -22,7 +22,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - When asked to "work on requirements", **only** produce the SRS document — do not plan or begin implementation
 - Implementation starts only after explicit user instruction
 - These are separate phases — never combine them
-- **Always use a feature branch** when adding or changing SRS requirements — never commit SRS changes directly to main
+- **Always use a feature branch** when adding or changing SRS requirements — never commit SRS changes directly to main or dev
 
 ### SRS Document Format
 
@@ -47,6 +47,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Merge Gate
 
 - **All** Tested cells must be `[x]` before merging to main — `/merge-to-main` enforces this
+- SRS validation is **not** enforced at `/merge-to-dev` time — it is deferred to `/merge-to-main`
 - SRS files remain in `SRS/` permanently — they are **not** archived or deleted after merge
 
 ## Project Overview
@@ -243,33 +244,43 @@ djlint templates/ --lint                                     # Templates (lint)
 djlint templates/ --reformat                                 # Templates (auto-fix)
 ```
 
-All three must pass clean before merging to main.
+All three must pass clean before merging to main. Linting is recommended but not enforced at `/merge-to-dev` time.
 
-### Feature Branch Workflow
+### Branch Workflow (3-Tier)
 
-**Use feature branches** for new features, multi-commit changes, refactoring. **Commit directly to main** only for single-commit fixes, docs, config, typos.
+The project uses a 3-tier branch model: **feature -> dev -> main**.
+
+- **`main`** = stable releases only. Every commit on main is tagged with a version. Never commit directly to main.
+- **`dev`** = persistent integration branch. VERSION always has a `-dev` suffix (e.g., `"2.31.0-dev"`). Multiple features are tested together here before release.
+- **Feature branches** = short-lived, for individual features/fixes. Branch from `dev` (not main).
 
 **Branch naming:** `feature/`, `bugfix/`, `refactor/`, `docs/` prefix + lowercase-hyphenated description (2-4 words). Examples: `feature/playlist-search`, `bugfix/tag-double-prefix`.
 
-**Creating:** Start from main, create branch, set `VERSION = "X.Y.Z-branch-name"` in `porter_core.py` line 48 as first commit.
+**Creating:** Start from dev, create branch, set `VERSION = "X.Y.Z-branch-name"` in `porter_core.py` line 50 (base version from dev, replacing `-dev` with `-branch-name`) as first commit.
 
-**Working:** Keep branch version throughout dev. For long-lived branches, rebase on `origin/main` periodically.
+**Working:** Keep branch version throughout development. For long-lived branches, rebase on `origin/dev` periodically.
 
-**Pre-merge checklist:** Clean working tree, tested with `--dry-run`/`--verbose`, no debug code, up to date with main, README future features updated, all SRS `[x]`.
+**Small fixes:** Single-commit fixes, docs, and config changes can go directly to dev (never directly to main).
 
-**Merging:** Use `/merge-to-main` skill (automates version bump, tagging, cleanup).
+**Merging to dev:** Use `/merge-to-dev` skill — fast and fully automatic, no user prompts, no SRS validation, no version bump.
+
+**Merging to main:** Use `/merge-to-main` skill (must be on dev) — full validation: SRS gate, version bump, tagging, release notes, sets next `-dev` version, offers branch cleanup, pushes both main and dev.
+
+**Pre-merge checklist (for main):** Clean working tree, tested with `--dry-run`/`--verbose`, no debug code, up to date with remote, README future features updated, all SRS `[x]`.
 
 ### Version Management
 
-Version defined in `porter_core.py` line 48. Uses semantic versioning (MAJOR.MINOR.PATCH).
+Version defined in `porter_core.py` line 50. Uses semantic versioning (MAJOR.MINOR.PATCH).
 
-**On feature branches:** `VERSION = "X.Y.Z-branch-name"` (e.g., `"1.2.0-cookie-management"`). Set as first commit.
+**On `dev` branch:** `VERSION = "X.Y.Z-dev"` (e.g., `"2.31.0-dev"`). The `-dev` suffix is always present on dev.
 
-**On merge to main:** Remove branch suffix, bump version, create git tag (`git tag vX.Y.Z`). PATCH for fixes, MINOR for features, MAJOR for breaking changes.
+**On feature branches:** `VERSION = "X.Y.Z-branch-name"` (e.g., `"2.31.0-cookie-management"`). Base version comes from dev, replacing `-dev` with `-branch-name`. Set as first commit.
 
-**Release notes:** When bumping the version, prepend a new entry to the top of `release-notes.txt` (project root) summarizing the changes in that release. Format: `Version X.Y.Z:` header followed by bullet points (`• description`). This is displayed in the web About page and `./music-porter about` CLI command. Generate the release notes by reviewing all commits since the previous version tag.
+**merge-to-dev:** No version change — the feature branch version stays as-is.
 
-**Direct commits to main:** Always ask user before bumping version. Suggest appropriate level based on changes.
+**merge-to-main:** Remove `-dev` suffix, bump version (PATCH/MINOR/MAJOR), create git tag (`git tag vX.Y.Z`). After tagging, sync dev with main and set the next `X.Y.Z-dev` version on dev.
+
+**Release notes:** When bumping the version, prepend a new entry to the top of `release-notes.txt` (project root) summarizing the changes in that release. Format: `Version X.Y.Z (YYYY-MM-DD):` header followed by bullet points (`• description`). This is displayed in the web About page and `./music-porter about` CLI command. Generate the release notes by reviewing all commits since the previous version tag.
 
 **Display:** Shown in startup banner, `--version` flag, and log files.
 
@@ -404,6 +415,36 @@ All persistent state lives in `data/`: `config.yaml`, `cookies.txt`, `music-port
 ### config.yaml
 
 YAML file with `settings` (output\_type, workers), `playlists` (key, url, name), and `destinations` (name, path with `usb://` or `folder://` scheme) for saved sync destinations. Path: `data/config.yaml`. Auto-created if missing. **Precedence:** CLI flag > config.yaml > hardcoded constant.
+
+### Schema Versioning
+
+Both persistent stores have explicit version tracking with sequential migrations:
+
+- **Config:** `CONFIG_SCHEMA_VERSION` constant in `porter_core.py` (~line 63). Version stored as `schema_version` key in `config.yaml`. Migrations run in `migrate_config_schema()`.
+- **Database:** `DB_SCHEMA_VERSION` constant in `porter_core.py` (~line 64). Version stored as SQLite `PRAGMA user_version`. Migrations run in `migrate_db_schema()`.
+
+Both functions are called at startup before any DB class or ConfigManager is instantiated (in `music-porter` main(), `web_ui.py` module level, and `_handle_tasks_command()`).
+
+**When changing config.yaml structure or DB tables/columns:**
+
+1. Increment the relevant constant (`CONFIG_SCHEMA_VERSION` or `DB_SCHEMA_VERSION`)
+2. Add a new `if current < N:` migration case in the corresponding function
+3. Migrations must be idempotent and sequential (version 0→1→2→…)
+
+**Current DB schema (version 1) — 4 tables:**
+
+- `audit_entries`: id, timestamp, operation, description, params, status, duration\_s, source
+- `task_history`: id, operation, description, status, result, error, started\_at, finished\_at, source
+- `sync_keys`: key\_name, last\_sync\_at, created\_at
+- `sync_files`: id, sync\_key, file\_path, playlist, synced\_at (FK → sync\_keys)
+
+**Current config schema (version 1) — top-level keys:**
+
+- `schema_version` (integer)
+- `settings` (output\_type, workers, server\_name)
+- `output_types` (profile name → profile fields)
+- `playlists` (list of key, url, name)
+- `destinations` (list of name, path with scheme, optional sync\_key)
 
 ### USB Drive Exclusions
 

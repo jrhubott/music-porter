@@ -56,6 +56,10 @@ mp._init_third_party()
 # Ensure data directory exists and migrate legacy files
 mp.migrate_data_dir()
 
+# Apply schema migrations before any DB or config class is instantiated
+mp.migrate_db_schema()
+mp.migrate_config_schema()
+
 # Load output profiles from config at import time so OUTPUT_PROFILES is
 # populated before any request handler accesses it.
 _startup_config = mp.ConfigManager(logger=mp.Logger(verbose=False))
