@@ -719,13 +719,13 @@ class MigrationEvent:
     params: dict = field(default_factory=dict)
 
 
-def _secure_path(path):
+def _secure_path(path, logger=None):
     """Set owner-only permissions (0o700 for dirs, 0o600 for files).
 
     Protects sensitive files (config.yaml with API key, cookies.txt,
     database) from being read by other users on the system.
-    Best-effort: silently ignored on Windows, in Docker containers
-    with non-owned bind mounts, or on read-only filesystems.
+    Best-effort: logs a warning on failure (Docker bind mounts,
+    read-only filesystems) but does not crash. Skipped on Windows.
     """
     if IS_WINDOWS:
         return
@@ -735,8 +735,9 @@ def _secure_path(path):
             p.chmod(0o700)
         elif p.exists():
             p.chmod(0o600)
-    except OSError:
-        pass
+    except OSError as e:
+        if logger:
+            logger.warn(f"Could not set permissions on {path}: {e}")
 
 
 def migrate_data_dir(logger=None):
@@ -749,12 +750,12 @@ def migrate_data_dir(logger=None):
     """
     data_dir = Path(DEFAULT_DATA_DIR)
     data_dir.mkdir(exist_ok=True)
-    _secure_path(data_dir)
+    _secure_path(data_dir, logger)
 
     # Enforce owner-only permissions on all sensitive files every startup
     for sensitive_file in (DEFAULT_CONFIG_FILE, DEFAULT_COOKIES, DEFAULT_DB_FILE,
                            'data/cookies.txt.backup', 'data/config.yaml.backup'):
-        _secure_path(Path(sensitive_file))
+        _secure_path(Path(sensitive_file), logger)
 
     migrations = [
         ('config.yaml', DEFAULT_CONFIG_FILE),
