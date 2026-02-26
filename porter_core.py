@@ -1119,6 +1119,243 @@ class TaskHistoryDB:
         return entry
 
 
+class USBSyncTracker:
+    """Persistent per-USB-key file-level sync tracking using SQLite.
+
+    Follows the AuditLogger/TaskHistoryDB pattern: WAL mode, write lock,
+    lockless reads, connection-per-call for thread safety.
+    """
+
+    def __init__(self, db_path=DEFAULT_DB_FILE):
+        self._db_path = str(db_path)
+        Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._write_lock = threading.Lock()
+        self._init_db()
+
+    def _connect(self):
+        conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        return conn
+
+    def _init_db(self):
+        conn = self._connect()
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS usb_keys (
+                    key_name    TEXT PRIMARY KEY,
+                    last_sync_at REAL NOT NULL DEFAULT 0,
+                    created_at  REAL NOT NULL DEFAULT 0
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS usb_sync_files (
+                    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                    usb_key  TEXT NOT NULL,
+                    file_path TEXT NOT NULL,
+                    playlist TEXT NOT NULL,
+                    synced_at REAL NOT NULL,
+                    FOREIGN KEY (usb_key) REFERENCES usb_keys(key_name)
+                        ON DELETE CASCADE,
+                    UNIQUE(usb_key, file_path, playlist)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_usb_sync_key
+                ON usb_sync_files(usb_key)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_usb_sync_playlist
+                ON usb_sync_files(usb_key, playlist)
+            """)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def record_batch(self, usb_key, playlist, file_paths):
+        """Record synced files for a USB key and playlist.
+
+        Upserts the usb_keys row and inserts/replaces file records.
+        """
+        if not file_paths:
+            return
+        now = time.time()
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    """INSERT INTO usb_keys (key_name, last_sync_at, created_at)
+                       VALUES (?, ?, ?)
+                       ON CONFLICT(key_name) DO UPDATE SET last_sync_at = ?""",
+                    (usb_key, now, now, now),
+                )
+                conn.executemany(
+                    """INSERT INTO usb_sync_files
+                           (usb_key, file_path, playlist, synced_at)
+                       VALUES (?, ?, ?, ?)
+                       ON CONFLICT(usb_key, file_path, playlist)
+                       DO UPDATE SET synced_at = ?""",
+                    [(usb_key, fp, playlist, now, now) for fp in file_paths],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def delete_key(self, usb_key):
+        """Delete a USB key and cascade-delete all its file records."""
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "DELETE FROM usb_keys WHERE key_name = ?", (usb_key,)
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def get_keys(self):
+        """List all tracked USB keys with total synced file counts.
+
+        Returns list of dicts: {key_name, last_sync_at, created_at,
+        total_synced_files}.
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute("""
+                SELECT k.key_name, k.last_sync_at, k.created_at,
+                       COUNT(f.id) AS total_synced_files
+                FROM usb_keys k
+                LEFT JOIN usb_sync_files f ON f.usb_key = k.key_name
+                GROUP BY k.key_name
+                ORDER BY k.last_sync_at DESC
+            """).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_synced_files(self, usb_key, playlist=None):
+        """Return set of tracked file paths for a USB key.
+
+        If playlist is provided, filter to that playlist only.
+        """
+        conn = self._connect()
+        try:
+            if playlist:
+                rows = conn.execute(
+                    """SELECT file_path FROM usb_sync_files
+                       WHERE usb_key = ? AND playlist = ?""",
+                    (usb_key, playlist),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT file_path FROM usb_sync_files WHERE usb_key = ?",
+                    (usb_key,),
+                ).fetchall()
+            return {r['file_path'] for r in rows}
+        finally:
+            conn.close()
+
+    def get_sync_status(self, usb_key, export_base_dir):
+        """Diff export directory against tracked files for a USB key.
+
+        Returns USBSyncStatusResult with per-playlist breakdown.
+        """
+        export_path = Path(export_base_dir)
+        if not export_path.exists():
+            return USBSyncStatusResult(
+                usb_key=usb_key, last_sync_at=0, playlists=[],
+                total_files=0, synced_files=0, new_files=0,
+                new_playlists=0)
+
+        # Get the key's last sync time
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT last_sync_at FROM usb_keys WHERE key_name = ?",
+                (usb_key,),
+            ).fetchone()
+            last_sync = row['last_sync_at'] if row else 0
+        finally:
+            conn.close()
+
+        synced_files_by_playlist = {}
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT playlist, file_path FROM usb_sync_files
+                   WHERE usb_key = ?""",
+                (usb_key,),
+            ).fetchall()
+            for r in rows:
+                synced_files_by_playlist.setdefault(
+                    r['playlist'], set()).add(r['file_path'])
+        finally:
+            conn.close()
+
+        playlists = []
+        total_files = 0
+        total_synced = 0
+        total_new = 0
+        new_playlist_count = 0
+
+        for subdir in sorted(export_path.iterdir()):
+            if not subdir.is_dir():
+                continue
+            playlist_name = subdir.name
+            files_on_disk = {
+                f.name for f in subdir.iterdir()
+                if f.is_file() and f.suffix == '.mp3'
+            }
+            if not files_on_disk:
+                continue
+
+            tracked = synced_files_by_playlist.get(playlist_name, set())
+            synced = files_on_disk & tracked
+            new = files_on_disk - tracked
+            is_new_playlist = len(tracked) == 0
+
+            playlists.append({
+                'name': playlist_name,
+                'total_files': len(files_on_disk),
+                'synced_files': len(synced),
+                'new_files': len(new),
+                'is_new_playlist': is_new_playlist,
+            })
+            total_files += len(files_on_disk)
+            total_synced += len(synced)
+            total_new += len(new)
+            if is_new_playlist:
+                new_playlist_count += 1
+
+        return USBSyncStatusResult(
+            usb_key=usb_key, last_sync_at=last_sync,
+            playlists=playlists, total_files=total_files,
+            synced_files=total_synced, new_files=total_new,
+            new_playlists=new_playlist_count)
+
+    def get_all_keys_summary(self, export_base_dir):
+        """Summary for all tracked USB keys.
+
+        Returns list of dicts: {key_name, last_sync_at, total_files,
+        synced_files, new_files, new_playlists}.
+        """
+        keys = self.get_keys()
+        results = []
+        for key_info in keys:
+            status = self.get_sync_status(
+                key_info['key_name'], export_base_dir)
+            results.append({
+                'key_name': key_info['key_name'],
+                'last_sync_at': key_info['last_sync_at'],
+                'total_files': status.total_files,
+                'synced_files': status.synced_files,
+                'new_files': status.new_files,
+                'new_playlists': status.new_playlists,
+            })
+        return results
+
+
 # ══════════════════════════════════════════════════════════════════
 # Section 3: Configuration Management
 # ══════════════════════════════════════════════════════════════════
@@ -2199,6 +2436,21 @@ class USBSyncResult:
     files_copied: int = 0
     files_skipped: int = 0
     files_failed: int = 0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class USBSyncStatusResult:
+    """Result of USBSyncTracker.get_sync_status()."""
+    usb_key: str
+    last_sync_at: float
+    playlists: list = field(default_factory=list)
+    total_files: int = 0
+    synced_files: int = 0
+    new_files: int = 0
+    new_playlists: int = 0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -4362,12 +4614,13 @@ class USBManager:
     """Manages USB drive detection and file copying."""
 
     def __init__(self, logger=None, excluded_volumes=None, prompt_handler=None,
-                 display_handler=None, cancel_event=None):
+                 display_handler=None, cancel_event=None, sync_tracker=None):
         self.logger = logger or Logger()
         self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
         self.display_handler = display_handler or NullDisplayHandler()
         self.cancel_event = cancel_event
         self.excluded_volumes = excluded_volumes or EXCLUDED_USB_VOLUMES
+        self.sync_tracker = sync_tracker
 
     def find_usb_drives(self):
         """
@@ -4644,6 +4897,28 @@ class USBManager:
         # Log summary
         self.logger.ok("Sync complete")
         duration = time.time() - start_time
+
+        # Record synced files in tracker (all files that exist on USB)
+        if self.sync_tracker and not dry_run and stats.files_failed == 0:
+            files_by_playlist = {}
+            for src_file in mp3_files:
+                if source_path.is_dir():
+                    rel = src_file.relative_to(source_path)
+                    parts = rel.parts
+                    if len(parts) > 1:
+                        playlist_name = parts[0]
+                        file_name = str(Path(*parts[1:]))
+                    else:
+                        playlist_name = source_path.name
+                        file_name = parts[0]
+                else:
+                    playlist_name = source_path.parent.name
+                    file_name = src_file.name
+                files_by_playlist.setdefault(
+                    playlist_name, []).append(file_name)
+            for pl_name, file_list in files_by_playlist.items():
+                self.sync_tracker.record_batch(volume, pl_name, file_list)
+
         # Prompt to eject USB drive after successful copy
         if not dry_run:
             self._prompt_and_eject_usb(volume)
@@ -6303,13 +6578,15 @@ class PipelineOrchestrator:
     def __init__(self, logger=None, deps=None, config=None, quality_preset='lossless',
                  cookie_path=DEFAULT_COOKIES, workers=None, embed_cover_art=True,
                  output_profile=None, prompt_handler=None, display_handler=None,
-                 cancel_event=None, audit_logger=None, audit_source='cli'):
+                 cancel_event=None, audit_logger=None, audit_source='cli',
+                 sync_tracker=None):
         self.logger = logger or Logger()
         self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
         self.display_handler = display_handler or NullDisplayHandler()
         self.cancel_event = cancel_event
         self.audit_logger = audit_logger
         self._audit_source = audit_source
+        self.sync_tracker = sync_tracker
         self.deps = deps or DependencyChecker(self.logger)
         self.config = config or ConfigManager(logger=self.logger)
         self.stats = PipelineStatistics()
@@ -6470,7 +6747,8 @@ class PipelineOrchestrator:
             self.logger.info("\n=== STAGE 4: Copy to USB ===")
             usb_manager = USBManager(self.logger, prompt_handler=self.prompt_handler,
                                      display_handler=self.display_handler,
-                                     cancel_event=self.cancel_event)
+                                     cancel_event=self.cancel_event,
+                                     sync_tracker=self.sync_tracker)
             usb_result = usb_manager.sync_to_usb(
                 export_dir,
                 usb_dir=usb_dir,
