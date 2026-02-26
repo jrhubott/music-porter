@@ -3,7 +3,7 @@ name: merge-to-dev
 description: Merge the current feature branch into dev — fast and fully automatic
 model: opus
 disable-model-invocation: true
-allowed-tools: Bash, Read, Grep, Glob
+allowed-tools: Bash, Read, Edit, Grep, Glob
 ---
 
 Merge the current feature branch into dev. This is fast and fully automatic — no user prompts, no questions asked.
@@ -32,21 +32,28 @@ Merge the current feature branch into dev. This is fast and fully automatic — 
      - List the conflicted files and report them
      - Stop — do NOT attempt to resolve conflicts
 
-4. **Push to remote**
+4. **Restore dev version suffix**
+   - Read VERSION from `porter_core.py` line 50
+   - Extract the base version (the part before the `-branch-name` suffix)
+   - Edit `porter_core.py` line 50 to set `VERSION = "X.Y.Z-dev"` (replace the branch-name suffix with `-dev`)
+   - Stage and commit: `Restore dev version suffix`
+   - Do NOT include Co-Authored-By lines
+
+5. **Push to remote**
    - Run `git push origin dev`
    - If push fails, warn and stop — do NOT force push
 
-5. **Return to feature branch**
+6. **Return to feature branch**
    - `git checkout <branch-name>` (return to the original feature branch)
    - Do NOT delete the feature branch — cleanup happens at merge-to-main time
 
-6. **Report**
+7. **Report**
    - Show `git log dev --oneline -5` to confirm the merge
    - Report success
 
 ## What this skill does NOT do
 
-- No version bump (version stays as-is on both branches)
+- No version bump (only restores the `-dev` suffix on dev)
 - No SRS validation (deferred to merge-to-main)
 - No README checks
 - No linting enforcement
