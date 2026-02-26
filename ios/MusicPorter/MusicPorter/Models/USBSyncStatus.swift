@@ -1,7 +1,7 @@
 import Foundation
 
-/// Summary of a tracked USB key with sync counts.
-struct USBKeySummary: Identifiable, Codable {
+/// Summary of a tracked sync key with sync counts.
+struct SyncKeySummary: Identifiable, Codable {
     let keyName: String
     let lastSyncAt: Double
     let totalFiles: Int
@@ -25,8 +25,11 @@ struct USBKeySummary: Identifiable, Codable {
     }
 }
 
-/// Per-playlist sync info within a USB key detail.
-struct USBPlaylistSyncInfo: Identifiable, Codable {
+/// Backwards compatibility alias.
+typealias USBKeySummary = SyncKeySummary
+
+/// Per-playlist sync info within a sync key detail.
+struct SyncPlaylistInfo: Identifiable, Codable {
     let name: String
     let totalFiles: Int
     let syncedFiles: Int
@@ -44,11 +47,14 @@ struct USBPlaylistSyncInfo: Identifiable, Codable {
     }
 }
 
-/// Full sync status detail for one USB key.
-struct USBSyncStatusDetail: Codable {
+/// Backwards compatibility alias.
+typealias USBPlaylistSyncInfo = SyncPlaylistInfo
+
+/// Full sync status detail for one sync key.
+struct SyncStatusDetail: Codable {
     let usbKey: String
     let lastSyncAt: Double
-    let playlists: [USBPlaylistSyncInfo]
+    let playlists: [SyncPlaylistInfo]
     let totalFiles: Int
     let syncedFiles: Int
     let newFiles: Int
@@ -69,8 +75,11 @@ struct USBSyncStatusDetail: Codable {
     }
 }
 
-/// Result of pruning stale tracking records for a USB key.
-struct USBPruneResult: Codable {
+/// Backwards compatibility alias.
+typealias USBSyncStatusDetail = SyncStatusDetail
+
+/// Result of pruning stale tracking records.
+struct SyncPruneResult: Codable {
     let prunedCount: Int
     let playlistsAffected: [String]
 
@@ -78,4 +87,23 @@ struct USBPruneResult: Codable {
         case prunedCount = "pruned_count"
         case playlistsAffected = "playlists_affected"
     }
+}
+
+/// Backwards compatibility alias.
+typealias USBPruneResult = SyncPruneResult
+
+/// A saved sync destination.
+struct SyncDestination: Identifiable, Codable {
+    let name: String
+    let path: String
+    let type: String
+    let available: Bool
+
+    var id: String { name }
+}
+
+/// Response from GET /api/sync/destinations.
+struct SyncDestinationsResponse: Codable {
+    let saved: [SyncDestination]
+    let usb: [SyncDestination]
 }

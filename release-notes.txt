@@ -1,3 +1,25 @@
+Version 2.27.0:
+• Add sync action buttons to sync keys and playlist breakdown tables (web and iOS)
+• Web: sync buttons in keys table and playlist detail rows with availability-based enable/disable
+• iOS: swipe-to-sync on key and playlist rows using OperationViewModel with ProgressPanel
+• Dashboard sync status labels and icons updated for destination types (USB vs saved)
+• Conditional sync key icons on sync page based on destination type
+• Auto-save custom paths as sync destinations for reuse (CLI interactive, CLI --dest, web API)
+• Remove dead sync_status.html template (replaced by unified sync.html)
+
+Version 2.26.0:
+• Generalize USB sync into unified sync destinations: saved named paths, USB drives, and custom paths
+• Add SyncDestination dataclass and ConfigManager CRUD (add/remove/get destinations in config.yaml)
+• Rename USBManager to SyncManager with backwards-compatible aliases
+• New unified `sync` CLI subcommand with --dest, --list-destinations, --add-dest, --remove-dest, --status flags
+• Hidden aliases: sync-usb and sync-status preserved for backwards compatibility
+• Pipeline --sync-dest flag for syncing to named destinations after processing
+• 10 new /api/sync/* REST API routes for destinations, sync execution, status, and key management
+• Combined web UI /sync page replacing separate USB Sync and Sync Status pages
+• Pipeline web template updated with sync destination picker
+• iOS companion app updated: generalized model types, new sync API methods, updated labels
+• All existing /api/usb/* routes and sync-usb CLI preserved for backwards compatibility
+
 Version 2.25.0:
 • Add USB sync tracking: persistent SQLite-backed records of which files have been synced to which USB drives
 • New USBSyncTracker class with batch recording, per-key and per-playlist status, file-level sync maps

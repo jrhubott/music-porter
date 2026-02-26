@@ -2,15 +2,22 @@ import SwiftUI
 
 struct SyncStatusView: View {
     @Environment(AppState.self) private var appState
-    @State private var keys: [USBKeySummary] = []
-    @State private var detail: USBSyncStatusDetail?
+    @State private var keys: [SyncKeySummary] = []
+    @State private var detail: SyncStatusDetail?
     @State private var selectedKey: String?
+    @State private var destinations: [SyncDestination] = []
+    @State private var usbKeyNames: Set<String> = []
+    @State private var vm = OperationViewModel()
+    @State private var profile: String = ""
+    @State private var usbDir: String = ""
     @State private var isLoading = false
     @State private var error: String?
     @State private var showDeleteConfirm = false
     @State private var keyToDelete: String?
     @State private var showDeletePlaylistConfirm = false
     @State private var playlistToDelete: (String, String)?
+    @State private var showDeleteDestConfirm = false
+    @State private var destToDelete: String?
 
     var body: some View {
         List {
@@ -19,9 +26,9 @@ struct SyncStatusView: View {
                     .frame(maxWidth: .infinity)
             } else if keys.isEmpty {
                 ContentUnavailableView(
-                    "No USB Sync History",
-                    systemImage: "externaldrive",
-                    description: Text("Sync files to a USB drive to start tracking.")
+                    "No Sync History",
+                    systemImage: "arrow.left.arrow.right",
+                    description: Text("Sync files to a destination to start tracking.")
                 )
             } else {
                 keysSection
@@ -30,18 +37,26 @@ struct SyncStatusView: View {
                 }
             }
 
+            if !destinations.isEmpty {
+                destinationsSection
+            }
+
             if let error {
                 Section {
                     Label(error, systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.red)
                 }
             }
+
+            if vm.isRunning || !vm.logMessages.isEmpty {
+                ProgressPanel(vm: vm)
+            }
         }
-        .navigationTitle("USB Sync Status")
+        .navigationTitle("Sync Status")
         .refreshable { await load() }
         .task { await load() }
         .confirmationDialog(
-            "Delete USB Key",
+            "Delete Sync Key",
             isPresented: $showDeleteConfirm,
             titleVisibility: .visible
         ) {
@@ -52,6 +67,19 @@ struct SyncStatusView: View {
             }
         } message: {
             Text("Delete all sync tracking data for \(keyToDelete ?? "")?")
+        }
+        .confirmationDialog(
+            "Remove Destination",
+            isPresented: $showDeleteDestConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) {
+                if let name = destToDelete {
+                    Task { await deleteDestination(name) }
+                }
+            }
+        } message: {
+            Text("Remove saved destination \"\(destToDelete ?? "")\"?")
         }
         .confirmationDialog(
             "Delete Playlist Tracking",
@@ -73,7 +101,7 @@ struct SyncStatusView: View {
     // MARK: - Keys List
 
     private var keysSection: some View {
-        Section("USB Keys") {
+        Section("Sync Keys") {
             ForEach(keys) { key in
                 Button {
                     selectedKey = key.keyName
@@ -82,7 +110,7 @@ struct SyncStatusView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
-                                Image(systemName: "externaldrive.connected.to.line.below")
+                                Image(systemName: usbKeyNames.contains(key.keyName) ? "externaldrive.connected.to.line.below" : "folder.fill")
                                     .foregroundStyle(.secondary)
                                 Text(key.keyName)
                                     .font(.subheadline.weight(.medium))
@@ -143,13 +171,22 @@ struct SyncStatusView: View {
                         Label("Delete", systemImage: "trash")
                     }
                 }
+                .swipeActions(edge: .leading) {
+                    Button {
+                        Task { await syncKey(key.keyName) }
+                    } label: {
+                        Label("Sync", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .tint(.blue)
+                    .disabled(!isKeyAvailable(key.keyName) || vm.isRunning)
+                }
             }
         }
     }
 
     // MARK: - Playlist Detail
 
-    private func detailSection(_ detail: USBSyncStatusDetail) -> some View {
+    private func detailSection(_ detail: SyncStatusDetail) -> some View {
         Section("Playlists: \(detail.usbKey)") {
             Button {
                 Task { await pruneKey(detail.usbKey) }
@@ -201,6 +238,51 @@ struct SyncStatusView: View {
                             Label("Delete", systemImage: "trash")
                         }
                     }
+                    .swipeActions(edge: .leading) {
+                        Button {
+                            Task { await syncPlaylist(detail.usbKey, playlist: playlist.name) }
+                        } label: {
+                            Label("Sync", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        .tint(.blue)
+                        .disabled(!isKeyAvailable(detail.usbKey) || vm.isRunning)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Saved Destinations
+
+    private var destinationsSection: some View {
+        Section("Saved Destinations") {
+            ForEach(destinations) { dest in
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(dest.name)
+                            .font(.subheadline.weight(.medium))
+                        Text(dest.path)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if dest.available {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    } else {
+                        Text("unavailable")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        destToDelete = dest.name
+                        showDeleteDestConfirm = true
+                    } label: {
+                        Label("Remove", systemImage: "trash")
+                    }
                 }
             }
         }
@@ -212,7 +294,24 @@ struct SyncStatusView: View {
         isLoading = true
         error = nil
         do {
-            keys = try await appState.apiClient.getUSBSyncStatus()
+            async let k = appState.apiClient.getSyncStatus()
+            async let d = appState.apiClient.getSyncDestinations()
+            async let st = appState.apiClient.getStatus()
+            async let se = appState.apiClient.getSettings()
+            keys = try await k
+            let destResponse = try? await d
+            destinations = destResponse?.saved ?? []
+            usbKeyNames = Set((destResponse?.usb ?? []).map { $0.name })
+            if let status = try? await st {
+                profile = status.profile
+            }
+            if let settings = try? await se {
+                if case .string(let dir) = settings.settings["usb_dir"] {
+                    usbDir = dir
+                } else {
+                    usbDir = "RZR/Music"
+                }
+            }
         } catch {
             self.error = error.localizedDescription
         }
@@ -221,7 +320,7 @@ struct SyncStatusView: View {
 
     private func loadDetail(_ key: String) async {
         do {
-            detail = try await appState.apiClient.getUSBSyncStatusDetail(key: key)
+            detail = try await appState.apiClient.getSyncStatusDetail(key: key)
         } catch {
             self.error = error.localizedDescription
         }
@@ -229,7 +328,7 @@ struct SyncStatusView: View {
 
     private func deleteKey(_ key: String) async {
         do {
-            try await appState.apiClient.deleteUSBKey(key: key)
+            try await appState.apiClient.deleteSyncKey(key: key)
             if selectedKey == key {
                 selectedKey = nil
                 detail = nil
@@ -242,8 +341,17 @@ struct SyncStatusView: View {
 
     private func deletePlaylist(_ key: String, _ playlist: String) async {
         do {
-            _ = try await appState.apiClient.deleteUSBPlaylist(key: key, playlist: playlist)
+            _ = try await appState.apiClient.deleteSyncPlaylist(key: key, playlist: playlist)
             await loadDetail(key)
+            await load()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func deleteDestination(_ name: String) async {
+        do {
+            try await appState.apiClient.deleteSyncDestination(name: name)
             await load()
         } catch {
             self.error = error.localizedDescription
@@ -252,11 +360,48 @@ struct SyncStatusView: View {
 
     private func pruneKey(_ key: String) async {
         do {
-            _ = try await appState.apiClient.pruneUSBKey(key: key)
+            _ = try await appState.apiClient.pruneSyncKey(key: key)
             await loadDetail(key)
             await load()
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    // MARK: - Sync Availability
+
+    private func isKeyAvailable(_ keyName: String) -> Bool {
+        if usbKeyNames.contains(keyName) { return true }
+        return destinations.first(where: { $0.name == keyName })?.available == true
+    }
+
+    private func destType(for keyName: String) -> String {
+        usbKeyNames.contains(keyName) ? "usb" : "saved"
+    }
+
+    // MARK: - Sync Actions
+
+    private func syncKey(_ keyName: String) async {
+        await vm.run(api: appState.apiClient) {
+            try await appState.apiClient.syncToDestination(
+                sourceDir: "export/\(profile)",
+                type: destType(for: keyName),
+                destination: keyName,
+                usbDir: destType(for: keyName) == "usb" ? usbDir : nil
+            )
+        }
+        await load()
+    }
+
+    private func syncPlaylist(_ keyName: String, playlist: String) async {
+        await vm.run(api: appState.apiClient) {
+            try await appState.apiClient.syncToDestination(
+                sourceDir: "export/\(profile)/\(playlist)",
+                type: destType(for: keyName),
+                destination: keyName,
+                usbDir: destType(for: keyName) == "usb" ? usbDir : nil
+            )
+        }
+        await load()
     }
 }

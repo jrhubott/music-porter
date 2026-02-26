@@ -62,13 +62,13 @@ The system follows an integrated pipeline:
 1. **Download** → Downloads Apple Music playlists as M4A files via gamdl
 2. **Convert** → Converts M4A to MP3 using ffmpeg (libmp3lame, default: lossless 320kbps CBR)
 3. **Tag** → Updates and preserves tags with TXXX frame protection
-4. **Sync** → Optionally copies to USB drives
+4. **Sync** → Optionally syncs to destinations (USB drives, saved paths, custom paths)
 
 ### Key Scripts
 
 **music-porter** (python) - **RECOMMENDED**
 - Unified tool combining all functionality in a single command
-- Professional subcommand architecture: `pipeline`, `download`, `convert`, `tag`, `restore`, `reset`, `delete`, `sync-usb`, `cover-art`, `summary`, `list`, `config`, `web`, `server`, `about`, `tasks`
+- Professional subcommand architecture: `pipeline`, `download`, `convert`, `tag`, `restore`, `reset`, `delete`, `sync`, `cover-art`, `summary`, `list`, `config`, `web`, `server`, `about`, `tasks`
 - Interactive menu for easy operation
 - Comprehensive error handling and statistics
 - Full pipeline orchestration (download → convert → tag → USB)
@@ -128,6 +128,7 @@ Presets via `--preset` flag: `lossless` (default, CBR 320kbps), `high` (VBR q2, 
 ./music-porter pipeline --auto                      # All playlists
 ./music-porter pipeline --playlist X --preset high  # Quality preset
 ./music-porter pipeline --playlist X --copy-to-usb  # Include USB sync
+./music-porter pipeline --playlist X --sync-dest nas-backup  # Sync to saved destination
 
 # Download
 ./music-porter download --playlist "Pop_Workout"
@@ -150,9 +151,15 @@ Presets via `--preset` flag: `lossless` (default, CBR 320kbps), `high` (VBR q2, 
 ./music-porter delete Pop_Workout --export-only      # Only export MP3 files
 ./music-porter delete Pop_Workout --remove-config    # Also remove from config.yaml
 
-# USB
-./music-porter sync-usb export/ride-command/Pop_Workout
-./music-porter sync-usb --usb-dir "RZR/Music"
+# Sync (destinations)
+./music-porter sync                                          # Interactive destination picker
+./music-porter sync --dest nas-backup                        # Sync to saved destination
+./music-porter sync --dest /path/to/folder                   # Sync to path
+./music-porter sync --list-destinations                      # List saved destinations
+./music-porter sync --add-dest NAME PATH                     # Save a destination
+./music-porter sync --remove-dest NAME                       # Remove a saved destination
+./music-porter sync --status                                 # Show sync tracking
+./music-porter sync-usb export/ride-command/Pop_Workout      # Legacy USB sync
 
 # Summary
 ./music-porter summary              # Default (balanced)
@@ -304,7 +311,7 @@ The web dashboard (`web_ui.py`) provides a browser-based interface with full fea
 
 ### Pages & Templates
 
-12 Jinja2 templates in `templates/` using Bootstrap 5.3.3 dark theme (CDN from jsDelivr). `base.html` provides shared layout (sidebar, log panel, SSE handler). Pages: `/` (dashboard), `/playlists`, `/pipeline`, `/convert`, `/tags`, `/cover-art`, `/usb`, `/settings`, `/operations`, `/audit`, `/about`.
+12 Jinja2 templates in `templates/` using Bootstrap 5.3.3 dark theme (CDN from jsDelivr). `base.html` provides shared layout (sidebar, log panel, SSE handler). Pages: `/` (dashboard), `/playlists`, `/pipeline`, `/convert`, `/tags`, `/cover-art`, `/sync`, `/settings`, `/operations`, `/audit`, `/about`.
 
 ### API Endpoints (~42)
 
@@ -321,6 +328,7 @@ All API routes are defined in `web_api.py` as a Flask Blueprint.
 - **Operations:** `POST /api/pipeline/run`, `/api/convert/run`, `/api/convert/batch`, `/api/tags/update`, `/api/tags/restore`, `/api/tags/reset`, `/api/cover-art/<action>`, `/api/usb/sync`
 - **Files:** `GET /api/files/<key>`, `/<key>/<filename>`, `/<key>/<filename>/artwork`, `/<key>/download-all`
 - **USB:** `GET /api/usb/drives`
+- **Sync:** `GET /api/sync/destinations`, `POST /api/sync/destinations`, `DELETE /api/sync/destinations/<name>`, `POST /api/sync/run`, `GET /api/sync/status`, `GET /api/sync/status/<key>`, `GET|DELETE /api/sync/keys/<key>`, `DELETE /api/sync/keys/<key>/playlists/<playlist>`, `POST /api/sync/keys/<key>/prune`
 - **Tasks:** `GET /api/tasks`, `/api/tasks/<id>`, `POST /api/tasks/<id>/cancel`, `GET /api/stream/<id>` (SSE), `GET /api/tasks/history`, `GET /api/tasks/stats`, `POST /api/tasks/clear`
 - **iOS Pairing:** `GET /api/pairing-qr`, `GET /api/pairing-info`
 - **Audit:** `GET /api/audit`, `GET /api/audit/stats`, `POST /api/audit/clear`
@@ -397,7 +405,7 @@ All persistent state lives in `data/`: `config.yaml`, `cookies.txt`, `music-port
 
 ### config.yaml
 
-YAML file with `settings` (output\_type, usb\_dir, workers) and `playlists` (key, url, name). Path: `data/config.yaml`. Auto-created if missing. **Precedence:** CLI flag > config.yaml > hardcoded constant.
+YAML file with `settings` (output\_type, usb\_dir, workers), `playlists` (key, url, name), and `destinations` (name, path) for saved sync destinations. Path: `data/config.yaml`. Auto-created if missing. **Precedence:** CLI flag > config.yaml > hardcoded constant.
 
 ### USB Drive Exclusions
 
@@ -407,7 +415,7 @@ Constant `EXCLUDED_USB_VOLUMES` in `music-porter`: `["Macintosh HD", "Macintosh 
 
 ### Key Classes in `porter_core.py`
 
-24 classes organized by concern: `Logger`, `PlaylistConfig`, `ConfigManager`, `DependencyChecker`, `TagStatistics`, `TaggerManager`, `ConversionStatistics`, `Converter`, `Downloader`, `CookieStatus`, `CookieManager`, `USBManager`, `PlaylistSummary`, `LibrarySummaryStatistics`, `SummaryManager`, `DataManager`, `PipelineStatistics`, `PipelineOrchestrator`, `InteractiveMenu`, `PlaylistResult`, `AggregateStatistics`, `CoverArtManager`, `AuditLogger`, `TaskHistoryDB`.
+25 classes organized by concern: `Logger`, `PlaylistConfig`, `SyncDestination`, `ConfigManager`, `DependencyChecker`, `TagStatistics`, `TaggerManager`, `ConversionStatistics`, `Converter`, `Downloader`, `CookieStatus`, `CookieManager`, `SyncManager` (alias: `USBManager`), `PlaylistSummary`, `LibrarySummaryStatistics`, `SummaryManager`, `DataManager`, `PipelineStatistics`, `PipelineOrchestrator`, `InteractiveMenu`, `PlaylistResult`, `AggregateStatistics`, `CoverArtManager`, `AuditLogger`, `TaskHistoryDB`.
 
 ### ConfigManager
 
@@ -423,7 +431,7 @@ Constant `EXCLUDED_USB_VOLUMES` in `music-porter`: `["Macintosh HD", "Macintosh 
 
 ### Interactive Menu
 
-- Numbered playlist selection (1-N) + letter actions: A (all), U (URL), C (USB), S (summary), R (resize art), P (profile), D (delete data), X (exit)
+- Numbered playlist selection (1-N) + letter actions: A (all), U (URL), C (sync to destination), S (summary), R (resize art), P (profile), D (delete data), X (exit)
 - Returns to menu after each operation; saves new URLs to config
 
 ### Cover Art (CoverArtManager)

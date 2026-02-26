@@ -9,7 +9,7 @@ A powerful music playlist management and conversion tool that downloads Apple Mu
 - **Multi-threaded conversion** with configurable parallel workers (`--workers N`)
 - **Progress bars** for all operations (convert, tag, restore, download, USB sync)
 - **Preserve metadata** with TXXX frame protection for original tags
-- **USB sync** with automatic drive detection and intelligent copying
+- **Sync destinations** with USB auto-detection, saved destinations, and custom paths
 - **Pipeline orchestration** for automated multi-stage workflows
 - **Interactive menu** for user-friendly operation (includes profile switching via `P`)
 - **YAML configuration** with global settings and CLI flag overrides
@@ -135,6 +135,7 @@ MP3 conversion supports configurable quality presets to balance file size and au
 ./music-porter pipeline --url "https://music.apple.com/..."
 ./music-porter pipeline --auto  # Process all playlists
 ./music-porter pipeline --playlist 1 --copy-to-usb  # Include USB sync
+./music-porter pipeline --playlist 1 --sync-dest nas-backup  # Sync to saved destination
 ```
 
 ### Individual Commands
@@ -175,11 +176,15 @@ MP3 conversion supports configurable quality presets to balance file size and au
 ./music-porter reset music/Pop_Workout export/ride-command/Pop_Workout
 ```
 
-**USB Sync** - Copy to USB drive
+**Sync** - Sync to destinations (USB drives, saved paths, custom paths)
 
 ```bash
-./music-porter sync-usb export/ride-command/Pop_Workout
-./music-porter sync-usb  # Copy entire export directory
+./music-porter sync                                      # Interactive destination picker
+./music-porter sync --dest nas-backup                    # Sync to saved destination
+./music-porter sync --dest /path/to/folder               # Sync to custom path
+./music-porter sync --list-destinations                  # List saved destinations
+./music-porter sync --add-dest NAME PATH                 # Save a new destination
+./music-porter sync-usb export/ride-command/Pop_Workout  # Legacy USB sync
 ```
 
 **Cover Art** - Manage embedded album artwork
@@ -431,7 +436,7 @@ The tool uses a "hard gate" protection system for original metadata:
 6. **Playlist statistics** - Detailed analytics (genre distribution, duration, etc.)
 7. **Tag history** - Track changes to tags over time
 8. **Backup and restore** - Backup entire library with metadata
-9. **Cloud storage sync** - Sync to Dropbox, Google Drive, etc.
+9. ~~**Cloud storage sync** - Sync to Dropbox, Google Drive, etc.~~ *(partially addressed in v2.26.0 — sync destinations support any mounted path including NAS/network shares)*
 10. ~~**Mobile app** - iOS/Android app for remote control~~ *(implemented in v2.9.0)*
 11. **Scheduling** - Automatic periodic syncing on schedule
 12. **Notification system** - Email/SMS alerts for completed operations
@@ -442,7 +447,7 @@ The tool uses a "hard gate" protection system for original metadata:
 
 ## Version
 
-Current version: **v2.25.0**
+Current version: **v2.27.0**
 
 ## License
 

@@ -76,12 +76,15 @@
           <input class="form-check-input" type="checkbox" id="pipelineVerbose">
           <label class="form-check-label" for="pipelineVerbose">Verbose</label>
         </div>
-        {% if not server_mode %}
         <div class="form-check">
-          <input class="form-check-input" type="checkbox" id="pipelineUsb">
-          <label class="form-check-label" for="pipelineUsb">Copy to USB</label>
+          <input class="form-check-input" type="checkbox" id="pipelineSync" onchange="toggleSyncDest()">
+          <label class="form-check-label" for="pipelineSync">Sync after processing</label>
         </div>
-        {% endif %}
+        <div class="d-none ms-4" id="pipelineSyncDest">
+          <select class="form-select form-select-sm" id="pipelineSyncDestSelect" style="width: auto; display: inline-block;">
+            <option value="">Loading...</option>
+          </select>
+        </div>
       </div>
 
       <button type="submit" class="btn btn-primary mt-3"><i class="bi bi-play-fill"></i> Run Pipeline</button>
@@ -170,6 +173,25 @@ fetch('/api/playlists').then(r=>r.json()).then(playlists => {
   if (playlists.length === 0) sel.innerHTML = '<option value="">No playlists configured</option>';
 });
 
+// Sync destination toggle and loading
+function toggleSyncDest() {
+  const show = document.getElementById('pipelineSync').checked;
+  document.getElementById('pipelineSyncDest').classList.toggle('d-none', !show);
+  if (show && document.getElementById('pipelineSyncDestSelect').options.length <= 1) {
+    loadPipelineSyncDests();
+  }
+}
+
+function loadPipelineSyncDests() {
+  fetch('/api/sync/destinations').then(r => r.json()).then(data => {
+    const sel = document.getElementById('pipelineSyncDestSelect');
+    let opts = '';
+    if (data.usb) data.usb.forEach(d => { opts += `<option value="usb:${d.name}">USB: ${d.name}</option>`; });
+    if (data.saved) data.saved.forEach(d => { opts += `<option value="saved:${d.name}">Saved: ${d.name} (${d.path})</option>`; });
+    sel.innerHTML = opts || '<option value="">No destinations</option>';
+  });
+}
+
 // Toggle mode fields
 document.getElementById('pipelineMode').addEventListener('change', function() {
   const mode = this.value;
@@ -184,8 +206,18 @@ document.getElementById('pipelineForm').addEventListener('submit', function(e) {
   const data = {
     dry_run: document.getElementById('pipelineDryRun').checked,
     verbose: document.getElementById('pipelineVerbose').checked,
-    copy_to_usb: document.getElementById('pipelineUsb') ? document.getElementById('pipelineUsb').checked : false,
   };
+  // Sync destination
+  const syncChecked = document.getElementById('pipelineSync').checked;
+  if (syncChecked) {
+    const syncSel = document.getElementById('pipelineSyncDestSelect');
+    const syncVal = syncSel.value;
+    if (syncVal) {
+      const [sType, sName] = syncVal.split(':', 2);
+      data.sync_type = sType;
+      data.sync_destination = sName;
+    }
+  }
   const preset = document.getElementById('pipelinePreset').value;
   if (preset) data.preset = preset;
   const dirStructure = document.getElementById('pipelineDirStructure').value;
@@ -221,8 +253,18 @@ document.getElementById('runAllBtn').addEventListener('click', function() {
     auto: true,
     dry_run: document.getElementById('pipelineDryRun').checked,
     verbose: document.getElementById('pipelineVerbose').checked,
-    copy_to_usb: document.getElementById('pipelineUsb') ? document.getElementById('pipelineUsb').checked : false,
   };
+  // Sync destination
+  const syncChecked2 = document.getElementById('pipelineSync').checked;
+  if (syncChecked2) {
+    const syncSel2 = document.getElementById('pipelineSyncDestSelect');
+    const syncVal2 = syncSel2.value;
+    if (syncVal2) {
+      const [sType2, sName2] = syncVal2.split(':', 2);
+      data.sync_type = sType2;
+      data.sync_destination = sName2;
+    }
+  }
   const preset = document.getElementById('pipelinePreset').value;
   if (preset) data.preset = preset;
   const dirStructure = document.getElementById('pipelineDirStructure').value;
@@ -286,14 +328,14 @@ function renderSingleSummary(r) {
     {name: 'Download', icon: 'bi-cloud-download', data: r.download_result, key: 'download'},
     {name: 'Convert', icon: 'bi-arrow-repeat', data: r.conversion_result, key: 'convert'},
     {name: 'Tag', icon: 'bi-tag', data: r.tag_result, key: 'tag'},
-    {name: 'USB Sync', icon: 'bi-usb-drive', data: r.usb_result, key: 'usb-sync'},
+    {name: 'Sync', icon: 'bi-arrow-left-right', data: r.usb_result, key: 'sync'},
   ];
 
   stages.forEach(function(stage) {
     const completed = (r.stages_completed || []).indexOf(stage.key) >= 0;
     const failed = (r.stages_failed || []).indexOf(stage.key) >= 0;
     const skipped = !completed && !failed && !stage.data;
-    if (skipped && stage.key === 'usb-sync') return; // hide USB if not used
+    if (skipped && stage.key === 'sync') return; // hide sync if not used
 
     let body = '';
     if (stage.key === 'download' && stage.data) {
@@ -327,7 +369,7 @@ function renderSingleSummary(r) {
       body += summaryRow('Artists updated', stage.data.artist_updated);
       body += summaryRow('Originals stored', (stage.data.title_stored || 0) + (stage.data.artist_stored || 0) + (stage.data.album_stored || 0));
       body += summaryRow('Duration', formatDuration(stage.data.duration));
-    } else if (stage.key === 'usb-sync' && stage.data) {
+    } else if (stage.key === 'sync' && stage.data) {
       body += summaryRow('Files found', stage.data.files_found);
       body += summaryRow('Copied', stage.data.files_copied);
       body += summaryRow('Skipped', stage.data.files_skipped);
@@ -429,7 +471,7 @@ function renderAggregateSummary(r) {
     ]},
   ];
   if (cum.files_on_usb) {
-    sections.push({name: 'USB', icon: 'bi-usb-drive', rows: [
+    sections.push({name: 'Sync', icon: 'bi-arrow-left-right', rows: [
       ['Files on USB', cum.files_on_usb],
     ]});
   }

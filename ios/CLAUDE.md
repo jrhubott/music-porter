@@ -15,7 +15,7 @@ Native SwiftUI app connecting to music-porter server over local network. Provide
 
 ## Architecture
 
-### Models (8 files)
+### Models (9 files)
 
 Codable structs matching server JSON responses:
 
@@ -27,12 +27,13 @@ Codable structs matching server JSON responses:
 - `FileListResponse` — Playlist key, profile, fileCount, files array
 - `SSEEvent` — Enum: `.log(level, message)`, `.progress(current, total, percent, stage)`, `.heartbeat`, `.done(status, result, error)`
 - `TaskInfo` — Task id, operation, description, status, result, error, elapsed; computed `isRunning`, `isCompleted`, `isFailed`
+- `USBSyncStatus` — `SyncKeySummary`, `SyncPlaylistInfo`, `SyncStatusDetail`, `SyncPruneResult`, `SyncDestination`, `SyncDestinationsResponse` (with backwards-compat typealiases for USB-prefixed names)
 
 ### Services (7 files)
 
 Network and platform services:
 
-- `APIClient` — `@MainActor @Observable` REST client; all endpoint methods (status, playlists CRUD, pipeline/convert/tag operations, file downloads, settings); `APIError` enum with `.notConfigured`, `.unauthorized`, `.serverBusy`, `.serverError`
+- `APIClient` — `@MainActor @Observable` REST client; all endpoint methods (status, playlists CRUD, pipeline/convert/tag operations, file downloads, settings, sync destinations/status); `APIError` enum with `.notConfigured`, `.unauthorized`, `.serverBusy`, `.serverError`
 - `SSEClient` — Swift actor; `events(taskId:)` returns `AsyncStream<SSEEvent>` from `GET /api/stream/<task_id>`; parses `"data: {json}"` lines
 - `ServerDiscovery` — `@MainActor @Observable`; uses `NWBrowser` for `_music-porter._tcp` Bonjour browsing; resolves endpoints to IP:port; 10-second auto-stop
 - `MusicKitService` — `@MainActor @Observable`; `requestAuthorization()`, `fetchLibraryPlaylists()`, `searchPlaylists(query:)` (limit 25); read-only due to DRM
@@ -61,12 +62,12 @@ SwiftUI with enforced dark theme:
 | `MainTabView` | Bottom tab bar: Dashboard, Playlists, Pipeline, Downloads, Settings |
 | `ServerDiscoveryView` | Bonjour discovery list + manual IP entry; presents `PairingView` as sheet |
 | `PairingView` | SecureField for API key; validates and stores credentials |
-| `DashboardView` | Server status card, library stats card, playlist overview; pull-to-refresh |
+| `DashboardView` | Server status card, library stats card, sync status, playlist overview; pull-to-refresh |
 | `PlaylistsView` | Playlist list with add (+) and swipe-to-delete; navigates to detail |
 | `PlaylistDetailView` | Track list with `TrackRow` components; pull-to-refresh |
-| `PipelineView` | Pipeline form (source, preset, USB toggle) + `ProgressPanel` |
+| `PipelineView` | Pipeline form (source, preset, sync toggle) + `ProgressPanel` |
 | `DownloadView` | Server playlists with download buttons; local storage display |
-| `SettingsView` | Server info, profiles, disconnect, navigation to operations/Apple Music/USB |
+| `SettingsView` | Server info, profiles, disconnect, navigation to operations/sync status/Apple Music/USB |
 | `OperationsView` | Task history with status badges (green/blue/red/orange) |
 | `AppleMusicBrowserView` | MusicKit authorization, library browse, catalog search, send-to-server |
 | `USBSyncView` | Playlist selection with checkmarks, export button, progress bar |

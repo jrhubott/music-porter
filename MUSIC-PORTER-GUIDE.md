@@ -50,7 +50,7 @@ Shows an interactive menu for easy playlist selection and processing.
 - **1-N** - Select a numbered playlist to process
 - **A** - Process all playlists (auto mode)
 - **U** - Enter a URL to download
-- **C** - Copy to USB drive
+- **C** - Sync to destination (USB drives, saved paths, custom paths)
 - **P** - Change output profile (shows current profile, persists choice to `config.yaml`)
 - **S** - Show library summary
 - **X** - Exit
@@ -278,26 +278,43 @@ If you prefer manual control or automation fails:
 - Restores to TIT2, TPE1, TALB frames
 - Original TXXX frames remain intact (can restore again later)
 
-### 6. sync-usb
+### 6. sync
 
-**Copy files to USB drive**
+**Sync files to destinations (USB drives, saved paths, custom paths)**
 
 ```bash
-# Copy default export directory
-./music-porter sync-usb
+# Interactive destination picker
+./music-porter sync
 
-# Copy specific directory
-./music-porter sync-usb export/ride-command/Pop_Workout
+# Sync to saved destination
+./music-porter sync --dest nas-backup
 
-# Custom USB path
+# Sync to custom path
+./music-porter sync --dest /Volumes/NAS/Music
+
+# Sync specific directory
+./music-porter sync export/ride-command/Pop_Workout --dest nas-backup
+
+# Manage saved destinations
+./music-porter sync --list-destinations
+./music-porter sync --add-dest nas-backup /Volumes/NAS/Music
+./music-porter sync --remove-dest nas-backup
+
+# View sync tracking status
+./music-porter sync --status
+./music-porter sync --status --usb-key nas-backup
+
+# Legacy USB sync (backwards compatible)
 ./music-porter sync-usb export/ride-command/Pop_Workout --usb-dir "RZR/Music"
 ```
 
 **Features:**
+- Unified destination picker: USB drives, saved destinations, and custom paths
+- Saved destinations stored in config.yaml for quick reuse
 - Auto-detects USB drives (excludes system volumes)
-- Interactive selection if multiple drives found
-- Uses rsync for reliable copying with progress display
-- Creates destination directory if needed
+- Incremental sync with size+mtime comparison
+- Persistent sync tracking across sessions
+- USB eject offered only for USB destinations
 
 ## Global Options
 
@@ -494,6 +511,17 @@ playlists:
 **Settings fields:**
 - `output_type`: Default output profile (e.g., `ride-command`, `basic`). Overridden by `--output-type` CLI flag.
 - `usb_dir`: Default USB destination directory. Overridden by `--usb-dir` CLI flag.
+
+A `destinations` section can also be added to save named sync destinations:
+
+```yaml
+destinations:
+  - name: nas-backup
+    path: /Volumes/NAS/Music
+  - name: studio-pc
+    path: /mnt/studio/Music
+```
+
 - `workers`: Number of parallel workers for batch operations.
 
 **Playlist fields:**
@@ -605,10 +633,13 @@ for dir in export/ride-command/*/; do
 done
 ```
 
-### Workflow 6: Copy Multiple Playlists to USB
+### Workflow 6: Sync to Destinations
 
 ```bash
-# Copy all exported playlists for the active profile
+# Sync all exports to a saved destination
+./music-porter sync --dest nas-backup
+
+# Sync all exports to USB (legacy)
 ./music-porter sync-usb export/ride-command/
 ```
 
@@ -778,10 +809,10 @@ pip install mutagen
    tail -100 logs/$(ls -t logs/ | head -1)
    ```
 
-5. **Test USB sync without copying** using dry-run
+5. **Test sync without copying** using dry-run
 
    ```bash
-   ./music-porter --dry-run sync-usb export/ride-command/Pop_Workout
+   ./music-porter sync --dest nas-backup --dry-run
    ```
 
 6. **Use interactive menu** for occasional use - most user-friendly
