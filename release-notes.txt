@@ -1,3 +1,13 @@
+Version 2.28.0:
+• Complete unification of sync destinations: remove all legacy USB-specific code paths and aliases
+• Rename USBSyncTracker to SyncTracker, USBManager remnants cleaned up across CLI, web API, and iOS
+• Remove deprecated /api/usb/* routes, sync-usb and sync-status CLI aliases, and usb_sync.html template
+• Simplify web API from dual USB+sync endpoints to single unified /api/sync/* routes
+• Realtime sync tracking: record each file immediately during sync instead of batch-recording after completion
+• Add SyncTracker.record_file() for per-file tracking and SyncManager._extract_sync_info() helper
+• iOS companion app updated with renamed model types and API paths
+• Net reduction of ~400 lines across the codebase
+
 Version 2.27.1:
 • Fix sync buttons disabled on page load due to race condition in destination metadata loading
 
