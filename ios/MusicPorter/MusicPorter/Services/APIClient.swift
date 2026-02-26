@@ -172,6 +172,24 @@ final class APIClient {
         return response.taskId
     }
 
+    // MARK: - USB Sync Status
+
+    func getUSBSyncStatus() async throws -> [USBKeySummary] {
+        try await get("/api/usb/sync-status")
+    }
+
+    func getUSBSyncStatusDetail(key: String) async throws -> USBSyncStatusDetail {
+        try await get("/api/usb/sync-status/\(key)")
+    }
+
+    func getUSBKeys() async throws -> [USBKeySummary] {
+        try await get("/api/usb/keys")
+    }
+
+    func deleteUSBKey(key: String) async throws {
+        let _: OkResponse = try await delete("/api/usb/keys/\(key)")
+    }
+
     // MARK: - Tasks
 
     func getTasks() async throws -> [TaskInfo] {
