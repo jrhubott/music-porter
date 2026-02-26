@@ -2224,7 +2224,130 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
     subparsers.add_parser('about',
         help='Show version info and release notes')
 
+    # ── tasks ──────────────────────────────────────────────────────
+    tasks_parser = subparsers.add_parser('tasks',
+        help='View task history from the database')
+    tasks_parser.add_argument('--limit', type=int, default=20,
+                              help='Number of entries to show (default: 20)')
+    tasks_parser.add_argument('--operation', type=str,
+                              help='Filter by operation type')
+    tasks_parser.add_argument('--status', type=str,
+                              choices=['completed', 'failed', 'cancelled', 'running', 'pending'],
+                              help='Filter by status')
+    tasks_parser.add_argument('--stats', action='store_true',
+                              help='Show aggregate statistics instead of history')
+
     return parser
+
+
+# ══════════════════════════════════════════════════════════════════
+# Section 10b: Tasks CLI Subcommand
+# ══════════════════════════════════════════════════════════════════
+
+def _handle_tasks_command():
+    """Fast-path handler for the tasks subcommand."""
+    import argparse as _ap
+    parser = _ap.ArgumentParser(prog='music-porter tasks',
+                                description='View task history')
+    parser.add_argument('--limit', type=int, default=20,
+                        help='Number of entries to show (default: 20)')
+    parser.add_argument('--operation', type=str,
+                        help='Filter by operation type')
+    parser.add_argument('--status', type=str,
+                        choices=['completed', 'failed', 'cancelled', 'running', 'pending'],
+                        help='Filter by status')
+    parser.add_argument('--stats', action='store_true',
+                        help='Show aggregate statistics')
+    args = parser.parse_args(sys.argv[2:])
+
+    from pathlib import Path as _P
+    db_path = _P(__file__).resolve().parent / DEFAULT_DB_FILE
+    if not db_path.exists():
+        print("No task history database found.")
+        print(f"Expected: {db_path}")
+        return
+
+    db = TaskHistoryDB(str(db_path))
+
+    if args.stats:
+        _render_task_stats(db)
+    else:
+        _render_task_history(db, limit=args.limit,
+                             operation=args.operation, status=args.status)
+
+
+def _render_task_stats(db):
+    """Print aggregate task statistics to terminal."""
+    stats = db.get_stats()
+    print(f"\n{'═' * 50}")
+    print("  Task History Statistics")
+    print(f"{'═' * 50}")
+    print(f"  Total tasks:  {stats['total']}")
+    print(f"  Today:        {stats['today']}")
+    print()
+
+    if stats['by_operation']:
+        print("  By Operation:")
+        for op, count in stats['by_operation'].items():
+            print(f"    {op:<25} {count:>5}")
+        print()
+
+    if stats['by_status']:
+        print("  By Status:")
+        for status, count in stats['by_status'].items():
+            print(f"    {status:<25} {count:>5}")
+
+    print(f"{'═' * 50}\n")
+
+
+def _render_task_history(db, limit=20, operation=None, status=None):
+    """Print task history table to terminal."""
+    from datetime import datetime as _dt
+
+    entries, total = db.get_entries(limit=limit, offset=0,
+                                    operation=operation, status=status)
+
+    print(f"\n{'═' * 90}")
+    print(f"  Task History ({len(entries)} of {total} entries)")
+    print(f"{'═' * 90}")
+
+    if not entries:
+        print("  No tasks found.\n")
+        return
+
+    # Header
+    print(f"  {'Status':<12} {'Operation':<22} {'Description':<28} {'Duration':>9} {'Source':<10}")
+    print(f"  {'─' * 12} {'─' * 22} {'─' * 28} {'─' * 9} {'─' * 10}")
+
+    for entry in entries:
+        status_str = entry.get('status', '?')
+        operation_str = entry.get('operation', '?')[:22]
+        desc = entry.get('description', '')[:28]
+        elapsed = entry.get('elapsed', 0)
+        source = entry.get('source', '?')
+
+        if elapsed and elapsed >= 60:
+            m = int(elapsed // 60)
+            s = int(elapsed % 60)
+            dur_str = f"{m}m {s}s"
+        elif elapsed:
+            dur_str = f"{elapsed:.1f}s"
+        else:
+            dur_str = "-"
+
+        # Timestamp
+        started = entry.get('started_at', 0)
+        if started:
+            ts = _dt.fromtimestamp(started).strftime('%m/%d %H:%M')
+        else:
+            ts = ""
+
+        print(f"  {status_str:<12} {operation_str:<22} {desc:<28} {dur_str:>9} {source:<10} {ts}")
+
+    if entry.get('error'):
+        print(f"\n  Last error: {entry['error']}")
+
+    print(f"{'═' * 90}\n")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -2246,6 +2369,11 @@ def main():
             print(notes_path.read_text())
         else:
             print("Release notes not found.")
+        sys.exit(0)
+
+    # Fast path: tasks only needs TaskHistoryDB
+    if len(sys.argv) > 1 and sys.argv[1] == 'tasks':
+        _handle_tasks_command()
         sys.exit(0)
 
     temp_logger = Logger(verbose=False)

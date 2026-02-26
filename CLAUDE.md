@@ -68,7 +68,7 @@ The system follows an integrated pipeline:
 
 **music-porter** (python) - **RECOMMENDED**
 - Unified tool combining all functionality in a single command
-- Professional subcommand architecture: `pipeline`, `download`, `convert`, `tag`, `restore`, `reset`, `delete`, `sync-usb`, `cover-art`, `summary`, `list`, `config`, `web`, `server`, `about`
+- Professional subcommand architecture: `pipeline`, `download`, `convert`, `tag`, `restore`, `reset`, `delete`, `sync-usb`, `cover-art`, `summary`, `list`, `config`, `web`, `server`, `about`, `tasks`
 - Interactive menu for easy operation
 - Comprehensive error handling and statistics
 - Full pipeline orchestration (download → convert → tag → USB)
@@ -176,6 +176,13 @@ Presets via `--preset` flag: `lossless` (default, CBR 320kbps), `high` (VBR q2, 
 ./music-porter config verify           # Validate config.yaml integrity
 ./music-porter config reset            # Reset to defaults (backs up first)
 ./music-porter config reset --force    # Reset without confirmation
+
+# Tasks (view persistent task history)
+./music-porter tasks                           # Recent task history (last 20)
+./music-porter tasks --stats                   # Aggregate statistics
+./music-porter tasks --limit 50                # Show more entries
+./music-porter tasks --status failed           # Filter by status
+./music-porter tasks --operation pipeline      # Filter by operation
 ```
 
 ### Global Flags
@@ -272,7 +279,7 @@ Version defined in `porter_core.py` line 48. Uses semantic versioning (MAJOR.MIN
 
 ## Directory Structure
 
-**Key files:** `music-porter` (CLI), `porter_core.py` (business logic), `web_ui.py` (web dashboard — app factory, classes, page routes), `web_api.py` (REST API blueprint — all `/api/*` routes), `config.yaml` (playlists + settings), `cookies.txt` (auth), `data/music-porter.db` (SQLite audit trail).
+**Key files:** `music-porter` (CLI), `porter_core.py` (business logic), `web_ui.py` (web dashboard — app factory, classes, page routes), `web_api.py` (REST API blueprint — all `/api/*` routes), `config.yaml` (playlists + settings), `cookies.txt` (auth), `data/music-porter.db` (SQLite audit trail + task history).
 
 **Directories:** `music/` (M4A downloads, nested by artist/album), `export/<profile>/<playlist>/` (MP3s, flat "Artist - Title.mp3"), `templates/` (Jinja2), `logs/`, `data/` (config, cookies, audit DB), `SRS/`, `ios/` (companion app — see `ios/CLAUDE.md`).
 
@@ -299,7 +306,7 @@ The web dashboard (`web_ui.py`) provides a browser-based interface with full fea
 
 12 Jinja2 templates in `templates/` using Bootstrap 5.3.3 dark theme (CDN from jsDelivr). `base.html` provides shared layout (sidebar, log panel, SSE handler). Pages: `/` (dashboard), `/playlists`, `/pipeline`, `/convert`, `/tags`, `/cover-art`, `/usb`, `/settings`, `/operations`, `/audit`, `/about`.
 
-### API Endpoints (~39)
+### API Endpoints (~42)
 
 All API routes are defined in `web_api.py` as a Flask Blueprint.
 
@@ -314,7 +321,7 @@ All API routes are defined in `web_api.py` as a Flask Blueprint.
 - **Operations:** `POST /api/pipeline/run`, `/api/convert/run`, `/api/convert/batch`, `/api/tags/update`, `/api/tags/restore`, `/api/tags/reset`, `/api/cover-art/<action>`, `/api/usb/sync`
 - **Files:** `GET /api/files/<key>`, `/<key>/<filename>`, `/<key>/<filename>/artwork`, `/<key>/download-all`
 - **USB:** `GET /api/usb/drives`
-- **Tasks:** `GET /api/tasks`, `/api/tasks/<id>`, `POST /api/tasks/<id>/cancel`, `GET /api/stream/<id>` (SSE)
+- **Tasks:** `GET /api/tasks`, `/api/tasks/<id>`, `POST /api/tasks/<id>/cancel`, `GET /api/stream/<id>` (SSE), `GET /api/tasks/history`, `GET /api/tasks/stats`, `POST /api/tasks/clear`
 - **iOS Pairing:** `GET /api/pairing-qr`, `GET /api/pairing-info`
 - **Audit:** `GET /api/audit`, `GET /api/audit/stats`, `POST /api/audit/clear`
 - **About:** `GET /api/about`
@@ -400,7 +407,7 @@ Constant `EXCLUDED_USB_VOLUMES` in `music-porter`: `["Macintosh HD", "Macintosh 
 
 ### Key Classes in `porter_core.py`
 
-23 classes organized by concern: `Logger`, `PlaylistConfig`, `ConfigManager`, `DependencyChecker`, `TagStatistics`, `TaggerManager`, `ConversionStatistics`, `Converter`, `Downloader`, `CookieStatus`, `CookieManager`, `USBManager`, `PlaylistSummary`, `LibrarySummaryStatistics`, `SummaryManager`, `DataManager`, `PipelineStatistics`, `PipelineOrchestrator`, `InteractiveMenu`, `PlaylistResult`, `AggregateStatistics`, `CoverArtManager`, `AuditLogger`.
+24 classes organized by concern: `Logger`, `PlaylistConfig`, `ConfigManager`, `DependencyChecker`, `TagStatistics`, `TaggerManager`, `ConversionStatistics`, `Converter`, `Downloader`, `CookieStatus`, `CookieManager`, `USBManager`, `PlaylistSummary`, `LibrarySummaryStatistics`, `SummaryManager`, `DataManager`, `PipelineStatistics`, `PipelineOrchestrator`, `InteractiveMenu`, `PlaylistResult`, `AggregateStatistics`, `CoverArtManager`, `AuditLogger`, `TaskHistoryDB`.
 
 ### ConfigManager
 
@@ -443,6 +450,16 @@ Constant `EXCLUDED_USB_VOLUMES` in `music-porter`: `["Macintosh HD", "Macintosh 
 - Business classes accept `audit_logger` and `audit_source` params — audit logging is wired at the call site, not inside the class
 - Web dashboard: `/audit` page with filtering, pagination, stats cards, and clear tool
 - No dedicated CLI subcommand — audit log is populated by all operations but viewed/managed via web only
+
+### Task History (TaskHistoryDB)
+
+- SQLite-backed persistent task history in `data/music-porter.db` (`task_history` table)
+- Thread-safe writes via `Lock`, lockless reads via WAL mode (same pattern as `AuditLogger`)
+- Schema: `task_history` table with `id` (TEXT PK), `operation`, `description`, `status`, `result` (JSON), `error`, `started_at` (epoch), `finished_at` (epoch), `source`
+- Startup recovery: marks stale `running`/`pending` rows as `failed` on init
+- Wired into `TaskManager` — all background tasks are persisted automatically
+- Web dashboard: `/operations` page with stats cards, filters, pagination, active task SSE viewer, and clear tool
+- CLI: `./music-porter tasks` subcommand for viewing history and stats
 
 ## Additional Resources
 

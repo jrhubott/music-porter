@@ -47,7 +47,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.23.0"
+VERSION = "2.24.0"
 
 DEFAULT_DATA_DIR = "data"
 DEFAULT_MUSIC_DIR = "music"
@@ -857,6 +857,266 @@ class AuditLogger:
                 return count
             finally:
                 conn.close()
+
+
+class TaskHistoryDB:
+    """Persistent task history using SQLite.
+
+    Follows the AuditLogger pattern: WAL mode, write lock, lockless reads,
+    connection-per-call for thread safety.
+    """
+
+    def __init__(self, db_path=DEFAULT_DB_FILE):
+        self._db_path = str(db_path)
+        Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._write_lock = threading.Lock()
+        self._init_db()
+
+    def _connect(self):
+        conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_db(self):
+        conn = self._connect()
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS task_history (
+                    id          TEXT PRIMARY KEY,
+                    operation   TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    status      TEXT NOT NULL DEFAULT 'pending',
+                    result      TEXT,
+                    error       TEXT NOT NULL DEFAULT '',
+                    started_at  REAL NOT NULL DEFAULT 0,
+                    finished_at REAL NOT NULL DEFAULT 0,
+                    source      TEXT NOT NULL DEFAULT 'web'
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_task_status
+                ON task_history(status)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_task_operation
+                ON task_history(operation)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_task_started_at
+                ON task_history(started_at)
+            """)
+            # Startup recovery: mark stale running/pending rows as failed
+            conn.execute(
+                """UPDATE task_history SET status = 'failed',
+                   error = 'Server restarted during execution',
+                   finished_at = ?
+                   WHERE status IN ('running', 'pending')""",
+                (time.time(),),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def insert(self, task_id, operation, description, source='web'):
+        """Insert a new task record."""
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    """INSERT INTO task_history
+                       (id, operation, description, status, source)
+                       VALUES (?, ?, ?, 'pending', ?)""",
+                    (task_id, operation, description, source),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def update_status(self, task_id, status, result=None, error='',
+                      started_at=None, finished_at=None):
+        """Update task status and optional fields."""
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                sets = ["status = ?"]
+                params = [status]
+                if result is not None:
+                    sets.append("result = ?")
+                    params.append(json.dumps(result))
+                if error:
+                    sets.append("error = ?")
+                    params.append(error)
+                if started_at is not None:
+                    sets.append("started_at = ?")
+                    params.append(started_at)
+                if finished_at is not None:
+                    sets.append("finished_at = ?")
+                    params.append(finished_at)
+                params.append(task_id)
+                conn.execute(
+                    f"UPDATE task_history SET {', '.join(sets)} WHERE id = ?",
+                    params,
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def get(self, task_id):
+        """Return a single task dict or None."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM task_history WHERE id = ?", (task_id,)
+            ).fetchone()
+            if not row:
+                return None
+            return self._row_to_dict(row)
+        finally:
+            conn.close()
+
+    def get_entries(self, limit=50, offset=0,
+                    operation=None, status=None,
+                    date_from=None, date_to=None):
+        """Return (entries, total) with optional filtering."""
+        where_clauses = []
+        params = []
+        if operation:
+            where_clauses.append("operation = ?")
+            params.append(operation)
+        if status:
+            where_clauses.append("status = ?")
+            params.append(status)
+        if date_from:
+            where_clauses.append("started_at >= ?")
+            # Convert date string to epoch
+            params.append(self._date_to_epoch(date_from))
+        if date_to:
+            where_clauses.append("started_at <= ?")
+            params.append(self._date_to_epoch(date_to, end_of_day=True))
+
+        where_sql = ""
+        if where_clauses:
+            where_sql = "WHERE " + " AND ".join(where_clauses)
+
+        conn = self._connect()
+        try:
+            total = conn.execute(
+                f"SELECT COUNT(*) FROM task_history {where_sql}",
+                params,
+            ).fetchone()[0]
+
+            rows = conn.execute(
+                f"""SELECT * FROM task_history {where_sql}
+                    ORDER BY started_at DESC, rowid DESC
+                    LIMIT ? OFFSET ?""",
+                [*params, limit, offset],
+            ).fetchall()
+
+            entries = [self._row_to_dict(row) for row in rows]
+            return entries, total
+        finally:
+            conn.close()
+
+    def get_stats(self):
+        """Return aggregate statistics."""
+        conn = self._connect()
+        try:
+            total = conn.execute(
+                "SELECT COUNT(*) FROM task_history"
+            ).fetchone()[0]
+
+            today_start = time.mktime(
+                datetime.now().replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                ).timetuple()
+            )
+            today_count = conn.execute(
+                "SELECT COUNT(*) FROM task_history WHERE started_at >= ?",
+                (today_start,),
+            ).fetchone()[0]
+
+            by_operation = {}
+            for row in conn.execute(
+                "SELECT operation, COUNT(*) as cnt FROM task_history "
+                "GROUP BY operation ORDER BY cnt DESC"
+            ):
+                by_operation[row['operation']] = row['cnt']
+
+            by_status = {}
+            for row in conn.execute(
+                "SELECT status, COUNT(*) as cnt FROM task_history "
+                "GROUP BY status ORDER BY cnt DESC"
+            ):
+                by_status[row['status']] = row['cnt']
+
+            return {
+                'total': total,
+                'today': today_count,
+                'by_operation': by_operation,
+                'by_status': by_status,
+            }
+        finally:
+            conn.close()
+
+    def clear(self, before_date=None):
+        """Delete entries, return count deleted."""
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                if before_date:
+                    epoch = self._date_to_epoch(before_date)
+                    count = conn.execute(
+                        "SELECT COUNT(*) FROM task_history "
+                        "WHERE started_at < ? AND status NOT IN ('running', 'pending')",
+                        (epoch,),
+                    ).fetchone()[0]
+                    conn.execute(
+                        "DELETE FROM task_history "
+                        "WHERE started_at < ? AND status NOT IN ('running', 'pending')",
+                        (epoch,),
+                    )
+                else:
+                    count = conn.execute(
+                        "SELECT COUNT(*) FROM task_history "
+                        "WHERE status NOT IN ('running', 'pending')"
+                    ).fetchone()[0]
+                    conn.execute(
+                        "DELETE FROM task_history "
+                        "WHERE status NOT IN ('running', 'pending')"
+                    )
+                conn.commit()
+                return count
+            finally:
+                conn.close()
+
+    @staticmethod
+    def _date_to_epoch(date_str, end_of_day=False):
+        """Convert 'YYYY-MM-DD' to epoch seconds."""
+        dt = datetime.strptime(date_str, '%Y-%m-%d')
+        if end_of_day:
+            dt = dt.replace(hour=23, minute=59, second=59)
+        return time.mktime(dt.timetuple())
+
+    @staticmethod
+    def _row_to_dict(row):
+        entry = dict(row)
+        # Parse JSON result
+        if entry.get('result'):
+            try:
+                entry['result'] = json.loads(entry['result'])
+            except (json.JSONDecodeError, TypeError):
+                pass
+        # Compute elapsed/duration
+        started = entry.get('started_at', 0)
+        finished = entry.get('finished_at', 0)
+        if started and finished:
+            entry['elapsed'] = round(finished - started, 1)
+        elif started and entry.get('status') == 'running':
+            entry['elapsed'] = round(time.time() - started, 1)
+        else:
+            entry['elapsed'] = 0
+        return entry
 
 
 # ══════════════════════════════════════════════════════════════════
