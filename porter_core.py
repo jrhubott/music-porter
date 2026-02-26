@@ -5026,9 +5026,21 @@ class SyncManager:
             if not p.exists() or not p.is_dir():
                 self.logger.error(f"Path does not exist or is not a directory: {custom_path}")
                 return (None, None, None)
-            return (custom_path, p.name, False)
+            # Auto-save custom path as a destination for reuse
+            dest_key = self._sanitize_dest_name(p.name)
+            if config and not config.get_destination(dest_key):
+                config.add_destination(dest_key, custom_path)
+            return (custom_path, dest_key, False)
 
         return (dest_path, dest_key, is_usb)
+
+    @staticmethod
+    def _sanitize_dest_name(name):
+        """Sanitize a directory name into a valid destination name (alphanumeric, hyphens, underscores)."""
+        import re as _re
+        sanitized = _re.sub(r'[^a-zA-Z0-9_-]', '-', name)
+        sanitized = _re.sub(r'-+', '-', sanitized).strip('-')
+        return sanitized or 'custom-dest'
 
     def sync_to_destination(self, source_dir, dest_path, dest_key,
                             is_usb=False, dry_run=False, usb_dir=None):

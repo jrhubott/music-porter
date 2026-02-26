@@ -3078,7 +3078,11 @@ def main():
             if saved:
                 dest_path, dest_key, is_usb = saved.path, saved.name, False
             elif Path(dest_arg).is_dir():
-                dest_path, dest_key, is_usb = dest_arg, Path(dest_arg).name, False
+                dest_key = SyncManager._sanitize_dest_name(Path(dest_arg).name)
+                dest_path, is_usb = dest_arg, False
+                # Auto-save custom path as a destination for reuse
+                if not config.get_destination(dest_key):
+                    config.add_destination(dest_key, dest_arg)
             else:
                 logger.error(f"'{dest_arg}' is not a saved destination name or valid directory path")
                 sys.exit(1)
@@ -3324,7 +3328,10 @@ def main():
                 sync_dest_path = saved.path
             elif Path(sync_dest).is_dir():
                 sync_dest_path = sync_dest
-                sync_dest = Path(sync_dest).name
+                sync_dest = SyncManager._sanitize_dest_name(Path(sync_dest).name)
+                # Auto-save custom path as a destination for reuse
+                if not config.get_destination(sync_dest):
+                    config.add_destination(sync_dest, sync_dest_path)
             else:
                 logger.error(f"'{sync_dest}' is not a saved destination or valid path")
                 sys.exit(1)

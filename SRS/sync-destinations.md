@@ -70,3 +70,5 @@ auto-detected USB drives, and ad-hoc custom paths with unified sync tracking.
 | 16.7.5 | v2.26.0 | [x] | `select_destination()` gracefully handles no USB drives and no saved destinations (shows only custom path option) |
 | 16.7.6 | v2.26.0 | [x] | USB eject is never offered for non-USB destinations |
 | 16.7.7 | v2.26.0 | [x] | Config migration: existing configs without `destinations` key load with empty list (no error) |
+| 16.7.8 | v2.26.0 | [x] | Custom paths used as sync destinations are auto-saved to config.yaml destinations for reuse (CLI interactive, CLI `--dest`, web API `type: custom`) |
+| 16.7.9 | v2.26.0 | [x] | `_sanitize_dest_name()` converts directory names to valid destination names (alphanumeric, hyphens, underscores only) |

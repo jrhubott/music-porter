@@ -1589,8 +1589,12 @@ def api_sync_run():
     elif dest_type == 'custom':
         if not dest_path:
             return jsonify({'error': 'dest_path required for custom sync'}), 400
-        dest_key = Path(dest_path).name
+        dest_key = mp.SyncManager._sanitize_dest_name(Path(dest_path).name)
         usb_dir = None
+        # Auto-save custom path as a destination for reuse
+        config = ctx.get_config()
+        if not config.get_destination(dest_key):
+            config.add_destination(dest_key, dest_path)
     else:
         return jsonify({'error': "type must be 'usb', 'saved', or 'custom'"}), 400
 
