@@ -1675,7 +1675,8 @@ class ConfigManager:
             dpath = str(entry.get('path', '')).strip()
             if dname and dpath:
                 # Migrate plain paths → folder:// scheme
-                if not dpath.startswith('usb://') and not dpath.startswith('folder://'):
+                if (not dpath.startswith('usb://') and not dpath.startswith('folder://')
+                        and not dpath.startswith('web-client://')):
                     dpath = f'folder://{dpath}'
                     dirty = True
                 self.destinations.append(SyncDestination(dname, dpath))
