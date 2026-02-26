@@ -763,7 +763,6 @@ def migrate_data_dir(logger=None):
         old_path, new_path = Path(old), Path(new)
         if old_path.exists() and not new_path.exists():
             shutil.move(str(old_path), str(new_path))
-            _secure_path(new_path)
             moved.append(f"{old} → {new}")
             if logger:
                 logger.info(f"Migrated {old} → {new}")
@@ -794,7 +793,6 @@ def migrate_db_schema(logger=None):
     conn = sqlite3.connect(str(db_path), check_same_thread=False)
     try:
         conn.execute("PRAGMA journal_mode=WAL")
-        _secure_path(db_path)
         current = conn.execute("PRAGMA user_version").fetchone()[0]
 
         if current >= DB_SCHEMA_VERSION:
@@ -2176,7 +2174,6 @@ class ConfigManager:
             f.write("# Music Porter Configuration\n")
             f.write("# CLI flags override these settings when specified.\n\n")
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
-        _secure_path(self.conf_path)
 
     def get_setting(self, key, default=None):
         """Get a setting value, returning default if not set."""
@@ -5356,13 +5353,11 @@ class CookieManager:
         if backup and self.cookie_path.exists():
             backup_path = Path(str(self.cookie_path) + '.backup')
             shutil.copy2(self.cookie_path, backup_path)
-            _secure_path(backup_path)
             self.logger.ok(f"Backup created: {backup_path}")
 
         # Save cookies in Netscape format
         try:
             cookie_jar.save(ignore_discard=True, ignore_expires=False)
-            _secure_path(self.cookie_path)
             self.logger.ok(f"Cookies saved to {self.cookie_path}")
 
             # Validate the new cookies
@@ -5417,7 +5412,6 @@ class CookieManager:
             # Create backup before modifying
             backup_path = Path(str(self.cookie_path) + '.backup')
             shutil.copy2(self.cookie_path, backup_path)
-            _secure_path(backup_path)
 
             # Clear and re-add only Apple cookies
             cookie_jar.clear()
@@ -5425,7 +5419,6 @@ class CookieManager:
                 cookie_jar.set_cookie(cookie)
 
             cookie_jar.save(ignore_discard=True, ignore_expires=False)
-            _secure_path(self.cookie_path)
             return (True, len(apple_cookies), removed_count)
 
         except Exception as e:
