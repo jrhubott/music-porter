@@ -11,7 +11,7 @@ Merge the dev branch into main following the project's 3-tier version workflow.
 ## Steps
 
 1. **Verify state**
-   - Confirm we are on the `dev` branch (not main, not a feature branch) — abort if not on dev
+   - If not on the `dev` branch, automatically switch to it: `git checkout dev`
    - Run `git status` to ensure the working tree is clean — abort if there are uncommitted changes
    - Run `git log main..dev --oneline` to summarize what will be merged
 
