@@ -394,6 +394,23 @@ def validate_config(conf_path=DEFAULT_CONFIG_FILE):
                     else:
                         seen_keys[key] = i + 1
 
+    # 12. destinations section (optional)
+    destinations_raw = data.get('destinations')
+    if destinations_raw is not None:
+        if not isinstance(destinations_raw, list):
+            results.append(("error", "'destinations' must be a list"))
+        else:
+            if destinations_raw:
+                results.append(("ok", f"'destinations' section has {len(destinations_raw)} entry/entries"))
+            for i, entry in enumerate(destinations_raw):
+                if not isinstance(entry, dict):
+                    results.append(("error", f"Destination entry {i + 1}: must be a mapping"))
+                    continue
+                if not entry.get('name'):
+                    results.append(("error", f"Destination entry {i + 1}: missing 'name'"))
+                if not entry.get('path'):
+                    results.append(("error", f"Destination entry {i + 1}: missing 'path'"))
+
     return results
 
 
@@ -1454,6 +1471,10 @@ class USBSyncTracker:
         return sync_map
 
 
+# Backwards compatibility alias
+SyncTracker = USBSyncTracker
+
+
 # ══════════════════════════════════════════════════════════════════
 # Section 3: Configuration Management
 # ══════════════════════════════════════════════════════════════════
@@ -1470,6 +1491,13 @@ class PlaylistConfig:
         return f"PlaylistConfig(key={self.key}, name={self.name})"
 
 
+@dataclass
+class SyncDestination:
+    """A saved sync destination (name + filesystem path)."""
+    name: str
+    path: str
+
+
 class ConfigManager:
     """Manages configuration from config.yaml (YAML format)."""
 
@@ -1480,6 +1508,7 @@ class ConfigManager:
         self.audit_logger = audit_logger
         self._audit_source = audit_source
         self.playlists = []
+        self.destinations = []
         self.settings = {}
         self.output_profiles = {}
         self._raw_output_types = {}
@@ -1522,6 +1551,15 @@ class ConfigManager:
                 self.playlists.append(PlaylistConfig(key, url, name))
             elif key or url or name:
                 self.logger.warn(f"Incomplete playlist entry (need key, url, name): {entry}")
+
+        # Load destinations
+        for entry in data.get('destinations', []):
+            dname = str(entry.get('name', '')).strip()
+            dpath = str(entry.get('path', '')).strip()
+            if dname and dpath:
+                self.destinations.append(SyncDestination(dname, dpath))
+            elif dname or dpath:
+                self.logger.warn(f"Incomplete destination entry (need name, path): {entry}")
 
         # Load output_types — auto-migrate if missing/null
         raw_types = data.get('output_types')
@@ -1600,6 +1638,12 @@ class ConfigManager:
                 for p in self.playlists
             ],
         }
+
+        if self.destinations:
+            data['destinations'] = [
+                {'name': d.name, 'path': d.path}
+                for d in self.destinations
+            ]
 
         with open(self.conf_path, 'w') as f:
             f.write("# Music Porter Configuration\n")
@@ -1699,6 +1743,56 @@ class ConfigManager:
             self._save()
             self.logger.info("Generated new API key for web dashboard")
         return key
+
+    # ── Destination CRUD ──────────────────────────────────────────
+
+    def get_destination(self, name):
+        """Get a saved destination by name (case-insensitive). Returns SyncDestination or None."""
+        name_lower = name.lower()
+        for dest in self.destinations:
+            if dest.name.lower() == name_lower:
+                return dest
+        return None
+
+    def add_destination(self, name, path):
+        """Add a saved sync destination. Returns True on success."""
+        import re as _re
+        if not _re.match(r'^[a-zA-Z0-9_-]+$', name):
+            self.logger.error(f"Destination name must be alphanumeric with hyphens/underscores: '{name}'")
+            return False
+        if self.get_destination(name):
+            self.logger.error(f"Destination '{name}' already exists")
+            return False
+        dest_path = Path(path)
+        if not dest_path.exists() or not dest_path.is_dir():
+            self.logger.error(f"Destination path does not exist or is not a directory: {path}")
+            return False
+        self.destinations.append(SyncDestination(name, str(dest_path)))
+        self._save()
+        self.logger.info(f"Added sync destination '{name}' → {path}")
+        if self.audit_logger:
+            self.audit_logger.log(
+                'destination_add', f"Added sync destination '{name}'",
+                'completed', params={'name': name, 'path': path},
+                source=self._audit_source)
+        return True
+
+    def remove_destination(self, name):
+        """Remove a saved destination by name (case-insensitive). Returns True if found."""
+        name_lower = name.lower()
+        original_len = len(self.destinations)
+        self.destinations = [d for d in self.destinations if d.name.lower() != name_lower]
+        if len(self.destinations) == original_len:
+            self.logger.warn(f"Destination '{name}' not found")
+            return False
+        self._save()
+        self.logger.info(f"Removed sync destination '{name}'")
+        if self.audit_logger:
+            self.audit_logger.log(
+                'destination_delete', f"Removed sync destination '{name}'",
+                'completed', params={'name': name},
+                source=self._audit_source)
+        return True
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -2523,20 +2617,30 @@ class DownloadResult:
 
 
 @dataclass
-class USBSyncResult:
-    """Result of USBManager.sync_to_usb()."""
+class SyncResult:
+    """Result of SyncManager.sync_to_destination()."""
     success: bool
     source: str
     destination: str
-    volume_name: str
+    dest_key: str
     duration: float
+    is_usb: bool = False
     files_found: int = 0
     files_copied: int = 0
     files_skipped: int = 0
     files_failed: int = 0
 
+    @property
+    def volume_name(self):
+        """Backwards-compatible alias for dest_key."""
+        return self.dest_key
+
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+# Backwards compatibility alias
+USBSyncResult = SyncResult
 
 
 @dataclass
@@ -4695,11 +4799,11 @@ class CookieManager:
 
 
 # ══════════════════════════════════════════════════════════════════
-# Section 8: USB Sync Module
+# Section 8: Sync Module (formerly USB Sync)
 # ══════════════════════════════════════════════════════════════════
 
 class USBSyncStatistics:
-    """Tracks USB sync operation statistics."""
+    """Tracks sync operation statistics."""
 
     def __init__(self):
         self.files_found = 0         # Total files to copy
@@ -4708,8 +4812,8 @@ class USBSyncStatistics:
         self.files_failed = 0        # Copy failures
 
 
-class USBManager:
-    """Manages USB drive detection and file copying."""
+class SyncManager:
+    """Manages sync destination selection, USB drive detection, and file copying."""
 
     def __init__(self, logger=None, excluded_volumes=None, prompt_handler=None,
                  display_handler=None, cancel_event=None, sync_tracker=None):
@@ -4869,14 +4973,77 @@ class USBManager:
         # File is up-to-date, skip
         return False
 
-    def sync_to_usb(self, source_dir, usb_dir=DEFAULT_USB_DIR, dry_run=False, volume=None):
+    def select_destination(self, config=None):
+        """Interactive destination picker showing USB drives, saved destinations, and custom path.
+
+        Returns (dest_path, dest_key, is_usb) tuple, or (None, None, None) if cancelled.
         """
-        Copy files from source_dir to USB drive with incremental sync.
-        Only copies new or modified files, skips unchanged files.
-        Returns USBSyncResult.
+        options = []
+        option_meta = []  # Parallel list: (dest_path, dest_key, is_usb)
+
+        # 1. Auto-detected USB drives
+        usb_drives = self.find_usb_drives()
+        for vol in usb_drives:
+            base = self._get_usb_base_path(vol)
+            options.append(f"USB: {vol} ({base})")
+            option_meta.append((str(base), vol, True))
+
+        # 2. Saved destinations from config
+        if config and config.destinations:
+            for dest in config.destinations:
+                exists = Path(dest.path).is_dir()
+                status = "" if exists else " [not found]"
+                options.append(f"Saved: {dest.name} ({dest.path}){status}")
+                option_meta.append((dest.path, dest.name, False))
+
+        # 3. Custom path option
+        options.append("Enter custom path...")
+        option_meta.append((None, None, False))  # Placeholder
+
+        if len(options) == 1:
+            # Only custom path option — no USB drives or saved destinations
+            self.logger.info("No USB drives or saved destinations found")
+
+        selection = self.prompt_handler.select_from_list(
+            "Select sync destination", options, allow_cancel=True)
+
+        if selection is None:
+            return (None, None, None)
+
+        dest_path, dest_key, is_usb = option_meta[selection]
+
+        # Handle custom path option
+        if dest_path is None:
+            try:
+                custom_path = input("  Enter destination path: ").strip()
+            except (KeyboardInterrupt, EOFError):
+                print()
+                return (None, None, None)
+            if not custom_path:
+                self.logger.error("No path provided")
+                return (None, None, None)
+            p = Path(custom_path)
+            if not p.exists() or not p.is_dir():
+                self.logger.error(f"Path does not exist or is not a directory: {custom_path}")
+                return (None, None, None)
+            return (custom_path, p.name, False)
+
+        return (dest_path, dest_key, is_usb)
+
+    def sync_to_destination(self, source_dir, dest_path, dest_key,
+                            is_usb=False, dry_run=False, usb_dir=None):
+        """Sync files to any destination with incremental copy logic.
 
         Args:
-            volume: Pre-selected volume name. Skips interactive selection if provided.
+            source_dir: Source directory containing MP3 files
+            dest_path: Base path of the destination
+            dest_key: Tracking key name (destination name or volume name)
+            is_usb: If True, offers USB eject after sync
+            dry_run: Preview changes without copying
+            usb_dir: Subdirectory within dest_path (USB convention, e.g. "RZR/Music")
+
+        Returns:
+            SyncResult with operation stats.
         """
         start_time = time.time()
         stats = USBSyncStatistics()
@@ -4884,8 +5051,9 @@ class USBManager:
 
         if not source_path.exists():
             self.logger.error(f"Source directory does not exist: {source_path}")
-            return USBSyncResult(success=False, source=str(source_dir),
-                                 destination='', volume_name='', duration=0)
+            return SyncResult(success=False, source=str(source_dir),
+                              destination='', dest_key=dest_key or '',
+                              duration=0, is_usb=is_usb)
 
         # Collect all .mp3 files to process
         mp3_files = []
@@ -4901,20 +5069,15 @@ class USBManager:
         stats.files_found = len(mp3_files)
         self.logger.info(f"Files to process: {stats.files_found}")
 
-        # Select USB drive (skip interactive prompt if volume pre-selected)
-        if volume is None:
-            volume = self.select_usb_drive()
-        if not volume:
-            return USBSyncResult(success=False, source=str(source_dir),
-                                 destination='', volume_name='', duration=0)
-
-        dest = self._get_usb_base_path(volume) / usb_dir
+        # Build full destination path
+        dest = Path(dest_path)
+        if usb_dir:
+            dest = dest / usb_dir
 
         self.logger.info(f"Syncing {source_path} to {dest}")
 
         if dry_run:
             self.logger.dry_run(f"Would create directory: {dest}")
-            # Simulate incremental check
             for src_file in mp3_files:
                 rel_path = src_file.relative_to(source_path) if source_path.is_dir() else src_file.name
                 dst_file = dest / rel_path
@@ -4925,14 +5088,15 @@ class USBManager:
                     if self.logger.verbose:
                         self.logger.dry_run(f"Would skip (unchanged): {src_file.name}")
                     stats.files_skipped += 1
-            self.logger.dry_run("Would prompt to eject USB drive after copy")
+            if is_usb:
+                self.logger.dry_run("Would prompt to eject USB drive after copy")
             duration = time.time() - start_time
 
-            return USBSyncResult(
+            return SyncResult(
                 success=True, source=str(source_path), destination=str(dest),
-                volume_name=volume, duration=duration, files_found=stats.files_found,
-                files_copied=stats.files_copied, files_skipped=stats.files_skipped,
-                files_failed=stats.files_failed)
+                dest_key=dest_key, duration=duration, is_usb=is_usb,
+                files_found=stats.files_found, files_copied=stats.files_copied,
+                files_skipped=stats.files_skipped, files_failed=stats.files_failed)
 
         # Create destination directory
         try:
@@ -4942,36 +5106,33 @@ class USBManager:
             stats.files_failed = stats.files_found
             duration = time.time() - start_time
 
-            return USBSyncResult(
+            return SyncResult(
                 success=False, source=str(source_path), destination=str(dest),
-                volume_name=volume, duration=duration, files_found=stats.files_found,
-                files_copied=stats.files_copied, files_skipped=stats.files_skipped,
-                files_failed=stats.files_failed)
+                dest_key=dest_key, duration=duration, is_usb=is_usb,
+                files_found=stats.files_found, files_copied=stats.files_copied,
+                files_skipped=stats.files_skipped, files_failed=stats.files_failed)
 
         # Copy files with incremental check
         progress = _DisplayProgress(
-            self.display_handler, total=len(mp3_files), desc="Syncing to USB",
+            self.display_handler, total=len(mp3_files), desc="Syncing files",
         )
 
         try:
             for src_file in mp3_files:
                 if _is_cancelled(self.cancel_event):
-                    self.logger.warn("USB sync cancelled by user")
+                    self.logger.warn("Sync cancelled by user")
                     break
                 try:
-                    # Preserve directory structure relative to source
                     if source_path.is_dir():
                         rel_path = src_file.relative_to(source_path)
                     else:
                         rel_path = src_file.name
                     dst_file = dest / rel_path
 
-                    # Create parent directory if needed
                     dst_file.parent.mkdir(parents=True, exist_ok=True)
 
-                    # Incremental check
                     if self._should_copy_file(src_file, dst_file):
-                        shutil.copy2(src_file, dst_file)  # Preserves timestamps
+                        shutil.copy2(src_file, dst_file)
                         stats.files_copied += 1
                         if self.logger.verbose:
                             self.logger.info(f"Copied: {src_file.name}")
@@ -4992,11 +5153,10 @@ class USBManager:
         finally:
             progress.close()
 
-        # Log summary
         self.logger.ok("Sync complete")
         duration = time.time() - start_time
 
-        # Record synced files in tracker (all files that exist on USB)
+        # Record synced files in tracker
         if self.sync_tracker and not dry_run and stats.files_failed == 0:
             files_by_playlist = {}
             for src_file in mp3_files:
@@ -5015,19 +5175,35 @@ class USBManager:
                 files_by_playlist.setdefault(
                     playlist_name, []).append(file_name)
             for pl_name, file_list in files_by_playlist.items():
-                self.sync_tracker.record_batch(volume, pl_name, file_list)
+                self.sync_tracker.record_batch(dest_key, pl_name, file_list)
 
-        # Prompt to eject USB drive after successful copy
-        if not dry_run:
-            self._prompt_and_eject_usb(volume)
-            # Note: eject operation is non-critical, doesn't affect return status
+        # Prompt to eject USB drive (only for USB destinations)
+        if is_usb and not dry_run:
+            self._prompt_and_eject_usb(dest_key)
 
-        # Success if no failures (skipped files are OK)
-        return USBSyncResult(
+        return SyncResult(
             success=stats.files_failed == 0, source=str(source_path),
-            destination=str(dest), volume_name=volume, duration=duration,
-            files_found=stats.files_found, files_copied=stats.files_copied,
-            files_skipped=stats.files_skipped, files_failed=stats.files_failed)
+            destination=str(dest), dest_key=dest_key, duration=duration,
+            is_usb=is_usb, files_found=stats.files_found,
+            files_copied=stats.files_copied, files_skipped=stats.files_skipped,
+            files_failed=stats.files_failed)
+
+    def sync_to_usb(self, source_dir, usb_dir=DEFAULT_USB_DIR, dry_run=False, volume=None):
+        """Backwards-compatible wrapper: sync files to a USB drive.
+
+        Args:
+            volume: Pre-selected volume name. Skips interactive selection if provided.
+        """
+        if volume is None:
+            volume = self.select_usb_drive()
+        if not volume:
+            return SyncResult(success=False, source=str(source_dir),
+                              destination='', dest_key='', duration=0, is_usb=True)
+
+        dest_path = str(self._get_usb_base_path(volume))
+        return self.sync_to_destination(
+            source_dir, dest_path=dest_path, dest_key=volume,
+            is_usb=True, dry_run=dry_run, usb_dir=usb_dir)
 
     def _prompt_and_eject_usb(self, volume_name):
         """
@@ -5113,6 +5289,10 @@ class USBManager:
         self.logger.info(f"Please safely eject drive '{volume_name}' using Windows Explorer")
         self.logger.info("(Automatic eject not implemented on Windows)")
         return True
+
+
+# Backwards compatibility alias
+USBManager = SyncManager
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -6696,10 +6876,16 @@ class PipelineOrchestrator:
 
     def run_full_pipeline(self, playlist=None, url=None, auto=False,
                          copy_to_usb=False, usb_dir=DEFAULT_USB_DIR,
+                         sync_dest=None, sync_dest_path=None, sync_dest_is_usb=False,
                          dry_run=False, verbose=False, quality_preset=None,
                          validate_cookies=True, auto_refresh_cookies=False):
         """
-        Execute the complete pipeline: download → convert → tag → USB sync.
+        Execute the complete pipeline: download → convert → tag → sync.
+
+        Args:
+            sync_dest: Destination key for sync (saved name or volume)
+            sync_dest_path: Resolved path for sync destination
+            sync_dest_is_usb: Whether the sync destination is a USB drive
         """
         self.stats.start_time = time.time()
         convert_result = None
@@ -6840,33 +7026,32 @@ class PipelineOrchestrator:
                 stages_failed=["cancelled"],
                 stages_skipped=list(self.stats.stages_skipped))
 
-        # ── Stage 4: USB sync (optional) ───────────────────────────────
-        if copy_to_usb:
-            self.logger.info("\n=== STAGE 4: Copy to USB ===")
-            usb_manager = USBManager(self.logger, prompt_handler=self.prompt_handler,
-                                     display_handler=self.display_handler,
-                                     cancel_event=self.cancel_event,
-                                     sync_tracker=self.sync_tracker)
-            usb_result = usb_manager.sync_to_usb(
-                export_dir,
-                usb_dir=usb_dir,
-                dry_run=dry_run
-            )
+        # ── Stage 4: Sync (optional) ──────────────────────────────────
+        do_sync = copy_to_usb or sync_dest_path
+        if do_sync:
+            sync_mgr = SyncManager(self.logger, prompt_handler=self.prompt_handler,
+                                   display_handler=self.display_handler,
+                                   cancel_event=self.cancel_event,
+                                   sync_tracker=self.sync_tracker)
+            if sync_dest_path:
+                self.logger.info(f"\n=== STAGE 4: Sync to {sync_dest or sync_dest_path} ===")
+                usb_result = sync_mgr.sync_to_destination(
+                    export_dir, dest_path=sync_dest_path, dest_key=sync_dest or Path(sync_dest_path).name,
+                    is_usb=sync_dest_is_usb, dry_run=dry_run,
+                    usb_dir=usb_dir if sync_dest_is_usb else None)
+            else:
+                self.logger.info("\n=== STAGE 4: Copy to USB ===")
+                usb_result = sync_mgr.sync_to_usb(
+                    export_dir, usb_dir=usb_dir, dry_run=dry_run)
 
             if usb_result.success:
-                self.stats.stages_completed.append("usb-sync")
+                self.stats.stages_completed.append("sync")
                 self.stats.usb_stats = {"files_copied": usb_result.files_copied, "files_skipped": usb_result.files_skipped}
                 self.stats.usb_success = True
-                if IS_MACOS:
-                    usb_placeholder = f"/Volumes/[drive]/{usb_dir}"
-                elif IS_LINUX:
-                    usb_placeholder = f"/media/$USER/[drive]/{usb_dir}"
-                else:
-                    usb_placeholder = f"[drive]:/{usb_dir}"
-                self.stats.usb_destination = usb_placeholder
+                self.stats.usb_destination = usb_result.destination
             else:
-                self.stats.stages_failed.append("usb-sync")
-                self.logger.error("USB sync stage failed")
+                self.stats.stages_failed.append("sync")
+                self.logger.error("Sync stage failed")
 
         duration = time.time() - self.stats.start_time
         if self.audit_logger:
