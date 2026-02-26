@@ -1487,6 +1487,43 @@ def api_sync_destination_link(name):
     return jsonify(result)
 
 
+@api_bp.route('/api/sync/destinations/<name>/rename', methods=['POST'])
+def api_sync_destination_rename(name):
+    """Rename a saved destination."""
+    ctx = _ctx()
+    data = request.get_json(force=True) or {}
+    new_name = (data.get('new_name') or '').strip()
+    if not new_name:
+        return jsonify({'error': 'new_name is required'}), 400
+    import re
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', new_name):
+        return jsonify({'error': 'new_name must be alphanumeric, hyphens, or underscores'}), 400
+    if new_name.lower() == name.lower():
+        return jsonify({'error': 'new_name must be different from the current name'}), 400
+
+    config = ctx.get_config()
+    dest = config.get_destination(name)
+    if not dest:
+        return jsonify({'error': f"Destination '{name}' not found"}), 404
+    if config.get_destination(new_name):
+        return jsonify({'error': f"Destination '{new_name}' already exists"}), 409
+
+    had_no_sync_key = dest.sync_key is None
+    tracking_renamed = False
+
+    ok = config.rename_destination(name, new_name)
+    if not ok:
+        return jsonify({'error': 'Failed to rename destination'}), 400
+
+    if had_no_sync_key and ctx.sync_tracker:
+        result = ctx.sync_tracker.rename_key(name, new_name)
+        if result is not None:
+            tracking_renamed = True
+
+    return jsonify({'ok': True, 'old_name': name, 'new_name': new_name,
+                    'tracking_renamed': tracking_renamed})
+
+
 @api_bp.route('/api/sync/run', methods=['POST'])
 def api_sync_run():
     """Run sync to a named destination."""

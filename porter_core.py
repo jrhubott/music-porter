@@ -2119,6 +2119,34 @@ class ConfigManager:
             self._save()
         return count
 
+    def rename_destination(self, old_name, new_name):
+        """Rename a saved destination. Returns True on success."""
+        import re as _re
+        if not _re.match(r'^[a-zA-Z0-9_-]+$', new_name):
+            self.logger.error(f"Destination name must be alphanumeric with hyphens/underscores: '{new_name}'")
+            return False
+        if old_name.lower() == new_name.lower():
+            self.logger.error("New name must be different from the current name")
+            return False
+        if self.get_destination(new_name):
+            self.logger.error(f"Destination '{new_name}' already exists")
+            return False
+        dest = self.get_destination(old_name)
+        if not dest:
+            self.logger.warn(f"Destination '{old_name}' not found")
+            return False
+        dest.name = new_name
+        self._save()
+        self.logger.info(f"Renamed destination '{old_name}' to '{new_name}'")
+        if self.audit_logger:
+            self.audit_logger.log(
+                'destination_rename',
+                f"Renamed destination '{old_name}' to '{new_name}'",
+                'completed',
+                params={'old_name': old_name, 'new_name': new_name},
+                source=self._audit_source)
+        return True
+
 
 # ══════════════════════════════════════════════════════════════════
 # Section 4: Dependency Checking

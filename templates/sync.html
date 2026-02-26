@@ -288,6 +288,26 @@
     </div>
   </div>
 </div>
+<!-- Rename destination modal -->
+<div class="modal fade" id="renameDestModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title">Rename Destination</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p>Rename <strong id="renameDestOldName">-</strong> to:</p>
+        <input type="text" class="form-control form-control-sm" id="renameDestNewName" placeholder="New destination name" pattern="[A-Za-z0-9_-]+">
+        <p class="text-muted small mt-2 mb-0">If this destination has no linked sync key, its tracking data will also be renamed.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="confirmRenameDestBtn">Rename</button>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock content %}
 
 {% block scripts %}
@@ -635,6 +655,9 @@ function renderDestsTable(saved) {
       <td class="text-center">${avail}</td>
       <td class="text-center">
         ${linkBtn}
+        <button class="btn btn-outline-warning btn-sm py-0 px-1 me-1" onclick="promptRenameDest('${d.name}')" title="Rename">
+          <i class="bi bi-pencil"></i>
+        </button>
         <button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="removeDest('${d.name}')" title="Remove">
           <i class="bi bi-trash"></i>
         </button>
@@ -743,6 +766,39 @@ function unlinkDest(name) {
     loadDestinations();
   }).catch(err => showToast('Unlink failed: ' + err, 'error'));
 }
+
+let pendingRenameDest = null;
+function promptRenameDest(name) {
+  pendingRenameDest = name;
+  document.getElementById('renameDestOldName').textContent = name;
+  document.getElementById('renameDestNewName').value = name;
+  const modal = new bootstrap.Modal(document.getElementById('renameDestModal'));
+  modal.show();
+  setTimeout(() => document.getElementById('renameDestNewName').select(), 300);
+}
+
+document.getElementById('confirmRenameDestBtn').addEventListener('click', function() {
+  if (!pendingRenameDest) return;
+  const newName = document.getElementById('renameDestNewName').value.trim();
+  if (!newName) { showToast('Enter a new name', 'warning'); return; }
+  if (!/^[A-Za-z0-9_-]+$/.test(newName)) { showToast('Name must be alphanumeric, hyphens, or underscores', 'warning'); return; }
+  if (newName === pendingRenameDest) { showToast('New name must be different', 'warning'); return; }
+
+  fetch('/api/sync/destinations/' + encodeURIComponent(pendingRenameDest) + '/rename', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({new_name: newName})
+  }).then(r => r.json()).then(data => {
+    if (data.error) { showToast(data.error, 'error'); return; }
+    bootstrap.Modal.getInstance(document.getElementById('renameDestModal')).hide();
+    let msg = `Renamed '${pendingRenameDest}' to '${newName}'`;
+    if (data.tracking_renamed) msg += ' (tracking key also renamed)';
+    showToast(msg, 'success');
+    pendingRenameDest = null;
+    loadDestinations();
+    loadSyncStatusData();
+  }).catch(err => showToast('Rename failed: ' + err, 'error'));
+});
 
 // ── Client-Side Sync ──
 const csyncHasFSA = typeof window.showDirectoryPicker === 'function';

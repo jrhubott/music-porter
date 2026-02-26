@@ -2233,6 +2233,8 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
                             help='Link an existing destination to a tracking key')
     sync_parser.add_argument('--unlink-dest', metavar='NAME',
                             help='Remove tracking key link from a destination')
+    sync_parser.add_argument('--rename-dest', nargs=2, metavar=('OLD', 'NEW'),
+                            help='Rename a saved destination')
     sync_parser.add_argument('--rename-key', nargs=2, metavar=('OLD', 'NEW'),
                             help='Rename a sync key (updates tracking data and destination links)')
 
@@ -2982,6 +2984,23 @@ def main():
         if getattr(args, 'unlink_dest', None):
             ok = config.update_destination_link(args.unlink_dest, None)
             sys.exit(0 if ok else 1)
+
+        if getattr(args, 'rename_dest', None):
+            old_name, new_name = args.rename_dest
+            dest = config.get_destination(old_name)
+            if not dest:
+                logger.error(f"Destination '{old_name}' not found")
+                sys.exit(1)
+            had_no_sync_key = dest.sync_key is None
+            ok = config.rename_destination(old_name, new_name)
+            if not ok:
+                sys.exit(1)
+            if had_no_sync_key and sync_tracker:
+                result = sync_tracker.rename_key(old_name, new_name)
+                if result and result.get('source_deleted'):
+                    logger.info(f"  Renamed tracking key '{old_name}' → '{new_name}' "
+                                f"({result['records_moved']} moved, {result['records_merged']} merged)")
+            sys.exit(0)
 
         # ── Tracking management subcommands ──────────────────────
         if getattr(args, 'delete_key', None):
