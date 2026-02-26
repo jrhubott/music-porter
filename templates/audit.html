@@ -158,7 +158,10 @@
 {% block scripts %}
 <script>
 const PAGE_SIZE = 50;
+const FETCH_LIMIT = PAGE_SIZE * 10;
 let currentOffset = 0;
+let currentRawConsumed = 0;
+let offsetHistory = [];
 let autoRefreshInterval = null;
 
 function statusBadge(status) {
@@ -224,7 +227,7 @@ function collapseConsecutive(entries) {
 
 function loadAudit() {
   const f = getFilters();
-  const params = new URLSearchParams({limit: PAGE_SIZE, offset: currentOffset});
+  const params = new URLSearchParams({limit: FETCH_LIMIT, offset: currentOffset});
   if (f.operation) params.set('operation', f.operation);
   if (f.status) params.set('status', f.status);
   if (f.from) params.set('from', f.from);
@@ -232,11 +235,14 @@ function loadAudit() {
 
   fetch('/api/audit?' + params).then(r => r.json()).then(data => {
     const tbody = document.getElementById('auditTable');
-    const groups = collapseConsecutive(data.entries);
-    if (data.entries.length === 0) {
+    const allGroups = collapseConsecutive(data.entries);
+    const displayGroups = allGroups.slice(0, PAGE_SIZE);
+    currentRawConsumed = displayGroups.reduce((sum, g) => sum + g.count, 0);
+
+    if (displayGroups.length === 0) {
       tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No entries found</td></tr>';
     } else {
-      tbody.innerHTML = groups.map(g => {
+      tbody.innerHTML = displayGroups.map(g => {
         const e = g.entry;
         const opCell = g.count > 1
           ? `<code>${e.operation}</code> <span class="badge bg-secondary">&times;${g.count}</span>`
@@ -255,17 +261,12 @@ function loadAudit() {
     }
 
     // Pagination
-    const start = data.offset + 1;
-    const end = Math.min(data.offset + data.entries.length, data.total);
-    let pageText = 'No entries';
-    if (data.total > 0) {
-      pageText = groups.length < data.entries.length
-        ? `Showing ${groups.length} rows (entries ${start}-${end} of ${data.total})`
-        : `Showing ${start}-${end} of ${data.total}`;
-    }
-    document.getElementById('pageInfo').textContent = pageText;
-    document.getElementById('prevPage').disabled = data.offset === 0;
-    document.getElementById('nextPage').disabled = data.offset + data.limit >= data.total;
+    const hasMore = currentOffset + currentRawConsumed < data.total;
+    document.getElementById('pageInfo').textContent = data.total > 0
+      ? `Showing ${displayGroups.length} rows of ${data.total} entries`
+      : 'No entries';
+    document.getElementById('prevPage').disabled = currentOffset === 0;
+    document.getElementById('nextPage').disabled = !hasMore;
   });
 }
 
@@ -320,6 +321,7 @@ function showParams(jsonStr) {
 document.getElementById('filterForm').addEventListener('submit', function(e) {
   e.preventDefault();
   currentOffset = 0;
+  offsetHistory = [];
   loadAudit();
 });
 
@@ -329,16 +331,18 @@ document.getElementById('resetFilters').addEventListener('click', function() {
   document.getElementById('filterFrom').value = '';
   document.getElementById('filterTo').value = '';
   currentOffset = 0;
+  offsetHistory = [];
   loadAudit();
 });
 
 document.getElementById('prevPage').addEventListener('click', function() {
-  currentOffset = Math.max(0, currentOffset - PAGE_SIZE);
+  currentOffset = offsetHistory.pop() || 0;
   loadAudit();
 });
 
 document.getElementById('nextPage').addEventListener('click', function() {
-  currentOffset += PAGE_SIZE;
+  offsetHistory.push(currentOffset);
+  currentOffset += currentRawConsumed;
   loadAudit();
 });
 
