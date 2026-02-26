@@ -719,6 +719,14 @@ document.getElementById('csyncFolderBtn').addEventListener('click', async functi
   const folderName = dirHandle.name;
   const manifestPlaylists = (manifest && manifest.playlists) || {};
 
+  // Write manifest immediately to persist sync_key across interruptions
+  await writeSyncManifest(dirHandle, {
+    sync_key: syncKey,
+    server_origin: window.location.origin,
+    last_sync_at: (manifest && manifest.last_sync_at) || new Date().toISOString(),
+    playlists: manifestPlaylists
+  });
+
   let totalCopied = 0, totalSkipped = 0, totalFailed = 0;
 
   // Count total files across all playlists first
