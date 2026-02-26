@@ -1486,6 +1486,9 @@ def api_sync_run():
     if not dest:
         return jsonify({'error': f"Destination '{dest_name}' not found"}), 404
 
+    if dest.is_web_client:
+        return jsonify({'error': 'web-client destinations can only be synced from the browser'}), 400
+
     desc = f'Sync: {Path(source_dir).name} → {dest.name}'
 
     def _run(task_id):
@@ -1618,6 +1621,13 @@ def api_sync_client_record():
                     'file_count': len(files)},
             source=ctx.detect_source(),
         )
+
+    # Auto-register web-client:// destination if not already saved
+    folder_name = data.get('folder_name', '')
+    if folder_name:
+        config = ctx.get_config()
+        if not config.get_destination(sync_key):
+            config.add_destination(sync_key, f'web-client://{folder_name}')
 
     return jsonify({'ok': True, 'recorded': len(files)})
 

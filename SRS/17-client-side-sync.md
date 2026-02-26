@@ -66,6 +66,12 @@ ZIP download (all browsers) for bulk export.
 | 17.4.8 | v2.29.0 | [ ] | `AbortError` from user cancelling the directory picker is silently ignored |
 | 17.4.9 | v2.29.0 | [ ] | Network or write errors are logged per-file; sync continues with remaining files |
 | 17.4.10 | v2.29.0 | [ ] | `QuotaExceededError` is caught and displayed as a disk full warning |
+| 17.4.11 | v2.29.0 | [ ] | On sync start, reads `.music-porter-sync.json` from selected directory; reuses stored `sync_key` if present |
+| 17.4.12 | v2.29.0 | [ ] | Files in manifest with matching size are skipped without filesystem checks |
+| 17.4.13 | v2.29.0 | [ ] | On sync completion, writes `.music-porter-sync.json` with sync_key, server_origin, last_sync_at, and per-playlist file maps |
+| 17.4.14 | v2.29.0 | [ ] | If manifest is missing or unparseable, sync proceeds normally (generates key from folder name, checks all files on disk) |
+| 17.4.15 | v2.29.0 | [ ] | Each file is recorded to the server DB individually via `POST /api/sync/client-record` as it is copied or skipped (realtime tracking) |
+| 17.4.16 | v2.29.0 | [ ] | Per-file server recording is fire-and-forget (non-blocking, non-fatal) |
 
 ### 17.5 ZIP Download Flow (JavaScript)
 
@@ -83,3 +89,16 @@ ZIP download (all browsers) for bulk export.
 | 17.6.2 | v2.29.0 | [ ] | Empty export directory (no playlists): card body shows "No exported playlists found" message |
 | 17.6.3 | v2.29.0 | [ ] | Server mode with API key auth: fetch calls include credentials for cookie-based sessions |
 | 17.6.4 | v2.29.0 | [ ] | File System Access sync in progress: both action buttons are disabled until complete |
+
+### 17.7 web-client:// Destination Type
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 17.7.1 | v2.29.0 | [ ] | `SyncDestination.type` returns `'web-client'` for paths with `web-client://` scheme |
+| 17.7.2 | v2.29.0 | [ ] | `SyncDestination.available` returns `True` for `web-client` type |
+| 17.7.3 | v2.29.0 | [ ] | `ConfigManager.add_destination()` accepts `web-client://` scheme and skips filesystem validation |
+| 17.7.4 | v2.29.0 | [ ] | `POST /api/sync/client-record` auto-registers a `web-client://` destination in config on first sync |
+| 17.7.5 | v2.29.0 | [ ] | `POST /api/sync/run` rejects `web-client` destinations with HTTP 400 |
+| 17.7.6 | v2.29.0 | [ ] | Sync Keys table shows `bi-pc-display` icon for web-client keys |
+| 17.7.7 | v2.29.0 | [ ] | Saved Destinations table shows "Client" badge (blue) for web-client destinations |
+| 17.7.8 | v2.29.0 | [ ] | Server-side sync dropdown excludes web-client destinations |

@@ -1568,8 +1568,9 @@ class SyncDestination:
     """A saved sync destination (name + schemed path).
 
     Paths use a scheme prefix:
-      - usb:///Volumes/MY_USB/RZR/Music  → USB drive destination
-      - folder:///path/to/dir            → Folder destination
+      - usb:///Volumes/MY_USB/RZR/Music   → USB drive destination
+      - folder:///path/to/dir             → Folder destination
+      - web-client://My-USB               → Browser-local sync target
     Legacy plain paths are migrated to folder:// on config load.
     """
     name: str
@@ -1577,7 +1578,11 @@ class SyncDestination:
 
     @property
     def type(self) -> str:
-        return 'usb' if self.path.startswith('usb://') else 'folder'
+        if self.path.startswith('usb://'):
+            return 'usb'
+        if self.path.startswith('web-client://'):
+            return 'web-client'
+        return 'folder'
 
     @property
     def raw_path(self) -> str:
@@ -1585,6 +1590,8 @@ class SyncDestination:
             return self.path[6:]
         if self.path.startswith('folder://'):
             return self.path[9:]
+        if self.path.startswith('web-client://'):
+            return self.path[13:]
         return self.path
 
     @property
@@ -1592,7 +1599,13 @@ class SyncDestination:
         return self.type == 'usb'
 
     @property
+    def is_web_client(self) -> bool:
+        return self.type == 'web-client'
+
+    @property
     def available(self) -> bool:
+        if self.is_web_client:
+            return True
         return Path(self.raw_path).is_dir()
 
     def to_api_dict(self) -> dict:
@@ -1901,23 +1914,25 @@ class ConfigManager:
             return False
 
         # Normalize to schemed path
-        if not path.startswith('usb://') and not path.startswith('folder://'):
+        if (not path.startswith('usb://') and not path.startswith('folder://')
+                and not path.startswith('web-client://')):
             path = f'folder://{path}'
 
-        # Validate the raw filesystem path exists
+        # Validate the raw filesystem path exists (skip for web-client)
         dest = SyncDestination(name, path)
-        raw = dest.raw_path
-        if dest.is_usb:
-            # For USB: validate the volume mount exists (subdir may not exist yet)
-            volume_path = Path(raw).parts[:3] if IS_MACOS else Path(raw).parts[:1]
-            volume_mount = Path(*volume_path) if volume_path else Path(raw)
-            if not volume_mount.is_dir():
-                self.logger.error(f"USB volume mount not found: {volume_mount}")
-                return False
-        else:
-            if not Path(raw).is_dir():
-                self.logger.error(f"Destination path does not exist or is not a directory: {raw}")
-                return False
+        if not dest.is_web_client:
+            raw = dest.raw_path
+            if dest.is_usb:
+                # For USB: validate the volume mount exists (subdir may not exist yet)
+                volume_path = Path(raw).parts[:3] if IS_MACOS else Path(raw).parts[:1]
+                volume_mount = Path(*volume_path) if volume_path else Path(raw)
+                if not volume_mount.is_dir():
+                    self.logger.error(f"USB volume mount not found: {volume_mount}")
+                    return False
+            else:
+                if not Path(raw).is_dir():
+                    self.logger.error(f"Destination path does not exist or is not a directory: {raw}")
+                    return False
 
         self.destinations.append(dest)
         self._save()

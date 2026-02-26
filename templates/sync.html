@@ -253,6 +253,7 @@ function loadDestinations() {
     const dests = data.destinations || [];
     dests.forEach(d => {
       destsMeta.push(d);
+      if (d.type === 'web-client') return; // web-client destinations can't be used for server-side sync
       const badge = d.type === 'usb' ? 'USB' : 'Folder';
       const status = d.available ? '' : ' [not found]';
       opts += `<option value="${destsMeta.length - 1}">[${badge}] ${d.name}${status}</option>`;
@@ -374,10 +375,14 @@ function loadSyncStatusData() {
       const plBadge = k.new_playlists > 0
         ? `<span class="badge bg-info">${k.new_playlists}</span>`
         : `<span class="text-muted">0</span>`;
-      const icon = destsMeta.some(d => d.type === 'usb' && d.name === k.key_name) ? 'bi-usb-drive' : 'bi-folder2-open';
+      const matchedDest = destsMeta.find(d => d.name === k.key_name);
+      let icon = 'bi-folder2-open';
+      if (matchedDest?.type === 'usb') icon = 'bi-usb-drive';
+      else if (matchedDest?.type === 'web-client') icon = 'bi-pc-display';
       const meta = findDestMeta(k.key_name);
-      const syncDisabled = (!meta || !meta.available) ? 'disabled' : '';
-      const syncTitle = syncDisabled ? 'Destination unavailable' : 'Sync all playlists';
+      const isWebClient = matchedDest?.type === 'web-client';
+      const syncDisabled = isWebClient || (!meta || !meta.available) ? 'disabled' : '';
+      const syncTitle = isWebClient ? 'Use browser sync' : syncDisabled ? 'Destination unavailable' : 'Sync all playlists';
       return `<tr>
         <td><a href="#" onclick="showDetail('${k.key_name}'); return false;"><i class="bi ${icon} me-1"></i>${k.key_name}</a></td>
         <td class="text-end">${k.synced_files} / ${k.total_files}</td>
@@ -508,12 +513,15 @@ function renderDestsTable(saved) {
     return;
   }
   tbody.innerHTML = saved.map(d => {
-    const avail = d.available
+    let avail;
+    if (d.type === 'web-client') avail = '<span class="badge bg-secondary">Browser</span>';
+    else avail = d.available
       ? '<span class="badge bg-success">Yes</span>'
       : '<span class="badge bg-danger">No</span>';
-    const typeBadge = d.type === 'usb'
-      ? '<span class="badge bg-info">USB</span>'
-      : '<span class="badge bg-secondary">Folder</span>';
+    let typeBadge;
+    if (d.type === 'usb') typeBadge = '<span class="badge bg-info">USB</span>';
+    else if (d.type === 'web-client') typeBadge = '<span class="badge bg-primary">Client</span>';
+    else typeBadge = '<span class="badge bg-secondary">Folder</span>';
     return `<tr>
       <td>${d.name}</td>
       <td>${typeBadge}</td>
@@ -659,6 +667,34 @@ function showClientSyncResult(copied, skipped, failed) {
   el.classList.remove('d-none');
 }
 
+// ── Local manifest helpers ──
+async function readSyncManifest(dirHandle) {
+  try {
+    const fh = await dirHandle.getFileHandle('.music-porter-sync.json');
+    const file = await fh.getFile();
+    return JSON.parse(await file.text());
+  } catch (_) {
+    return null;
+  }
+}
+
+async function writeSyncManifest(dirHandle, manifest) {
+  try {
+    const fh = await dirHandle.getFileHandle('.music-porter-sync.json', {create: true});
+    const w = await fh.createWritable();
+    await w.write(JSON.stringify(manifest, null, 2));
+    await w.close();
+  } catch (_) { /* best-effort */ }
+}
+
+function recordClientFile(syncKey, playlist, filename, folderName) {
+  fetch('/api/sync/client-record', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({sync_key: syncKey, playlist, files: [filename], folder_name: folderName})
+  }).catch(() => {});
+}
+
 // ── File System Access API sync ──
 document.getElementById('csyncFolderBtn').addEventListener('click', async function() {
   const playlists = getSelectedPlaylists();
@@ -677,6 +713,12 @@ document.getElementById('csyncFolderBtn').addEventListener('click', async functi
   showClientSyncProgress(true);
   document.getElementById('csyncResult').classList.add('d-none');
 
+  // Read manifest for sync key persistence and skip optimization
+  const manifest = await readSyncManifest(dirHandle);
+  const syncKey = (manifest && manifest.sync_key) ? manifest.sync_key : 'client-' + dirHandle.name;
+  const folderName = dirHandle.name;
+  const manifestPlaylists = (manifest && manifest.playlists) || {};
+
   let totalCopied = 0, totalSkipped = 0, totalFailed = 0;
 
   // Count total files across all playlists first
@@ -693,6 +735,9 @@ document.getElementById('csyncFolderBtn').addEventListener('click', async functi
     }
   }
 
+  // Build new manifest state as we go
+  const newManifestPlaylists = {};
+
   let processed = 0;
   for (const key of playlists) {
     const files = fileLists[key];
@@ -708,28 +753,35 @@ document.getElementById('csyncFolderBtn').addEventListener('click', async functi
       continue;
     }
 
-    const syncedFiles = [];
+    const manifestFiles = (manifestPlaylists[key] && manifestPlaylists[key].files) || {};
+    const syncedFileMap = {};
+
     for (const fileInfo of files) {
       const fname = fileInfo.filename;
       processed++;
       updateClientSyncProgress(processed, grandTotal, fname);
 
       try {
-        // Check if file exists with matching size (incremental skip)
+        // Check manifest first, then fall back to disk check
         let skip = false;
-        try {
-          const existing = await plDirHandle.getFileHandle(fname);
-          const existingFile = await existing.getFile();
-          if (existingFile.size === fileInfo.size) {
-            skip = true;
+        if (manifestFiles[fname] === fileInfo.size) {
+          skip = true;
+        } else {
+          try {
+            const existing = await plDirHandle.getFileHandle(fname);
+            const existingFile = await existing.getFile();
+            if (existingFile.size === fileInfo.size) {
+              skip = true;
+            }
+          } catch (_) {
+            // file doesn't exist — will copy
           }
-        } catch (_) {
-          // file doesn't exist — will copy
         }
 
         if (skip) {
           totalSkipped++;
-          syncedFiles.push(fname);
+          syncedFileMap[fname] = fileInfo.size;
+          recordClientFile(syncKey, key, fname, folderName);
           continue;
         }
 
@@ -742,7 +794,8 @@ document.getElementById('csyncFolderBtn').addEventListener('click', async functi
         await writable.write(blob);
         await writable.close();
         totalCopied++;
-        syncedFiles.push(fname);
+        syncedFileMap[fname] = fileInfo.size;
+        recordClientFile(syncKey, key, fname, folderName);
       } catch (e) {
         totalFailed++;
         if (e.name === 'QuotaExceededError') {
@@ -753,23 +806,22 @@ document.getElementById('csyncFolderBtn').addEventListener('click', async functi
       }
     }
 
-    // Report synced files for tracking
-    if (syncedFiles.length) {
-      const syncKey = 'client-' + dirHandle.name;
-      try {
-        await fetch('/api/sync/client-record', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({sync_key: syncKey, playlist: key, files: syncedFiles})
-        });
-      } catch (_) { /* tracking failure is non-fatal */ }
-    }
+    newManifestPlaylists[key] = {files: syncedFileMap};
   }
+
+  // Write updated manifest
+  await writeSyncManifest(dirHandle, {
+    sync_key: syncKey,
+    server_origin: window.location.origin,
+    last_sync_at: new Date().toISOString(),
+    playlists: newManifestPlaylists
+  });
 
   showClientSyncResult(totalCopied, totalSkipped, totalFailed);
   updateClientSyncProgress(grandTotal, grandTotal, 'Done');
   setClientSyncBusy(false);
   loadSyncStatusData();
+  loadDestinations();
 });
 
 // ── ZIP download flow ──
