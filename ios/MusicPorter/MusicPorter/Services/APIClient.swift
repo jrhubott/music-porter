@@ -110,13 +110,16 @@ final class APIClient {
     // MARK: - Operations
 
     func runPipeline(playlist: String? = nil, url: String? = nil, auto: Bool = false,
-                     preset: String? = nil, copyToUsb: Bool = false) async throws -> String {
+                     preset: String? = nil, copyToUsb: Bool = false,
+                     syncType: String? = nil, syncDestination: String? = nil) async throws -> String {
         var body: [String: Any] = [:]
         if let playlist { body["playlist"] = playlist }
         if let url { body["url"] = url }
         if auto { body["auto"] = true }
         if let preset { body["preset"] = preset }
         if copyToUsb { body["copy_to_usb"] = true }
+        if let syncType { body["sync_type"] = syncType }
+        if let syncDestination { body["sync_destination"] = syncDestination }
         let response: TaskIdResponse = try await postAny("/api/pipeline/run", body: body)
         return response.taskId
     }

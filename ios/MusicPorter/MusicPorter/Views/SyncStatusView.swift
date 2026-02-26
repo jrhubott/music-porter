@@ -5,12 +5,15 @@ struct SyncStatusView: View {
     @State private var keys: [SyncKeySummary] = []
     @State private var detail: SyncStatusDetail?
     @State private var selectedKey: String?
+    @State private var destinations: [SyncDestination] = []
     @State private var isLoading = false
     @State private var error: String?
     @State private var showDeleteConfirm = false
     @State private var keyToDelete: String?
     @State private var showDeletePlaylistConfirm = false
     @State private var playlistToDelete: (String, String)?
+    @State private var showDeleteDestConfirm = false
+    @State private var destToDelete: String?
 
     var body: some View {
         List {
@@ -28,6 +31,10 @@ struct SyncStatusView: View {
                 if let detail, selectedKey != nil {
                     detailSection(detail)
                 }
+            }
+
+            if !destinations.isEmpty {
+                destinationsSection
             }
 
             if let error {
@@ -52,6 +59,19 @@ struct SyncStatusView: View {
             }
         } message: {
             Text("Delete all sync tracking data for \(keyToDelete ?? "")?")
+        }
+        .confirmationDialog(
+            "Remove Destination",
+            isPresented: $showDeleteDestConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) {
+                if let name = destToDelete {
+                    Task { await deleteDestination(name) }
+                }
+            }
+        } message: {
+            Text("Remove saved destination \"\(destToDelete ?? "")\"?")
         }
         .confirmationDialog(
             "Delete Playlist Tracking",
@@ -206,13 +226,53 @@ struct SyncStatusView: View {
         }
     }
 
+    // MARK: - Saved Destinations
+
+    private var destinationsSection: some View {
+        Section("Saved Destinations") {
+            ForEach(destinations) { dest in
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(dest.name)
+                            .font(.subheadline.weight(.medium))
+                        Text(dest.path)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if dest.available {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    } else {
+                        Text("unavailable")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        destToDelete = dest.name
+                        showDeleteDestConfirm = true
+                    } label: {
+                        Label("Remove", systemImage: "trash")
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: - Actions
 
     private func load() async {
         isLoading = true
         error = nil
         do {
-            keys = try await appState.apiClient.getSyncStatus()
+            async let k = appState.apiClient.getSyncStatus()
+            async let d = appState.apiClient.getSyncDestinations()
+            keys = try await k
+            let destResponse = try? await d
+            destinations = destResponse?.saved ?? []
         } catch {
             self.error = error.localizedDescription
         }
@@ -244,6 +304,15 @@ struct SyncStatusView: View {
         do {
             _ = try await appState.apiClient.deleteSyncPlaylist(key: key, playlist: playlist)
             await loadDetail(key)
+            await load()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func deleteDestination(_ name: String) async {
+        do {
+            try await appState.apiClient.deleteSyncDestination(name: name)
             await load()
         } catch {
             self.error = error.localizedDescription
