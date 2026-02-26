@@ -1,3 +1,6 @@
+Version 2.27.1:
+• Fix sync buttons disabled on page load due to race condition in destination metadata loading
+
 Version 2.27.0:
 • Add sync action buttons to sync keys and playlist breakdown tables (web and iOS)
 • Web: sync buttons in keys table and playlist detail rows with availability-based enable/disable
