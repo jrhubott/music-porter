@@ -390,6 +390,7 @@ function loadSyncStatusData() {
         <td class="text-end">${plBadge}</td>
         <td class="text-end">${lastSync}</td>
         <td class="text-center">
+          ${csyncHasFSA ? `<button class="btn btn-outline-success btn-sm py-0 px-1 me-1" onclick="clientSyncToKey('${k.key_name}', null)" title="Sync via browser (File System Access)"><i class="bi bi-pc-display"></i></button>` : ''}
           <button class="btn btn-outline-primary btn-sm py-0 px-1 me-1" onclick="syncToKey('${k.key_name}', 'export/${cachedProfile}')" title="${syncTitle}" ${syncDisabled}>
             <i class="bi bi-arrow-repeat"></i>
           </button>
@@ -440,6 +441,7 @@ function showDetail(keyName) {
         <td class="text-end">${p.new_files}</td>
         <td class="text-center">${statusBadge}</td>
         <td class="text-center">
+          ${csyncHasFSA ? `<button class="btn btn-outline-success btn-sm py-0 px-1 me-1" onclick="clientSyncToKey('${keyName}', ['${p.name}'])" title="Sync playlist via browser"><i class="bi bi-pc-display"></i></button>` : ''}
           <button class="btn btn-outline-primary btn-sm py-0 px-1 me-1" onclick="syncToKey('${keyName}', 'export/${cachedProfile}/${p.name}')" title="${detailSyncTitle}" ${detailSyncDisabled}>
             <i class="bi bi-arrow-repeat"></i>
           </button>
@@ -696,9 +698,22 @@ function recordClientFile(syncKey, playlist, filename, folderName) {
 }
 
 // ── File System Access API sync ──
-document.getElementById('csyncFolderBtn').addEventListener('click', async function() {
-  const playlists = getSelectedPlaylists();
-  if (!playlists.length) return;
+async function clientSyncToKey(keyName, playlists) {
+  // If playlists is null and a key is specified, fetch from server
+  if (!playlists && keyName) {
+    try {
+      const resp = await fetch('/api/sync/status/' + encodeURIComponent(keyName));
+      const data = await resp.json();
+      if (!data.playlists || !data.playlists.length) {
+        showToast('No playlists found for key ' + keyName, 'warning');
+        return;
+      }
+      playlists = data.playlists.map(p => p.name);
+    } catch (e) {
+      showToast('Failed to load playlists for key: ' + e.message, 'error');
+      return;
+    }
+  }
 
   let dirHandle;
   try {
@@ -709,19 +724,26 @@ document.getElementById('csyncFolderBtn').addEventListener('click', async functi
     return;
   }
 
+  // Scroll to progress area
+  document.getElementById('clientSyncCard').scrollIntoView({behavior: 'smooth'});
   setClientSyncBusy(true);
   showClientSyncProgress(true);
   document.getElementById('csyncResult').classList.add('d-none');
 
-  // Read manifest for sync key persistence and skip optimization
+  // Read manifest for skip optimization
   const manifest = await readSyncManifest(dirHandle);
-  const syncKey = (manifest && manifest.sync_key) ? manifest.sync_key : 'client-' + dirHandle.name;
-  const folderName = dirHandle.name;
   const manifestPlaylists = (manifest && manifest.playlists) || {};
+
+  // Determine sync key: use provided keyName, or fall back to manifest / folder name
+  if (!keyName) {
+    keyName = (manifest && manifest.sync_key) ? manifest.sync_key : 'client-' + dirHandle.name;
+  }
+  // Only pass folder_name for client- keys (triggers auto-registration of web-client:// destination)
+  const folderName = keyName.startsWith('client-') ? dirHandle.name : '';
 
   // Write manifest immediately to persist sync_key across interruptions
   await writeSyncManifest(dirHandle, {
-    sync_key: syncKey,
+    sync_key: keyName,
     server_origin: window.location.origin,
     last_sync_at: (manifest && manifest.last_sync_at) || new Date().toISOString(),
     playlists: manifestPlaylists
@@ -789,7 +811,7 @@ document.getElementById('csyncFolderBtn').addEventListener('click', async functi
         if (skip) {
           totalSkipped++;
           syncedFileMap[fname] = fileInfo.size;
-          recordClientFile(syncKey, key, fname, folderName);
+          recordClientFile(keyName, key, fname, folderName);
           continue;
         }
 
@@ -803,7 +825,7 @@ document.getElementById('csyncFolderBtn').addEventListener('click', async functi
         await writable.close();
         totalCopied++;
         syncedFileMap[fname] = fileInfo.size;
-        recordClientFile(syncKey, key, fname, folderName);
+        recordClientFile(keyName, key, fname, folderName);
       } catch (e) {
         totalFailed++;
         if (e.name === 'QuotaExceededError') {
@@ -819,7 +841,7 @@ document.getElementById('csyncFolderBtn').addEventListener('click', async functi
 
   // Write updated manifest
   await writeSyncManifest(dirHandle, {
-    sync_key: syncKey,
+    sync_key: keyName,
     server_origin: window.location.origin,
     last_sync_at: new Date().toISOString(),
     playlists: newManifestPlaylists
@@ -830,6 +852,12 @@ document.getElementById('csyncFolderBtn').addEventListener('click', async functi
   setClientSyncBusy(false);
   loadSyncStatusData();
   loadDestinations();
+}
+
+document.getElementById('csyncFolderBtn').addEventListener('click', async function() {
+  const playlists = getSelectedPlaylists();
+  if (!playlists.length) return;
+  clientSyncToKey(null, playlists);
 });
 
 // ── ZIP download flow ──

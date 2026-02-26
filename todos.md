@@ -6,6 +6,8 @@
 - [ ] Document web UI (web_ui.py and templates/) — API endpoints, setup instructions, and usage guide
 - [ ] Add iOS app version management — version should only be updated when something changes in the iOS app, not on every main project version bump
 - [ ] Build companion desktop agent — lightweight Python CLI/binary with Bonjour discovery, API key auth, and USB detection (reusing SyncManager platform logic) for incremental sync from music-porter server to local drives without a browser
+- [ ] iOS sync should honor USB directory structure — create playlist subdirectories under the user's selected directory (matching server sync behavior) and inform the user that subdirectories will be created within their chosen location
+- [ ] Add schema versioning to config.yaml and music-porter.db — add a schema_version field to both, consolidate all existing migration logic into two functions (one for DB, one for config), update CLAUDE.md to document the schema and instruct Claude to increment the version when schemas change
 
 ## Completed
 

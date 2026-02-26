@@ -72,6 +72,11 @@ ZIP download (all browsers) for bulk export.
 | 17.4.14 | v2.29.0 | [ ] | If manifest is missing or unparseable, sync proceeds normally (generates key from folder name, checks all files on disk) |
 | 17.4.15 | v2.29.0 | [ ] | Each file is recorded to the server DB individually via `POST /api/sync/client-record` as it is copied or skipped (realtime tracking) |
 | 17.4.16 | v2.29.0 | [ ] | Per-file server recording is fire-and-forget (non-blocking, non-fatal) |
+| 17.4.17 | v2.29.0 | [ ] | Sync Keys table has a browser-sync button (pc-display icon) that triggers client-side sync for that key |
+| 17.4.18 | v2.29.0 | [ ] | Playlist Breakdown table has a per-playlist browser-sync button |
+| 17.4.19 | v2.29.0 | [ ] | Browser-sync buttons are only visible when File System Access API is available |
+| 17.4.20 | v2.29.0 | [ ] | Syncing to an existing (non-client) key does not auto-register a web-client:// destination |
+| 17.4.21 | v2.29.0 | [ ] | The local manifest is written with the chosen key name so future syncs reuse it |
 
 ### 17.5 ZIP Download Flow (JavaScript)
 
