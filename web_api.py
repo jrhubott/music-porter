@@ -805,6 +805,8 @@ def api_pipeline_run():
     # USB sync is not available in server mode — force off
     if not current_app.config.get('NO_AUTH'):
         copy_to_usb = False
+    sync_type = data.get('sync_type')  # 'usb' or 'saved'
+    sync_destination = data.get('sync_destination')
     dir_structure = data.get('dir_structure')
     filename_format = data.get('filename_format')
 
@@ -850,6 +852,21 @@ def api_pipeline_run():
             sync_tracker=ctx.sync_tracker,
         )
 
+        # Resolve sync destination
+        sync_dest = None
+        sync_dest_path = None
+        sync_dest_is_usb = False
+        if sync_type == 'usb' and sync_destination:
+            sync_dest = sync_destination
+            usb_mgr = mp.SyncManager(mp.Logger(verbose=False))
+            sync_dest_path = str(usb_mgr._get_usb_base_path(sync_destination))
+            sync_dest_is_usb = True
+        elif sync_type == 'saved' and sync_destination:
+            saved = config.get_destination(sync_destination)
+            if saved:
+                sync_dest = saved.name
+                sync_dest_path = saved.path
+
         if auto:
             logger.info("Auto mode: processing all playlists")
             aggregate = mp.AggregateStatistics()
@@ -860,6 +877,8 @@ def api_pipeline_run():
                 orchestrator.run_full_pipeline(
                     playlist=str(i + 1), auto=True,
                     copy_to_usb=copy_to_usb, usb_dir=usb_dir,
+                    sync_dest=sync_dest, sync_dest_path=sync_dest_path,
+                    sync_dest_is_usb=sync_dest_is_usb,
                     dry_run=dry_run, verbose=verbose,
                     quality_preset=quality_preset,
                 )
@@ -873,6 +892,8 @@ def api_pipeline_run():
             pipeline_result = orchestrator.run_full_pipeline(
                 playlist=playlist_key, url=url, auto=True,
                 copy_to_usb=copy_to_usb, usb_dir=usb_dir,
+                sync_dest=sync_dest, sync_dest_path=sync_dest_path,
+                sync_dest_is_usb=sync_dest_is_usb,
                 dry_run=dry_run, verbose=verbose,
                 quality_preset=quality_preset,
             )

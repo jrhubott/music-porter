@@ -1,0 +1,536 @@
+{% extends "base.html" %}
+{% block title %}Sync - Music Porter{% endblock title %}
+{% block content %}
+<h4 class="mb-4">Sync</h4>
+
+<!-- Section 1: Sync Operation -->
+<div class="card mb-4">
+  <div class="card-header"><i class="bi bi-arrow-left-right"></i> Sync Files</div>
+  <div class="card-body">
+    <form id="syncForm">
+      <div class="row g-3">
+        <div class="col-md-4">
+          <label class="form-label">Source Directory</label>
+          <select class="form-select form-select-sm" id="syncSource">
+            <option value="">Loading...</option>
+          </select>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Destination</label>
+          <div class="input-group input-group-sm">
+            <select class="form-select form-select-sm" id="syncDest">
+              <option value="">Loading...</option>
+            </select>
+            <button type="button" class="btn btn-outline-secondary" id="refreshDests" title="Refresh"><i class="bi bi-arrow-clockwise"></i></button>
+          </div>
+        </div>
+        <div class="col-md-4" id="usbDirGroup">
+          <label class="form-label">USB Subdirectory</label>
+          <input type="text" class="form-control form-control-sm" id="syncUsbDir" placeholder="RZR/Music">
+        </div>
+      </div>
+      <div class="col-md-4 d-none" id="customPathGroup">
+        <label class="form-label">Custom Path</label>
+        <input type="text" class="form-control form-control-sm" id="syncCustomPath" placeholder="/path/to/destination">
+      </div>
+      <div class="d-flex gap-3 mt-3">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="syncDryRun">
+          <label class="form-check-label" for="syncDryRun">Dry Run</label>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="syncVerbose">
+          <label class="form-check-label" for="syncVerbose">Verbose</label>
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary mt-3"><i class="bi bi-play-fill"></i> Sync</button>
+    </form>
+  </div>
+</div>
+
+<div class="card mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-terminal"></i> Output</span>
+    <span class="badge bg-secondary" id="syncStatus">Idle</span>
+  </div>
+  <div class="card-body p-0">
+    <div class="log-panel" id="syncLog">
+      <div class="log-line text-muted">Ready. Select source and destination.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Section 2: Sync Status / Tracking -->
+<div class="row g-3 mb-4" id="syncStatsRow">
+  <div class="col-md-4">
+    <div class="card text-center">
+      <div class="card-body py-2">
+        <div class="text-muted small">Tracked Keys</div>
+        <div class="fs-4 fw-bold" id="syncStatKeys">-</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card text-center">
+      <div class="card-body py-2">
+        <div class="text-muted small">Synced Files</div>
+        <div class="fs-4 fw-bold text-success" id="syncStatSynced">-</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card text-center">
+      <div class="card-body py-2">
+        <div class="text-muted small">New Files</div>
+        <div class="fs-4 fw-bold text-warning" id="syncStatNew">-</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="syncEmpty" class="d-none text-center py-5">
+  <i class="bi bi-arrow-left-right fs-1 text-muted"></i>
+  <h5 class="mt-3">No sync history</h5>
+  <p class="text-muted mb-0">Sync files to a destination to start tracking.</p>
+</div>
+
+<div class="card d-none mb-4" id="keysCard">
+  <div class="card-body">
+    <h6 class="card-title"><i class="bi bi-arrow-left-right"></i> Sync Keys</h6>
+    <div class="table-responsive mt-2">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Key Name</th>
+            <th class="text-end">Synced</th>
+            <th class="text-end">New Files</th>
+            <th class="text-end">New Playlists</th>
+            <th class="text-end">Last Sync</th>
+            <th class="text-center">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="keysTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Detail accordion -->
+<div class="card mt-4 d-none mb-4" id="detailCard">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-list-nested"></i> Playlist Breakdown: <strong id="detailKeyName">-</strong></span>
+    <div>
+      <button class="btn btn-outline-warning btn-sm me-1" onclick="pruneKey()" title="Remove stale records"><i class="bi bi-eraser"></i> Prune Stale</button>
+      <button class="btn btn-outline-secondary btn-sm" onclick="hideDetail()"><i class="bi bi-x"></i> Close</button>
+    </div>
+  </div>
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Playlist</th>
+            <th class="text-end">Total</th>
+            <th class="text-end">Synced</th>
+            <th class="text-end">New</th>
+            <th class="text-center">Status</th>
+            <th class="text-center">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="detailTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Section 3: Manage Destinations -->
+<div class="card mb-4">
+  <div class="card-header"><i class="bi bi-folder-plus"></i> Saved Destinations</div>
+  <div class="card-body">
+    <div class="table-responsive" id="destsTable">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Path</th>
+            <th class="text-center">Available</th>
+            <th class="text-center">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="destsTableBody">
+          <tr><td colspan="4" class="text-center text-muted">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <hr>
+    <form id="addDestForm" class="row g-2 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label">Name</label>
+        <input type="text" class="form-control form-control-sm" id="newDestName" placeholder="my-nas" pattern="[a-zA-Z0-9_-]+">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">Path</label>
+        <input type="text" class="form-control form-control-sm" id="newDestPath" placeholder="/Volumes/NAS/Music">
+      </div>
+      <div class="col-md-3">
+        <button type="submit" class="btn btn-outline-primary btn-sm w-100"><i class="bi bi-plus"></i> Add Destination</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Delete key modal -->
+<div class="modal fade" id="deleteKeyModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title">Delete Sync Key</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p>Delete all sync tracking data for <strong id="deleteKeyName">-</strong>?</p>
+        <p class="text-muted small mb-0">This only removes tracking data. Files at the destination are not affected.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-danger btn-sm" id="confirmDeleteBtn">Delete</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock content %}
+
+{% block scripts %}
+<script>
+// ── Destination loading ──
+let destsMeta = []; // [{name, path, type, available}]
+
+function loadDestinations() {
+  fetch('/api/sync/destinations').then(r => r.json()).then(data => {
+    const sel = document.getElementById('syncDest');
+    destsMeta = [];
+    let opts = '';
+
+    // USB drives
+    if (data.usb && data.usb.length) {
+      data.usb.forEach(d => {
+        destsMeta.push(d);
+        opts += `<option value="${destsMeta.length - 1}">USB: ${d.name} (${d.path})</option>`;
+      });
+    }
+
+    // Saved destinations
+    if (data.saved && data.saved.length) {
+      data.saved.forEach(d => {
+        destsMeta.push(d);
+        const status = d.available ? '' : ' [not found]';
+        opts += `<option value="${destsMeta.length - 1}">Saved: ${d.name} (${d.path})${status}</option>`;
+      });
+    }
+
+    // Custom path option
+    destsMeta.push({name: '__custom__', path: '', type: 'custom', available: true});
+    opts += `<option value="${destsMeta.length - 1}">Enter custom path...</option>`;
+
+    if (destsMeta.length === 1) {
+      opts = '<option value="">No destinations found</option>' + opts;
+    }
+
+    sel.innerHTML = opts;
+    onDestChange();
+    renderDestsTable(data.saved || []);
+    renderSyncStatusForDest();
+  });
+}
+
+function onDestChange() {
+  const idx = parseInt(document.getElementById('syncDest').value);
+  const meta = destsMeta[idx];
+  const usbGroup = document.getElementById('usbDirGroup');
+  const customGroup = document.getElementById('customPathGroup');
+
+  if (!meta) return;
+
+  if (meta.type === 'usb') {
+    usbGroup.classList.remove('d-none');
+    customGroup.classList.add('d-none');
+  } else if (meta.type === 'custom') {
+    usbGroup.classList.add('d-none');
+    customGroup.classList.remove('d-none');
+  } else {
+    usbGroup.classList.add('d-none');
+    customGroup.classList.add('d-none');
+  }
+}
+
+document.getElementById('syncDest').addEventListener('change', function() {
+  onDestChange();
+  renderSyncStatusForDest();
+});
+document.getElementById('refreshDests').addEventListener('click', loadDestinations);
+
+// ── Source loading ──
+function loadSources() {
+  fetch('/api/directories/export').then(r => r.json()).then(dirs => {
+    const sel = document.getElementById('syncSource');
+    fetch('/api/status').then(r => r.json()).then(status => {
+      const profile = status.profile;
+      let opts = `<option value="export/${profile}">All (export/${profile}/)</option>`;
+      opts += dirs.map(d => `<option value="export/${profile}/${d.name}">${d.name} (${d.files} files)</option>`).join('');
+      sel.innerHTML = opts;
+    });
+  });
+
+  fetch('/api/settings').then(r => r.json()).then(s => {
+    document.getElementById('syncUsbDir').value = s.settings.usb_dir || 'RZR/Music';
+  });
+}
+
+// ── Sync form submit ──
+document.getElementById('syncForm').addEventListener('submit', function(e) {
+  e.preventDefault();
+  const idx = parseInt(document.getElementById('syncDest').value);
+  const meta = destsMeta[idx];
+  if (!meta) { showToast('Select a destination', 'warning'); return; }
+
+  const sourceDir = document.getElementById('syncSource').value;
+  if (!sourceDir) { showToast('Select a source directory', 'warning'); return; }
+
+  const data = {
+    source_dir: sourceDir,
+    type: meta.type,
+    destination: meta.name,
+    dry_run: document.getElementById('syncDryRun').checked,
+    verbose: document.getElementById('syncVerbose').checked,
+  };
+
+  if (meta.type === 'usb') {
+    data.usb_dir = document.getElementById('syncUsbDir').value;
+  } else if (meta.type === 'custom') {
+    const cp = document.getElementById('syncCustomPath').value.trim();
+    if (!cp) { showToast('Enter a custom path', 'warning'); return; }
+    data.dest_path = cp;
+  }
+
+  document.getElementById('syncStatus').textContent = 'Running';
+  document.getElementById('syncStatus').className = 'badge bg-primary badge-running';
+
+  submitOperation('/api/sync/run', data, 'syncLog', function(msg) {
+    const badge = document.getElementById('syncStatus');
+    if (msg.status === 'completed') { badge.textContent = 'Completed'; badge.className = 'badge bg-success'; }
+    else { badge.textContent = msg.status; badge.className = 'badge bg-danger'; }
+    loadSyncStatusData();
+  });
+});
+
+// ── Sync status tracking ──
+let allKeysData = [];
+
+function loadSyncStatusData() {
+  fetch('/api/sync/status').then(r => r.json()).then(data => {
+    allKeysData = data;
+    const empty = document.getElementById('syncEmpty');
+    const card = document.getElementById('keysCard');
+
+    if (!data.length) {
+      empty.classList.remove('d-none');
+      card.classList.add('d-none');
+      document.getElementById('syncStatKeys').textContent = '0';
+      document.getElementById('syncStatSynced').textContent = '0';
+      document.getElementById('syncStatNew').textContent = '0';
+      return;
+    }
+
+    empty.classList.add('d-none');
+    card.classList.remove('d-none');
+
+    let totalSynced = 0, totalNew = 0;
+    data.forEach(k => { totalSynced += k.synced_files; totalNew += k.new_files; });
+
+    document.getElementById('syncStatKeys').textContent = data.length;
+    document.getElementById('syncStatSynced').textContent = totalSynced.toLocaleString();
+    document.getElementById('syncStatNew').textContent = totalNew.toLocaleString();
+
+    const tbody = document.getElementById('keysTableBody');
+    tbody.innerHTML = data.map(k => {
+      const lastSync = k.last_sync_at ? new Date(k.last_sync_at * 1000).toLocaleString() : 'Never';
+      const newBadge = k.new_files > 0
+        ? `<span class="badge bg-warning text-dark">${k.new_files}</span>`
+        : `<span class="text-success">0</span>`;
+      const plBadge = k.new_playlists > 0
+        ? `<span class="badge bg-info">${k.new_playlists}</span>`
+        : `<span class="text-muted">0</span>`;
+      return `<tr>
+        <td><a href="#" onclick="showDetail('${k.key_name}'); return false;"><i class="bi bi-arrow-left-right me-1"></i>${k.key_name}</a></td>
+        <td class="text-end">${k.synced_files} / ${k.total_files}</td>
+        <td class="text-end">${newBadge}</td>
+        <td class="text-end">${plBadge}</td>
+        <td class="text-end">${lastSync}</td>
+        <td class="text-center">
+          <button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="promptDeleteKey('${k.key_name}')" title="Delete key">
+            <i class="bi bi-trash"></i>
+          </button>
+        </td>
+      </tr>`;
+    }).join('');
+
+    renderSyncStatusForDest();
+  }).catch(err => {
+    showToast('Failed to load sync status: ' + err, 'error');
+  });
+}
+
+function renderSyncStatusForDest() {
+  // No inline sync status card needed — stats cards above show totals
+}
+
+function showDetail(keyName) {
+  fetch('/api/sync/status/' + encodeURIComponent(keyName)).then(r => r.json()).then(data => {
+    const card = document.getElementById('detailCard');
+    card.classList.remove('d-none');
+    document.getElementById('detailKeyName').textContent = keyName;
+
+    const tbody = document.getElementById('detailTableBody');
+    if (!data.playlists || !data.playlists.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No export files found</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.playlists.map(p => {
+      let statusBadge;
+      if (p.is_new_playlist) {
+        statusBadge = '<span class="badge bg-info">NEW</span>';
+      } else if (p.new_files > 0) {
+        statusBadge = `<span class="badge bg-warning text-dark">+${p.new_files}</span>`;
+      } else {
+        statusBadge = '<span class="badge bg-success">synced</span>';
+      }
+      return `<tr>
+        <td>${p.name}</td>
+        <td class="text-end">${p.total_files}</td>
+        <td class="text-end">${p.synced_files}</td>
+        <td class="text-end">${p.new_files}</td>
+        <td class="text-center">${statusBadge}</td>
+        <td class="text-center">
+          <button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="deletePlaylist('${keyName}', '${p.name}')" title="Delete playlist tracking">
+            <i class="bi bi-trash"></i>
+          </button>
+        </td>
+      </tr>`;
+    }).join('');
+  });
+}
+
+function hideDetail() {
+  document.getElementById('detailCard').classList.add('d-none');
+}
+
+let pendingDeleteKey = null;
+function promptDeleteKey(keyName) {
+  pendingDeleteKey = keyName;
+  document.getElementById('deleteKeyName').textContent = keyName;
+  new bootstrap.Modal(document.getElementById('deleteKeyModal')).show();
+}
+
+document.getElementById('confirmDeleteBtn').addEventListener('click', function() {
+  if (!pendingDeleteKey) return;
+  fetch('/api/sync/keys/' + encodeURIComponent(pendingDeleteKey), {method: 'DELETE'})
+    .then(r => r.json())
+    .then(() => {
+      bootstrap.Modal.getInstance(document.getElementById('deleteKeyModal')).hide();
+      showToast('Deleted tracking for ' + pendingDeleteKey, 'success');
+      pendingDeleteKey = null;
+      hideDetail();
+      loadSyncStatusData();
+    })
+    .catch(err => showToast('Delete failed: ' + err, 'error'));
+});
+
+function pruneKey() {
+  const keyName = document.getElementById('detailKeyName').textContent;
+  fetch('/api/sync/keys/' + encodeURIComponent(keyName) + '/prune', {method: 'POST'})
+    .then(r => r.json())
+    .then(data => {
+      if (data.pruned_count === 0) {
+        showToast('No stale records found for ' + keyName, 'info');
+      } else {
+        showToast('Pruned ' + data.pruned_count + ' stale record(s) for ' + keyName, 'success');
+      }
+      showDetail(keyName);
+      loadSyncStatusData();
+    })
+    .catch(err => showToast('Prune failed: ' + err, 'error'));
+}
+
+function deletePlaylist(keyName, playlistName) {
+  if (!confirm(`Delete tracking for playlist "${playlistName}" on key "${keyName}"?`)) return;
+  fetch('/api/sync/keys/' + encodeURIComponent(keyName) + '/playlists/' + encodeURIComponent(playlistName), {method: 'DELETE'})
+    .then(r => r.json())
+    .then(data => {
+      showToast(`Deleted ${data.deleted} record(s) for ${playlistName}`, 'success');
+      showDetail(keyName);
+      loadSyncStatusData();
+    })
+    .catch(err => showToast('Delete failed: ' + err, 'error'));
+}
+
+// ── Saved destinations table ──
+function renderDestsTable(saved) {
+  const tbody = document.getElementById('destsTableBody');
+  if (!saved || !saved.length) {
+    tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No saved destinations</td></tr>';
+    return;
+  }
+  tbody.innerHTML = saved.map(d => {
+    const avail = d.available
+      ? '<span class="badge bg-success">Yes</span>'
+      : '<span class="badge bg-danger">No</span>';
+    return `<tr>
+      <td>${d.name}</td>
+      <td><code>${d.path}</code></td>
+      <td class="text-center">${avail}</td>
+      <td class="text-center">
+        <button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="removeDest('${d.name}')" title="Remove">
+          <i class="bi bi-trash"></i>
+        </button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+document.getElementById('addDestForm').addEventListener('submit', function(e) {
+  e.preventDefault();
+  const name = document.getElementById('newDestName').value.trim();
+  const path = document.getElementById('newDestPath').value.trim();
+  if (!name || !path) { showToast('Name and path required', 'warning'); return; }
+
+  fetch('/api/sync/destinations', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name, path})
+  }).then(r => r.json()).then(data => {
+    if (data.error) { showToast(data.error, 'error'); return; }
+    showToast(`Added destination '${name}'`, 'success');
+    document.getElementById('newDestName').value = '';
+    document.getElementById('newDestPath').value = '';
+    loadDestinations();
+  }).catch(err => showToast('Failed: ' + err, 'error'));
+});
+
+function removeDest(name) {
+  if (!confirm(`Remove saved destination "${name}"?`)) return;
+  fetch('/api/sync/destinations/' + encodeURIComponent(name), {method: 'DELETE'})
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) { showToast(data.error, 'error'); return; }
+      showToast(`Removed destination '${name}'`, 'success');
+      loadDestinations();
+    })
+    .catch(err => showToast('Failed: ' + err, 'error'));
+}
+
+// ── Init ──
+loadSources();
+loadDestinations();
+loadSyncStatusData();
+</script>
+{% endblock scripts %}

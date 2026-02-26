@@ -839,15 +839,17 @@ def create_app(project_root=None, no_auth=False, server_host=None,
     def cover_art_page():
         return render_template('cover_art.html')
 
+    @app.route('/sync')
+    def sync_page():
+        return render_template('sync.html')
+
     @app.route('/usb')
     def usb_page():
-        if not app.config.get('NO_AUTH'):
-            return redirect(url_for('dashboard'))
-        return render_template('usb_sync.html')
+        return redirect(url_for('sync_page'))
 
     @app.route('/sync-status')
     def sync_status_page():
-        return render_template('sync_status.html')
+        return redirect(url_for('sync_page'))
 
     @app.route('/settings')
     def settings_page():
