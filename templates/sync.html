@@ -360,8 +360,9 @@ function loadSyncStatusData() {
       const plBadge = k.new_playlists > 0
         ? `<span class="badge bg-info">${k.new_playlists}</span>`
         : `<span class="text-muted">0</span>`;
+      const icon = destsMeta.some(d => d.type === 'usb' && d.name === k.key_name) ? 'bi-usb-drive' : 'bi-folder2-open';
       return `<tr>
-        <td><a href="#" onclick="showDetail('${k.key_name}'); return false;"><i class="bi bi-arrow-left-right me-1"></i>${k.key_name}</a></td>
+        <td><a href="#" onclick="showDetail('${k.key_name}'); return false;"><i class="bi ${icon} me-1"></i>${k.key_name}</a></td>
         <td class="text-end">${k.synced_files} / ${k.total_files}</td>
         <td class="text-end">${newBadge}</td>
         <td class="text-end">${plBadge}</td>
