@@ -12,6 +12,17 @@
   </div>
 </div>
 {% else %}
+<!-- Sync status summary -->
+<div class="card mb-4 d-none" id="syncStatusCard">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center">
+      <h6 class="card-title mb-0"><i class="bi bi-arrow-left-right"></i> Sync Status</h6>
+      <a href="/sync-status" class="btn btn-outline-primary btn-sm">Full Details</a>
+    </div>
+    <div id="syncStatusContent" class="mt-2"></div>
+  </div>
+</div>
+
 <div class="card mb-4">
   <div class="card-body">
     <form id="usbForm">
@@ -95,10 +106,12 @@ function loadDrives() {
     } else {
       sel.innerHTML = drives.map(d => `<option value="${d}">${d}</option>`).join('');
     }
+    renderSyncStatus();
   });
 }
 
 document.getElementById('refreshDrives').addEventListener('click', loadDrives);
+document.getElementById('usbDrive').addEventListener('change', renderSyncStatus);
 
 document.getElementById('usbForm').addEventListener('submit', function(e) {
   e.preventDefault();
@@ -119,11 +132,60 @@ document.getElementById('usbForm').addEventListener('submit', function(e) {
     const badge = document.getElementById('usbStatus');
     if (msg.status === 'completed') { badge.textContent = 'Completed'; badge.className = 'badge bg-success'; }
     else { badge.textContent = msg.status; badge.className = 'badge bg-danger'; }
+    loadSyncStatus();
   });
 });
 
 loadSources();
 loadDrives();
+
+// ── Sync status summary (filtered by selected drive) ──
+let syncStatusData = [];
+
+function loadSyncStatus() {
+  fetch('/api/usb/sync-status').then(r => r.json()).then(data => {
+    syncStatusData = data;
+    renderSyncStatus();
+  }).catch(() => {});
+}
+
+function renderSyncStatus() {
+  const card = document.getElementById('syncStatusCard');
+  const content = document.getElementById('syncStatusContent');
+  const selectedVolume = document.getElementById('usbDrive').value;
+
+  if (!selectedVolume || !syncStatusData.length) {
+    card.classList.add('d-none');
+    return;
+  }
+
+  const match = syncStatusData.find(k => k.key_name === selectedVolume);
+  card.classList.remove('d-none');
+
+  if (!match) {
+    content.innerHTML = `<div class="text-muted">
+      <i class="bi bi-info-circle me-1"></i>No sync history for <strong>${selectedVolume}</strong>. All files will be new.
+    </div>`;
+    return;
+  }
+
+  const newBadge = match.new_files > 0
+    ? `<span class="badge bg-warning text-dark">${match.new_files} new files</span>`
+    : '<span class="badge bg-success">all synced</span>';
+  const plBadge = match.new_playlists > 0
+    ? ` <span class="badge bg-info">${match.new_playlists} new playlist${match.new_playlists > 1 ? 's' : ''}</span>`
+    : '';
+  const lastSync = match.last_sync_at
+    ? new Date(match.last_sync_at * 1000).toLocaleString()
+    : 'Never';
+  content.innerHTML = `<div class="d-flex align-items-center gap-2">
+    <i class="bi bi-usb-drive"></i><strong>${match.key_name}</strong>
+    ${newBadge}${plBadge}
+    <span class="text-muted small">${match.synced_files}/${match.total_files} files</span>
+    <span class="text-muted small ms-auto">Last sync: ${lastSync}</span>
+  </div>`;
+}
+loadSyncStatus();
 </script>
 {% endif %}
 {% endblock scripts %}

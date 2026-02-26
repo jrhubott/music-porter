@@ -336,6 +336,101 @@ def render_usb_sync_summary(r: USBSyncResult) -> None:
     print("=" * 60)
 
 
+def render_post_sync_tracking_summary(status) -> None:
+    """Render compact sync tracking summary after USB sync."""
+    print()
+    print("  SYNC TRACKING")
+    print("─" * 35)
+    print(f"  USB key:            {status.usb_key}")
+    print(f"  Synced files:       {status.synced_files} / {status.total_files}")
+    print(f"  Remaining new:      {status.new_files}")
+    print("─" * 35)
+
+
+def render_usb_sync_status_summary(all_status: list) -> None:
+    """Render USB sync status for all tracked keys."""
+    print()
+    print("╔" + "═" * 60 + "╗")
+    print("║" + "USB SYNC STATUS".center(60) + "║")
+    print("╚" + "═" * 60 + "╝")
+    print()
+    if not all_status:
+        print("  No tracked USB keys.")
+        print("  Sync files to a USB drive to start tracking.")
+        print()
+        return
+    print(f"  {'Key Name':<20} {'Last Sync':<20} {'Synced':>6} {'New':>6} {'New PL':>6}")
+    print("  " + "─" * 58)
+    for s in all_status:
+        name = s['key_name'][:19]
+        if s['last_sync_at']:
+            last = datetime.fromtimestamp(s['last_sync_at']).strftime("%Y-%m-%d %H:%M")
+        else:
+            last = "Never"
+        synced = str(s['synced_files'])
+        new = str(s['new_files'])
+        new_pl = str(s['new_playlists'])
+        print(f"  {name:<20} {last:<20} {synced:>6} {new:>6} {new_pl:>6}")
+    print("  " + "─" * 58)
+    print()
+
+
+def render_usb_sync_status_detail(status) -> None:
+    """Render per-playlist breakdown for one USB key."""
+    print()
+    print("╔" + "═" * 60 + "╗")
+    title = f"USB SYNC STATUS: {status.usb_key}"
+    print("║" + title.center(60) + "║")
+    print("╚" + "═" * 60 + "╝")
+    print()
+    if status.last_sync_at:
+        last = datetime.fromtimestamp(status.last_sync_at).strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        last = "Never"
+    print(f"  Last sync:               {last}")
+    print(f"  Total files:             {status.total_files}")
+    print(f"  Synced files:            {status.synced_files}")
+    print(f"  New files:               {status.new_files}")
+    print(f"  New playlists:           {status.new_playlists}")
+    print()
+    if status.playlists:
+        print(f"  {'Playlist':<25} {'Total':>6} {'Synced':>7} {'New':>6}  {'Status'}")
+        print("  " + "─" * 58)
+        for p in status.playlists:
+            name = p['name'][:24]
+            total = str(p['total_files'])
+            synced = str(p['synced_files'])
+            new = str(p['new_files'])
+            if p['is_new_playlist']:
+                flag = "NEW"
+            elif p['new_files'] > 0:
+                flag = f"+{p['new_files']}"
+            else:
+                flag = "synced"
+            print(f"  {name:<25} {total:>6} {synced:>7} {new:>6}  {flag}")
+        print("  " + "─" * 58)
+    else:
+        print("  No export files found.")
+    print()
+
+
+def render_usb_keys_list(keys: list) -> None:
+    """Render simple list of tracked USB keys."""
+    print()
+    if not keys:
+        print("  No tracked USB keys.")
+        return
+    print(f"  Tracked USB keys ({len(keys)}):")
+    print()
+    for k in keys:
+        if k['last_sync_at']:
+            last = datetime.fromtimestamp(k['last_sync_at']).strftime("%Y-%m-%d %H:%M")
+        else:
+            last = "Never"
+        print(f"    {k['key_name']:<20}  {k['total_synced_files']:>5} files  Last sync: {last}")
+    print()
+
+
 def render_delete_summary(r: DeleteResult) -> None:
     """Render delete data summary."""
     print()
@@ -539,6 +634,26 @@ def _render_default_summary(r: LibrarySummaryResult) -> None:
     print(f"  Freshness:               {counts['current']} current, {counts['recent']} recent, "
           f"{counts['stale']} stale, {counts['outdated']} outdated")
     print()
+
+    # USB sync status
+    try:
+        _sync_tracker = USBSyncTracker()
+        _usb_keys = _sync_tracker.get_all_keys_summary(r.export_dir)
+        if _usb_keys:
+            print("─" * 60)
+            print("  USB SYNC STATUS")
+            print("─" * 60)
+            for ks in _usb_keys:
+                if ks['last_sync_at']:
+                    _last = datetime.fromtimestamp(ks['last_sync_at']).strftime("%b %d %H:%M")
+                else:
+                    _last = "Never"
+                new_label = f"  +{ks['new_files']} new" if ks['new_files'] > 0 else "  synced"
+                pl_label = f"  +{ks['new_playlists']} new playlists" if ks['new_playlists'] > 0 else ""
+                print(f"  {ks['key_name']:<16}  {ks['synced_files']}/{ks['total_files']} files{new_label}{pl_label}  (last: {_last})")
+            print()
+    except Exception:
+        pass  # Non-critical — don't fail summary if tracker DB unavailable
 
     # Playlist breakdown
     print("─" * 60)
@@ -1108,7 +1223,7 @@ class InteractiveMenu:
 
     def __init__(self, logger=None, config=None, deps=None, workers=None,
                  output_profile=None, prompt_handler=None, display_handler=None,
-                 audit_logger=None):
+                 audit_logger=None, sync_tracker=None):
         self.logger = logger or Logger()
         self.config = config or ConfigManager(logger=self.logger)
         self.deps = deps or DependencyChecker(self.logger)
@@ -1117,6 +1232,7 @@ class InteractiveMenu:
         self.prompt_handler = prompt_handler or CLIPromptHandler()
         self.display_handler = display_handler or CLIDisplayHandler(self.logger)
         self.audit_logger = audit_logger
+        self.sync_tracker = sync_tracker
 
     def show(self, dry_run=False, verbose=False):
         """Display interactive menu and handle user selection."""
@@ -1239,7 +1355,8 @@ class InteractiveMenu:
                                             output_profile=self.output_profile,
                                             prompt_handler=self.prompt_handler,
                                             display_handler=self.display_handler,
-                                            audit_logger=self.audit_logger)
+                                            audit_logger=self.audit_logger,
+                                            sync_tracker=self.sync_tracker)
 
         result = orchestrator.run_full_pipeline(
             playlist=str(index + 1),
@@ -1282,7 +1399,8 @@ class InteractiveMenu:
                                                 output_profile=self.output_profile,
                                                 prompt_handler=self.prompt_handler,
                                                 display_handler=self.display_handler,
-                                                audit_logger=self.audit_logger)
+                                                audit_logger=self.audit_logger,
+                                                sync_tracker=self.sync_tracker)
             result = orchestrator.run_full_pipeline(
                 playlist=str(i + 1),
                 auto=True,
@@ -1330,7 +1448,8 @@ class InteractiveMenu:
                                                 output_profile=self.output_profile,
                                                 prompt_handler=self.prompt_handler,
                                                 display_handler=self.display_handler,
-                                                audit_logger=self.audit_logger)
+                                                audit_logger=self.audit_logger,
+                                                sync_tracker=self.sync_tracker)
             result = orchestrator.run_full_pipeline(
                 url=url,
                 auto=False,
@@ -1358,7 +1477,8 @@ class InteractiveMenu:
         self.logger.info("Copying existing files to USB...")
 
         usb_manager = USBManager(self.logger, prompt_handler=self.prompt_handler,
-                                 display_handler=self.display_handler)
+                                 display_handler=self.display_handler,
+                                 sync_tracker=self.sync_tracker)
         usb_result = usb_manager.sync_to_usb(
             get_export_dir(self.output_profile.name),
             usb_dir=DEFAULT_USB_DIR,
@@ -1610,7 +1730,8 @@ class InteractiveMenu:
             response = input("\nCopy files to USB? [y/N] ").strip().lower()
             if response == 'y':
                 usb_manager = USBManager(self.logger, prompt_handler=self.prompt_handler,
-                                         display_handler=self.display_handler)
+                                         display_handler=self.display_handler,
+                                         sync_tracker=self.sync_tracker)
                 usb_result = usb_manager.sync_to_usb(
                     source_dir,
                     usb_dir=DEFAULT_USB_DIR,
@@ -2071,6 +2192,20 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
         help='Copy files to USB drive')
     sync_parser.add_argument('source_dir', nargs='?', default=None,
                             help='Source directory to copy (default: export/<profile>/)')
+
+    # ── sync-status ──────────────────────────────────────────────
+    syncstatus_parser = subparsers.add_parser('sync-status',
+        help='View USB sync tracking status')
+    syncstatus_parser.add_argument('--usb-key', default=None,
+                                    help='Show detail for a specific USB key')
+    syncstatus_parser.add_argument('--delete-key', default=None,
+                                    help='Delete tracking data for a USB key')
+    syncstatus_parser.add_argument('--delete-playlist', default=None,
+                                    help='Delete tracking for a playlist on a USB key (requires --usb-key)')
+    syncstatus_parser.add_argument('--prune', action='store_true',
+                                    help='Remove stale records for files no longer in the export directory')
+    syncstatus_parser.add_argument('--list-keys', action='store_true',
+                                    help='List all tracked USB keys')
 
     # ── cover-art ─────────────────────────────────────────────────
     coverart_parser = subparsers.add_parser('cover-art',
@@ -2772,14 +2907,89 @@ def main():
     elif args.command == 'sync-usb':
         # Copy files to USB drive
         source_dir = args.source_dir or get_export_dir(output_profile.name)
-        usb_manager = USBManager(logger, prompt_handler=cli_prompt, display_handler=cli_display)
+        sync_tracker = USBSyncTracker()
+        usb_manager = USBManager(logger, prompt_handler=cli_prompt,
+                                 display_handler=cli_display,
+                                 sync_tracker=sync_tracker)
         result = usb_manager.sync_to_usb(
             source_dir,
             usb_dir=usb_dir,
             dry_run=args.dry_run
         )
         render_usb_sync_summary(result)
+        if result.success and not args.dry_run:
+            try:
+                export_dir = get_export_dir(output_profile.name)
+                tracking_status = sync_tracker.get_sync_status(
+                    result.volume_name, export_dir)
+                render_post_sync_tracking_summary(tracking_status)
+            except Exception:
+                pass  # Non-critical — don't fail the exit code
         sys.exit(0 if result.success else 1)
+
+    elif args.command == 'sync-status':
+        # View USB sync tracking status
+        sync_tracker = USBSyncTracker()
+        export_dir = get_export_dir(output_profile.name)
+
+        if args.delete_key:
+            # Confirm deletion
+            key_name = args.delete_key
+            if cli_prompt.confirm(
+                    f"Delete all sync tracking data for USB key '{key_name}'?",
+                    default=False):
+                sync_tracker.delete_key(key_name)
+                logger.ok(f"Deleted tracking data for USB key '{key_name}'")
+            else:
+                logger.info("Cancelled")
+            sys.exit(0)
+
+        if args.delete_playlist:
+            if not args.usb_key:
+                logger.error("--delete-playlist requires --usb-key")
+                sys.exit(1)
+            playlist_name = args.delete_playlist
+            key_name = args.usb_key
+            if cli_prompt.confirm(
+                    f"Delete tracking for playlist '{playlist_name}' on USB key '{key_name}'?",
+                    default=False):
+                count = sync_tracker.delete_playlist(key_name, playlist_name)
+                logger.ok(f"Deleted {count} tracking record(s) for '{playlist_name}' on '{key_name}'")
+            else:
+                logger.info("Cancelled")
+            sys.exit(0)
+
+        if args.prune:
+            if args.usb_key:
+                result = sync_tracker.prune_stale(args.usb_key, export_dir)
+                if result['pruned_count'] == 0:
+                    logger.ok(f"No stale records found for '{args.usb_key}'")
+                else:
+                    logger.ok(f"Pruned {result['pruned_count']} stale record(s) for '{args.usb_key}'"
+                              f" ({', '.join(result['playlists_affected'])})")
+            else:
+                result = sync_tracker.prune_all_keys(export_dir)
+                if result['total_pruned'] == 0:
+                    logger.ok("No stale records found across any keys")
+                else:
+                    logger.ok(f"Pruned {result['total_pruned']} stale record(s) total")
+                    for kp in result['keys_pruned']:
+                        logger.info(f"  {kp['key_name']}: {kp['pruned_count']} pruned"
+                                    f" ({', '.join(kp['playlists_affected'])})")
+            sys.exit(0)
+
+        if args.list_keys:
+            keys = sync_tracker.get_keys()
+            render_usb_keys_list(keys)
+            sys.exit(0)
+
+        if args.usb_key:
+            status = sync_tracker.get_sync_status(args.usb_key, export_dir)
+            render_usb_sync_status_detail(status)
+        else:
+            all_status = sync_tracker.get_all_keys_summary(export_dir)
+            render_usb_sync_status_summary(all_status)
+        sys.exit(0)
 
     elif args.command == 'summary':
         # Display library stats and playlist summary
@@ -2991,6 +3201,7 @@ def main():
 
         embed_cover_art = not getattr(args, 'no_cover_art', False)
         quality_preset = resolve_quality_preset(args, logger, output_profile)
+        sync_tracker = USBSyncTracker()
         orchestrator = PipelineOrchestrator(logger, deps, config,
                                           quality_preset=quality_preset,
                                           cookie_path=args.cookies,
@@ -2999,7 +3210,8 @@ def main():
                                           output_profile=output_profile,
                                           prompt_handler=cli_prompt,
                                           display_handler=cli_display,
-                                          audit_logger=audit_logger)
+                                          audit_logger=audit_logger,
+                                          sync_tracker=sync_tracker)
 
         # Determine what to process
         if args.auto:
@@ -3107,11 +3319,13 @@ def main():
         # Display dependency summary
         render_dependency_check(deps.get_status(config))
 
+        sync_tracker = USBSyncTracker()
         menu = InteractiveMenu(logger, config, deps, workers=workers,
                                output_profile=output_profile,
                                prompt_handler=cli_prompt,
                                display_handler=cli_display,
-                               audit_logger=audit_logger)
+                               audit_logger=audit_logger,
+                               sync_tracker=sync_tracker)
 
         success = menu.show(dry_run=args.dry_run, verbose=args.verbose)
         sys.exit(0 if success else 1)

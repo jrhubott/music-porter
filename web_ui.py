@@ -608,6 +608,7 @@ class AppContext:
 
     task_manager: TaskManager
     audit_logger: object  # mp.AuditLogger
+    sync_tracker: object  # mp.USBSyncTracker
     api_key: str
     project_root: Path
     scheduler: 'PipelineScheduler | None' = None
@@ -730,6 +731,7 @@ def create_app(project_root=None, no_auth=False, server_host=None,
     ctx = AppContext(
         task_manager=TaskManager(task_db=_task_db),
         audit_logger=mp.AuditLogger(_db_path),
+        sync_tracker=mp.USBSyncTracker(_db_path),
         api_key=_api_key,
         project_root=project_root,
     )
@@ -842,6 +844,10 @@ def create_app(project_root=None, no_auth=False, server_host=None,
         if not app.config.get('NO_AUTH'):
             return redirect(url_for('dashboard'))
         return render_template('usb_sync.html')
+
+    @app.route('/sync-status')
+    def sync_status_page():
+        return render_template('sync_status.html')
 
     @app.route('/settings')
     def settings_page():

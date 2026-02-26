@@ -847,6 +847,7 @@ def api_pipeline_run():
             cancel_event=task.cancel_event,
             audit_logger=ctx.audit_logger,
             audit_source=source,
+            sync_tracker=ctx.sync_tracker,
         )
 
         if auto:
@@ -1212,12 +1213,31 @@ def api_files_list(playlist_key):
             entry.setdefault('has_protection_tags', False)
         files.append(entry)
 
+    include_sync = request.args.get('include_sync', '').lower() == 'true'
+    if include_sync and ctx.sync_tracker:
+        sync_map = ctx.sync_tracker.get_file_sync_map(playlist_key)
+        for entry in files:
+            entry['synced_to'] = sync_map.get(entry['filename'], [])
+
     return jsonify({
         'playlist': playlist_key,
         'profile': profile.name,
         'file_count': len(files),
         'files': files,
     })
+
+
+# TODO: Add a web file browser page (template + route) that shows per-file
+# sync indicators using the sync-status endpoint below. Currently only
+# exposed via API for the iOS companion app.
+
+@api_bp.route('/api/files/<playlist_key>/sync-status')
+def api_files_sync_status(playlist_key):
+    """Return sync map for files in a playlist (lightweight, no ID3 reads)."""
+    ctx = _ctx()
+    if not ctx.sync_tracker:
+        return jsonify({})
+    return jsonify(ctx.sync_tracker.get_file_sync_map(playlist_key))
 
 
 @api_bp.route('/api/files/<playlist_key>/<filename>')
@@ -1344,7 +1364,8 @@ def api_usb_sync():
         display = ctx.make_display_handler(task_id)
         task = ctx.task_manager.get(task_id)
         usb_mgr = mp.USBManager(logger, display_handler=display,
-                                cancel_event=task.cancel_event)
+                                cancel_event=task.cancel_event,
+                                sync_tracker=ctx.sync_tracker)
         usb_result = usb_mgr.sync_to_usb(
             source_dir, usb_dir=usb_dir, dry_run=dry_run, volume=volume,
         )
@@ -1361,6 +1382,89 @@ def api_usb_sync():
     if task_id is None:
         return jsonify({'error': 'Another operation is already running'}), 409
     return jsonify({'task_id': task_id})
+
+
+# ══════════════════════════════════════════════════════════════════
+# API: USB Sync Status
+# ══════════════════════════════════════════════════════════════════
+
+@api_bp.route('/api/usb/sync-status')
+def api_usb_sync_status():
+    """Summary of all tracked USB keys with new/synced counts."""
+    ctx = _ctx()
+    config = ctx.get_config()
+    profile = ctx.get_output_profile(config)
+    export_dir = str(ctx.project_root / mp.get_export_dir(profile.name))
+    results = ctx.sync_tracker.get_all_keys_summary(export_dir)
+    return jsonify(results)
+
+
+@api_bp.route('/api/usb/sync-status/<key>')
+def api_usb_sync_status_detail(key):
+    """Per-playlist breakdown for one USB key."""
+    ctx = _ctx()
+    config = ctx.get_config()
+    profile = ctx.get_output_profile(config)
+    export_dir = str(ctx.project_root / mp.get_export_dir(profile.name))
+    status = ctx.sync_tracker.get_sync_status(key, export_dir)
+    return jsonify(status.to_dict())
+
+
+@api_bp.route('/api/usb/keys')
+def api_usb_keys():
+    """List all tracked USB keys."""
+    return jsonify(_ctx().sync_tracker.get_keys())
+
+
+@api_bp.route('/api/usb/keys/<key>', methods=['DELETE'])
+def api_usb_key_delete(key):
+    """Delete a USB key and all its tracking data."""
+    ctx = _ctx()
+    ctx.sync_tracker.delete_key(key)
+    if ctx.audit_logger:
+        ctx.audit_logger.log(
+            'usb_key_delete',
+            f"Deleted USB sync tracking for key '{key}'",
+            'completed',
+            params={'usb_key': key},
+            source=ctx.detect_source(),
+        )
+    return jsonify({'ok': True})
+
+
+@api_bp.route('/api/usb/keys/<key>/playlists/<playlist>', methods=['DELETE'])
+def api_usb_playlist_delete(key, playlist):
+    """Delete tracking records for one playlist on a USB key."""
+    ctx = _ctx()
+    count = ctx.sync_tracker.delete_playlist(key, playlist)
+    if ctx.audit_logger:
+        ctx.audit_logger.log(
+            'usb_playlist_delete',
+            f"Deleted {count} tracking record(s) for playlist '{playlist}' on key '{key}'",
+            'completed',
+            params={'usb_key': key, 'playlist': playlist, 'deleted': count},
+            source=ctx.detect_source(),
+        )
+    return jsonify({'ok': True, 'deleted': count})
+
+
+@api_bp.route('/api/usb/keys/<key>/prune', methods=['POST'])
+def api_usb_key_prune(key):
+    """Remove stale tracking records for files no longer in export directory."""
+    ctx = _ctx()
+    config = ctx.get_config()
+    profile = ctx.get_output_profile(config)
+    export_dir = str(ctx.project_root / mp.get_export_dir(profile.name))
+    result = ctx.sync_tracker.prune_stale(key, export_dir)
+    if ctx.audit_logger:
+        ctx.audit_logger.log(
+            'usb_key_prune',
+            f"Pruned {result['pruned_count']} stale record(s) for key '{key}'",
+            'completed',
+            params={'usb_key': key, **result},
+            source=ctx.detect_source(),
+        )
+    return jsonify(result)
 
 
 # ══════════════════════════════════════════════════════════════════

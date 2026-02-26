@@ -172,6 +172,37 @@ final class APIClient {
         return response.taskId
     }
 
+    // MARK: - USB Sync Status
+
+    func getUSBSyncStatus() async throws -> [USBKeySummary] {
+        try await get("/api/usb/sync-status")
+    }
+
+    func getUSBSyncStatusDetail(key: String) async throws -> USBSyncStatusDetail {
+        try await get("/api/usb/sync-status/\(key)")
+    }
+
+    func getUSBKeys() async throws -> [USBKeySummary] {
+        try await get("/api/usb/keys")
+    }
+
+    func deleteUSBKey(key: String) async throws {
+        let _: OkResponse = try await delete("/api/usb/keys/\(key)")
+    }
+
+    func deleteUSBPlaylist(key: String, playlist: String) async throws -> Int {
+        let response: DeletedCountResponse = try await delete("/api/usb/keys/\(key)/playlists/\(playlist)")
+        return response.deleted
+    }
+
+    func pruneUSBKey(key: String) async throws -> USBPruneResult {
+        try await postAny("/api/usb/keys/\(key)/prune", body: [:] as [String: String])
+    }
+
+    func getFileSyncStatus(playlist: String) async throws -> [String: [String]] {
+        try await get("/api/files/\(playlist)/sync-status")
+    }
+
     // MARK: - Tasks
 
     func getTasks() async throws -> [TaskInfo] {
@@ -346,6 +377,11 @@ struct ServerInfoResponse: Codable {
 struct OkResponse: Codable {
     let ok: Bool?
     let error: String?
+}
+
+struct DeletedCountResponse: Codable {
+    let ok: Bool
+    let deleted: Int
 }
 
 struct DeleteDataResponse: Codable {

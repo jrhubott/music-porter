@@ -1,3 +1,13 @@
+Version 2.25.0:
+• Add USB sync tracking: persistent SQLite-backed records of which files have been synced to which USB drives
+• New USBSyncTracker class with batch recording, per-key and per-playlist status, file-level sync maps
+• CLI: sync-status subcommand with --usb-key, --delete-key, --delete-playlist, --prune, --list-keys flags
+• Web: sync status page with keys table, playlist detail breakdown, per-playlist delete and stale pruning
+• API: 7 new endpoints for sync status, key/playlist management, pruning, and file sync maps
+• iOS: full sync status view with key/playlist browsing, swipe-to-delete, pruning, and per-file USB indicators
+• Post-sync CLI summary shows tracking stats after successful USB sync
+• Pipeline and sync-usb commands automatically record synced files for tracking
+
 Version 2.24.0:
 • Add persistent SQLite-backed task history (survives server restarts)
 • Redesign Operations page with stats cards, filters, pagination, and clear tool

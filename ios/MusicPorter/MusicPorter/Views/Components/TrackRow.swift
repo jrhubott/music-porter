@@ -6,6 +6,7 @@ struct TrackRow: View {
     let playlist: String
     let api: APIClient
     var isNowPlaying: Bool = false
+    var syncedTo: [String] = []
 
     var body: some View {
         HStack(spacing: 12) {
@@ -43,6 +44,14 @@ struct TrackRow: View {
             }
 
             Spacer()
+
+            // USB sync indicator
+            if !syncedTo.isEmpty {
+                Image(systemName: "externaldrive.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.green)
+                    .help("Synced to: \(syncedTo.joined(separator: ", "))")
+            }
 
             // File size
             Text(ByteCountFormatter.string(fromByteCount: Int64(track.size), countStyle: .file))

@@ -16,6 +16,7 @@ struct DashboardView: View {
                     tagIntegritySection
                     coverArtSection
                     freshnessSection
+                    usbSyncSection
                     playlistsSection
 
                     if let error = vm.error {
@@ -244,7 +245,53 @@ struct DashboardView: View {
         }
     }
 
-    // MARK: - 8. Playlists
+    // MARK: - 8. USB Sync Status
+
+    @ViewBuilder
+    private var usbSyncSection: some View {
+        if !vm.usbSyncStatus.isEmpty {
+            GroupBox("USB Sync Status") {
+                VStack(spacing: 8) {
+                    ForEach(vm.usbSyncStatus) { key in
+                        NavigationLink(destination: SyncStatusView()) {
+                            HStack {
+                                Image(systemName: "externaldrive.connected.to.line.below")
+                                    .foregroundStyle(.secondary)
+                                Text(key.keyName)
+                                    .font(.subheadline.weight(.medium))
+                                Spacer()
+                                if key.newFiles > 0 {
+                                    Text("+\(key.newFiles) new")
+                                        .font(.caption)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(.yellow.opacity(0.2))
+                                        .foregroundStyle(.yellow)
+                                        .clipShape(Capsule())
+                                } else {
+                                    Text("synced")
+                                        .font(.caption)
+                                        .foregroundStyle(.green)
+                                }
+                                if key.newPlaylists > 0 {
+                                    Text("\(key.newPlaylists) new PL")
+                                        .font(.caption)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(.blue.opacity(0.2))
+                                        .foregroundStyle(.blue)
+                                        .clipShape(Capsule())
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - 9. Playlists
 
     @ViewBuilder
     private var playlistsSection: some View {
