@@ -1468,6 +1468,218 @@ def api_usb_key_prune(key):
 
 
 # ══════════════════════════════════════════════════════════════════
+# API: Sync Destinations (generalized sync — replaces USB-only)
+# ══════════════════════════════════════════════════════════════════
+
+@api_bp.route('/api/sync/destinations')
+def api_sync_destinations():
+    """List saved destinations + auto-detected USB drives."""
+    ctx = _ctx()
+    config = ctx.get_config()
+    result = {'saved': [], 'usb': []}
+
+    # Saved destinations
+    for d in config.destinations:
+        exists = Path(d.path).is_dir()
+        result['saved'].append({
+            'name': d.name,
+            'path': d.path,
+            'available': exists,
+            'type': 'saved',
+        })
+
+    # USB drives (only in web mode, not server mode)
+    if current_app.config.get('NO_AUTH'):
+        usb_mgr = mp.SyncManager(mp.Logger(verbose=False))
+        for vol in usb_mgr.find_usb_drives():
+            base = str(usb_mgr._get_usb_base_path(vol))
+            result['usb'].append({
+                'name': vol,
+                'path': base,
+                'available': True,
+                'type': 'usb',
+            })
+
+    return jsonify(result)
+
+
+@api_bp.route('/api/sync/destinations', methods=['POST'])
+def api_sync_destination_add():
+    """Add a saved sync destination."""
+    ctx = _ctx()
+    data = request.get_json(force=True)
+    name = data.get('name', '').strip()
+    path = data.get('path', '').strip()
+    if not name or not path:
+        return jsonify({'error': 'name and path are required'}), 400
+    config = ctx.get_config()
+    ok = config.add_destination(name, path)
+    if not ok:
+        return jsonify({'error': f"Failed to add destination '{name}'"}), 400
+    return jsonify({'ok': True, 'name': name, 'path': path})
+
+
+@api_bp.route('/api/sync/destinations/<name>', methods=['DELETE'])
+def api_sync_destination_delete(name):
+    """Remove a saved sync destination."""
+    ctx = _ctx()
+    config = ctx.get_config()
+    ok = config.remove_destination(name)
+    if not ok:
+        return jsonify({'error': f"Destination '{name}' not found"}), 404
+    return jsonify({'ok': True})
+
+
+@api_bp.route('/api/sync/run', methods=['POST'])
+def api_sync_run():
+    """Run sync to any destination type (usb, saved, custom)."""
+    ctx = _ctx()
+    data = request.get_json(force=True)
+    source_dir = data.get('source_dir', '')
+    dest_type = data.get('type', '')  # 'usb', 'saved', 'custom'
+    dest_name = data.get('destination', '')
+    dest_path = data.get('dest_path', '')
+    usb_dir = data.get('usb_dir', mp.DEFAULT_USB_DIR)
+    dry_run = data.get('dry_run', False)
+    verbose = data.get('verbose', False)
+
+    if not source_dir:
+        return jsonify({'error': 'source_dir is required'}), 400
+
+    # Resolve destination
+    is_usb = False
+    if dest_type == 'usb':
+        if not current_app.config.get('NO_AUTH'):
+            return jsonify({'error': 'USB sync is not available in server mode'}), 403
+        if not dest_name:
+            return jsonify({'error': 'destination (volume name) required for USB sync'}), 400
+        usb_mgr = mp.SyncManager(mp.Logger(verbose=False))
+        dest_path = str(usb_mgr._get_usb_base_path(dest_name))
+        dest_key = dest_name
+        is_usb = True
+    elif dest_type == 'saved':
+        config = ctx.get_config()
+        saved = config.get_destination(dest_name)
+        if not saved:
+            return jsonify({'error': f"Saved destination '{dest_name}' not found"}), 404
+        dest_path = saved.path
+        dest_key = saved.name
+        usb_dir = None
+    elif dest_type == 'custom':
+        if not dest_path:
+            return jsonify({'error': 'dest_path required for custom sync'}), 400
+        dest_key = Path(dest_path).name
+        usb_dir = None
+    else:
+        return jsonify({'error': "type must be 'usb', 'saved', or 'custom'"}), 400
+
+    desc = f'Sync: {Path(source_dir).name} → {dest_key}'
+
+    def _run(task_id):
+        logger = ctx.make_logger(task_id, verbose=verbose)
+        display = ctx.make_display_handler(task_id)
+        task = ctx.task_manager.get(task_id)
+        sync_mgr = mp.SyncManager(logger, display_handler=display,
+                                  cancel_event=task.cancel_event,
+                                  sync_tracker=ctx.sync_tracker)
+        result = sync_mgr.sync_to_destination(
+            source_dir, dest_path=dest_path, dest_key=dest_key,
+            is_usb=is_usb, dry_run=dry_run, usb_dir=usb_dir)
+        return {
+            'success': result.success,
+            'files_found': result.files_found,
+            'files_copied': result.files_copied,
+            'files_skipped': result.files_skipped,
+            'files_failed': result.files_failed,
+        }
+
+    task_id = ctx.task_manager.submit('sync', desc, _run,
+                                      source=ctx.detect_source())
+    if task_id is None:
+        return jsonify({'error': 'Another operation is already running'}), 409
+    return jsonify({'task_id': task_id})
+
+
+@api_bp.route('/api/sync/status')
+def api_sync_status():
+    """Summary of all tracked sync keys."""
+    ctx = _ctx()
+    config = ctx.get_config()
+    profile = ctx.get_output_profile(config)
+    export_dir = str(ctx.project_root / mp.get_export_dir(profile.name))
+    results = ctx.sync_tracker.get_all_keys_summary(export_dir)
+    return jsonify(results)
+
+
+@api_bp.route('/api/sync/status/<key>')
+def api_sync_status_detail(key):
+    """Per-playlist breakdown for one sync key."""
+    ctx = _ctx()
+    config = ctx.get_config()
+    profile = ctx.get_output_profile(config)
+    export_dir = str(ctx.project_root / mp.get_export_dir(profile.name))
+    status = ctx.sync_tracker.get_sync_status(key, export_dir)
+    return jsonify(status.to_dict())
+
+
+@api_bp.route('/api/sync/keys')
+def api_sync_keys():
+    """List all tracked sync keys."""
+    return jsonify(_ctx().sync_tracker.get_keys())
+
+
+@api_bp.route('/api/sync/keys/<key>', methods=['DELETE'])
+def api_sync_key_delete(key):
+    """Delete a sync key and all tracking data."""
+    ctx = _ctx()
+    ctx.sync_tracker.delete_key(key)
+    if ctx.audit_logger:
+        ctx.audit_logger.log(
+            'sync_key_delete',
+            f"Deleted sync tracking for key '{key}'",
+            'completed',
+            params={'key': key},
+            source=ctx.detect_source(),
+        )
+    return jsonify({'ok': True})
+
+
+@api_bp.route('/api/sync/keys/<key>/playlists/<playlist>', methods=['DELETE'])
+def api_sync_playlist_delete(key, playlist):
+    """Delete tracking for one playlist on a sync key."""
+    ctx = _ctx()
+    count = ctx.sync_tracker.delete_playlist(key, playlist)
+    if ctx.audit_logger:
+        ctx.audit_logger.log(
+            'sync_playlist_delete',
+            f"Deleted {count} tracking record(s) for playlist '{playlist}' on key '{key}'",
+            'completed',
+            params={'key': key, 'playlist': playlist, 'deleted': count},
+            source=ctx.detect_source(),
+        )
+    return jsonify({'ok': True, 'deleted': count})
+
+
+@api_bp.route('/api/sync/keys/<key>/prune', methods=['POST'])
+def api_sync_key_prune(key):
+    """Prune stale tracking records for a sync key."""
+    ctx = _ctx()
+    config = ctx.get_config()
+    profile = ctx.get_output_profile(config)
+    export_dir = str(ctx.project_root / mp.get_export_dir(profile.name))
+    result = ctx.sync_tracker.prune_stale(key, export_dir)
+    if ctx.audit_logger:
+        ctx.audit_logger.log(
+            'sync_key_prune',
+            f"Pruned {result['pruned_count']} stale record(s) for key '{key}'",
+            'completed',
+            params={'key': key, **result},
+            source=ctx.detect_source(),
+        )
+    return jsonify(result)
+
+
+# ══════════════════════════════════════════════════════════════════
 # API: Tasks
 # ══════════════════════════════════════════════════════════════════
 
