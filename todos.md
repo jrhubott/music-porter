@@ -4,6 +4,7 @@
 
 - [ ] Add web file-level browsing page — template + route showing per-file sync indicators using the /api/files/<key>/sync-status endpoint
 - [ ] Document web UI (web_ui.py and templates/) — API endpoints, setup instructions, and usage guide
+- [ ] Add iOS app version management — version should only be updated when something changes in the iOS app, not on every main project version bump
 
 ## Completed
 
