@@ -13,6 +13,8 @@
 | 5 | [Cover Art](#srs-5-cover-art) | 5.1–5.5 | Cover art embedding, extraction, replacement, stripping, and resizing with Pillow integration |
 | 6 | [USB Sync](#srs-6-usb-sync) | 6.1–6.7 | Platform-aware USB drive detection, incremental file sync, and auto-eject for macOS/Linux/Windows |
 | 16 | [Sync Destinations](#srs-16-sync-destinations) | 16.1–16.7 | Generalized sync supporting saved named paths, USB drives, and custom paths with unified CLI/web/iOS interfaces |
+| 17 | [Client-Side Sync](#srs-17-client-side-sync) | 17.1–17.7 | Browser-based sync via File System Access API and ZIP download, with local manifest persistence and web-client destination type |
+| 18 | [Destination Linking](#srs-18-destination-linking--shared-sync-keys) | 18.1–18.9 | Shared sync keys for destinations, tracking merge, sync key rename, destination rename across CLI/API/web/iOS |
 
 ### Library & Configuration
 
@@ -2230,3 +2232,227 @@ auto-detected USB drives, and ad-hoc custom paths with unified sync tracking.
 | 16.7.7 | v2.26.0 | [x] | Config migration: existing configs without `destinations` key load with empty list (no error) |
 | 16.7.8 | v2.26.0 | [x] | Custom paths used as sync destinations are auto-saved to config.yaml destinations for reuse (CLI interactive, CLI `--dest`, web API `type: custom`) |
 | 16.7.9 | v2.26.0 | [x] | `_sanitize_dest_name()` converts directory names to valid destination names (alphanumeric, hyphens, underscores only) |
+
+---
+
+### SRS 17: Client-Side Sync
+
+**Version:** 1.0  |  **Date:** 2026-02-26  |  **Status:** Complete  |  **Implemented in:** v2.29.0
+
+---
+
+#### Purpose
+
+Enable web dashboard users to sync playlists to USB drives or folders
+connected to their **client** machine (browser), not just destinations
+accessible from the server. Two complementary approaches: the File System
+Access API (Chromium browsers) for incremental folder sync, and a multi-playlist
+ZIP download (all browsers) for bulk export.
+
+##### 17.1 Multi-Playlist ZIP Download API
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 17.1.1 | v2.29.0 | [x] | `POST /api/files/download-zip` accepts JSON body `{"playlists": ["key1", "key2", ...]}` |
+| 17.1.2 | v2.29.0 | [x] | Response is a streamed ZIP archive with `Content-Disposition: attachment; filename="music-porter-export.zip"` |
+| 17.1.3 | v2.29.0 | [x] | ZIP uses `ZIP_STORED` compression (MP3s are already compressed) |
+| 17.1.4 | v2.29.0 | [x] | ZIP contains one subdirectory per playlist, each containing the playlist's MP3 files |
+| 17.1.5 | v2.29.0 | [x] | Returns HTTP 413 if total file count across all playlists exceeds 2000 |
+| 17.1.6 | v2.29.0 | [x] | Returns HTTP 400 if `playlists` array is empty or missing |
+| 17.1.7 | v2.29.0 | [x] | Each playlist directory is validated with `safe_dir()` before inclusion |
+| 17.1.8 | v2.29.0 | [x] | Uses `ctx.get_output_profile()` to resolve the correct export directory |
+| 17.1.9 | v2.29.0 | [x] | Playlists with no MP3 files are silently skipped (not an error) |
+
+##### 17.2 Client Sync Tracking API
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 17.2.1 | v2.29.0 | [x] | `POST /api/sync/client-record` accepts JSON body `{"sync_key": "client-<name>", "playlist": "<key>", "files": ["file1.mp3", ...]}` |
+| 17.2.2 | v2.29.0 | [x] | Calls `ctx.sync_tracker.record_batch(sync_key, playlist, files)` to persist tracking |
+| 17.2.3 | v2.29.0 | [x] | Returns HTTP 400 if `sync_key`, `playlist`, or `files` is missing |
+| 17.2.4 | v2.29.0 | [x] | Returns HTTP 400 if `sync_tracker` is not available |
+| 17.2.5 | v2.29.0 | [x] | Logs to audit with operation `client_sync_record` including sync_key, playlist, and file count |
+| 17.2.6 | v2.29.0 | [x] | Client sync keys appear in existing Sync Keys tracking table on the web UI |
+
+##### 17.3 Client-Side Sync UI
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 17.3.1 | v2.29.0 | [x] | New "Client-Side Sync" card appears on `/sync` page between the Output card and Section 2: Sync Status |
+| 17.3.2 | v2.29.0 | [x] | Card header shows browser support badge: green "Chromium" if `showDirectoryPicker` is available, yellow "ZIP Only" otherwise |
+| 17.3.3 | v2.29.0 | [x] | Info alert explains Chromium requirement when File System Access API is not available |
+| 17.3.4 | v2.29.0 | [x] | Playlist checkboxes are loaded from `GET /api/directories/export` with Select All / Select None links |
+| 17.3.5 | v2.29.0 | [x] | "Sync to Local Folder" button is only visible when File System Access API is supported |
+| 17.3.6 | v2.29.0 | [x] | "Download as ZIP" button is always visible |
+| 17.3.7 | v2.29.0 | [x] | Progress bar (1.4rem height, `bg-info`) shows per-file progress during File System Access sync |
+| 17.3.8 | v2.29.0 | [x] | Result summary alert shows copied/skipped/failed counts after sync completes |
+
+##### 17.4 File System Access API Sync (JavaScript)
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 17.4.1 | v2.29.0 | [x] | Calls `showDirectoryPicker({mode: 'readwrite'})` to let user select target folder |
+| 17.4.2 | v2.29.0 | [x] | Creates one subdirectory per selected playlist in the target folder |
+| 17.4.3 | v2.29.0 | [x] | Fetches file list per playlist via `GET /api/files/<key>` |
+| 17.4.4 | v2.29.0 | [x] | Skips files that already exist in target directory with matching size (incremental sync) |
+| 17.4.5 | v2.29.0 | [x] | Downloads each new file via `GET /api/files/<key>/<filename>` and writes via `FileSystemWritableFileStream` |
+| 17.4.6 | v2.29.0 | [x] | After each playlist completes, reports synced files to `POST /api/sync/client-record` |
+| 17.4.7 | v2.29.0 | [x] | Progress bar updates per-file with current file name |
+| 17.4.8 | v2.29.0 | [x] | `AbortError` from user cancelling the directory picker is silently ignored |
+| 17.4.9 | v2.29.0 | [x] | Network or write errors are logged per-file; sync continues with remaining files |
+| 17.4.10 | v2.29.0 | [x] | `QuotaExceededError` is caught and displayed as a disk full warning |
+| 17.4.11 | v2.29.0 | [x] | On sync start, reads `.music-porter-sync.json` from selected directory; reuses stored `sync_key` if present |
+| 17.4.12 | v2.29.0 | [x] | Files in manifest with matching size are skipped without filesystem checks |
+| 17.4.13 | v2.29.0 | [x] | On sync completion, writes `.music-porter-sync.json` with sync_key, server_origin, last_sync_at, and per-playlist file maps |
+| 17.4.14 | v2.29.0 | [x] | If manifest is missing or unparseable, sync proceeds normally (generates key from folder name, checks all files on disk) |
+| 17.4.15 | v2.29.0 | [x] | Each file is recorded to the server DB individually via `POST /api/sync/client-record` as it is copied or skipped (realtime tracking) |
+| 17.4.16 | v2.29.0 | [x] | Per-file server recording is fire-and-forget (non-blocking, non-fatal) |
+| 17.4.17 | v2.29.0 | [x] | Sync Keys table has a browser-sync button (pc-display icon) that triggers client-side sync for that key |
+| 17.4.18 | v2.29.0 | [x] | Playlist Breakdown table has a per-playlist browser-sync button |
+| 17.4.19 | v2.29.0 | [x] | Browser-sync buttons are only visible when File System Access API is available |
+| 17.4.20 | v2.29.0 | [x] | Syncing to an existing (non-client) key does not auto-register a web-client:// destination |
+| 17.4.21 | v2.29.0 | [x] | The local manifest is written with the chosen key name so future syncs reuse it |
+
+##### 17.5 ZIP Download Flow (JavaScript)
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 17.5.1 | v2.29.0 | [x] | Single playlist download uses existing `GET /api/files/<key>/download-all` endpoint |
+| 17.5.2 | v2.29.0 | [x] | Multiple playlist download uses `POST /api/files/download-zip` and triggers download via blob URL |
+| 17.5.3 | v2.29.0 | [x] | Download button is disabled during ZIP generation and re-enabled on completion |
+
+##### 17.6 Edge Cases
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 17.6.1 | v2.29.0 | [x] | No playlists selected: action buttons are disabled with tooltip "Select at least one playlist" |
+| 17.6.2 | v2.29.0 | [x] | Empty export directory (no playlists): card body shows "No exported playlists found" message |
+| 17.6.3 | v2.29.0 | [x] | Server mode with API key auth: fetch calls include credentials for cookie-based sessions |
+| 17.6.4 | v2.29.0 | [x] | File System Access sync in progress: both action buttons are disabled until complete |
+
+##### 17.7 web-client:// Destination Type
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 17.7.1 | v2.29.0 | [x] | `SyncDestination.type` returns `'web-client'` for paths with `web-client://` scheme |
+| 17.7.2 | v2.29.0 | [x] | `SyncDestination.available` returns `True` for `web-client` type |
+| 17.7.3 | v2.29.0 | [x] | `ConfigManager.add_destination()` accepts `web-client://` scheme and skips filesystem validation |
+| 17.7.4 | v2.29.0 | [x] | `POST /api/sync/client-record` auto-registers a `web-client://` destination in config on first sync |
+| 17.7.5 | v2.29.0 | [x] | `POST /api/sync/run` rejects `web-client` destinations with HTTP 400 |
+| 17.7.6 | v2.29.0 | [x] | Sync Keys table shows `bi-pc-display` icon for web-client keys |
+| 17.7.7 | v2.29.0 | [x] | Saved Destinations table shows "Client" badge (blue) for web-client destinations |
+| 17.7.8 | v2.29.0 | [x] | Server-side sync dropdown excludes web-client destinations |
+
+---
+
+### SRS 18: Destination Linking — Shared Sync Keys
+
+**Version:** 1.0  |  **Date:** 2026-02-26  |  **Status:** Complete  |  **Implemented in:** v2.29.0
+
+---
+
+#### Overview
+
+Adds an optional `sync_key` field to `SyncDestination` so multiple destinations can share
+a single tracking key. This unifies sync tracking across server-side sync, client-side
+browser sync, and iOS — preventing duplicate tracking entries and unnecessary re-syncs.
+
+##### 18.1 Data Model
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 18.1.1 | 1.0 | [x] | `SyncDestination` dataclass has an optional `sync_key: str` field (default `None`) |
+| 18.1.2 | 1.0 | [x] | `SyncDestination.effective_key` property returns `sync_key` if set, otherwise `name` |
+| 18.1.3 | 1.0 | [x] | `to_api_dict()` includes `effective_key` field and conditionally includes `sync_key` when set |
+| 18.1.4 | 1.0 | [x] | `config.yaml` destinations persist `sync_key` when set; omit when `None` |
+| 18.1.5 | 1.0 | [x] | ConfigManager loads `sync_key` from YAML destination entries |
+| 18.1.6 | 1.0 | [x] | `ConfigManager.ensure_destination()` returns existing or creates new destination with auto-link to `sync_key` |
+
+##### 18.2 Tracking Merge
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 18.2.1 | 1.0 | [x] | `SyncTracker.merge_key(source_key, target_key)` moves all `sync_files` records from source to target |
+| 18.2.2 | 1.0 | [x] | Duplicate records (same file\_path + playlist) resolve by keeping the latest `synced_at` timestamp |
+| 18.2.3 | 1.0 | [x] | After merge, source sync key is deleted (cascade deletes remaining records) |
+| 18.2.4 | 1.0 | [x] | `merge_key()` returns `{records_moved, records_merged, source_deleted}` stats |
+| 18.2.5 | 1.0 | [x] | Merging when source key has no records is a no-op returning zero counts |
+| 18.2.6 | 1.0 | [x] | Target key is created (upserted) if it does not already exist |
+
+##### 18.3 API
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 18.3.1 | 1.0 | [x] | `PUT /api/sync/destinations/<name>/link` accepts `{sync_key}` to link or `{sync_key: ""}` to unlink |
+| 18.3.2 | 1.0 | [x] | Link endpoint calls `merge_key()` when old tracking data exists under the destination name |
+| 18.3.3 | 1.0 | [x] | Link endpoint returns `{ok, sync_key, merge_stats}` |
+| 18.3.4 | 1.0 | [x] | `POST /api/sync/destinations` accepts optional `sync_key` field |
+| 18.3.5 | 1.0 | [x] | `GET /api/sync/destinations` returns `effective_key` and `sync_key` for each destination |
+| 18.3.6 | 1.0 | [x] | `POST /api/sync/run` uses `dest.effective_key` for tracking instead of `dest.name` |
+
+##### 18.4 Web UI
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 18.4.1 | 1.0 | [x] | Destinations table shows "Linked Key" column with badge when linked |
+| 18.4.2 | 1.0 | [x] | Each destination row has a link/unlink button in the actions column |
+| 18.4.3 | 1.0 | [x] | Link modal allows selecting from existing sync keys |
+| 18.4.4 | 1.0 | [x] | Add destination form has optional "Link to Key" dropdown |
+| 18.4.5 | 1.0 | [x] | `findDestMeta()` matches by both `name` and `effective_key` |
+| 18.4.6 | 1.0 | [x] | Sync Keys table shows linked-destination count badge when destinations link to a key |
+
+##### 18.5 CLI
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 18.5.1 | 1.0 | [x] | `--link-to KEY` flag on `--add-dest` pre-links the new destination |
+| 18.5.2 | 1.0 | [x] | `--link-dest NAME KEY` links an existing destination and merges tracking data |
+| 18.5.3 | 1.0 | [x] | `--unlink-dest NAME` removes the sync\_key from a destination |
+| 18.5.4 | 1.0 | [x] | `render_destinations_list` shows `-> KEY` suffix for linked destinations |
+| 18.5.5 | 1.0 | [x] | All sync operations use `dest.effective_key` for tracking |
+| 18.5.6 | 1.0 | [x] | Pipeline sync stage uses `sync_destination.effective_key` |
+
+##### 18.6 iOS
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 18.6.1 | 1.0 | [x] | `SyncDestination` model has optional `syncKey` and required `effectiveKey` fields |
+| 18.6.2 | 1.0 | [x] | CodingKeys map `sync_key` and `effective_key` from JSON |
+
+##### 18.7 Edge Cases
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 18.7.1 | 1.0 | [x] | Linking to a nonexistent key is allowed — key is created on first sync |
+| 18.7.2 | 1.0 | [x] | Deleting a destination that others link to does not affect other destinations |
+| 18.7.3 | 1.0 | [x] | Deleting a sync key that destinations link to removes tracking data; `sync_key` field persists in config |
+| 18.7.4 | 1.0 | [x] | Unlinking a destination does not delete or move tracking data |
+| 18.7.5 | 1.0 | [x] | Auto-detected USB drives (unsaved) have no `sync_key` — `effective_key` equals `name` |
+
+##### 18.8 Sync Key Rename
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 18.8.1 | 1.0 | [x] | `SyncTracker.rename_key()` moves all tracking records to new key name; fails (returns `None`) if target key already exists |
+| 18.8.2 | 1.0 | [x] | `ConfigManager.rename_sync_key_refs()` updates all destination `sync_key` references from old key to new key |
+| 18.8.3 | 1.0 | [x] | `POST /api/sync/keys/<key>/rename` endpoint accepts `{new_key}`, renames key, updates destination links, and audit logs |
+| 18.8.4 | 1.0 | [x] | Web UI Sync Keys table has rename button (pencil icon) opening a modal with key name input |
+| 18.8.5 | 1.0 | [x] | CLI `--rename-key OLD NEW` flag renames key, updates destination links, and audit logs |
+| 18.8.6 | 1.0 | [x] | Renaming to an existing key returns HTTP 409 (API) or exit code 1 (CLI) with an error message |
+| 18.8.7 | 1.0 | [x] | Renaming a key with no tracking records is a no-op that still succeeds |
+
+##### 18.9 Destination Rename
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 18.9.1 | 1.0 | [x] | `ConfigManager.rename_destination(old_name, new_name)` validates name format (`[a-zA-Z0-9_-]+`), uniqueness, existence, and mutates `dest.name` in place |
+| 18.9.2 | 1.0 | [x] | `rename_destination()` returns `False` with error log if new name matches existing destination (case-insensitive) |
+| 18.9.3 | 1.0 | [x] | `rename_destination()` audit logs as `destination_rename` with `old_name` and `new_name` params |
+| 18.9.4 | 1.0 | [x] | CLI `--rename-dest OLD NEW` flag renames the destination and, if `sync_key` is `None`, also renames the tracking key via `sync_tracker.rename_key()` |
+| 18.9.5 | 1.0 | [x] | CLI handler exits 1 if destination not found or rename fails |
+| 18.9.6 | 1.0 | [x] | `POST /api/sync/destinations/<name>/rename` accepts `{new_name}`, validates format and uniqueness, returns `{ok, old_name, new_name, tracking_renamed}` |
+| 18.9.7 | 1.0 | [x] | API returns HTTP 404 if destination not found, HTTP 409 if new name already exists, HTTP 400 if name invalid or same |
+| 18.9.8 | 1.0 | [x] | API renames tracking key only when destination has no explicit `sync_key` (effective key equals name) |
+| 18.9.9 | 1.0 | [x] | Web UI destinations table has a pencil button per row that opens a rename modal |
+| 18.9.10 | 1.0 | [x] | Web UI rename modal pre-fills current name, validates format client-side, and refreshes both destinations and sync status tables on success |
+| 18.9.11 | 1.0 | [x] | Renaming a destination with a linked `sync_key` does NOT rename the tracking key (only the destination name changes) |
