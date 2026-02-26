@@ -1,4 +1,4 @@
-data/
+data/*
 design/
 __pycache__/
 export/
