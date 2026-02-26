@@ -719,13 +719,38 @@ class MigrationEvent:
     params: dict = field(default_factory=dict)
 
 
+def _secure_path(path):
+    """Set owner-only permissions (0o700 for dirs, 0o600 for files).
+
+    Protects sensitive files (config.yaml with API key, cookies.txt,
+    database) from being read by other users on the system.
+    Silently ignored on Windows where POSIX permissions don't apply.
+    """
+    if IS_WINDOWS:
+        return
+    p = Path(path)
+    if p.is_dir():
+        p.chmod(0o700)
+    elif p.exists():
+        p.chmod(0o600)
+
+
 def migrate_data_dir(logger=None):
     """Create data/ dir and migrate config.yaml/cookies.txt from project root if needed.
+
+    Also enforces owner-only permissions on the data directory and all
+    sensitive files within it (config.yaml, cookies.txt, database).
 
     Returns a list of MigrationEvent entries for deferred audit logging.
     """
     data_dir = Path(DEFAULT_DATA_DIR)
     data_dir.mkdir(exist_ok=True)
+    _secure_path(data_dir)
+
+    # Enforce owner-only permissions on all sensitive files every startup
+    for sensitive_file in (DEFAULT_CONFIG_FILE, DEFAULT_COOKIES, DEFAULT_DB_FILE,
+                           'data/cookies.txt.backup', 'data/config.yaml.backup'):
+        _secure_path(Path(sensitive_file))
 
     migrations = [
         ('config.yaml', DEFAULT_CONFIG_FILE),
@@ -738,6 +763,7 @@ def migrate_data_dir(logger=None):
         old_path, new_path = Path(old), Path(new)
         if old_path.exists() and not new_path.exists():
             shutil.move(str(old_path), str(new_path))
+            _secure_path(new_path)
             moved.append(f"{old} → {new}")
             if logger:
                 logger.info(f"Migrated {old} → {new}")
@@ -768,6 +794,7 @@ def migrate_db_schema(logger=None):
     conn = sqlite3.connect(str(db_path), check_same_thread=False)
     try:
         conn.execute("PRAGMA journal_mode=WAL")
+        _secure_path(db_path)
         current = conn.execute("PRAGMA user_version").fetchone()[0]
 
         if current >= DB_SCHEMA_VERSION:
@@ -2149,6 +2176,7 @@ class ConfigManager:
             f.write("# Music Porter Configuration\n")
             f.write("# CLI flags override these settings when specified.\n\n")
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+        _secure_path(self.conf_path)
 
     def get_setting(self, key, default=None):
         """Get a setting value, returning default if not set."""
@@ -5328,11 +5356,13 @@ class CookieManager:
         if backup and self.cookie_path.exists():
             backup_path = Path(str(self.cookie_path) + '.backup')
             shutil.copy2(self.cookie_path, backup_path)
+            _secure_path(backup_path)
             self.logger.ok(f"Backup created: {backup_path}")
 
         # Save cookies in Netscape format
         try:
             cookie_jar.save(ignore_discard=True, ignore_expires=False)
+            _secure_path(self.cookie_path)
             self.logger.ok(f"Cookies saved to {self.cookie_path}")
 
             # Validate the new cookies
@@ -5387,6 +5417,7 @@ class CookieManager:
             # Create backup before modifying
             backup_path = Path(str(self.cookie_path) + '.backup')
             shutil.copy2(self.cookie_path, backup_path)
+            _secure_path(backup_path)
 
             # Clear and re-add only Apple cookies
             cookie_jar.clear()
@@ -5394,6 +5425,7 @@ class CookieManager:
                 cookie_jar.set_cookie(cookie)
 
             cookie_jar.save(ignore_discard=True, ignore_expires=False)
+            _secure_path(self.cookie_path)
             return (True, len(apple_cookies), removed_count)
 
         except Exception as e:
