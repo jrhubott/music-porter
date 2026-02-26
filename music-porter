@@ -336,6 +336,17 @@ def render_usb_sync_summary(r: USBSyncResult) -> None:
     print("=" * 60)
 
 
+def render_post_sync_tracking_summary(status) -> None:
+    """Render compact sync tracking summary after USB sync."""
+    print()
+    print("  SYNC TRACKING")
+    print("─" * 35)
+    print(f"  USB key:            {status.usb_key}")
+    print(f"  Synced files:       {status.synced_files} / {status.total_files}")
+    print(f"  Remaining new:      {status.new_files}")
+    print("─" * 35)
+
+
 def render_usb_sync_status_summary(all_status: list) -> None:
     """Render USB sync status for all tracked keys."""
     print()
@@ -2189,6 +2200,10 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
                                     help='Show detail for a specific USB key')
     syncstatus_parser.add_argument('--delete-key', default=None,
                                     help='Delete tracking data for a USB key')
+    syncstatus_parser.add_argument('--delete-playlist', default=None,
+                                    help='Delete tracking for a playlist on a USB key (requires --usb-key)')
+    syncstatus_parser.add_argument('--prune', action='store_true',
+                                    help='Remove stale records for files no longer in the export directory')
     syncstatus_parser.add_argument('--list-keys', action='store_true',
                                     help='List all tracked USB keys')
 
@@ -2902,6 +2917,14 @@ def main():
             dry_run=args.dry_run
         )
         render_usb_sync_summary(result)
+        if result.success and not args.dry_run:
+            try:
+                export_dir = get_export_dir(output_profile.name)
+                tracking_status = sync_tracker.get_sync_status(
+                    result.volume_name, export_dir)
+                render_post_sync_tracking_summary(tracking_status)
+            except Exception:
+                pass  # Non-critical — don't fail the exit code
         sys.exit(0 if result.success else 1)
 
     elif args.command == 'sync-status':
@@ -2919,6 +2942,40 @@ def main():
                 logger.ok(f"Deleted tracking data for USB key '{key_name}'")
             else:
                 logger.info("Cancelled")
+            sys.exit(0)
+
+        if args.delete_playlist:
+            if not args.usb_key:
+                logger.error("--delete-playlist requires --usb-key")
+                sys.exit(1)
+            playlist_name = args.delete_playlist
+            key_name = args.usb_key
+            if cli_prompt.confirm(
+                    f"Delete tracking for playlist '{playlist_name}' on USB key '{key_name}'?",
+                    default=False):
+                count = sync_tracker.delete_playlist(key_name, playlist_name)
+                logger.ok(f"Deleted {count} tracking record(s) for '{playlist_name}' on '{key_name}'")
+            else:
+                logger.info("Cancelled")
+            sys.exit(0)
+
+        if args.prune:
+            if args.usb_key:
+                result = sync_tracker.prune_stale(args.usb_key, export_dir)
+                if result['pruned_count'] == 0:
+                    logger.ok(f"No stale records found for '{args.usb_key}'")
+                else:
+                    logger.ok(f"Pruned {result['pruned_count']} stale record(s) for '{args.usb_key}'"
+                              f" ({', '.join(result['playlists_affected'])})")
+            else:
+                result = sync_tracker.prune_all_keys(export_dir)
+                if result['total_pruned'] == 0:
+                    logger.ok("No stale records found across any keys")
+                else:
+                    logger.ok(f"Pruned {result['total_pruned']} stale record(s) total")
+                    for kp in result['keys_pruned']:
+                        logger.info(f"  {kp['key_name']}: {kp['pruned_count']} pruned"
+                                    f" ({', '.join(kp['playlists_affected'])})")
             sys.exit(0)
 
         if args.list_keys:

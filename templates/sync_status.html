@@ -64,7 +64,10 @@
 <div class="card mt-4 d-none" id="detailCard">
   <div class="card-header d-flex justify-content-between align-items-center">
     <span><i class="bi bi-list-nested"></i> Playlist Breakdown: <strong id="detailKeyName">-</strong></span>
-    <button class="btn btn-outline-secondary btn-sm" onclick="hideDetail()"><i class="bi bi-x"></i> Close</button>
+    <div>
+      <button class="btn btn-outline-warning btn-sm me-1" onclick="pruneKey()" title="Remove stale records"><i class="bi bi-eraser"></i> Prune Stale</button>
+      <button class="btn btn-outline-secondary btn-sm" onclick="hideDetail()"><i class="bi bi-x"></i> Close</button>
+    </div>
   </div>
   <div class="card-body">
     <div class="table-responsive">
@@ -76,6 +79,7 @@
             <th class="text-end">Synced</th>
             <th class="text-end">New</th>
             <th class="text-center">Status</th>
+            <th class="text-center">Actions</th>
           </tr>
         </thead>
         <tbody id="detailTableBody"></tbody>
@@ -169,7 +173,7 @@ function showDetail(keyName) {
 
     const tbody = document.getElementById('detailTableBody');
     if (!data.playlists || !data.playlists.length) {
-      tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No export files found</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No export files found</td></tr>';
       return;
     }
     tbody.innerHTML = data.playlists.map(p => {
@@ -187,6 +191,11 @@ function showDetail(keyName) {
         <td class="text-end">${p.synced_files}</td>
         <td class="text-end">${p.new_files}</td>
         <td class="text-center">${statusBadge}</td>
+        <td class="text-center">
+          <button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="deletePlaylist('${keyName}', '${p.name}')" title="Delete playlist tracking">
+            <i class="bi bi-trash"></i>
+          </button>
+        </td>
       </tr>`;
     }).join('');
   });
@@ -216,6 +225,34 @@ document.getElementById('confirmDeleteBtn').addEventListener('click', function()
     })
     .catch(err => showToast('Delete failed: ' + err, 'error'));
 });
+
+function pruneKey() {
+  const keyName = document.getElementById('detailKeyName').textContent;
+  fetch('/api/usb/keys/' + encodeURIComponent(keyName) + '/prune', {method: 'POST'})
+    .then(r => r.json())
+    .then(data => {
+      if (data.pruned_count === 0) {
+        showToast('No stale records found for ' + keyName, 'info');
+      } else {
+        showToast('Pruned ' + data.pruned_count + ' stale record(s) for ' + keyName, 'success');
+      }
+      showDetail(keyName);
+      loadSyncStatus();
+    })
+    .catch(err => showToast('Prune failed: ' + err, 'error'));
+}
+
+function deletePlaylist(keyName, playlistName) {
+  if (!confirm(`Delete tracking for playlist "${playlistName}" on key "${keyName}"?`)) return;
+  fetch('/api/usb/keys/' + encodeURIComponent(keyName) + '/playlists/' + encodeURIComponent(playlistName), {method: 'DELETE'})
+    .then(r => r.json())
+    .then(data => {
+      showToast(`Deleted ${data.deleted} record(s) for ${playlistName}`, 'success');
+      showDetail(keyName);
+      loadSyncStatus();
+    })
+    .catch(err => showToast('Delete failed: ' + err, 'error'));
+}
 
 loadSyncStatus();
 </script>

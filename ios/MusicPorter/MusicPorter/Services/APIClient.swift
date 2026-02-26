@@ -190,6 +190,19 @@ final class APIClient {
         let _: OkResponse = try await delete("/api/usb/keys/\(key)")
     }
 
+    func deleteUSBPlaylist(key: String, playlist: String) async throws -> Int {
+        let response: DeletedCountResponse = try await delete("/api/usb/keys/\(key)/playlists/\(playlist)")
+        return response.deleted
+    }
+
+    func pruneUSBKey(key: String) async throws -> USBPruneResult {
+        try await postAny("/api/usb/keys/\(key)/prune", body: [:] as [String: String])
+    }
+
+    func getFileSyncStatus(playlist: String) async throws -> [String: [String]] {
+        try await get("/api/files/\(playlist)/sync-status")
+    }
+
     // MARK: - Tasks
 
     func getTasks() async throws -> [TaskInfo] {
@@ -364,6 +377,11 @@ struct ServerInfoResponse: Codable {
 struct OkResponse: Codable {
     let ok: Bool?
     let error: String?
+}
+
+struct DeletedCountResponse: Codable {
+    let ok: Bool
+    let deleted: Int
 }
 
 struct DeleteDataResponse: Codable {

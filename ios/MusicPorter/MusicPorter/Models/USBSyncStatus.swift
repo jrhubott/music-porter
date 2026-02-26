@@ -68,3 +68,14 @@ struct USBSyncStatusDetail: Codable {
         case newPlaylists = "new_playlists"
     }
 }
+
+/// Result of pruning stale tracking records for a USB key.
+struct USBPruneResult: Codable {
+    let prunedCount: Int
+    let playlistsAffected: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case prunedCount = "pruned_count"
+        case playlistsAffected = "playlists_affected"
+    }
+}

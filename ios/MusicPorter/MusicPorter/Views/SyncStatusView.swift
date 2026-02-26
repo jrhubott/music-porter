@@ -9,6 +9,8 @@ struct SyncStatusView: View {
     @State private var error: String?
     @State private var showDeleteConfirm = false
     @State private var keyToDelete: String?
+    @State private var showDeletePlaylistConfirm = false
+    @State private var playlistToDelete: (String, String)?
 
     var body: some View {
         List {
@@ -50,6 +52,21 @@ struct SyncStatusView: View {
             }
         } message: {
             Text("Delete all sync tracking data for \(keyToDelete ?? "")?")
+        }
+        .confirmationDialog(
+            "Delete Playlist Tracking",
+            isPresented: $showDeletePlaylistConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let (key, playlist) = playlistToDelete {
+                    Task { await deletePlaylist(key, playlist) }
+                }
+            }
+        } message: {
+            if let (key, playlist) = playlistToDelete {
+                Text("Delete tracking for \"\(playlist)\" on \"\(key)\"?")
+            }
         }
     }
 
@@ -134,6 +151,13 @@ struct SyncStatusView: View {
 
     private func detailSection(_ detail: USBSyncStatusDetail) -> some View {
         Section("Playlists: \(detail.usbKey)") {
+            Button {
+                Task { await pruneKey(detail.usbKey) }
+            } label: {
+                Label("Prune Stale Records", systemImage: "eraser")
+                    .font(.subheadline)
+                    .foregroundStyle(.yellow)
+            }
             if detail.playlists.isEmpty {
                 Text("No export files found")
                     .font(.subheadline)
@@ -169,6 +193,14 @@ struct SyncStatusView: View {
                                 .foregroundStyle(.green)
                         }
                     }
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) {
+                            playlistToDelete = (detail.usbKey, playlist.name)
+                            showDeletePlaylistConfirm = true
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
                 }
             }
         }
@@ -202,6 +234,26 @@ struct SyncStatusView: View {
                 selectedKey = nil
                 detail = nil
             }
+            await load()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func deletePlaylist(_ key: String, _ playlist: String) async {
+        do {
+            _ = try await appState.apiClient.deleteUSBPlaylist(key: key, playlist: playlist)
+            await loadDetail(key)
+            await load()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func pruneKey(_ key: String) async {
+        do {
+            _ = try await appState.apiClient.pruneUSBKey(key: key)
+            await loadDetail(key)
             await load()
         } catch {
             self.error = error.localizedDescription

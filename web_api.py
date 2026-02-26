@@ -1213,12 +1213,31 @@ def api_files_list(playlist_key):
             entry.setdefault('has_protection_tags', False)
         files.append(entry)
 
+    include_sync = request.args.get('include_sync', '').lower() == 'true'
+    if include_sync and ctx.sync_tracker:
+        sync_map = ctx.sync_tracker.get_file_sync_map(playlist_key)
+        for entry in files:
+            entry['synced_to'] = sync_map.get(entry['filename'], [])
+
     return jsonify({
         'playlist': playlist_key,
         'profile': profile.name,
         'file_count': len(files),
         'files': files,
     })
+
+
+# TODO: Add a web file browser page (template + route) that shows per-file
+# sync indicators using the sync-status endpoint below. Currently only
+# exposed via API for the iOS companion app.
+
+@api_bp.route('/api/files/<playlist_key>/sync-status')
+def api_files_sync_status(playlist_key):
+    """Return sync map for files in a playlist (lightweight, no ID3 reads)."""
+    ctx = _ctx()
+    if not ctx.sync_tracker:
+        return jsonify({})
+    return jsonify(ctx.sync_tracker.get_file_sync_map(playlist_key))
 
 
 @api_bp.route('/api/files/<playlist_key>/<filename>')
@@ -1411,6 +1430,41 @@ def api_usb_key_delete(key):
             source=ctx.detect_source(),
         )
     return jsonify({'ok': True})
+
+
+@api_bp.route('/api/usb/keys/<key>/playlists/<playlist>', methods=['DELETE'])
+def api_usb_playlist_delete(key, playlist):
+    """Delete tracking records for one playlist on a USB key."""
+    ctx = _ctx()
+    count = ctx.sync_tracker.delete_playlist(key, playlist)
+    if ctx.audit_logger:
+        ctx.audit_logger.log(
+            'usb_playlist_delete',
+            f"Deleted {count} tracking record(s) for playlist '{playlist}' on key '{key}'",
+            'completed',
+            params={'usb_key': key, 'playlist': playlist, 'deleted': count},
+            source=ctx.detect_source(),
+        )
+    return jsonify({'ok': True, 'deleted': count})
+
+
+@api_bp.route('/api/usb/keys/<key>/prune', methods=['POST'])
+def api_usb_key_prune(key):
+    """Remove stale tracking records for files no longer in export directory."""
+    ctx = _ctx()
+    config = ctx.get_config()
+    profile = ctx.get_output_profile(config)
+    export_dir = str(ctx.project_root / mp.get_export_dir(profile.name))
+    result = ctx.sync_tracker.prune_stale(key, export_dir)
+    if ctx.audit_logger:
+        ctx.audit_logger.log(
+            'usb_key_prune',
+            f"Pruned {result['pruned_count']} stale record(s) for key '{key}'",
+            'completed',
+            params={'usb_key': key, **result},
+            source=ctx.detect_source(),
+        )
+    return jsonify(result)
 
 
 # ══════════════════════════════════════════════════════════════════

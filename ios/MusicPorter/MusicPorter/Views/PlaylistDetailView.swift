@@ -20,7 +20,8 @@ struct PlaylistDetailView: View {
                         track: track,
                         playlist: playlist.key,
                         api: appState.apiClient,
-                        isNowPlaying: appState.audioPlayer.currentServerTrackID == track.filename
+                        isNowPlaying: appState.audioPlayer.currentServerTrackID == track.filename,
+                        syncedTo: vm.syncMap[track.filename] ?? []
                     )
                 }
                 .buttonStyle(.plain)

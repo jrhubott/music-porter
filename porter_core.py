@@ -1214,6 +1214,23 @@ class USBSyncTracker:
             finally:
                 conn.close()
 
+    def delete_playlist(self, usb_key, playlist):
+        """Delete tracking records for one playlist on a USB key.
+
+        Returns count of deleted records.
+        """
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                cursor = conn.execute(
+                    "DELETE FROM usb_sync_files WHERE usb_key = ? AND playlist = ?",
+                    (usb_key, playlist),
+                )
+                conn.commit()
+                return cursor.rowcount
+            finally:
+                conn.close()
+
     def get_keys(self):
         """List all tracked USB keys with total synced file counts.
 
@@ -1354,6 +1371,87 @@ class USBSyncTracker:
                 'new_playlists': status.new_playlists,
             })
         return results
+
+    def prune_stale(self, usb_key, export_base_dir):
+        """Remove DB records for files no longer in the export directory.
+
+        Returns dict: {pruned_count, playlists_affected}.
+        """
+        export_path = Path(export_base_dir)
+
+        # Fetch all tracked records for this key
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT id, playlist, file_path FROM usb_sync_files WHERE usb_key = ?",
+                (usb_key,),
+            ).fetchall()
+        finally:
+            conn.close()
+
+        stale_ids = []
+        playlists_affected = set()
+        for r in rows:
+            file_on_disk = export_path / r['playlist'] / r['file_path']
+            if not file_on_disk.exists():
+                stale_ids.append(r['id'])
+                playlists_affected.add(r['playlist'])
+
+        if stale_ids:
+            with self._write_lock:
+                conn = self._connect()
+                try:
+                    conn.execute(
+                        f"DELETE FROM usb_sync_files WHERE id IN ({','.join('?' * len(stale_ids))})",
+                        stale_ids,
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+
+        return {
+            'pruned_count': len(stale_ids),
+            'playlists_affected': sorted(playlists_affected),
+        }
+
+    def prune_all_keys(self, export_base_dir):
+        """Prune stale records for all tracked USB keys.
+
+        Returns dict: {total_pruned, keys_pruned}.
+        """
+        keys = self.get_keys()
+        total_pruned = 0
+        keys_pruned = []
+        for key_info in keys:
+            result = self.prune_stale(key_info['key_name'], export_base_dir)
+            if result['pruned_count'] > 0:
+                keys_pruned.append({
+                    'key_name': key_info['key_name'],
+                    'pruned_count': result['pruned_count'],
+                    'playlists_affected': result['playlists_affected'],
+                })
+                total_pruned += result['pruned_count']
+        return {'total_pruned': total_pruned, 'keys_pruned': keys_pruned}
+
+    def get_file_sync_map(self, playlist):
+        """Map filenames to USB keys they've been synced to.
+
+        Returns dict: {filename: [usb_key_name, ...]}.
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT file_path, usb_key FROM usb_sync_files
+                   WHERE playlist = ? ORDER BY file_path, usb_key""",
+                (playlist,),
+            ).fetchall()
+        finally:
+            conn.close()
+
+        sync_map = {}
+        for r in rows:
+            sync_map.setdefault(r['file_path'], []).append(r['usb_key'])
+        return sync_map
 
 
 # ══════════════════════════════════════════════════════════════════
