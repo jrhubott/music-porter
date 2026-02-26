@@ -167,7 +167,8 @@ def api_cookies_refresh():
         else:
             return {'success': False}
 
-    task_id = ctx.task_manager.submit('cookie_refresh', desc, _run)
+    task_id = ctx.task_manager.submit('cookie_refresh', desc, _run,
+                                      source=ctx.detect_source())
     if task_id is None:
         return jsonify({'error': 'Another operation is already running'}), 409
     return jsonify({'task_id': task_id})
@@ -430,7 +431,8 @@ def api_convert_batch():
             'playlists_failed': total_failed,
         }
 
-    task_id = ctx.task_manager.submit('convert_batch', desc, _run)
+    task_id = ctx.task_manager.submit('convert_batch', desc, _run,
+                                      source=ctx.detect_source())
     if task_id is None:
         return jsonify({'error': 'Another operation is already running'}), 409
     return jsonify({'task_id': task_id})
@@ -877,7 +879,8 @@ def api_pipeline_run():
             result_dict['success'] = pipeline_result.success
             return result_dict
 
-    task_id = ctx.task_manager.submit('pipeline', desc, _run)
+    task_id = ctx.task_manager.submit('pipeline', desc, _run,
+                                      source=ctx.detect_source())
     if task_id is None:
         return jsonify({'error': 'Another operation is already running'}), 409
     return jsonify({'task_id': task_id})
@@ -942,7 +945,8 @@ def api_convert_run():
                                            dry_run=dry_run, verbose=verbose)
         return {'success': convert_result.success}
 
-    task_id = ctx.task_manager.submit('convert', desc, _run)
+    task_id = ctx.task_manager.submit('convert', desc, _run,
+                                      source=ctx.detect_source())
     if task_id is None:
         return jsonify({'error': 'Another operation is already running'}), 409
     return jsonify({'task_id': task_id})
@@ -988,7 +992,8 @@ def api_tags_update():
                                         dry_run=dry_run, verbose=verbose)
         return {'success': tag_result.success}
 
-    task_id = ctx.task_manager.submit('tag_update', desc, _run)
+    task_id = ctx.task_manager.submit('tag_update', desc, _run,
+                                      source=ctx.detect_source())
     if task_id is None:
         return jsonify({'error': 'Another operation is already running'}), 409
     return jsonify({'task_id': task_id})
@@ -1037,7 +1042,8 @@ def api_tags_restore():
         )
         return {'success': restore_result.success}
 
-    task_id = ctx.task_manager.submit('tag_restore', desc, _run)
+    task_id = ctx.task_manager.submit('tag_restore', desc, _run,
+                                      source=ctx.detect_source())
     if task_id is None:
         return jsonify({'error': 'Another operation is already running'}), 409
     return jsonify({'task_id': task_id})
@@ -1080,7 +1086,8 @@ def api_tags_reset():
                                                  dry_run=dry_run, verbose=verbose)
         return {'success': success}
 
-    task_id = ctx.task_manager.submit('tag_reset', desc, _run)
+    task_id = ctx.task_manager.submit('tag_reset', desc, _run,
+                                      source=ctx.detect_source())
     if task_id is None:
         return jsonify({'error': 'Another operation is already running'}), 409
     return jsonify({'task_id': task_id})
@@ -1154,7 +1161,8 @@ def api_cover_art(action):
                            dry_run=dry_run, verbose=verbose)
             return {'success': r.success}
 
-    task_id = ctx.task_manager.submit(f'cover_art_{action}', desc, _run)
+    task_id = ctx.task_manager.submit(f'cover_art_{action}', desc, _run,
+                                      source=ctx.detect_source())
     if task_id is None:
         return jsonify({'error': 'Another operation is already running'}), 409
     return jsonify({'task_id': task_id})
@@ -1348,7 +1356,8 @@ def api_usb_sync():
             'files_failed': usb_result.files_failed,
         }
 
-    task_id = ctx.task_manager.submit('usb_sync', desc, _run)
+    task_id = ctx.task_manager.submit('usb_sync', desc, _run,
+                                      source=ctx.detect_source())
     if task_id is None:
         return jsonify({'error': 'Another operation is already running'}), 409
     return jsonify({'task_id': task_id})
@@ -1363,12 +1372,75 @@ def api_tasks_list():
     return jsonify(_ctx().task_manager.list_all())
 
 
+@api_bp.route('/api/tasks/history')
+def api_tasks_history():
+    """Paginated task history with optional filters."""
+    ctx = _ctx()
+    db = ctx.task_manager._db
+    if not db:
+        return jsonify({'entries': [], 'total': 0, 'limit': 50, 'offset': 0})
+    limit = request.args.get('limit', 50, type=int)
+    offset = request.args.get('offset', 0, type=int)
+    operation = request.args.get('operation') or None
+    status = request.args.get('status') or None
+    date_from = request.args.get('from') or None
+    date_to = request.args.get('to') or None
+    entries, total = db.get_entries(
+        limit=limit, offset=offset,
+        operation=operation, status=status,
+        date_from=date_from, date_to=date_to,
+    )
+    # Merge live elapsed for running tasks
+    for entry in entries:
+        live = ctx.task_manager._tasks.get(entry['id'])
+        if live and live.status == 'running':
+            entry['elapsed'] = round(live.elapsed(), 1)
+            entry['status'] = live.status
+    return jsonify({
+        'entries': entries,
+        'total': total,
+        'limit': limit,
+        'offset': offset,
+    })
+
+
+@api_bp.route('/api/tasks/stats')
+def api_tasks_stats():
+    """Aggregate task history statistics."""
+    db = _ctx().task_manager._db
+    if not db:
+        return jsonify({'total': 0, 'today': 0, 'by_operation': {}, 'by_status': {}})
+    return jsonify(db.get_stats())
+
+
+@api_bp.route('/api/tasks/clear', methods=['POST'])
+def api_tasks_clear():
+    """Delete old task history entries."""
+    ctx = _ctx()
+    db = ctx.task_manager._db
+    if not db:
+        return jsonify({'error': 'Task history not available'}), 503
+    data = request.get_json(silent=True) or {}
+    if not data.get('confirm'):
+        return jsonify({'error': 'Set confirm: true to clear'}), 400
+    before_date = data.get('before_date')
+    count = db.clear(before_date=before_date)
+    return jsonify({'deleted': count})
+
+
 @api_bp.route('/api/tasks/<task_id>')
 def api_tasks_get(task_id):
-    task = _ctx().task_manager.get(task_id)
-    if not task:
-        return jsonify({'error': 'Task not found'}), 404
-    return jsonify(task.to_dict())
+    ctx = _ctx()
+    # Check in-memory first (has thread/queue for active tasks)
+    task = ctx.task_manager._tasks.get(task_id)
+    if task:
+        return jsonify(task.to_dict())
+    # Fall back to DB for historical tasks
+    if ctx.task_manager._db:
+        entry = ctx.task_manager._db.get(task_id)
+        if entry:
+            return jsonify(entry)
+    return jsonify({'error': 'Task not found'}), 404
 
 
 @api_bp.route('/api/tasks/<task_id>/cancel', methods=['POST'])

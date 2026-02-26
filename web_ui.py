@@ -221,11 +221,13 @@ class TaskState:
 class TaskManager:
     """Manages background operations. One major operation at a time."""
 
-    def __init__(self):
+    def __init__(self, task_db=None):
         self._tasks = {}
         self._lock = threading.RLock()
+        self._db = task_db
 
-    def submit(self, operation, description, target, audit_callback=None):
+    def submit(self, operation, description, target, audit_callback=None,
+               source='web'):
         """Submit a new background task. Returns task_id or None if busy.
 
         target is called as target(task_id) so it can create a WebLogger.
@@ -241,9 +243,16 @@ class TaskManager:
             task = TaskState(id=task_id, operation=operation, description=description)
             self._tasks[task_id] = task
 
+            # Persist to DB
+            if self._db:
+                self._db.insert(task_id, operation, description, source=source)
+
             def _run():
                 task.status = 'running'
                 task.started_at = time.time()
+                if self._db:
+                    self._db.update_status(task_id, 'running',
+                                           started_at=task.started_at)
                 try:
                     result = target(task_id)
                     if task.cancel_event.is_set():
@@ -256,6 +265,14 @@ class TaskManager:
                     task.error = str(e)
                 finally:
                     task.finished_at = time.time()
+                    # Persist final state to DB
+                    if self._db:
+                        self._db.update_status(
+                            task_id, task.status,
+                            result=task.result or None,
+                            error=task.error,
+                            finished_at=task.finished_at,
+                        )
                     # Send sentinel so SSE stream knows we're done
                     task.log_queue.put(None)
                     # Audit callback for completion logging
@@ -271,11 +288,30 @@ class TaskManager:
             return task_id
 
     def get(self, task_id):
-        return self._tasks.get(task_id)
+        # Check in-memory first (needed for thread/queue/cancel)
+        task = self._tasks.get(task_id)
+        if task:
+            return task
+        # Fall back to DB for historical tasks
+        if self._db:
+            return self._db.get(task_id)
+        return None
 
     def list_all(self):
+        """Return task history from DB, merging live elapsed for running tasks."""
+        if not self._db:
+            with self._lock:
+                return [t.to_dict() for t in self._tasks.values()]
+
+        entries, _ = self._db.get_entries(limit=100, offset=0)
+        # Merge live elapsed from in-memory state for running tasks
         with self._lock:
-            return [t.to_dict() for t in self._tasks.values()]
+            for entry in entries:
+                live = self._tasks.get(entry['id'])
+                if live and live.status == 'running':
+                    entry['elapsed'] = round(live.elapsed(), 1)
+                    entry['status'] = live.status
+        return entries
 
     def cancel(self, task_id):
         task = self._tasks.get(task_id)
@@ -521,6 +557,7 @@ class PipelineScheduler:
         task_id = self._ctx.task_manager.submit(
             'scheduled_pipeline', desc, _run,
             audit_callback=_audit_callback,
+            source='scheduler',
         )
 
         if task_id is None:
@@ -687,10 +724,12 @@ def create_app(project_root=None, no_auth=False, server_host=None,
     # ── Shared Application Context ───────────────────────────
     _boot_config = mp.ConfigManager(logger=mp.Logger(verbose=False))
     _api_key = _boot_config.ensure_api_key()
+    _db_path = str(project_root / mp.DEFAULT_DB_FILE)
 
+    _task_db = mp.TaskHistoryDB(_db_path)
     ctx = AppContext(
-        task_manager=TaskManager(),
-        audit_logger=mp.AuditLogger(str(project_root / mp.DEFAULT_DB_FILE)),
+        task_manager=TaskManager(task_db=_task_db),
+        audit_logger=mp.AuditLogger(_db_path),
         api_key=_api_key,
         project_root=project_root,
     )
