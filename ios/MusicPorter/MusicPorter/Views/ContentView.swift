@@ -67,7 +67,7 @@ struct ReconnectingView: View {
             Spacer()
 
             Button(role: .destructive) {
-                appState.forgetServer()
+                appState.cancelAutoReconnect()
             } label: {
                 Text("Cancel")
                     .frame(maxWidth: .infinity)

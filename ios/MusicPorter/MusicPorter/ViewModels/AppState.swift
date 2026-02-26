@@ -54,12 +54,6 @@ final class AppState {
         reconnectAttempt = 0
     }
 
-    /// Stop reconnecting and forget the saved server entirely.
-    func forgetServer() {
-        cancelAutoReconnect()
-        savedServer = nil
-    }
-
     func connect(server: ServerConnection, apiKey: String) async throws {
         apiClient.configure(server: server, apiKey: apiKey)
         downloadManager.configure(apiClient: apiClient)
