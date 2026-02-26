@@ -28,8 +28,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - Tables with columns: ID, Version, Tested, Requirement
 - New requirements start with `[ ]` in the Tested column — mark `[x]` when implemented and tested
-- **IDs must be globally unique** across all SRS documents in `SRS/SRS.md` — use the entry's sequential number as the first digit (e.g., entry 8 uses IDs `8.1.1`, `8.2.1`, etc.)
-- When creating a new SRS, check `SRS/SRS.md` for the highest entry number and use the next one
+- **IDs must be globally unique** across all SRS documents in `SRS/` — use the entry's sequential number as the first digit (e.g., entry 8 uses IDs `8.1.1`, `8.2.1`, etc.)
+- When creating a new SRS, check existing files in `SRS/` for the highest entry number and use the next one
 - Edge cases are the last subsection under Requirements
 - Store individual SRS files in the `SRS/` directory
 - Organized by **user feature** (not by internal class or module)
@@ -47,7 +47,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Merge Gate
 
 - **All** Tested cells must be `[x]` before merging to main — `/merge-to-main` enforces this
-- **Archive on merge:** completed SRS merged into `SRS/SRS.md` under the appropriate existing section. If no existing section fits, ask the user before creating one. Delete the individual SRS file from `SRS/` after archiving.
+- SRS files remain in `SRS/` permanently — they are **not** archived or deleted after merge
 
 ## Project Overview
 
