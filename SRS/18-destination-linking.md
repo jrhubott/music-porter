@@ -91,3 +91,19 @@ browser sync, and iOS — preventing duplicate tracking entries and unnecessary 
 | 18.8.5 | 1.0 | [x] | CLI `--rename-key OLD NEW` flag renames key, updates destination links, and audit logs |
 | 18.8.6 | 1.0 | [x] | Renaming to an existing key returns HTTP 409 (API) or exit code 1 (CLI) with an error message |
 | 18.8.7 | 1.0 | [x] | Renaming a key with no tracking records is a no-op that still succeeds |
+
+### 18.9 Destination Rename
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 18.9.1 | 1.0 | [x] | `ConfigManager.rename_destination(old_name, new_name)` validates name format (`[a-zA-Z0-9_-]+`), uniqueness, existence, and mutates `dest.name` in place |
+| 18.9.2 | 1.0 | [x] | `rename_destination()` returns `False` with error log if new name matches existing destination (case-insensitive) |
+| 18.9.3 | 1.0 | [x] | `rename_destination()` audit logs as `destination_rename` with `old_name` and `new_name` params |
+| 18.9.4 | 1.0 | [x] | CLI `--rename-dest OLD NEW` flag renames the destination and, if `sync_key` is `None`, also renames the tracking key via `sync_tracker.rename_key()` |
+| 18.9.5 | 1.0 | [x] | CLI handler exits 1 if destination not found or rename fails |
+| 18.9.6 | 1.0 | [x] | `POST /api/sync/destinations/<name>/rename` accepts `{new_name}`, validates format and uniqueness, returns `{ok, old_name, new_name, tracking_renamed}` |
+| 18.9.7 | 1.0 | [x] | API returns HTTP 404 if destination not found, HTTP 409 if new name already exists, HTTP 400 if name invalid or same |
+| 18.9.8 | 1.0 | [x] | API renames tracking key only when destination has no explicit `sync_key` (effective key equals name) |
+| 18.9.9 | 1.0 | [x] | Web UI destinations table has a pencil button per row that opens a rename modal |
+| 18.9.10 | 1.0 | [x] | Web UI rename modal pre-fills current name, validates format client-side, and refreshes both destinations and sync status tables on success |
+| 18.9.11 | 1.0 | [x] | Renaming a destination with a linked `sync_key` does NOT rename the tracking key (only the destination name changes) |
