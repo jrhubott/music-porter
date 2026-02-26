@@ -724,15 +724,19 @@ def _secure_path(path):
 
     Protects sensitive files (config.yaml with API key, cookies.txt,
     database) from being read by other users on the system.
-    Silently ignored on Windows where POSIX permissions don't apply.
+    Best-effort: silently ignored on Windows, in Docker containers
+    with non-owned bind mounts, or on read-only filesystems.
     """
     if IS_WINDOWS:
         return
-    p = Path(path)
-    if p.is_dir():
-        p.chmod(0o700)
-    elif p.exists():
-        p.chmod(0o600)
+    try:
+        p = Path(path)
+        if p.is_dir():
+            p.chmod(0o700)
+        elif p.exists():
+            p.chmod(0o600)
+    except OSError:
+        pass
 
 
 def migrate_data_dir(logger=None):
