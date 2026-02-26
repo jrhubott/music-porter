@@ -2,6 +2,7 @@
 
 ## Active
 
+- [ ] Add web file-level browsing page — template + route showing per-file sync indicators using the /api/files/<key>/sync-status endpoint
 - [ ] Document web UI (web_ui.py and templates/) — API endpoints, setup instructions, and usage guide
 
 ## Completed
