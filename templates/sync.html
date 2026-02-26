@@ -24,14 +24,6 @@
             <button type="button" class="btn btn-outline-secondary" id="refreshDests" title="Refresh"><i class="bi bi-arrow-clockwise"></i></button>
           </div>
         </div>
-        <div class="col-md-4" id="usbDirGroup">
-          <label class="form-label">USB Subdirectory</label>
-          <input type="text" class="form-control form-control-sm" id="syncUsbDir" placeholder="RZR/Music">
-        </div>
-      </div>
-      <div class="col-md-4 d-none" id="customPathGroup">
-        <label class="form-label">Custom Path</label>
-        <input type="text" class="form-control form-control-sm" id="syncCustomPath" placeholder="/path/to/destination">
       </div>
       <div class="d-flex gap-3 mt-3">
         <div class="form-check">
@@ -152,13 +144,14 @@
         <thead>
           <tr>
             <th>Name</th>
+            <th>Type</th>
             <th>Path</th>
             <th class="text-center">Available</th>
             <th class="text-center">Actions</th>
           </tr>
         </thead>
         <tbody id="destsTableBody">
-          <tr><td colspan="4" class="text-center text-muted">Loading...</td></tr>
+          <tr><td colspan="5" class="text-center text-muted">Loading...</td></tr>
         </tbody>
       </table>
     </div>
@@ -204,7 +197,6 @@
 <script>
 // ── Cached state for sync buttons ──
 let cachedProfile = '';
-let cachedUsbDir = '';
 
 // ── Destination loading ──
 let destsMeta = []; // [{name, path, type, available}]
@@ -215,61 +207,27 @@ function loadDestinations() {
     destsMeta = [];
     let opts = '';
 
-    // USB drives
-    if (data.usb && data.usb.length) {
-      data.usb.forEach(d => {
-        destsMeta.push(d);
-        opts += `<option value="${destsMeta.length - 1}">USB: ${d.name} (${d.path})</option>`;
-      });
-    }
+    // Flat destinations list with type badges
+    const dests = data.destinations || [];
+    dests.forEach(d => {
+      destsMeta.push(d);
+      const badge = d.type === 'usb' ? 'USB' : 'Folder';
+      const status = d.available ? '' : ' [not found]';
+      opts += `<option value="${destsMeta.length - 1}">[${badge}] ${d.name}${status}</option>`;
+    });
 
-    // Saved destinations
-    if (data.saved && data.saved.length) {
-      data.saved.forEach(d => {
-        destsMeta.push(d);
-        const status = d.available ? '' : ' [not found]';
-        opts += `<option value="${destsMeta.length - 1}">Saved: ${d.name} (${d.path})${status}</option>`;
-      });
-    }
-
-    // Custom path option
-    destsMeta.push({name: '__custom__', path: '', type: 'custom', available: true});
-    opts += `<option value="${destsMeta.length - 1}">Enter custom path...</option>`;
-
-    if (destsMeta.length === 1) {
-      opts = '<option value="">No destinations found</option>' + opts;
+    if (!destsMeta.length) {
+      opts = '<option value="">No destinations found</option>';
     }
 
     sel.innerHTML = opts;
-    onDestChange();
-    renderDestsTable(data.saved || []);
+    renderDestsTable(dests.filter(d => d.type !== 'usb'));
     renderSyncStatusForDest();
     loadSyncStatusData();
   });
 }
 
-function onDestChange() {
-  const idx = parseInt(document.getElementById('syncDest').value);
-  const meta = destsMeta[idx];
-  const usbGroup = document.getElementById('usbDirGroup');
-  const customGroup = document.getElementById('customPathGroup');
-
-  if (!meta) return;
-
-  if (meta.type === 'usb') {
-    usbGroup.classList.remove('d-none');
-    customGroup.classList.add('d-none');
-  } else if (meta.type === 'custom') {
-    usbGroup.classList.add('d-none');
-    customGroup.classList.remove('d-none');
-  } else {
-    usbGroup.classList.add('d-none');
-    customGroup.classList.add('d-none');
-  }
-}
-
 document.getElementById('syncDest').addEventListener('change', function() {
-  onDestChange();
   renderSyncStatusForDest();
 });
 document.getElementById('refreshDests').addEventListener('click', loadDestinations);
@@ -286,11 +244,6 @@ function loadSources() {
       sel.innerHTML = opts;
     });
   });
-
-  fetch('/api/settings').then(r => r.json()).then(s => {
-    cachedUsbDir = s.settings.usb_dir || 'RZR/Music';
-    document.getElementById('syncUsbDir').value = cachedUsbDir;
-  });
 }
 
 // ── Sync helpers for action buttons ──
@@ -301,8 +254,7 @@ function findDestMeta(keyName) {
 function syncToKey(keyName, sourceDir) {
   const meta = findDestMeta(keyName);
   if (!meta) { showToast('Destination not found: ' + keyName, 'warning'); return; }
-  const data = { source_dir: sourceDir, type: meta.type, destination: meta.name };
-  if (meta.type === 'usb') { data.usb_dir = cachedUsbDir; }
+  const data = { source_dir: sourceDir, destination: meta.name };
 
   document.getElementById('syncStatus').textContent = 'Running';
   document.getElementById('syncStatus').className = 'badge bg-primary badge-running';
@@ -327,19 +279,10 @@ document.getElementById('syncForm').addEventListener('submit', function(e) {
 
   const data = {
     source_dir: sourceDir,
-    type: meta.type,
     destination: meta.name,
     dry_run: document.getElementById('syncDryRun').checked,
     verbose: document.getElementById('syncVerbose').checked,
   };
-
-  if (meta.type === 'usb') {
-    data.usb_dir = document.getElementById('syncUsbDir').value;
-  } else if (meta.type === 'custom') {
-    const cp = document.getElementById('syncCustomPath').value.trim();
-    if (!cp) { showToast('Enter a custom path', 'warning'); return; }
-    data.dest_path = cp;
-  }
 
   document.getElementById('syncStatus').textContent = 'Running';
   document.getElementById('syncStatus').className = 'badge bg-primary badge-running';
@@ -519,15 +462,19 @@ function deletePlaylist(keyName, playlistName) {
 function renderDestsTable(saved) {
   const tbody = document.getElementById('destsTableBody');
   if (!saved || !saved.length) {
-    tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No saved destinations</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No saved destinations</td></tr>';
     return;
   }
   tbody.innerHTML = saved.map(d => {
     const avail = d.available
       ? '<span class="badge bg-success">Yes</span>'
       : '<span class="badge bg-danger">No</span>';
+    const typeBadge = d.type === 'usb'
+      ? '<span class="badge bg-info">USB</span>'
+      : '<span class="badge bg-secondary">Folder</span>';
     return `<tr>
       <td>${d.name}</td>
+      <td>${typeBadge}</td>
       <td><code>${d.path}</code></td>
       <td class="text-center">${avail}</td>
       <td class="text-center">

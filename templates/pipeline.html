@@ -186,8 +186,11 @@ function loadPipelineSyncDests() {
   fetch('/api/sync/destinations').then(r => r.json()).then(data => {
     const sel = document.getElementById('pipelineSyncDestSelect');
     let opts = '';
-    if (data.usb) data.usb.forEach(d => { opts += `<option value="usb:${d.name}">USB: ${d.name}</option>`; });
-    if (data.saved) data.saved.forEach(d => { opts += `<option value="saved:${d.name}">Saved: ${d.name} (${d.path})</option>`; });
+    const dests = data.destinations || [];
+    dests.forEach(d => {
+      const badge = d.type === 'usb' ? 'USB' : 'Folder';
+      opts += `<option value="${d.name}">[${badge}] ${d.name}</option>`;
+    });
     sel.innerHTML = opts || '<option value="">No destinations</option>';
   });
 }
@@ -210,13 +213,8 @@ document.getElementById('pipelineForm').addEventListener('submit', function(e) {
   // Sync destination
   const syncChecked = document.getElementById('pipelineSync').checked;
   if (syncChecked) {
-    const syncSel = document.getElementById('pipelineSyncDestSelect');
-    const syncVal = syncSel.value;
-    if (syncVal) {
-      const [sType, sName] = syncVal.split(':', 2);
-      data.sync_type = sType;
-      data.sync_destination = sName;
-    }
+    const syncVal = document.getElementById('pipelineSyncDestSelect').value;
+    if (syncVal) data.sync_destination = syncVal;
   }
   const preset = document.getElementById('pipelinePreset').value;
   if (preset) data.preset = preset;
@@ -257,13 +255,8 @@ document.getElementById('runAllBtn').addEventListener('click', function() {
   // Sync destination
   const syncChecked2 = document.getElementById('pipelineSync').checked;
   if (syncChecked2) {
-    const syncSel2 = document.getElementById('pipelineSyncDestSelect');
-    const syncVal2 = syncSel2.value;
-    if (syncVal2) {
-      const [sType2, sName2] = syncVal2.split(':', 2);
-      data.sync_type = sType2;
-      data.sync_destination = sName2;
-    }
+    const syncVal2 = document.getElementById('pipelineSyncDestSelect').value;
+    if (syncVal2) data.sync_destination = syncVal2;
   }
   const preset = document.getElementById('pipelinePreset').value;
   if (preset) data.preset = preset;
@@ -328,7 +321,7 @@ function renderSingleSummary(r) {
     {name: 'Download', icon: 'bi-cloud-download', data: r.download_result, key: 'download'},
     {name: 'Convert', icon: 'bi-arrow-repeat', data: r.conversion_result, key: 'convert'},
     {name: 'Tag', icon: 'bi-tag', data: r.tag_result, key: 'tag'},
-    {name: 'Sync', icon: 'bi-arrow-left-right', data: r.usb_result, key: 'sync'},
+    {name: 'Sync', icon: 'bi-arrow-left-right', data: r.sync_result, key: 'sync'},
   ];
 
   stages.forEach(function(stage) {
@@ -470,9 +463,9 @@ function renderAggregateSummary(r) {
       ['Originals stored', cum.original_tags_stored],
     ]},
   ];
-  if (cum.files_on_usb) {
+  if (cum.files_synced) {
     sections.push({name: 'Sync', icon: 'bi-arrow-left-right', rows: [
-      ['Files on USB', cum.files_on_usb],
+      ['Files synced', cum.files_synced],
     ]});
   }
 
