@@ -757,8 +757,8 @@ loadSummary();
 // ── Sync Status ──
 function loadSyncStatus() {
   Promise.all([
-    fetch('/api/usb/sync-status').then(r => r.json()),
-    fetch('/api/sync/destinations').then(r => r.json()).catch(() => ({usb: []}))
+    fetch('/api/sync/status').then(r => r.json()),
+    fetch('/api/sync/destinations').then(r => r.json()).catch(() => ({destinations: []}))
   ]).then(([data, destData]) => {
     const row = document.getElementById('usbSyncRow');
     const badges = document.getElementById('usbSyncBadges');
@@ -767,7 +767,7 @@ function loadSyncStatus() {
       return;
     }
     row.classList.remove('d-none');
-    const usbNames = new Set((destData.usb || []).map(d => d.name));
+    const usbNames = new Set((destData.destinations || []).filter(d => d.type === 'usb').map(d => d.name));
     badges.innerHTML = data.map(k => {
       const icon = usbNames.has(k.key_name) ? 'bi-usb-drive' : 'bi-folder2-open';
       const newBadge = k.new_files > 0

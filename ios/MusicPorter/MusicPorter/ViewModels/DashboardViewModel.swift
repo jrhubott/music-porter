@@ -27,7 +27,7 @@ final class DashboardViewModel {
             activeTasks = (try? await ts) ?? []
             syncStatus = (try? await us) ?? []
             let destResponse = try? await ds
-            usbKeyNames = Set((destResponse?.usb ?? []).map { $0.name })
+            usbKeyNames = Set((destResponse?.destinations ?? []).filter { $0.type == "usb" }.map { $0.name })
         } catch {
             self.error = error.localizedDescription
         }

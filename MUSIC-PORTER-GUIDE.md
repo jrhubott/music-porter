@@ -70,8 +70,8 @@ Shows an interactive menu for easy playlist selection and processing.
 # With quality preset (lossless, high, medium, low, custom)
 ./music-porter pipeline --playlist "Pop_Workout" --preset high
 
-# Include USB copy
-./music-porter pipeline --playlist "Pop_Workout" --copy-to-usb
+# Include sync to a saved destination
+./music-porter pipeline --playlist "Pop_Workout" --sync-dest nas-backup
 ```
 
 ## Cookie Management
@@ -182,8 +182,8 @@ If you prefer manual control or automation fails:
 ./music-porter pipeline --playlist "Pop_Workout" --preset high
 ./music-porter pipeline --auto --preset medium
 
-# Include USB sync
-./music-porter pipeline --playlist "Pop_Workout" --copy-to-usb --usb-dir "RZR/Music"
+# Include sync to destination
+./music-porter pipeline --playlist "Pop_Workout" --sync-dest nas-backup
 ```
 
 **What it does:**
@@ -302,10 +302,7 @@ If you prefer manual control or automation fails:
 
 # View sync tracking status
 ./music-porter sync --status
-./music-porter sync --status --usb-key nas-backup
-
-# Legacy USB sync (backwards compatible)
-./music-porter sync-usb export/ride-command/Pop_Workout --usb-dir "RZR/Music"
+./music-porter sync --status --sync-key nas-backup
 ```
 
 **Features:**
@@ -496,7 +493,6 @@ The tool uses a YAML configuration file (`config.yaml`) for playlists and settin
 ```yaml
 settings:
   output_type: ride-command
-  usb_dir: RZR/Music
   workers: 6
 
 playlists:
@@ -510,8 +506,6 @@ playlists:
 
 **Settings fields:**
 - `output_type`: Default output profile (e.g., `ride-command`, `basic`). Overridden by `--output-type` CLI flag.
-- `usb_dir`: Default USB destination directory. Overridden by `--usb-dir` CLI flag.
-
 A `destinations` section can also be added to save named sync destinations:
 
 ```yaml
@@ -597,15 +591,15 @@ Export directories are scoped by the active output profile: `export/<profile>/<p
 ./music-porter
 # Select playlist, choose to copy to USB
 
-# Or one command
-./music-porter pipeline --playlist "Pop_Workout" --copy-to-usb
+# Or one command with sync
+./music-porter pipeline --playlist "Pop_Workout" --sync-dest nas-backup
 ```
 
 ### Workflow 2: Update All Playlists
 
 ```bash
-# Process all configured playlists automatically
-./music-porter pipeline --auto --copy-to-usb
+# Process all configured playlists and sync
+./music-porter pipeline --auto --sync-dest nas-backup
 ```
 
 ### Workflow 3: One-Time URL Download
@@ -638,9 +632,6 @@ done
 ```bash
 # Sync all exports to a saved destination
 ./music-porter sync --dest nas-backup
-
-# Sync all exports to USB (legacy)
-./music-porter sync-usb export/ride-command/
 ```
 
 ## Logging

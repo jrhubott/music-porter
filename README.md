@@ -134,7 +134,6 @@ MP3 conversion supports configurable quality presets to balance file size and au
 ./music-porter pipeline --playlist "Pop_Workout"
 ./music-porter pipeline --url "https://music.apple.com/..."
 ./music-porter pipeline --auto  # Process all playlists
-./music-porter pipeline --playlist 1 --copy-to-usb  # Include USB sync
 ./music-porter pipeline --playlist 1 --sync-dest nas-backup  # Sync to saved destination
 ```
 
@@ -184,7 +183,7 @@ MP3 conversion supports configurable quality presets to balance file size and au
 ./music-porter sync --dest /path/to/folder               # Sync to custom path
 ./music-porter sync --list-destinations                  # List saved destinations
 ./music-porter sync --add-dest NAME PATH                 # Save a new destination
-./music-porter sync-usb export/ride-command/Pop_Workout  # Legacy USB sync
+./music-porter sync --status                            # Show sync tracking
 ```
 
 **Cover Art** - Manage embedded album artwork
@@ -247,7 +246,6 @@ Configuration uses YAML format with two sections: `settings` (global defaults) a
 ```yaml
 settings:
   output_type: ride-command    # Default output profile
-  usb_dir: RZR/Music           # Default USB directory
   workers: 6                   # Parallel conversion workers
 
 playlists:
@@ -447,7 +445,7 @@ The tool uses a "hard gate" protection system for original metadata:
 
 ## Version
 
-Current version: **v2.27.0**
+Current version: **v2.28.0**
 
 ## License
 

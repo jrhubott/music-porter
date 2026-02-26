@@ -608,7 +608,7 @@ class AppContext:
 
     task_manager: TaskManager
     audit_logger: object  # mp.AuditLogger
-    sync_tracker: object  # mp.USBSyncTracker
+    sync_tracker: object  # mp.SyncTracker
     api_key: str
     project_root: Path
     scheduler: 'PipelineScheduler | None' = None
@@ -731,7 +731,7 @@ def create_app(project_root=None, no_auth=False, server_host=None,
     ctx = AppContext(
         task_manager=TaskManager(task_db=_task_db),
         audit_logger=mp.AuditLogger(_db_path),
-        sync_tracker=mp.USBSyncTracker(_db_path),
+        sync_tracker=mp.SyncTracker(_db_path),
         api_key=_api_key,
         project_root=project_root,
     )
