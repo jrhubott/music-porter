@@ -47,7 +47,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.28.0"
+VERSION = "2.29.0"
 
 DEFAULT_DATA_DIR = "data"
 DEFAULT_MUSIC_DIR = "music"
@@ -1522,6 +1522,92 @@ class SyncTracker:
                 total_pruned += result['pruned_count']
         return {'total_pruned': total_pruned, 'keys_pruned': keys_pruned}
 
+    def merge_key(self, source_key, target_key):
+        """Merge tracking records from source_key into target_key.
+
+        Moves all sync_files records from source to target. Duplicate
+        records (same file_path + playlist) keep the latest synced_at.
+        After merge, the source key is deleted.
+
+        Returns dict: {records_moved, records_merged, source_deleted}.
+        """
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                # Check if source key exists and has records
+                source_count = conn.execute(
+                    "SELECT COUNT(*) FROM sync_files WHERE sync_key = ?",
+                    (source_key,),
+                ).fetchone()[0]
+
+                if source_count == 0:
+                    return {'records_moved': 0, 'records_merged': 0,
+                            'source_deleted': False}
+
+                # Ensure target key exists
+                now = time.time()
+                conn.execute(
+                    """INSERT INTO sync_keys (key_name, last_sync_at, created_at)
+                       VALUES (?, ?, ?)
+                       ON CONFLICT(key_name) DO UPDATE SET last_sync_at = ?""",
+                    (target_key, now, now, now),
+                )
+
+                # Count existing overlaps for stats
+                overlap_count = conn.execute(
+                    """SELECT COUNT(*) FROM sync_files s
+                       JOIN sync_files t ON t.sync_key = ?
+                           AND t.file_path = s.file_path
+                           AND t.playlist = s.playlist
+                       WHERE s.sync_key = ?""",
+                    (target_key, source_key),
+                ).fetchone()[0]
+
+                # Merge: insert or update keeping latest synced_at
+                conn.execute(
+                    """INSERT INTO sync_files (sync_key, file_path, playlist, synced_at)
+                       SELECT ?, file_path, playlist, synced_at
+                       FROM sync_files WHERE sync_key = ?
+                       ON CONFLICT(sync_key, file_path, playlist)
+                       DO UPDATE SET synced_at = MAX(synced_at, excluded.synced_at)""",
+                    (target_key, source_key),
+                )
+
+                # Delete source key (CASCADE deletes remaining source records)
+                conn.execute(
+                    "DELETE FROM sync_keys WHERE key_name = ?",
+                    (source_key,),
+                )
+                conn.commit()
+
+                records_moved = source_count - overlap_count
+                return {
+                    'records_moved': records_moved,
+                    'records_merged': overlap_count,
+                    'source_deleted': True,
+                }
+            finally:
+                conn.close()
+
+    def rename_key(self, old_key, new_key):
+        """Rename a sync key, moving all tracking records to the new name.
+
+        Returns dict with stats, or None if new_key already exists.
+        Unlike merge_key, rename requires the target name to be unused.
+        """
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                exists = conn.execute(
+                    "SELECT 1 FROM sync_keys WHERE key_name = ?",
+                    (new_key,),
+                ).fetchone()
+            finally:
+                conn.close()
+        if exists:
+            return None
+        return self.merge_key(old_key, new_key)
+
     def get_file_sync_map(self, playlist):
         """Map filenames to sync keys they've been synced to.
 
@@ -1568,16 +1654,22 @@ class SyncDestination:
     """A saved sync destination (name + schemed path).
 
     Paths use a scheme prefix:
-      - usb:///Volumes/MY_USB/RZR/Music  → USB drive destination
-      - folder:///path/to/dir            → Folder destination
+      - usb:///Volumes/MY_USB/RZR/Music   → USB drive destination
+      - folder:///path/to/dir             → Folder destination
+      - web-client://My-USB               → Browser-local sync target
     Legacy plain paths are migrated to folder:// on config load.
     """
     name: str
     path: str  # usb:///Volumes/X/RZR/Music or folder:///path/to/dir
+    sync_key: str = None  # optional link to a shared tracking key
 
     @property
     def type(self) -> str:
-        return 'usb' if self.path.startswith('usb://') else 'folder'
+        if self.path.startswith('usb://'):
+            return 'usb'
+        if self.path.startswith('web-client://'):
+            return 'web-client'
+        return 'folder'
 
     @property
     def raw_path(self) -> str:
@@ -1585,6 +1677,8 @@ class SyncDestination:
             return self.path[6:]
         if self.path.startswith('folder://'):
             return self.path[9:]
+        if self.path.startswith('web-client://'):
+            return self.path[13:]
         return self.path
 
     @property
@@ -1592,12 +1686,27 @@ class SyncDestination:
         return self.type == 'usb'
 
     @property
+    def is_web_client(self) -> bool:
+        return self.type == 'web-client'
+
+    @property
+    def effective_key(self) -> str:
+        """Sync tracking key: sync_key if linked, else name."""
+        return self.sync_key if self.sync_key else self.name
+
+    @property
     def available(self) -> bool:
+        if self.is_web_client:
+            return True
         return Path(self.raw_path).is_dir()
 
     def to_api_dict(self) -> dict:
-        return {'name': self.name, 'path': self.path,
-                'type': self.type, 'available': self.available}
+        d = {'name': self.name, 'path': self.path,
+             'type': self.type, 'available': self.available,
+             'effective_key': self.effective_key}
+        if self.sync_key:
+            d['sync_key'] = self.sync_key
+        return d
 
 
 class ConfigManager:
@@ -1662,10 +1771,12 @@ class ConfigManager:
             dpath = str(entry.get('path', '')).strip()
             if dname and dpath:
                 # Migrate plain paths → folder:// scheme
-                if not dpath.startswith('usb://') and not dpath.startswith('folder://'):
+                if (not dpath.startswith('usb://') and not dpath.startswith('folder://')
+                        and not dpath.startswith('web-client://')):
                     dpath = f'folder://{dpath}'
                     dirty = True
-                self.destinations.append(SyncDestination(dname, dpath))
+                dsync_key = str(entry.get('sync_key', '')).strip() or None
+                self.destinations.append(SyncDestination(dname, dpath, sync_key=dsync_key))
             elif dname or dpath:
                 self.logger.warn(f"Incomplete destination entry (need name, path): {entry}")
 
@@ -1772,10 +1883,13 @@ class ConfigManager:
         }
 
         if self.destinations:
-            data['destinations'] = [
-                {'name': d.name, 'path': d.path}
-                for d in self.destinations
-            ]
+            dest_list = []
+            for d in self.destinations:
+                entry = {'name': d.name, 'path': d.path}
+                if d.sync_key:
+                    entry['sync_key'] = d.sync_key
+                dest_list.append(entry)
+            data['destinations'] = dest_list
 
         with open(self.conf_path, 'w') as f:
             f.write("# Music Porter Configuration\n")
@@ -1886,11 +2000,12 @@ class ConfigManager:
                 return dest
         return None
 
-    def add_destination(self, name, path):
+    def add_destination(self, name, path, sync_key=None):
         """Add a saved sync destination. Returns True on success.
 
         Path should be a schemed path (usb:// or folder://).
         Plain paths are auto-prefixed with folder://.
+        Optional sync_key links this destination to a shared tracking key.
         """
         import re as _re
         if not _re.match(r'^[a-zA-Z0-9_-]+$', name):
@@ -1901,31 +2016,37 @@ class ConfigManager:
             return False
 
         # Normalize to schemed path
-        if not path.startswith('usb://') and not path.startswith('folder://'):
+        if (not path.startswith('usb://') and not path.startswith('folder://')
+                and not path.startswith('web-client://')):
             path = f'folder://{path}'
 
-        # Validate the raw filesystem path exists
-        dest = SyncDestination(name, path)
-        raw = dest.raw_path
-        if dest.is_usb:
-            # For USB: validate the volume mount exists (subdir may not exist yet)
-            volume_path = Path(raw).parts[:3] if IS_MACOS else Path(raw).parts[:1]
-            volume_mount = Path(*volume_path) if volume_path else Path(raw)
-            if not volume_mount.is_dir():
-                self.logger.error(f"USB volume mount not found: {volume_mount}")
-                return False
-        else:
-            if not Path(raw).is_dir():
-                self.logger.error(f"Destination path does not exist or is not a directory: {raw}")
-                return False
+        # Validate the raw filesystem path exists (skip for web-client)
+        dest = SyncDestination(name, path, sync_key=sync_key)
+        if not dest.is_web_client:
+            raw = dest.raw_path
+            if dest.is_usb:
+                # For USB: validate the volume mount exists (subdir may not exist yet)
+                volume_path = Path(raw).parts[:3] if IS_MACOS else Path(raw).parts[:1]
+                volume_mount = Path(*volume_path) if volume_path else Path(raw)
+                if not volume_mount.is_dir():
+                    self.logger.error(f"USB volume mount not found: {volume_mount}")
+                    return False
+            else:
+                if not Path(raw).is_dir():
+                    self.logger.error(f"Destination path does not exist or is not a directory: {raw}")
+                    return False
 
         self.destinations.append(dest)
         self._save()
-        self.logger.info(f"Added sync destination '{name}' → {path}")
+        link_msg = f" (linked to '{sync_key}')" if sync_key else ''
+        self.logger.info(f"Added sync destination '{name}' → {path}{link_msg}")
         if self.audit_logger:
+            params = {'name': name, 'path': path}
+            if sync_key:
+                params['sync_key'] = sync_key
             self.audit_logger.log(
-                'destination_add', f"Added sync destination '{name}'",
-                'completed', params={'name': name, 'path': path},
+                'destination_add', f"Added sync destination '{name}'{link_msg}",
+                'completed', params=params,
                 source=self._audit_source)
         return True
 
@@ -1943,6 +2064,86 @@ class ConfigManager:
             self.audit_logger.log(
                 'destination_delete', f"Removed sync destination '{name}'",
                 'completed', params={'name': name},
+                source=self._audit_source)
+        return True
+
+    def update_destination_link(self, name, sync_key):
+        """Set or clear a destination's sync_key. Returns True if found.
+
+        Pass sync_key=None or '' to unlink.
+        """
+        dest = self.get_destination(name)
+        if not dest:
+            self.logger.warn(f"Destination '{name}' not found")
+            return False
+        old_key = dest.sync_key
+        new_key = sync_key.strip() if sync_key else None
+        dest.sync_key = new_key
+        self._save()
+        if new_key:
+            self.logger.info(f"Linked destination '{name}' → key '{new_key}'")
+        else:
+            self.logger.info(f"Unlinked destination '{name}' (was '{old_key}')")
+        if self.audit_logger:
+            self.audit_logger.log(
+                'destination_link',
+                f"{'Linked' if new_key else 'Unlinked'} destination '{name}'"
+                + (f" → '{new_key}'" if new_key else ''),
+                'completed',
+                params={'name': name, 'sync_key': new_key, 'old_sync_key': old_key},
+                source=self._audit_source)
+        return True
+
+    def ensure_destination(self, name, path, sync_key=None):
+        """Get or create a destination, auto-linking to sync_key if provided.
+
+        Returns the SyncDestination (existing or newly created), or None on failure.
+        """
+        existing = self.get_destination(name)
+        if existing:
+            return existing
+        ok = self.add_destination(name, path, sync_key=sync_key)
+        return self.get_destination(name) if ok else None
+
+    def rename_sync_key_refs(self, old_key, new_key):
+        """Update all destination sync_key references from old_key to new_key.
+
+        Returns count of destinations updated.
+        """
+        count = 0
+        for dest in self.destinations:
+            if dest.sync_key == old_key:
+                dest.sync_key = new_key
+                count += 1
+        if count:
+            self._save()
+        return count
+
+    def rename_destination(self, old_name, new_name):
+        """Rename a saved destination. Returns True on success."""
+        import re as _re
+        if not _re.match(r'^[a-zA-Z0-9_-]+$', new_name):
+            self.logger.error(f"Destination name must be alphanumeric with hyphens/underscores: '{new_name}'")
+            return False
+        if old_name.lower() == new_name.lower():
+            self.logger.error("New name must be different from the current name")
+            return False
+        if self.get_destination(new_name):
+            self.logger.error(f"Destination '{new_name}' already exists")
+            return False
+        dest = self.get_destination(old_name)
+        if not dest:
+            self.logger.warn(f"Destination '{old_name}' not found")
+            return False
+        dest.name = new_name
+        self._save()
+        self.logger.info(f"Renamed destination '{old_name}' to '{new_name}'")
+        if self.audit_logger:
+            self.audit_logger.log(
+                'destination_rename',
+                f"Renamed destination '{old_name}' to '{new_name}'",
+                'completed',
+                params={'old_name': old_name, 'new_name': new_name},
                 source=self._audit_source)
         return True
 
@@ -7213,7 +7414,7 @@ class PipelineOrchestrator:
             self.logger.info(f"\n=== STAGE 4: Sync to {sync_destination.name} ===")
             usb_result = sync_mgr.sync_to_destination(
                 export_dir, dest_path=sync_destination.path,
-                dest_key=sync_destination.name, dry_run=dry_run)
+                dest_key=sync_destination.effective_key, dry_run=dry_run)
 
             if usb_result.success:
                 self.stats.stages_completed.append("sync")

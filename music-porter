@@ -443,7 +443,8 @@ def render_destinations_list(destinations) -> None:
     for d in destinations:
         exists = Path(d.path).is_dir()
         status = "" if exists else "  [not found]"
-        print(f"    {d.name:<20}  {d.path}{status}")
+        link = f"  -> {d.sync_key}" if d.sync_key else ""
+        print(f"    {d.name:<20}  {d.path}{status}{link}")
     print()
 
 
@@ -1499,7 +1500,7 @@ class InteractiveMenu:
             return False
         result = sync_mgr.sync_to_destination(
             get_export_dir(self.output_profile.name),
-            dest_path=dest.path, dest_key=dest.name,
+            dest_path=dest.path, dest_key=dest.effective_key,
             dry_run=dry_run
         )
         render_sync_summary(result)
@@ -2226,6 +2227,16 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
                             help='Remove stale records for files no longer in export')
     sync_parser.add_argument('--list-keys', action='store_true',
                             help='List all tracked sync keys')
+    sync_parser.add_argument('--link-to', default=None, metavar='KEY',
+                            help='Link new destination to a tracking key (use with --add-dest)')
+    sync_parser.add_argument('--link-dest', nargs=2, metavar=('NAME', 'KEY'),
+                            help='Link an existing destination to a tracking key')
+    sync_parser.add_argument('--unlink-dest', metavar='NAME',
+                            help='Remove tracking key link from a destination')
+    sync_parser.add_argument('--rename-dest', nargs=2, metavar=('OLD', 'NEW'),
+                            help='Rename a saved destination')
+    sync_parser.add_argument('--rename-key', nargs=2, metavar=('OLD', 'NEW'),
+                            help='Rename a sync key (updates tracking data and destination links)')
 
     # Hidden alias for backwards compatibility
     subparsers.add_parser('sync-status', help=argparse.SUPPRESS)
@@ -2947,12 +2958,49 @@ def main():
 
         if getattr(args, 'add_dest', None):
             dest_name, dest_path = args.add_dest
-            ok = config.add_destination(dest_name, dest_path)
+            link_to = getattr(args, 'link_to', None)
+            ok = config.add_destination(dest_name, dest_path, sync_key=link_to)
             sys.exit(0 if ok else 1)
 
         if getattr(args, 'remove_dest', None):
             ok = config.remove_destination(args.remove_dest)
             sys.exit(0 if ok else 1)
+
+        if getattr(args, 'link_dest', None):
+            link_name, link_key = args.link_dest
+            dest = config.get_destination(link_name)
+            if not dest:
+                logger.error(f"Destination '{link_name}' not found")
+                sys.exit(1)
+            old_effective = dest.effective_key
+            if old_effective != link_key:
+                merge_stats = sync_tracker.merge_key(old_effective, link_key)
+                if merge_stats['source_deleted']:
+                    logger.info(f"Merged tracking: {merge_stats['records_moved']} moved, "
+                                f"{merge_stats['records_merged']} merged")
+            config.update_destination_link(link_name, link_key)
+            sys.exit(0)
+
+        if getattr(args, 'unlink_dest', None):
+            ok = config.update_destination_link(args.unlink_dest, None)
+            sys.exit(0 if ok else 1)
+
+        if getattr(args, 'rename_dest', None):
+            old_name, new_name = args.rename_dest
+            dest = config.get_destination(old_name)
+            if not dest:
+                logger.error(f"Destination '{old_name}' not found")
+                sys.exit(1)
+            had_no_sync_key = dest.sync_key is None
+            ok = config.rename_destination(old_name, new_name)
+            if not ok:
+                sys.exit(1)
+            if had_no_sync_key and sync_tracker:
+                result = sync_tracker.rename_key(old_name, new_name)
+                if result and result.get('source_deleted'):
+                    logger.info(f"  Renamed tracking key '{old_name}' → '{new_name}' "
+                                f"({result['records_moved']} moved, {result['records_merged']} merged)")
+            sys.exit(0)
 
         # ── Tracking management subcommands ──────────────────────
         if getattr(args, 'delete_key', None):
@@ -2964,6 +3012,31 @@ def main():
                 logger.ok(f"Deleted tracking data for key '{key_name}'")
             else:
                 logger.info("Cancelled")
+            sys.exit(0)
+
+        if getattr(args, 'rename_key', None):
+            old_key, new_key = args.rename_key
+            result = sync_tracker.rename_key(old_key, new_key)
+            if result is None:
+                logger.error(f"Key '{new_key}' already exists — cannot rename")
+                sys.exit(1)
+            dests_updated = config.rename_sync_key_refs(old_key, new_key)
+            if result['source_deleted']:
+                logger.ok(f"Renamed key '{old_key}' to '{new_key}' "
+                          f"({result['records_moved']} moved, {result['records_merged']} merged)")
+            else:
+                logger.ok(f"Renamed key '{old_key}' to '{new_key}' (no tracking records)")
+            if dests_updated:
+                logger.info(f"  Updated {dests_updated} destination link(s)")
+            if audit_logger:
+                audit_logger.log(
+                    'sync_key_rename',
+                    f"Renamed sync key '{old_key}' to '{new_key}'",
+                    'completed',
+                    params={'old_key': old_key, 'new_key': new_key,
+                            **result, 'destinations_updated': dests_updated},
+                    source='cli',
+                )
             sys.exit(0)
 
         if getattr(args, 'delete_playlist', None):
@@ -3027,10 +3100,10 @@ def main():
                 dest = saved
             elif Path(dest_arg).is_dir():
                 dest_key = SyncManager._sanitize_dest_name(Path(dest_arg).name)
-                dest = SyncDestination(dest_key, f'folder://{dest_arg}')
-                # Auto-save custom path as a destination for reuse
-                if not config.get_destination(dest_key):
-                    config.add_destination(dest_key, dest.path)
+                dest = config.ensure_destination(dest_key, f'folder://{dest_arg}', sync_key=dest_key)
+                if not dest:
+                    logger.error(f"Failed to create destination for '{dest_arg}'")
+                    sys.exit(1)
             else:
                 logger.error(f"'{dest_arg}' is not a saved destination name or valid directory path")
                 sys.exit(1)
@@ -3043,12 +3116,12 @@ def main():
                 sys.exit(0)
 
         result = sync_mgr.sync_to_destination(
-            source_dir, dest_path=dest.path, dest_key=dest.name,
+            source_dir, dest_path=dest.path, dest_key=dest.effective_key,
             dry_run=args.dry_run)
         render_sync_summary(result)
         if result.success and not args.dry_run:
             try:
-                tracking_status = sync_tracker.get_sync_status(dest.name, export_dir)
+                tracking_status = sync_tracker.get_sync_status(dest.effective_key, export_dir)
                 render_post_sync_tracking_summary(tracking_status)
             except Exception:
                 pass

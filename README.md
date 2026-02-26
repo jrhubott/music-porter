@@ -423,6 +423,7 @@ The tool uses a "hard gate" protection system for original metadata:
 11. **Cover art resize on embed/convert** - Add `--cover-art-size` flag to `embed`, `update`, `convert`, and `pipeline` commands for automatic resizing during processing
 12. **Lock screen artwork** - Load album artwork image into MPNowPlayingInfoCenter for lock screen and Control Center display during iOS playback
 13. **Web file browser** - File-level browsing page with per-file USB sync indicators showing which drives each track has been synced to
+14. **Sync key owns paths** - Restructure config so sync keys are first-class entities that own multiple destination paths, replacing the current destination-links-to-key model with a more intuitive key-centric architecture
 
 ### Low Priority / Nice to Have
 

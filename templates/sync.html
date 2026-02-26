@@ -52,6 +52,54 @@
   </div>
 </div>
 
+<!-- Client-Side Sync -->
+<div class="card mb-4" id="clientSyncCard">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-pc-display"></i> Client-Side Sync</span>
+    <span class="badge" id="csyncBrowserBadge">Detecting...</span>
+  </div>
+  <div class="card-body">
+    <div class="alert alert-info small d-none" id="csyncChromiumAlert">
+      <i class="bi bi-info-circle"></i> "Sync to Local Folder" requires a Chromium-based browser (Chrome, Edge, Brave). You can still use "Download as ZIP" in any browser.
+    </div>
+    <div id="csyncEmpty" class="text-center text-muted py-3 d-none">
+      No exported playlists found.
+    </div>
+    <div id="csyncPlaylistArea">
+      <div class="mb-2">
+        <small>
+          <a href="#" id="csyncSelectAll">Select All</a> /
+          <a href="#" id="csyncSelectNone">Select None</a>
+        </small>
+      </div>
+      <div id="csyncPlaylists" class="mb-3">
+        <span class="text-muted small">Loading playlists...</span>
+      </div>
+    </div>
+    <div class="d-flex gap-2 mb-3">
+      <button class="btn btn-primary btn-sm" id="csyncFolderBtn" disabled>
+        <i class="bi bi-folder-symlink"></i> Sync to Local Folder
+      </button>
+      <button class="btn btn-outline-secondary btn-sm" id="csyncZipBtn" disabled>
+        <i class="bi bi-file-earmark-zip"></i> Download as ZIP
+      </button>
+    </div>
+    <div class="d-none" id="csyncProgressWrap">
+      <div class="d-flex align-items-center gap-2 mb-2">
+        <div class="progress flex-grow-1" style="height: 1.4rem;">
+          <div class="progress-bar bg-info" id="csyncProgressBar" role="progressbar" style="width: 0%;">0%</div>
+        </div>
+        <button class="btn btn-outline-danger btn-sm py-0 px-2" id="csyncAbortBtn" title="Abort sync">
+          <i class="bi bi-x-lg"></i> Abort
+        </button>
+      </div>
+      <small class="text-muted" id="csyncProgressLabel">Starting...</small>
+      <small class="text-muted float-end" id="csyncEta"></small>
+    </div>
+    <div class="alert d-none mb-0" id="csyncResult"></div>
+  </div>
+</div>
+
 <!-- Section 2: Sync Status / Tracking -->
 <div class="row g-3 mb-4" id="syncStatsRow">
   <div class="col-md-4">
@@ -146,12 +194,13 @@
             <th>Name</th>
             <th>Type</th>
             <th>Path</th>
+            <th class="text-center">Linked Key</th>
             <th class="text-center">Available</th>
             <th class="text-center">Actions</th>
           </tr>
         </thead>
         <tbody id="destsTableBody">
-          <tr><td colspan="5" class="text-center text-muted">Loading...</td></tr>
+          <tr><td colspan="6" class="text-center text-muted">Loading...</td></tr>
         </tbody>
       </table>
     </div>
@@ -161,12 +210,18 @@
         <label class="form-label">Name</label>
         <input type="text" class="form-control form-control-sm" id="newDestName" placeholder="my-nas" pattern="[a-zA-Z0-9_-]+">
       </div>
-      <div class="col-md-6">
+      <div class="col-md-4">
         <label class="form-label">Path</label>
         <input type="text" class="form-control form-control-sm" id="newDestPath" placeholder="/Volumes/NAS/Music">
       </div>
       <div class="col-md-3">
-        <button type="submit" class="btn btn-outline-primary btn-sm w-100"><i class="bi bi-plus"></i> Add Destination</button>
+        <label class="form-label">Link to Key <span class="text-muted">(optional)</span></label>
+        <select class="form-select form-select-sm" id="newDestLinkTo">
+          <option value="">None</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <button type="submit" class="btn btn-outline-primary btn-sm w-100"><i class="bi bi-plus"></i> Add</button>
       </div>
     </form>
   </div>
@@ -191,6 +246,68 @@
     </div>
   </div>
 </div>
+<!-- Rename key modal -->
+<div class="modal fade" id="renameKeyModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title">Rename Sync Key</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p>Rename <strong id="renameKeyOldName">-</strong> to:</p>
+        <input type="text" class="form-control form-control-sm" id="renameKeyNewName" placeholder="New key name" pattern="[A-Za-z0-9_-]+">
+        <p class="text-muted small mt-2 mb-0">Tracking data and destination links will be updated automatically.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="confirmRenameBtn">Rename</button>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- Link destination modal -->
+<div class="modal fade" id="linkDestModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title">Link Destination</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p>Link <strong id="linkDestName">-</strong> to a shared tracking key:</p>
+        <select class="form-select form-select-sm mb-3" id="linkDestKeySelect">
+          <option value="">Select a key...</option>
+        </select>
+        <p class="text-muted small mb-0">Existing tracking data under the destination's current key will be merged into the selected key.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="confirmLinkBtn">Link</button>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- Rename destination modal -->
+<div class="modal fade" id="renameDestModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title">Rename Destination</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p>Rename <strong id="renameDestOldName">-</strong> to:</p>
+        <input type="text" class="form-control form-control-sm" id="renameDestNewName" placeholder="New destination name" pattern="[A-Za-z0-9_-]+">
+        <p class="text-muted small mt-2 mb-0">If this destination has no linked sync key, its tracking data will also be renamed.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="confirmRenameDestBtn">Rename</button>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock content %}
 
 {% block scripts %}
@@ -211,6 +328,7 @@ function loadDestinations() {
     const dests = data.destinations || [];
     dests.forEach(d => {
       destsMeta.push(d);
+      if (d.type === 'web-client') return; // web-client destinations can't be used for server-side sync
       const badge = d.type === 'usb' ? 'USB' : 'Folder';
       const status = d.available ? '' : ' [not found]';
       opts += `<option value="${destsMeta.length - 1}">[${badge}] ${d.name}${status}</option>`;
@@ -248,7 +366,7 @@ function loadSources() {
 
 // ── Sync helpers for action buttons ──
 function findDestMeta(keyName) {
-  return destsMeta.find(d => d.name === keyName && d.name !== '__custom__');
+  return destsMeta.find(d => d.name !== '__custom__' && (d.name === keyName || d.effective_key === keyName));
 }
 
 function syncToKey(keyName, sourceDir) {
@@ -332,19 +450,31 @@ function loadSyncStatusData() {
       const plBadge = k.new_playlists > 0
         ? `<span class="badge bg-info">${k.new_playlists}</span>`
         : `<span class="text-muted">0</span>`;
-      const icon = destsMeta.some(d => d.type === 'usb' && d.name === k.key_name) ? 'bi-usb-drive' : 'bi-folder2-open';
+      const matchedDest = destsMeta.find(d => d.name === k.key_name || d.effective_key === k.key_name);
+      let icon = 'bi-folder2-open';
+      if (matchedDest?.type === 'usb') icon = 'bi-usb-drive';
+      else if (matchedDest?.type === 'web-client') icon = 'bi-pc-display';
       const meta = findDestMeta(k.key_name);
-      const syncDisabled = (!meta || !meta.available) ? 'disabled' : '';
-      const syncTitle = syncDisabled ? 'Destination unavailable' : 'Sync all playlists';
+      const isWebClient = matchedDest?.type === 'web-client';
+      const syncDisabled = isWebClient || (!meta || !meta.available) ? 'disabled' : '';
+      const syncTitle = isWebClient ? 'Use browser sync' : syncDisabled ? 'Destination unavailable' : 'Sync all playlists';
+      const linkedDests = destsMeta.filter(d => d.sync_key === k.key_name);
+      const linkedBadge = linkedDests.length > 0
+        ? ` <span class="badge bg-info" title="${linkedDests.map(d => d.name).join(', ')}">${linkedDests.length} linked</span>`
+        : '';
       return `<tr>
-        <td><a href="#" onclick="showDetail('${k.key_name}'); return false;"><i class="bi ${icon} me-1"></i>${k.key_name}</a></td>
+        <td><a href="#" onclick="showDetail('${k.key_name}'); return false;"><i class="bi ${icon} me-1"></i>${k.key_name}</a>${linkedBadge}</td>
         <td class="text-end">${k.synced_files} / ${k.total_files}</td>
         <td class="text-end">${newBadge}</td>
         <td class="text-end">${plBadge}</td>
         <td class="text-end">${lastSync}</td>
         <td class="text-center">
+          ${csyncHasFSA ? `<button class="btn btn-outline-success btn-sm py-0 px-1 me-1" onclick="clientSyncToKey('${k.key_name}', null)" title="Sync via browser (File System Access)"><i class="bi bi-pc-display"></i></button>` : ''}
           <button class="btn btn-outline-primary btn-sm py-0 px-1 me-1" onclick="syncToKey('${k.key_name}', 'export/${cachedProfile}')" title="${syncTitle}" ${syncDisabled}>
             <i class="bi bi-arrow-repeat"></i>
+          </button>
+          <button class="btn btn-outline-warning btn-sm py-0 px-1 me-1" onclick="promptRenameKey('${k.key_name}')" title="Rename key">
+            <i class="bi bi-pencil"></i>
           </button>
           <button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="promptDeleteKey('${k.key_name}')" title="Delete key">
             <i class="bi bi-trash"></i>
@@ -354,6 +484,7 @@ function loadSyncStatusData() {
     }).join('');
 
     renderSyncStatusForDest();
+    populateLinkToDropdown();
   }).catch(err => {
     showToast('Failed to load sync status: ' + err, 'error');
   });
@@ -393,6 +524,7 @@ function showDetail(keyName) {
         <td class="text-end">${p.new_files}</td>
         <td class="text-center">${statusBadge}</td>
         <td class="text-center">
+          ${csyncHasFSA ? `<button class="btn btn-outline-success btn-sm py-0 px-1 me-1" onclick="clientSyncToKey('${keyName}', ['${p.name}'])" title="Sync playlist via browser"><i class="bi bi-pc-display"></i></button>` : ''}
           <button class="btn btn-outline-primary btn-sm py-0 px-1 me-1" onclick="syncToKey('${keyName}', 'export/${cachedProfile}/${p.name}')" title="${detailSyncTitle}" ${detailSyncDisabled}>
             <i class="bi bi-arrow-repeat"></i>
           </button>
@@ -430,6 +562,40 @@ document.getElementById('confirmDeleteBtn').addEventListener('click', function()
     .catch(err => showToast('Delete failed: ' + err, 'error'));
 });
 
+let pendingRenameKey = null;
+function promptRenameKey(keyName) {
+  pendingRenameKey = keyName;
+  document.getElementById('renameKeyOldName').textContent = keyName;
+  document.getElementById('renameKeyNewName').value = keyName;
+  const modal = new bootstrap.Modal(document.getElementById('renameKeyModal'));
+  modal.show();
+  setTimeout(() => document.getElementById('renameKeyNewName').select(), 300);
+}
+
+document.getElementById('confirmRenameBtn').addEventListener('click', function() {
+  if (!pendingRenameKey) return;
+  const newKey = document.getElementById('renameKeyNewName').value.trim();
+  if (!newKey) { showToast('Enter a new key name', 'warning'); return; }
+  if (!/^[A-Za-z0-9_-]+$/.test(newKey)) { showToast('Key name must be alphanumeric, hyphens, or underscores', 'warning'); return; }
+  if (newKey === pendingRenameKey) { showToast('New name must be different', 'warning'); return; }
+
+  fetch('/api/sync/keys/' + encodeURIComponent(pendingRenameKey) + '/rename', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({new_key: newKey})
+  }).then(r => r.json()).then(data => {
+    if (data.error) { showToast(data.error, 'error'); return; }
+    bootstrap.Modal.getInstance(document.getElementById('renameKeyModal')).hide();
+    let msg = `Renamed '${pendingRenameKey}' to '${newKey}'`;
+    if (data.destinations_updated > 0) msg += ` (${data.destinations_updated} destination link(s) updated)`;
+    showToast(msg, 'success');
+    pendingRenameKey = null;
+    hideDetail();
+    loadSyncStatusData();
+    loadDestinations();
+  }).catch(err => showToast('Rename failed: ' + err, 'error'));
+});
+
 function pruneKey() {
   const keyName = document.getElementById('detailKeyName').textContent;
   fetch('/api/sync/keys/' + encodeURIComponent(keyName) + '/prune', {method: 'POST'})
@@ -462,22 +628,36 @@ function deletePlaylist(keyName, playlistName) {
 function renderDestsTable(saved) {
   const tbody = document.getElementById('destsTableBody');
   if (!saved || !saved.length) {
-    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No saved destinations</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No saved destinations</td></tr>';
     return;
   }
   tbody.innerHTML = saved.map(d => {
-    const avail = d.available
+    let avail;
+    if (d.type === 'web-client') avail = '<span class="badge bg-secondary">Browser</span>';
+    else avail = d.available
       ? '<span class="badge bg-success">Yes</span>'
       : '<span class="badge bg-danger">No</span>';
-    const typeBadge = d.type === 'usb'
-      ? '<span class="badge bg-info">USB</span>'
-      : '<span class="badge bg-secondary">Folder</span>';
+    let typeBadge;
+    if (d.type === 'usb') typeBadge = '<span class="badge bg-info">USB</span>';
+    else if (d.type === 'web-client') typeBadge = '<span class="badge bg-primary">Client</span>';
+    else typeBadge = '<span class="badge bg-secondary">Folder</span>';
+    const linkedKey = d.sync_key
+      ? `<span class="badge bg-info">${d.sync_key}</span>`
+      : '<span class="text-muted">-</span>';
+    const linkBtn = d.sync_key
+      ? `<button class="btn btn-outline-warning btn-sm py-0 px-1 me-1" onclick="unlinkDest('${d.name}')" title="Unlink"><i class="bi bi-link-45deg"></i></button>`
+      : `<button class="btn btn-outline-info btn-sm py-0 px-1 me-1" onclick="promptLinkDest('${d.name}')" title="Link to key"><i class="bi bi-link"></i></button>`;
     return `<tr>
       <td>${d.name}</td>
       <td>${typeBadge}</td>
       <td><code>${d.path}</code></td>
+      <td class="text-center">${linkedKey}</td>
       <td class="text-center">${avail}</td>
       <td class="text-center">
+        ${linkBtn}
+        <button class="btn btn-outline-warning btn-sm py-0 px-1 me-1" onclick="promptRenameDest('${d.name}')" title="Rename">
+          <i class="bi bi-pencil"></i>
+        </button>
         <button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="removeDest('${d.name}')" title="Remove">
           <i class="bi bi-trash"></i>
         </button>
@@ -492,15 +672,21 @@ document.getElementById('addDestForm').addEventListener('submit', function(e) {
   const path = document.getElementById('newDestPath').value.trim();
   if (!name || !path) { showToast('Name and path required', 'warning'); return; }
 
+  const payload = {name, path};
+  const linkTo = document.getElementById('newDestLinkTo').value;
+  if (linkTo) payload.sync_key = linkTo;
+
   fetch('/api/sync/destinations', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({name, path})
+    body: JSON.stringify(payload)
   }).then(r => r.json()).then(data => {
     if (data.error) { showToast(data.error, 'error'); return; }
-    showToast(`Added destination '${name}'`, 'success');
+    const msg = linkTo ? `Added destination '${name}' linked to '${linkTo}'` : `Added destination '${name}'`;
+    showToast(msg, 'success');
     document.getElementById('newDestName').value = '';
     document.getElementById('newDestPath').value = '';
+    document.getElementById('newDestLinkTo').value = '';
     loadDestinations();
   }).catch(err => showToast('Failed: ' + err, 'error'));
 });
@@ -517,8 +703,488 @@ function removeDest(name) {
     .catch(err => showToast('Failed: ' + err, 'error'));
 }
 
+// ── Destination linking ──
+let pendingLinkDest = null;
+
+function populateLinkToDropdown() {
+  const keys = allKeysData.map(k => k.key_name);
+  // Add destination names that aren't already keys (for pre-linking)
+  destsMeta.forEach(d => {
+    if (d.effective_key && !keys.includes(d.effective_key)) keys.push(d.effective_key);
+  });
+  keys.sort();
+
+  // Populate add-form dropdown
+  const addSelect = document.getElementById('newDestLinkTo');
+  addSelect.innerHTML = '<option value="">None</option>' +
+    keys.map(k => `<option value="${k}">${k}</option>`).join('');
+
+  // Populate modal dropdown
+  const modalSelect = document.getElementById('linkDestKeySelect');
+  modalSelect.innerHTML = '<option value="">Select a key...</option>' +
+    keys.map(k => `<option value="${k}">${k}</option>`).join('');
+}
+
+function promptLinkDest(name) {
+  pendingLinkDest = name;
+  document.getElementById('linkDestName').textContent = name;
+  populateLinkToDropdown();
+  new bootstrap.Modal(document.getElementById('linkDestModal')).show();
+}
+
+document.getElementById('confirmLinkBtn').addEventListener('click', function() {
+  if (!pendingLinkDest) return;
+  const syncKey = document.getElementById('linkDestKeySelect').value;
+  if (!syncKey) { showToast('Select a key to link to', 'warning'); return; }
+
+  fetch('/api/sync/destinations/' + encodeURIComponent(pendingLinkDest) + '/link', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({sync_key: syncKey})
+  }).then(r => r.json()).then(data => {
+    if (data.error) { showToast(data.error, 'error'); return; }
+    bootstrap.Modal.getInstance(document.getElementById('linkDestModal')).hide();
+    let msg = `Linked '${pendingLinkDest}' to key '${syncKey}'`;
+    if (data.merge_stats && data.merge_stats.source_deleted) {
+      msg += ` (${data.merge_stats.records_moved} moved, ${data.merge_stats.records_merged} merged)`;
+    }
+    showToast(msg, 'success');
+    pendingLinkDest = null;
+    loadDestinations();
+  }).catch(err => showToast('Link failed: ' + err, 'error'));
+});
+
+function unlinkDest(name) {
+  if (!confirm(`Unlink destination "${name}" from its shared key?`)) return;
+  fetch('/api/sync/destinations/' + encodeURIComponent(name) + '/link', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({sync_key: ''})
+  }).then(r => r.json()).then(data => {
+    if (data.error) { showToast(data.error, 'error'); return; }
+    showToast(`Unlinked destination '${name}'`, 'success');
+    loadDestinations();
+  }).catch(err => showToast('Unlink failed: ' + err, 'error'));
+}
+
+let pendingRenameDest = null;
+function promptRenameDest(name) {
+  pendingRenameDest = name;
+  document.getElementById('renameDestOldName').textContent = name;
+  document.getElementById('renameDestNewName').value = name;
+  const modal = new bootstrap.Modal(document.getElementById('renameDestModal'));
+  modal.show();
+  setTimeout(() => document.getElementById('renameDestNewName').select(), 300);
+}
+
+document.getElementById('confirmRenameDestBtn').addEventListener('click', function() {
+  if (!pendingRenameDest) return;
+  const newName = document.getElementById('renameDestNewName').value.trim();
+  if (!newName) { showToast('Enter a new name', 'warning'); return; }
+  if (!/^[A-Za-z0-9_-]+$/.test(newName)) { showToast('Name must be alphanumeric, hyphens, or underscores', 'warning'); return; }
+  if (newName === pendingRenameDest) { showToast('New name must be different', 'warning'); return; }
+
+  fetch('/api/sync/destinations/' + encodeURIComponent(pendingRenameDest) + '/rename', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({new_name: newName})
+  }).then(r => r.json()).then(data => {
+    if (data.error) { showToast(data.error, 'error'); return; }
+    bootstrap.Modal.getInstance(document.getElementById('renameDestModal')).hide();
+    let msg = `Renamed '${pendingRenameDest}' to '${newName}'`;
+    if (data.tracking_renamed) msg += ' (tracking key also renamed)';
+    showToast(msg, 'success');
+    pendingRenameDest = null;
+    loadDestinations();
+    loadSyncStatusData();
+  }).catch(err => showToast('Rename failed: ' + err, 'error'));
+});
+
+// ── Client-Side Sync ──
+const csyncHasFSA = typeof window.showDirectoryPicker === 'function';
+
+(function initClientSyncUI() {
+  const badge = document.getElementById('csyncBrowserBadge');
+  const folderBtn = document.getElementById('csyncFolderBtn');
+  const alert = document.getElementById('csyncChromiumAlert');
+  if (csyncHasFSA) {
+    badge.textContent = 'Chromium';
+    badge.classList.add('bg-success');
+    folderBtn.classList.remove('d-none');
+  } else {
+    badge.textContent = 'ZIP Only';
+    badge.classList.add('bg-warning', 'text-dark');
+    folderBtn.classList.add('d-none');
+    alert.classList.remove('d-none');
+  }
+})();
+
+function loadClientSyncPlaylists() {
+  fetch('/api/directories/export').then(r => r.json()).then(dirs => {
+    const container = document.getElementById('csyncPlaylists');
+    const emptyMsg = document.getElementById('csyncEmpty');
+    const area = document.getElementById('csyncPlaylistArea');
+    if (!dirs.length) {
+      area.classList.add('d-none');
+      emptyMsg.classList.remove('d-none');
+      return;
+    }
+    emptyMsg.classList.add('d-none');
+    area.classList.remove('d-none');
+    container.innerHTML = dirs.map(d =>
+      `<div class="form-check form-check-inline">
+        <input class="form-check-input csync-pl-cb" type="checkbox" value="${d.name}" id="csyncPl_${d.name}">
+        <label class="form-check-label small" for="csyncPl_${d.name}">${d.name} <span class="text-muted">(${d.files})</span></label>
+      </div>`
+    ).join('');
+    updateClientSyncButtons();
+    document.querySelectorAll('.csync-pl-cb').forEach(cb => {
+      cb.addEventListener('change', updateClientSyncButtons);
+    });
+  });
+}
+
+document.getElementById('csyncSelectAll').addEventListener('click', function(e) {
+  e.preventDefault();
+  document.querySelectorAll('.csync-pl-cb').forEach(cb => { cb.checked = true; });
+  updateClientSyncButtons();
+});
+document.getElementById('csyncSelectNone').addEventListener('click', function(e) {
+  e.preventDefault();
+  document.querySelectorAll('.csync-pl-cb').forEach(cb => { cb.checked = false; });
+  updateClientSyncButtons();
+});
+
+function getSelectedPlaylists() {
+  return Array.from(document.querySelectorAll('.csync-pl-cb:checked')).map(cb => cb.value);
+}
+
+function updateClientSyncButtons() {
+  const selected = getSelectedPlaylists();
+  const hasSelection = selected.length > 0;
+  const folderBtn = document.getElementById('csyncFolderBtn');
+  const zipBtn = document.getElementById('csyncZipBtn');
+  const inProgress = folderBtn.dataset.busy === '1';
+  if (csyncHasFSA) folderBtn.disabled = !hasSelection || inProgress;
+  zipBtn.disabled = !hasSelection || inProgress;
+  const tip = hasSelection ? '' : 'Select at least one playlist';
+  folderBtn.title = tip;
+  zipBtn.title = tip;
+}
+
+function setClientSyncBusy(busy) {
+  const folderBtn = document.getElementById('csyncFolderBtn');
+  const zipBtn = document.getElementById('csyncZipBtn');
+  folderBtn.dataset.busy = busy ? '1' : '0';
+  folderBtn.disabled = busy;
+  zipBtn.disabled = busy;
+}
+
+let csyncAborted = false;
+let csyncStartTime = 0;
+
+function showClientSyncProgress(show) {
+  document.getElementById('csyncProgressWrap').classList.toggle('d-none', !show);
+  document.getElementById('csyncEta').textContent = '';
+  if (show) {
+    document.getElementById('csyncAbortBtn').classList.remove('d-none');
+  }
+}
+
+function formatEta(seconds) {
+  if (seconds < 60) return Math.ceil(seconds) + 's remaining';
+  const m = Math.floor(seconds / 60);
+  const s = Math.ceil(seconds % 60);
+  return m + 'm ' + (s < 10 ? '0' : '') + s + 's remaining';
+}
+
+function updateClientSyncProgress(current, total, label) {
+  const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+  const bar = document.getElementById('csyncProgressBar');
+  bar.style.width = pct + '%';
+  bar.textContent = pct + '%';
+  document.getElementById('csyncProgressLabel').textContent = label || '';
+  // ETA calculation
+  const etaEl = document.getElementById('csyncEta');
+  if (current > 0 && current < total && csyncStartTime > 0) {
+    const elapsed = (Date.now() - csyncStartTime) / 1000;
+    const rate = current / elapsed;
+    const remaining = (total - current) / rate;
+    etaEl.textContent = formatEta(remaining);
+  } else {
+    etaEl.textContent = '';
+  }
+}
+
+document.getElementById('csyncAbortBtn').addEventListener('click', function() {
+  csyncAborted = true;
+  this.disabled = true;
+  this.innerHTML = '<i class="bi bi-hourglass-split"></i> Aborting...';
+});
+
+function showClientSyncResult(copied, skipped, failed, aborted) {
+  const el = document.getElementById('csyncResult');
+  const cls = aborted ? 'alert-warning' : (failed > 0 ? 'alert-warning' : 'alert-success');
+  const icon = aborted ? 'bi-exclamation-triangle' : 'bi-check-circle';
+  const prefix = aborted ? 'Aborted. ' : '';
+  el.className = 'alert mb-0 ' + cls;
+  el.innerHTML = `<i class="bi ${icon}"></i> ${prefix}Copied: <strong>${copied}</strong> &nbsp; Skipped: <strong>${skipped}</strong> &nbsp; Failed: <strong>${failed}</strong>`;
+  el.classList.remove('d-none');
+}
+
+// ── Local manifest helpers ──
+async function readSyncManifest(dirHandle) {
+  try {
+    const fh = await dirHandle.getFileHandle('.music-porter-sync.json');
+    const file = await fh.getFile();
+    return JSON.parse(await file.text());
+  } catch (_) {
+    return null;
+  }
+}
+
+async function writeSyncManifest(dirHandle, manifest) {
+  try {
+    const fh = await dirHandle.getFileHandle('.music-porter-sync.json', {create: true});
+    const w = await fh.createWritable();
+    await w.write(JSON.stringify(manifest, null, 2));
+    await w.close();
+  } catch (_) { /* best-effort */ }
+}
+
+function recordClientFile(syncKey, playlist, filename, folderName) {
+  fetch('/api/sync/client-record', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({sync_key: syncKey, playlist, files: [filename], folder_name: folderName})
+  }).catch(() => {});
+}
+
+// ── File System Access API sync ──
+async function clientSyncToKey(keyName, playlists) {
+  // If playlists is null and a key is specified, fetch from server
+  if (!playlists && keyName) {
+    try {
+      const resp = await fetch('/api/sync/status/' + encodeURIComponent(keyName));
+      const data = await resp.json();
+      if (!data.playlists || !data.playlists.length) {
+        showToast('No playlists found for key ' + keyName, 'warning');
+        return;
+      }
+      playlists = data.playlists.map(p => p.name);
+    } catch (e) {
+      showToast('Failed to load playlists for key: ' + e.message, 'error');
+      return;
+    }
+  }
+
+  let dirHandle;
+  try {
+    dirHandle = await window.showDirectoryPicker({mode: 'readwrite'});
+  } catch (e) {
+    if (e.name === 'AbortError') return; // user cancelled
+    showToast('Could not open folder: ' + e.message, 'error');
+    return;
+  }
+
+  // Scroll to progress area
+  document.getElementById('clientSyncCard').scrollIntoView({behavior: 'smooth'});
+  csyncAborted = false;
+  csyncStartTime = Date.now();
+  const abortBtn = document.getElementById('csyncAbortBtn');
+  abortBtn.disabled = false;
+  abortBtn.innerHTML = '<i class="bi bi-x-lg"></i> Abort';
+  setClientSyncBusy(true);
+  showClientSyncProgress(true);
+  document.getElementById('csyncResult').classList.add('d-none');
+
+  // Read manifest for skip optimization
+  const manifest = await readSyncManifest(dirHandle);
+  const manifestPlaylists = (manifest && manifest.playlists) || {};
+
+  // Determine sync key: use provided keyName, or fall back to manifest / folder name
+  if (!keyName) {
+    keyName = (manifest && manifest.sync_key) ? manifest.sync_key : 'client-' + dirHandle.name;
+  }
+  // Only pass folder_name for client- keys (triggers auto-registration of web-client:// destination)
+  const folderName = keyName.startsWith('client-') ? dirHandle.name : '';
+
+  // Write manifest immediately to persist sync_key across interruptions
+  await writeSyncManifest(dirHandle, {
+    sync_key: keyName,
+    server_origin: window.location.origin,
+    last_sync_at: (manifest && manifest.last_sync_at) || new Date().toISOString(),
+    playlists: manifestPlaylists
+  });
+
+  let totalCopied = 0, totalSkipped = 0, totalFailed = 0;
+
+  // Count total files across all playlists first
+  let fileLists = {};
+  let grandTotal = 0;
+  for (const key of playlists) {
+    try {
+      const resp = await fetch('/api/files/' + encodeURIComponent(key));
+      const data = await resp.json();
+      fileLists[key] = data.files || [];
+      grandTotal += fileLists[key].length;
+    } catch (e) {
+      fileLists[key] = [];
+    }
+  }
+
+  // Build new manifest state as we go
+  const newManifestPlaylists = {};
+
+  let processed = 0;
+  for (const key of playlists) {
+    if (csyncAborted) break;
+    const files = fileLists[key];
+    if (!files.length) continue;
+
+    let plDirHandle;
+    try {
+      plDirHandle = await dirHandle.getDirectoryHandle(key, {create: true});
+    } catch (e) {
+      totalFailed += files.length;
+      processed += files.length;
+      updateClientSyncProgress(processed, grandTotal, 'Error creating folder: ' + key);
+      continue;
+    }
+
+    const manifestFiles = (manifestPlaylists[key] && manifestPlaylists[key].files) || {};
+    const syncedFileMap = {};
+
+    for (const fileInfo of files) {
+      if (csyncAborted) break;
+      const fname = fileInfo.filename;
+      processed++;
+      updateClientSyncProgress(processed, grandTotal, fname);
+
+      try {
+        // Check manifest first, then fall back to disk check
+        let skip = false;
+        if (manifestFiles[fname] === fileInfo.size) {
+          skip = true;
+        } else {
+          try {
+            const existing = await plDirHandle.getFileHandle(fname);
+            const existingFile = await existing.getFile();
+            if (existingFile.size === fileInfo.size) {
+              skip = true;
+            }
+          } catch (_) {
+            // file doesn't exist — will copy
+          }
+        }
+
+        if (skip) {
+          totalSkipped++;
+          syncedFileMap[fname] = fileInfo.size;
+          recordClientFile(keyName, key, fname, folderName);
+          continue;
+        }
+
+        // Download and write
+        const resp = await fetch('/api/files/' + encodeURIComponent(key) + '/' + encodeURIComponent(fname));
+        if (!resp.ok) { totalFailed++; continue; }
+        const blob = await resp.blob();
+        const newHandle = await plDirHandle.getFileHandle(fname, {create: true});
+        const writable = await newHandle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        totalCopied++;
+        syncedFileMap[fname] = fileInfo.size;
+        recordClientFile(keyName, key, fname, folderName);
+      } catch (e) {
+        totalFailed++;
+        if (e.name === 'QuotaExceededError') {
+          showToast('Disk full — sync stopped at ' + fname, 'error');
+          processed = grandTotal; // skip remaining
+          break;
+        }
+      }
+    }
+
+    newManifestPlaylists[key] = {files: syncedFileMap};
+  }
+
+  // Write updated manifest
+  await writeSyncManifest(dirHandle, {
+    sync_key: keyName,
+    server_origin: window.location.origin,
+    last_sync_at: new Date().toISOString(),
+    playlists: newManifestPlaylists
+  });
+
+  if (csyncAborted) {
+    showClientSyncResult(totalCopied, totalSkipped, totalFailed, true);
+    updateClientSyncProgress(processed, grandTotal, 'Aborted');
+  } else {
+    showClientSyncResult(totalCopied, totalSkipped, totalFailed, false);
+    updateClientSyncProgress(grandTotal, grandTotal, 'Done');
+  }
+  document.getElementById('csyncEta').textContent = '';
+  document.getElementById('csyncAbortBtn').classList.add('d-none');
+  setClientSyncBusy(false);
+  loadSyncStatusData();
+  loadDestinations();
+}
+
+document.getElementById('csyncFolderBtn').addEventListener('click', async function() {
+  const playlists = getSelectedPlaylists();
+  if (!playlists.length) return;
+  clientSyncToKey(null, playlists);
+});
+
+// ── ZIP download flow ──
+document.getElementById('csyncZipBtn').addEventListener('click', async function() {
+  const playlists = getSelectedPlaylists();
+  if (!playlists.length) return;
+
+  if (playlists.length === 1) {
+    // Single playlist — use existing endpoint
+    window.location.href = '/api/files/' + encodeURIComponent(playlists[0]) + '/download-all';
+    return;
+  }
+
+  // Multiple playlists — use new multi-playlist endpoint
+  const btn = document.getElementById('csyncZipBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Building ZIP...';
+
+  try {
+    const resp = await fetch('/api/files/download-zip', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({playlists})
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      showToast(err.error || 'ZIP download failed', 'error');
+      return;
+    }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'music-porter-export.zip';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    showToast('ZIP download failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-file-earmark-zip"></i> Download as ZIP';
+    updateClientSyncButtons();
+  }
+});
+
 // ── Init ──
 loadSources();
 loadDestinations();
+loadClientSyncPlaylists();
 </script>
 {% endblock scripts %}

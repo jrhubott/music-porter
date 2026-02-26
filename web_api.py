@@ -1332,6 +1332,62 @@ def api_files_download_all(playlist_key):
     )
 
 
+@api_bp.route('/api/files/download-zip', methods=['POST'])
+def api_files_download_zip():
+    """Stream a ZIP archive of MP3s from multiple playlists."""
+    import io
+    import zipfile
+
+    ctx = _ctx()
+    data = request.get_json(silent=True) or {}
+    playlists = data.get('playlists', [])
+    if not playlists:
+        return jsonify({'error': 'playlists array is required'}), 400
+
+    config = ctx.get_config()
+    profile = ctx.get_output_profile(config)
+
+    # Collect files per playlist, validate directories, enforce limit
+    playlist_files = []  # [(playlist_key, [Path, ...])]
+    total_count = 0
+    for key in playlists:
+        playlist_dir = ctx.project_root / mp.get_export_dir(profile.name, key)
+        safe = ctx.safe_dir(playlist_dir)
+        if not safe or not Path(safe).is_dir():
+            continue  # skip missing playlists silently
+        mp3s = sorted(Path(safe).glob('*.mp3'))
+        if not mp3s:
+            continue
+        total_count += len(mp3s)
+        if total_count > 2000:
+            return jsonify({'error': 'Too many files (limit 2000)'}), 413
+        playlist_files.append((key, mp3s))
+
+    if not playlist_files:
+        return jsonify({'error': 'No MP3 files found in selected playlists'}), 404
+
+    def generate_zip():
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_STORED) as zf:
+            for key, files in playlist_files:
+                for f in files:
+                    zf.write(f, f'{key}/{f.name}')
+        buf.seek(0)
+        while True:
+            chunk = buf.read(65536)
+            if not chunk:
+                break
+            yield chunk
+
+    return Response(
+        generate_zip(),
+        mimetype='application/zip',
+        headers={
+            'Content-Disposition': 'attachment; filename="music-porter-export.zip"',
+        },
+    )
+
+
 # ══════════════════════════════════════════════════════════════════
 # API: USB
 # ══════════════════════════════════════════════════════════════════
@@ -1377,13 +1433,17 @@ def api_sync_destination_add():
     data = request.get_json(force=True)
     name = data.get('name', '').strip()
     path = data.get('path', '').strip()
+    sync_key = data.get('sync_key', '').strip() or None
     if not name or not path:
         return jsonify({'error': 'name and path are required'}), 400
     config = ctx.get_config()
-    ok = config.add_destination(name, path)
+    ok = config.add_destination(name, path, sync_key=sync_key)
     if not ok:
         return jsonify({'error': f"Failed to add destination '{name}'"}), 400
-    return jsonify({'ok': True, 'name': name, 'path': path})
+    result = {'ok': True, 'name': name, 'path': path}
+    if sync_key:
+        result['sync_key'] = sync_key
+    return jsonify(result)
 
 
 @api_bp.route('/api/sync/destinations/<name>', methods=['DELETE'])
@@ -1395,6 +1455,73 @@ def api_sync_destination_delete(name):
     if not ok:
         return jsonify({'error': f"Destination '{name}' not found"}), 404
     return jsonify({'ok': True})
+
+
+@api_bp.route('/api/sync/destinations/<name>/link', methods=['PUT'])
+def api_sync_destination_link(name):
+    """Link or unlink a destination's sync_key."""
+    ctx = _ctx()
+    data = request.get_json(force=True)
+    new_sync_key = data.get('sync_key', '').strip() or None
+
+    config = ctx.get_config()
+    dest = config.get_destination(name)
+    if not dest:
+        return jsonify({'error': f"Destination '{name}' not found"}), 404
+
+    merge_stats = None
+
+    # If linking and old tracking data exists under the dest name, merge it
+    if new_sync_key and ctx.sync_tracker:
+        old_effective = dest.effective_key
+        if old_effective != new_sync_key:
+            merge_stats = ctx.sync_tracker.merge_key(old_effective, new_sync_key)
+
+    ok = config.update_destination_link(name, new_sync_key)
+    if not ok:
+        return jsonify({'error': f"Failed to update destination '{name}'"}), 400
+
+    result = {'ok': True, 'sync_key': new_sync_key}
+    if merge_stats:
+        result['merge_stats'] = merge_stats
+    return jsonify(result)
+
+
+@api_bp.route('/api/sync/destinations/<name>/rename', methods=['POST'])
+def api_sync_destination_rename(name):
+    """Rename a saved destination."""
+    ctx = _ctx()
+    data = request.get_json(force=True) or {}
+    new_name = (data.get('new_name') or '').strip()
+    if not new_name:
+        return jsonify({'error': 'new_name is required'}), 400
+    import re
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', new_name):
+        return jsonify({'error': 'new_name must be alphanumeric, hyphens, or underscores'}), 400
+    if new_name.lower() == name.lower():
+        return jsonify({'error': 'new_name must be different from the current name'}), 400
+
+    config = ctx.get_config()
+    dest = config.get_destination(name)
+    if not dest:
+        return jsonify({'error': f"Destination '{name}' not found"}), 404
+    if config.get_destination(new_name):
+        return jsonify({'error': f"Destination '{new_name}' already exists"}), 409
+
+    had_no_sync_key = dest.sync_key is None
+    tracking_renamed = False
+
+    ok = config.rename_destination(name, new_name)
+    if not ok:
+        return jsonify({'error': 'Failed to rename destination'}), 400
+
+    if had_no_sync_key and ctx.sync_tracker:
+        result = ctx.sync_tracker.rename_key(name, new_name)
+        if result is not None:
+            tracking_renamed = True
+
+    return jsonify({'ok': True, 'old_name': name, 'new_name': new_name,
+                    'tracking_renamed': tracking_renamed})
 
 
 @api_bp.route('/api/sync/run', methods=['POST'])
@@ -1430,6 +1557,9 @@ def api_sync_run():
     if not dest:
         return jsonify({'error': f"Destination '{dest_name}' not found"}), 404
 
+    if dest.is_web_client:
+        return jsonify({'error': 'web-client destinations can only be synced from the browser'}), 400
+
     desc = f'Sync: {Path(source_dir).name} → {dest.name}'
 
     def _run(task_id):
@@ -1440,7 +1570,7 @@ def api_sync_run():
                                   cancel_event=task.cancel_event,
                                   sync_tracker=ctx.sync_tracker)
         result = sync_mgr.sync_to_destination(
-            source_dir, dest_path=dest.path, dest_key=dest.name,
+            source_dir, dest_path=dest.path, dest_key=dest.effective_key,
             dry_run=dry_run)
         return {
             'success': result.success,
@@ -1534,6 +1664,76 @@ def api_sync_key_prune(key):
             source=ctx.detect_source(),
         )
     return jsonify(result)
+
+
+@api_bp.route('/api/sync/keys/<key>/rename', methods=['POST'])
+def api_sync_key_rename(key):
+    """Rename a sync key, moving all tracking data to the new name."""
+    ctx = _ctx()
+    data = request.get_json(force=True) or {}
+    new_key = (data.get('new_key') or '').strip()
+    if not new_key:
+        return jsonify({'error': 'new_key is required'}), 400
+    import re
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', new_key):
+        return jsonify({'error': 'new_key must be alphanumeric, hyphens, or underscores'}), 400
+    if new_key == key:
+        return jsonify({'error': 'new_key must be different from the current key'}), 400
+
+    result = ctx.sync_tracker.rename_key(key, new_key)
+    if result is None:
+        return jsonify({'error': f"Key '{new_key}' already exists"}), 409
+
+    config = ctx.get_config()
+    dests_updated = config.rename_sync_key_refs(key, new_key)
+
+    if ctx.audit_logger:
+        ctx.audit_logger.log(
+            'sync_key_rename',
+            f"Renamed sync key '{key}' to '{new_key}'",
+            'completed',
+            params={'old_key': key, 'new_key': new_key,
+                    **result, 'destinations_updated': dests_updated},
+            source=ctx.detect_source(),
+        )
+    return jsonify({'ok': True, 'old_key': key, 'new_key': new_key,
+                    'stats': result, 'destinations_updated': dests_updated})
+
+
+@api_bp.route('/api/sync/client-record', methods=['POST'])
+def api_sync_client_record():
+    """Record files synced via client-side (browser) sync for tracking."""
+    ctx = _ctx()
+    if not ctx.sync_tracker:
+        return jsonify({'error': 'Sync tracker not available'}), 400
+
+    data = request.get_json(silent=True) or {}
+    sync_key = data.get('sync_key', '')
+    playlist = data.get('playlist', '')
+    files = data.get('files', [])
+
+    if not sync_key or not playlist or not files:
+        return jsonify({'error': 'sync_key, playlist, and files are required'}), 400
+
+    ctx.sync_tracker.record_batch(sync_key, playlist, files)
+
+    if ctx.audit_logger:
+        ctx.audit_logger.log(
+            'client_sync_record',
+            f"Recorded {len(files)} file(s) for '{playlist}' on key '{sync_key}'",
+            'completed',
+            params={'sync_key': sync_key, 'playlist': playlist,
+                    'file_count': len(files)},
+            source=ctx.detect_source(),
+        )
+
+    # Auto-register web-client:// destination if not already saved
+    folder_name = data.get('folder_name', '')
+    if folder_name:
+        config = ctx.get_config()
+        config.ensure_destination(sync_key, f'web-client://{folder_name}', sync_key=sync_key)
+
+    return jsonify({'ok': True, 'recorded': len(files)})
 
 
 # ══════════════════════════════════════════════════════════════════

@@ -157,6 +157,7 @@ Presets via `--preset` flag: `lossless` (default, CBR 320kbps), `high` (VBR q2, 
 ./music-porter sync --list-destinations                      # List saved destinations
 ./music-porter sync --add-dest NAME PATH                     # Save a destination
 ./music-porter sync --remove-dest NAME                       # Remove a saved destination
+./music-porter sync --rename-dest OLD NEW                    # Rename a saved destination
 ./music-porter sync --status                                 # Show sync tracking
 
 # Summary
@@ -325,7 +326,7 @@ All API routes are defined in `web_api.py` as a Flask Blueprint.
 - **Directories:** `GET /api/directories/music`, `GET /api/directories/export`
 - **Operations:** `POST /api/pipeline/run`, `/api/convert/run`, `/api/convert/batch`, `/api/tags/update`, `/api/tags/restore`, `/api/tags/reset`, `/api/cover-art/<action>`
 - **Files:** `GET /api/files/<key>`, `/<key>/<filename>`, `/<key>/<filename>/artwork`, `/<key>/download-all`
-- **Sync:** `GET /api/sync/destinations`, `POST /api/sync/destinations`, `DELETE /api/sync/destinations/<name>`, `POST /api/sync/run`, `GET /api/sync/status`, `GET /api/sync/status/<key>`, `GET|DELETE /api/sync/keys/<key>`, `DELETE /api/sync/keys/<key>/playlists/<playlist>`, `POST /api/sync/keys/<key>/prune`
+- **Sync:** `GET /api/sync/destinations`, `POST /api/sync/destinations`, `DELETE /api/sync/destinations/<name>`, `POST /api/sync/destinations/<name>/rename`, `POST /api/sync/run`, `GET /api/sync/status`, `GET /api/sync/status/<key>`, `GET|DELETE /api/sync/keys/<key>`, `DELETE /api/sync/keys/<key>/playlists/<playlist>`, `POST /api/sync/keys/<key>/prune`
 - **Tasks:** `GET /api/tasks`, `/api/tasks/<id>`, `POST /api/tasks/<id>/cancel`, `GET /api/stream/<id>` (SSE), `GET /api/tasks/history`, `GET /api/tasks/stats`, `POST /api/tasks/clear`
 - **iOS Pairing:** `GET /api/pairing-qr`, `GET /api/pairing-info`
 - **Audit:** `GET /api/audit`, `GET /api/audit/stats`, `POST /api/audit/clear`
@@ -451,7 +452,7 @@ Constant `EXCLUDED_USB_VOLUMES` in `music-porter`: `["Macintosh HD", "Macintosh 
 - Thread-safe writes via `RLock`, lockless reads via WAL mode
 - Schema: `audit_entries` table with `id`, `timestamp`, `operation`, `description`, `params` (JSON), `status`, `duration_s`, `source`
 - Source field: `'cli'`, `'web'`, `'ios'`, or `'api'` — set by caller
-- Audited operations: `login`, `logout`, `auth_denied`, `auth_validate`, `settings_update`, `playlist_add`, `playlist_update`, `playlist_delete`, `playlist_delete_data`, `tag_update`, `tag_restore`, `tag_reset`, `convert`, `cover_art`, `cookie_refresh`, `pipeline`, `audit_clear`
+- Audited operations: `login`, `logout`, `auth_denied`, `auth_validate`, `settings_update`, `playlist_add`, `playlist_update`, `playlist_delete`, `playlist_delete_data`, `tag_update`, `tag_restore`, `tag_reset`, `convert`, `cover_art`, `cookie_refresh`, `pipeline`, `audit_clear`, `destination_rename`
 - Business classes accept `audit_logger` and `audit_source` params — audit logging is wired at the call site, not inside the class
 - Web dashboard: `/audit` page with filtering, pagination, stats cards, and clear tool
 - No dedicated CLI subcommand — audit log is populated by all operations but viewed/managed via web only

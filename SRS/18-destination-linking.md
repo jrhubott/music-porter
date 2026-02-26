@@ -1,0 +1,109 @@
+# SRS 18: Destination Linking — Shared Sync Keys
+
+## Overview
+
+Adds an optional `sync_key` field to `SyncDestination` so multiple destinations can share
+a single tracking key. This unifies sync tracking across server-side sync, client-side
+browser sync, and iOS — preventing duplicate tracking entries and unnecessary re-syncs.
+
+## Requirements
+
+### 18.1 Data Model
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 18.1.1 | 1.0 | [x] | `SyncDestination` dataclass has an optional `sync_key: str` field (default `None`) |
+| 18.1.2 | 1.0 | [x] | `SyncDestination.effective_key` property returns `sync_key` if set, otherwise `name` |
+| 18.1.3 | 1.0 | [x] | `to_api_dict()` includes `effective_key` field and conditionally includes `sync_key` when set |
+| 18.1.4 | 1.0 | [x] | `config.yaml` destinations persist `sync_key` when set; omit when `None` |
+| 18.1.5 | 1.0 | [x] | ConfigManager loads `sync_key` from YAML destination entries |
+| 18.1.6 | 1.0 | [x] | `ConfigManager.ensure_destination()` returns existing or creates new destination with auto-link to `sync_key` |
+
+### 18.2 Tracking Merge
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 18.2.1 | 1.0 | [x] | `SyncTracker.merge_key(source_key, target_key)` moves all `sync_files` records from source to target |
+| 18.2.2 | 1.0 | [x] | Duplicate records (same file\_path + playlist) resolve by keeping the latest `synced_at` timestamp |
+| 18.2.3 | 1.0 | [x] | After merge, source sync key is deleted (cascade deletes remaining records) |
+| 18.2.4 | 1.0 | [x] | `merge_key()` returns `{records_moved, records_merged, source_deleted}` stats |
+| 18.2.5 | 1.0 | [x] | Merging when source key has no records is a no-op returning zero counts |
+| 18.2.6 | 1.0 | [x] | Target key is created (upserted) if it does not already exist |
+
+### 18.3 API
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 18.3.1 | 1.0 | [x] | `PUT /api/sync/destinations/<name>/link` accepts `{sync_key}` to link or `{sync_key: ""}` to unlink |
+| 18.3.2 | 1.0 | [x] | Link endpoint calls `merge_key()` when old tracking data exists under the destination name |
+| 18.3.3 | 1.0 | [x] | Link endpoint returns `{ok, sync_key, merge_stats}` |
+| 18.3.4 | 1.0 | [x] | `POST /api/sync/destinations` accepts optional `sync_key` field |
+| 18.3.5 | 1.0 | [x] | `GET /api/sync/destinations` returns `effective_key` and `sync_key` for each destination |
+| 18.3.6 | 1.0 | [x] | `POST /api/sync/run` uses `dest.effective_key` for tracking instead of `dest.name` |
+
+### 18.4 Web UI
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 18.4.1 | 1.0 | [x] | Destinations table shows "Linked Key" column with badge when linked |
+| 18.4.2 | 1.0 | [x] | Each destination row has a link/unlink button in the actions column |
+| 18.4.3 | 1.0 | [x] | Link modal allows selecting from existing sync keys |
+| 18.4.4 | 1.0 | [x] | Add destination form has optional "Link to Key" dropdown |
+| 18.4.5 | 1.0 | [x] | `findDestMeta()` matches by both `name` and `effective_key` |
+| 18.4.6 | 1.0 | [x] | Sync Keys table shows linked-destination count badge when destinations link to a key |
+
+### 18.5 CLI
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 18.5.1 | 1.0 | [x] | `--link-to KEY` flag on `--add-dest` pre-links the new destination |
+| 18.5.2 | 1.0 | [x] | `--link-dest NAME KEY` links an existing destination and merges tracking data |
+| 18.5.3 | 1.0 | [x] | `--unlink-dest NAME` removes the sync\_key from a destination |
+| 18.5.4 | 1.0 | [x] | `render_destinations_list` shows `-> KEY` suffix for linked destinations |
+| 18.5.5 | 1.0 | [x] | All sync operations use `dest.effective_key` for tracking |
+| 18.5.6 | 1.0 | [x] | Pipeline sync stage uses `sync_destination.effective_key` |
+
+### 18.6 iOS
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 18.6.1 | 1.0 | [x] | `SyncDestination` model has optional `syncKey` and required `effectiveKey` fields |
+| 18.6.2 | 1.0 | [x] | CodingKeys map `sync_key` and `effective_key` from JSON |
+
+### 18.7 Edge Cases
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 18.7.1 | 1.0 | [x] | Linking to a nonexistent key is allowed — key is created on first sync |
+| 18.7.2 | 1.0 | [x] | Deleting a destination that others link to does not affect other destinations |
+| 18.7.3 | 1.0 | [x] | Deleting a sync key that destinations link to removes tracking data; `sync_key` field persists in config |
+| 18.7.4 | 1.0 | [x] | Unlinking a destination does not delete or move tracking data |
+| 18.7.5 | 1.0 | [x] | Auto-detected USB drives (unsaved) have no `sync_key` — `effective_key` equals `name` |
+
+### 18.8 Sync Key Rename
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 18.8.1 | 1.0 | [x] | `SyncTracker.rename_key()` moves all tracking records to new key name; fails (returns `None`) if target key already exists |
+| 18.8.2 | 1.0 | [x] | `ConfigManager.rename_sync_key_refs()` updates all destination `sync_key` references from old key to new key |
+| 18.8.3 | 1.0 | [x] | `POST /api/sync/keys/<key>/rename` endpoint accepts `{new_key}`, renames key, updates destination links, and audit logs |
+| 18.8.4 | 1.0 | [x] | Web UI Sync Keys table has rename button (pencil icon) opening a modal with key name input |
+| 18.8.5 | 1.0 | [x] | CLI `--rename-key OLD NEW` flag renames key, updates destination links, and audit logs |
+| 18.8.6 | 1.0 | [x] | Renaming to an existing key returns HTTP 409 (API) or exit code 1 (CLI) with an error message |
+| 18.8.7 | 1.0 | [x] | Renaming a key with no tracking records is a no-op that still succeeds |
+
+### 18.9 Destination Rename
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 18.9.1 | 1.0 | [x] | `ConfigManager.rename_destination(old_name, new_name)` validates name format (`[a-zA-Z0-9_-]+`), uniqueness, existence, and mutates `dest.name` in place |
+| 18.9.2 | 1.0 | [x] | `rename_destination()` returns `False` with error log if new name matches existing destination (case-insensitive) |
+| 18.9.3 | 1.0 | [x] | `rename_destination()` audit logs as `destination_rename` with `old_name` and `new_name` params |
+| 18.9.4 | 1.0 | [x] | CLI `--rename-dest OLD NEW` flag renames the destination and, if `sync_key` is `None`, also renames the tracking key via `sync_tracker.rename_key()` |
+| 18.9.5 | 1.0 | [x] | CLI handler exits 1 if destination not found or rename fails |
+| 18.9.6 | 1.0 | [x] | `POST /api/sync/destinations/<name>/rename` accepts `{new_name}`, validates format and uniqueness, returns `{ok, old_name, new_name, tracking_renamed}` |
+| 18.9.7 | 1.0 | [x] | API returns HTTP 404 if destination not found, HTTP 409 if new name already exists, HTTP 400 if name invalid or same |
+| 18.9.8 | 1.0 | [x] | API renames tracking key only when destination has no explicit `sync_key` (effective key equals name) |
+| 18.9.9 | 1.0 | [x] | Web UI destinations table has a pencil button per row that opens a rename modal |
+| 18.9.10 | 1.0 | [x] | Web UI rename modal pre-fills current name, validates format client-side, and refreshes both destinations and sync status tables on success |
+| 18.9.11 | 1.0 | [x] | Renaming a destination with a linked `sync_key` does NOT rename the tracking key (only the destination name changes) |

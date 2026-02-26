@@ -1,3 +1,15 @@
+Version 2.29.0:
+• Client-side sync: sync playlists to browser-local folders via File System Access API (Chromium) or download as ZIP (all browsers)
+• Local sync manifest (.music-porter-sync.json) persists sync key and file maps for incremental syncs across sessions
+• web-client:// destination type auto-registered on first browser sync, with Client badge in destinations table
+• Destination linking: optional sync_key field lets multiple destinations share a single tracking key
+• ConfigManager.ensure_destination() centralizes auto-creation with optional sync_key linking
+• Sync key rename: CLI --rename-key, API POST /api/sync/keys/<key>/rename, and web UI pencil button with modal
+• Destination rename: CLI --rename-dest, API POST /api/sync/destinations/<name>/rename, and web UI pencil button
+• Browser-sync buttons on Sync Keys and Playlist Breakdown tables for quick per-key/per-playlist client sync
+• Client-side sync abort button and ETA display during File System Access sync
+• Audit log UI: collapse consecutive duplicate entries, incremental page filling, and improved pagination accuracy
+
 Version 2.28.0:
 • Complete unification of sync destinations: remove all legacy USB-specific code paths and aliases
 • Rename USBSyncTracker to SyncTracker, USBManager remnants cleaned up across CLI, web API, and iOS
