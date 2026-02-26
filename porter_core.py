@@ -2075,6 +2075,17 @@ class ConfigManager:
                 source=self._audit_source)
         return True
 
+    def ensure_destination(self, name, path, sync_key=None):
+        """Get or create a destination, auto-linking to sync_key if provided.
+
+        Returns the SyncDestination (existing or newly created), or None on failure.
+        """
+        existing = self.get_destination(name)
+        if existing:
+            return existing
+        ok = self.add_destination(name, path, sync_key=sync_key)
+        return self.get_destination(name) if ok else None
+
 
 # ══════════════════════════════════════════════════════════════════
 # Section 4: Dependency Checking

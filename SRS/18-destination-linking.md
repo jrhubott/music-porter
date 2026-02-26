@@ -17,6 +17,7 @@ browser sync, and iOS — preventing duplicate tracking entries and unnecessary 
 | 18.1.3 | 1.0 | [ ] | `to_api_dict()` includes `effective_key` field and conditionally includes `sync_key` when set |
 | 18.1.4 | 1.0 | [ ] | `config.yaml` destinations persist `sync_key` when set; omit when `None` |
 | 18.1.5 | 1.0 | [ ] | ConfigManager loads `sync_key` from YAML destination entries |
+| 18.1.6 | 1.0 | [ ] | `ConfigManager.ensure_destination()` returns existing or creates new destination with auto-link to `sync_key` |
 
 ### 18.2 Tracking Merge
 

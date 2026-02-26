@@ -1660,8 +1660,7 @@ def api_sync_client_record():
     folder_name = data.get('folder_name', '')
     if folder_name:
         config = ctx.get_config()
-        if not config.get_destination(sync_key):
-            config.add_destination(sync_key, f'web-client://{folder_name}')
+        config.ensure_destination(sync_key, f'web-client://{folder_name}', sync_key=sync_key)
 
     return jsonify({'ok': True, 'recorded': len(files)})
 

@@ -3054,10 +3054,10 @@ def main():
                 dest = saved
             elif Path(dest_arg).is_dir():
                 dest_key = SyncManager._sanitize_dest_name(Path(dest_arg).name)
-                dest = SyncDestination(dest_key, f'folder://{dest_arg}')
-                # Auto-save custom path as a destination for reuse
-                if not config.get_destination(dest_key):
-                    config.add_destination(dest_key, dest.path)
+                dest = config.ensure_destination(dest_key, f'folder://{dest_arg}', sync_key=dest_key)
+                if not dest:
+                    logger.error(f"Failed to create destination for '{dest_arg}'")
+                    sys.exit(1)
             else:
                 logger.error(f"'{dest_arg}' is not a saved destination name or valid directory path")
                 sys.exit(1)
