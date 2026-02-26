@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Root view: shows connection flow or main app tabs.
+/// Root view: shows connection flow, reconnecting state, or main app tabs.
 struct ContentView: View {
     @Environment(AppState.self) private var appState
 
@@ -8,14 +8,73 @@ struct ContentView: View {
         Group {
             if appState.isConnected {
                 MainTabView()
+            } else if appState.isReconnecting, let server = appState.savedServer {
+                ReconnectingView(server: server)
             } else {
                 ServerDiscoveryView()
             }
         }
         .task {
-            // Non-blocking: if reconnect succeeds, isConnected flips and
-            // the view auto-switches to MainTabView
             await appState.attemptAutoReconnect()
+        }
+    }
+}
+
+/// Shown while the app retries connecting to a previously saved server.
+struct ReconnectingView: View {
+    @Environment(AppState.self) private var appState
+    let server: ServerConnection
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Spacer()
+
+            Image(systemName: "antenna.radiowaves.left.and.right")
+                .font(.system(size: 48))
+                .foregroundStyle(.secondary)
+                .symbolEffect(.pulse, isActive: true)
+
+            Text("Connecting to Server")
+                .font(.title2.weight(.semibold))
+
+            VStack(spacing: 8) {
+                if let url = server.url {
+                    Text(url)
+                        .font(.body.monospaced())
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("\(server.host):\(server.port)")
+                        .font(.body.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+
+                if !server.name.isEmpty {
+                    Text(server.name)
+                        .font(.subheadline)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            ProgressView()
+                .scaleEffect(1.2)
+
+            if appState.reconnectAttempt > 1 {
+                Text("Attempt \(appState.reconnectAttempt)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button(role: .destructive) {
+                appState.forgetServer()
+            } label: {
+                Text("Cancel")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .padding(.horizontal, 40)
+            .padding(.bottom, 32)
         }
     }
 }
