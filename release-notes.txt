@@ -1,3 +1,12 @@
+Version 2.30.0 (2026-02-26):
+• Schema versioning for config.yaml and SQLite database with sequential migration functions
+• CONFIG_SCHEMA_VERSION and DB_SCHEMA_VERSION constants with migrate_config_schema() and migrate_db_schema()
+• Migrations run at startup before any DB or ConfigManager is instantiated
+• 3-tier branch workflow: feature → dev → main with persistent dev integration branch
+• New /merge-to-dev skill for fast, automatic merges into dev (no prompts, no SRS validation)
+• Rewritten /merge-to-main skill: merges dev→main with full validation, version bump, tagging, and branch cleanup
+• SRS files now remain in SRS/ permanently — no longer archived after merge
+
 Version 2.29.0 (2026-02-26):
 • Client-side sync: sync playlists to browser-local folders via File System Access API (Chromium) or download as ZIP (all browsers)
 • Local sync manifest (.music-porter-sync.json) persists sync key and file maps for incremental syncs across sessions
