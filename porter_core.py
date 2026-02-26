@@ -1238,6 +1238,30 @@ class SyncTracker:
 
             conn.commit()
 
+    def record_file(self, sync_key, playlist, file_path):
+        """Record a single synced file for a sync key and playlist."""
+        now = time.time()
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    """INSERT INTO sync_keys (key_name, last_sync_at, created_at)
+                       VALUES (?, ?, ?)
+                       ON CONFLICT(key_name) DO UPDATE SET last_sync_at = ?""",
+                    (sync_key, now, now, now),
+                )
+                conn.execute(
+                    """INSERT INTO sync_files
+                           (sync_key, file_path, playlist, synced_at)
+                       VALUES (?, ?, ?, ?)
+                       ON CONFLICT(sync_key, file_path, playlist)
+                       DO UPDATE SET synced_at = ?""",
+                    (sync_key, file_path, playlist, now, now),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
     def record_batch(self, sync_key, playlist, file_paths):
         """Record synced files for a sync key and playlist.
 
@@ -5097,6 +5121,16 @@ class SyncManager:
         # File is up-to-date, skip
         return False
 
+    def _extract_sync_info(self, src_file, source_path):
+        """Extract playlist name and file name from a source file path."""
+        if source_path.is_dir():
+            rel = src_file.relative_to(source_path)
+            parts = rel.parts
+            if len(parts) > 1:
+                return parts[0], str(Path(*parts[1:]))
+            return source_path.name, parts[0]
+        return source_path.parent.name, src_file.name
+
     def select_destination(self, config=None, output_profile=None):
         """Interactive destination picker showing USB drives, saved destinations, and custom path.
 
@@ -5294,6 +5328,12 @@ class SyncManager:
                         else:
                             self.logger.file_info(f"Skipped (unchanged): {src_file.name}")
 
+                    if self.sync_tracker and not dry_run:
+                        pl_name, fname = self._extract_sync_info(
+                            src_file, source_path)
+                        self.sync_tracker.record_file(
+                            dest_key, pl_name, fname)
+
                 except Exception as e:
                     stats.files_failed += 1
                     self.logger.error(f"Failed to copy {src_file.name}: {e}")
@@ -5304,27 +5344,6 @@ class SyncManager:
 
         self.logger.ok("Sync complete")
         duration = time.time() - start_time
-
-        # Record synced files in tracker
-        if self.sync_tracker and not dry_run and stats.files_failed == 0:
-            files_by_playlist = {}
-            for src_file in mp3_files:
-                if source_path.is_dir():
-                    rel = src_file.relative_to(source_path)
-                    parts = rel.parts
-                    if len(parts) > 1:
-                        playlist_name = parts[0]
-                        file_name = str(Path(*parts[1:]))
-                    else:
-                        playlist_name = source_path.name
-                        file_name = parts[0]
-                else:
-                    playlist_name = source_path.parent.name
-                    file_name = src_file.name
-                files_by_playlist.setdefault(
-                    playlist_name, []).append(file_name)
-            for pl_name, file_list in files_by_playlist.items():
-                self.sync_tracker.record_batch(dest_key, pl_name, file_list)
 
         # Prompt to eject USB drive (only for USB destinations)
         if is_usb and not dry_run:
