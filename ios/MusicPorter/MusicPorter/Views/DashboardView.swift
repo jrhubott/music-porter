@@ -255,7 +255,7 @@ struct DashboardView: View {
                     ForEach(vm.syncStatus) { key in
                         NavigationLink(destination: SyncStatusView()) {
                             HStack {
-                                Image(systemName: "externaldrive.connected.to.line.below")
+                                Image(systemName: vm.usbKeyNames.contains(key.keyName) ? "externaldrive.connected.to.line.below" : "folder.fill")
                                     .foregroundStyle(.secondary)
                                 Text(key.keyName)
                                     .font(.subheadline.weight(.medium))

@@ -277,8 +277,8 @@
       <div class="card">
         <div class="card-body">
           <div class="d-flex justify-content-between align-items-center">
-            <h6 class="card-title mb-0"><i class="bi bi-arrow-left-right"></i> USB Sync Status</h6>
-            <a href="/sync-status" class="btn btn-outline-primary btn-sm">Details</a>
+            <h6 class="card-title mb-0"><i class="bi bi-arrow-left-right"></i> Sync Status</h6>
+            <a href="/sync" class="btn btn-outline-primary btn-sm">Details</a>
           </div>
           <div class="d-flex gap-4 mt-3 flex-wrap" id="usbSyncBadges"></div>
         </div>
@@ -754,9 +754,12 @@ function sortTable(key) {
 
 loadSummary();
 
-// ── USB Sync Status ──
-function loadUSBSyncStatus() {
-  fetch('/api/usb/sync-status').then(r => r.json()).then(data => {
+// ── Sync Status ──
+function loadSyncStatus() {
+  Promise.all([
+    fetch('/api/usb/sync-status').then(r => r.json()),
+    fetch('/api/sync/destinations').then(r => r.json()).catch(() => ({usb: []}))
+  ]).then(([data, destData]) => {
     const row = document.getElementById('usbSyncRow');
     const badges = document.getElementById('usbSyncBadges');
     if (!data.length) {
@@ -764,17 +767,19 @@ function loadUSBSyncStatus() {
       return;
     }
     row.classList.remove('d-none');
+    const usbNames = new Set((destData.usb || []).map(d => d.name));
     badges.innerHTML = data.map(k => {
+      const icon = usbNames.has(k.key_name) ? 'bi-usb-drive' : 'bi-folder2-open';
       const newBadge = k.new_files > 0
         ? `<span class="badge bg-warning text-dark ms-1">+${k.new_files} new</span>`
         : '<span class="badge bg-success ms-1">synced</span>';
       const plBadge = k.new_playlists > 0
         ? ` <span class="badge bg-info ms-1">${k.new_playlists} new playlist${k.new_playlists > 1 ? 's' : ''}</span>`
         : '';
-      return `<div><i class="bi bi-usb-drive me-1"></i><strong>${k.key_name}</strong> ${newBadge}${plBadge} <span class="text-muted small">${k.synced_files}/${k.total_files} files</span></div>`;
+      return `<div><i class="bi ${icon} me-1"></i><strong>${k.key_name}</strong> ${newBadge}${plBadge} <span class="text-muted small">${k.synced_files}/${k.total_files} files</span></div>`;
     }).join('');
   }).catch(() => {});
 }
-loadUSBSyncStatus();
+loadSyncStatus();
 </script>
 {% endblock scripts %}

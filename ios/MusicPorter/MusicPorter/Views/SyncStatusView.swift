@@ -6,6 +6,7 @@ struct SyncStatusView: View {
     @State private var detail: SyncStatusDetail?
     @State private var selectedKey: String?
     @State private var destinations: [SyncDestination] = []
+    @State private var usbKeyNames: Set<String> = []
     @State private var isLoading = false
     @State private var error: String?
     @State private var showDeleteConfirm = false
@@ -102,7 +103,7 @@ struct SyncStatusView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
-                                Image(systemName: "externaldrive.connected.to.line.below")
+                                Image(systemName: usbKeyNames.contains(key.keyName) ? "externaldrive.connected.to.line.below" : "folder.fill")
                                     .foregroundStyle(.secondary)
                                 Text(key.keyName)
                                     .font(.subheadline.weight(.medium))
@@ -273,6 +274,7 @@ struct SyncStatusView: View {
             keys = try await k
             let destResponse = try? await d
             destinations = destResponse?.saved ?? []
+            usbKeyNames = Set((destResponse?.usb ?? []).map { $0.name })
         } catch {
             self.error = error.localizedDescription
         }

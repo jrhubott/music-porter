@@ -7,6 +7,7 @@ final class DashboardViewModel {
     var libraryStats: LibraryStatsResponse?
     var activeTasks: [TaskInfo] = []
     var syncStatus: [SyncKeySummary] = []
+    var usbKeyNames: Set<String> = []
     var isLoading = false
     var error: String?
 
@@ -19,11 +20,14 @@ final class DashboardViewModel {
             async let ls = api.getLibraryStats()
             async let ts = api.getTasks()
             async let us = api.getSyncStatus()
+            async let ds = api.getSyncDestinations()
             status = try await s
             summary = try await sm
             libraryStats = try await ls
             activeTasks = (try? await ts) ?? []
             syncStatus = (try? await us) ?? []
+            let destResponse = try? await ds
+            usbKeyNames = Set((destResponse?.usb ?? []).map { $0.name })
         } catch {
             self.error = error.localizedDescription
         }
