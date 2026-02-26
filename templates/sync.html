@@ -202,6 +202,10 @@
 
 {% block scripts %}
 <script>
+// ── Cached state for sync buttons ──
+let cachedProfile = '';
+let cachedUsbDir = '';
+
 // ── Destination loading ──
 let destsMeta = []; // [{name, path, type, available}]
 
@@ -275,6 +279,7 @@ function loadSources() {
     const sel = document.getElementById('syncSource');
     fetch('/api/status').then(r => r.json()).then(status => {
       const profile = status.profile;
+      cachedProfile = profile;
       let opts = `<option value="export/${profile}">All (export/${profile}/)</option>`;
       opts += dirs.map(d => `<option value="export/${profile}/${d.name}">${d.name} (${d.files} files)</option>`).join('');
       sel.innerHTML = opts;
@@ -282,7 +287,30 @@ function loadSources() {
   });
 
   fetch('/api/settings').then(r => r.json()).then(s => {
-    document.getElementById('syncUsbDir').value = s.settings.usb_dir || 'RZR/Music';
+    cachedUsbDir = s.settings.usb_dir || 'RZR/Music';
+    document.getElementById('syncUsbDir').value = cachedUsbDir;
+  });
+}
+
+// ── Sync helpers for action buttons ──
+function findDestMeta(keyName) {
+  return destsMeta.find(d => d.name === keyName && d.name !== '__custom__');
+}
+
+function syncToKey(keyName, sourceDir) {
+  const meta = findDestMeta(keyName);
+  if (!meta) { showToast('Destination not found: ' + keyName, 'warning'); return; }
+  const data = { source_dir: sourceDir, type: meta.type, destination: meta.name };
+  if (meta.type === 'usb') { data.usb_dir = cachedUsbDir; }
+
+  document.getElementById('syncStatus').textContent = 'Running';
+  document.getElementById('syncStatus').className = 'badge bg-primary badge-running';
+
+  submitOperation('/api/sync/run', data, 'syncLog', function(msg) {
+    const badge = document.getElementById('syncStatus');
+    if (msg.status === 'completed') { badge.textContent = 'Completed'; badge.className = 'badge bg-success'; }
+    else { badge.textContent = msg.status; badge.className = 'badge bg-danger'; }
+    loadSyncStatusData();
   });
 }
 
@@ -361,6 +389,9 @@ function loadSyncStatusData() {
         ? `<span class="badge bg-info">${k.new_playlists}</span>`
         : `<span class="text-muted">0</span>`;
       const icon = destsMeta.some(d => d.type === 'usb' && d.name === k.key_name) ? 'bi-usb-drive' : 'bi-folder2-open';
+      const meta = findDestMeta(k.key_name);
+      const syncDisabled = (!meta || !meta.available) ? 'disabled' : '';
+      const syncTitle = syncDisabled ? 'Destination unavailable' : 'Sync all playlists';
       return `<tr>
         <td><a href="#" onclick="showDetail('${k.key_name}'); return false;"><i class="bi ${icon} me-1"></i>${k.key_name}</a></td>
         <td class="text-end">${k.synced_files} / ${k.total_files}</td>
@@ -368,6 +399,9 @@ function loadSyncStatusData() {
         <td class="text-end">${plBadge}</td>
         <td class="text-end">${lastSync}</td>
         <td class="text-center">
+          <button class="btn btn-outline-primary btn-sm py-0 px-1 me-1" onclick="syncToKey('${k.key_name}', 'export/${cachedProfile}')" title="${syncTitle}" ${syncDisabled}>
+            <i class="bi bi-arrow-repeat"></i>
+          </button>
           <button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="promptDeleteKey('${k.key_name}')" title="Delete key">
             <i class="bi bi-trash"></i>
           </button>
@@ -396,6 +430,9 @@ function showDetail(keyName) {
       tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No export files found</td></tr>';
       return;
     }
+    const detailMeta = findDestMeta(keyName);
+    const detailSyncDisabled = (!detailMeta || !detailMeta.available) ? 'disabled' : '';
+    const detailSyncTitle = detailSyncDisabled ? 'Destination unavailable' : 'Sync playlist';
     tbody.innerHTML = data.playlists.map(p => {
       let statusBadge;
       if (p.is_new_playlist) {
@@ -412,6 +449,9 @@ function showDetail(keyName) {
         <td class="text-end">${p.new_files}</td>
         <td class="text-center">${statusBadge}</td>
         <td class="text-center">
+          <button class="btn btn-outline-primary btn-sm py-0 px-1 me-1" onclick="syncToKey('${keyName}', 'export/${cachedProfile}/${p.name}')" title="${detailSyncTitle}" ${detailSyncDisabled}>
+            <i class="bi bi-arrow-repeat"></i>
+          </button>
           <button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="deletePlaylist('${keyName}', '${p.name}')" title="Delete playlist tracking">
             <i class="bi bi-trash"></i>
           </button>

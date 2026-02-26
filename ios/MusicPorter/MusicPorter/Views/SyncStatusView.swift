@@ -7,6 +7,9 @@ struct SyncStatusView: View {
     @State private var selectedKey: String?
     @State private var destinations: [SyncDestination] = []
     @State private var usbKeyNames: Set<String> = []
+    @State private var vm = OperationViewModel()
+    @State private var profile: String = ""
+    @State private var usbDir: String = ""
     @State private var isLoading = false
     @State private var error: String?
     @State private var showDeleteConfirm = false
@@ -43,6 +46,10 @@ struct SyncStatusView: View {
                     Label(error, systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.red)
                 }
+            }
+
+            if vm.isRunning || !vm.logMessages.isEmpty {
+                ProgressPanel(vm: vm)
             }
         }
         .navigationTitle("Sync Status")
@@ -164,6 +171,15 @@ struct SyncStatusView: View {
                         Label("Delete", systemImage: "trash")
                     }
                 }
+                .swipeActions(edge: .leading) {
+                    Button {
+                        Task { await syncKey(key.keyName) }
+                    } label: {
+                        Label("Sync", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .tint(.blue)
+                    .disabled(!isKeyAvailable(key.keyName) || vm.isRunning)
+                }
             }
         }
     }
@@ -222,6 +238,15 @@ struct SyncStatusView: View {
                             Label("Delete", systemImage: "trash")
                         }
                     }
+                    .swipeActions(edge: .leading) {
+                        Button {
+                            Task { await syncPlaylist(detail.usbKey, playlist: playlist.name) }
+                        } label: {
+                            Label("Sync", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        .tint(.blue)
+                        .disabled(!isKeyAvailable(detail.usbKey) || vm.isRunning)
+                    }
                 }
             }
         }
@@ -271,10 +296,22 @@ struct SyncStatusView: View {
         do {
             async let k = appState.apiClient.getSyncStatus()
             async let d = appState.apiClient.getSyncDestinations()
+            async let st = appState.apiClient.getStatus()
+            async let se = appState.apiClient.getSettings()
             keys = try await k
             let destResponse = try? await d
             destinations = destResponse?.saved ?? []
             usbKeyNames = Set((destResponse?.usb ?? []).map { $0.name })
+            if let status = try? await st {
+                profile = status.profile
+            }
+            if let settings = try? await se {
+                if case .string(let dir) = settings.settings["usb_dir"] {
+                    usbDir = dir
+                } else {
+                    usbDir = "RZR/Music"
+                }
+            }
         } catch {
             self.error = error.localizedDescription
         }
@@ -329,5 +366,42 @@ struct SyncStatusView: View {
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    // MARK: - Sync Availability
+
+    private func isKeyAvailable(_ keyName: String) -> Bool {
+        if usbKeyNames.contains(keyName) { return true }
+        return destinations.first(where: { $0.name == keyName })?.available == true
+    }
+
+    private func destType(for keyName: String) -> String {
+        usbKeyNames.contains(keyName) ? "usb" : "saved"
+    }
+
+    // MARK: - Sync Actions
+
+    private func syncKey(_ keyName: String) async {
+        await vm.run(api: appState.apiClient) {
+            try await appState.apiClient.syncToDestination(
+                sourceDir: "export/\(profile)",
+                type: destType(for: keyName),
+                destination: keyName,
+                usbDir: destType(for: keyName) == "usb" ? usbDir : nil
+            )
+        }
+        await load()
+    }
+
+    private func syncPlaylist(_ keyName: String, playlist: String) async {
+        await vm.run(api: appState.apiClient) {
+            try await appState.apiClient.syncToDestination(
+                sourceDir: "export/\(profile)/\(playlist)",
+                type: destType(for: keyName),
+                destination: keyName,
+                usbDir: destType(for: keyName) == "usb" ? usbDir : nil
+            )
+        }
+        await load()
     }
 }
