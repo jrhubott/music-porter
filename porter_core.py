@@ -1522,6 +1522,73 @@ class SyncTracker:
                 total_pruned += result['pruned_count']
         return {'total_pruned': total_pruned, 'keys_pruned': keys_pruned}
 
+    def merge_key(self, source_key, target_key):
+        """Merge tracking records from source_key into target_key.
+
+        Moves all sync_files records from source to target. Duplicate
+        records (same file_path + playlist) keep the latest synced_at.
+        After merge, the source key is deleted.
+
+        Returns dict: {records_moved, records_merged, source_deleted}.
+        """
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                # Check if source key exists and has records
+                source_count = conn.execute(
+                    "SELECT COUNT(*) FROM sync_files WHERE sync_key = ?",
+                    (source_key,),
+                ).fetchone()[0]
+
+                if source_count == 0:
+                    return {'records_moved': 0, 'records_merged': 0,
+                            'source_deleted': False}
+
+                # Ensure target key exists
+                now = time.time()
+                conn.execute(
+                    """INSERT INTO sync_keys (key_name, last_sync_at, created_at)
+                       VALUES (?, ?, ?)
+                       ON CONFLICT(key_name) DO UPDATE SET last_sync_at = ?""",
+                    (target_key, now, now, now),
+                )
+
+                # Count existing overlaps for stats
+                overlap_count = conn.execute(
+                    """SELECT COUNT(*) FROM sync_files s
+                       JOIN sync_files t ON t.sync_key = ?
+                           AND t.file_path = s.file_path
+                           AND t.playlist = s.playlist
+                       WHERE s.sync_key = ?""",
+                    (target_key, source_key),
+                ).fetchone()[0]
+
+                # Merge: insert or update keeping latest synced_at
+                conn.execute(
+                    """INSERT INTO sync_files (sync_key, file_path, playlist, synced_at)
+                       SELECT ?, file_path, playlist, synced_at
+                       FROM sync_files WHERE sync_key = ?
+                       ON CONFLICT(sync_key, file_path, playlist)
+                       DO UPDATE SET synced_at = MAX(synced_at, excluded.synced_at)""",
+                    (target_key, source_key),
+                )
+
+                # Delete source key (CASCADE deletes remaining source records)
+                conn.execute(
+                    "DELETE FROM sync_keys WHERE key_name = ?",
+                    (source_key,),
+                )
+                conn.commit()
+
+                records_moved = source_count - overlap_count
+                return {
+                    'records_moved': records_moved,
+                    'records_merged': overlap_count,
+                    'source_deleted': True,
+                }
+            finally:
+                conn.close()
+
     def get_file_sync_map(self, playlist):
         """Map filenames to sync keys they've been synced to.
 
@@ -1575,6 +1642,7 @@ class SyncDestination:
     """
     name: str
     path: str  # usb:///Volumes/X/RZR/Music or folder:///path/to/dir
+    sync_key: str = None  # optional link to a shared tracking key
 
     @property
     def type(self) -> str:
@@ -1603,14 +1671,23 @@ class SyncDestination:
         return self.type == 'web-client'
 
     @property
+    def effective_key(self) -> str:
+        """Sync tracking key: sync_key if linked, else name."""
+        return self.sync_key if self.sync_key else self.name
+
+    @property
     def available(self) -> bool:
         if self.is_web_client:
             return True
         return Path(self.raw_path).is_dir()
 
     def to_api_dict(self) -> dict:
-        return {'name': self.name, 'path': self.path,
-                'type': self.type, 'available': self.available}
+        d = {'name': self.name, 'path': self.path,
+             'type': self.type, 'available': self.available,
+             'effective_key': self.effective_key}
+        if self.sync_key:
+            d['sync_key'] = self.sync_key
+        return d
 
 
 class ConfigManager:
@@ -1679,7 +1756,8 @@ class ConfigManager:
                         and not dpath.startswith('web-client://')):
                     dpath = f'folder://{dpath}'
                     dirty = True
-                self.destinations.append(SyncDestination(dname, dpath))
+                dsync_key = str(entry.get('sync_key', '')).strip() or None
+                self.destinations.append(SyncDestination(dname, dpath, sync_key=dsync_key))
             elif dname or dpath:
                 self.logger.warn(f"Incomplete destination entry (need name, path): {entry}")
 
@@ -1786,10 +1864,13 @@ class ConfigManager:
         }
 
         if self.destinations:
-            data['destinations'] = [
-                {'name': d.name, 'path': d.path}
-                for d in self.destinations
-            ]
+            dest_list = []
+            for d in self.destinations:
+                entry = {'name': d.name, 'path': d.path}
+                if d.sync_key:
+                    entry['sync_key'] = d.sync_key
+                dest_list.append(entry)
+            data['destinations'] = dest_list
 
         with open(self.conf_path, 'w') as f:
             f.write("# Music Porter Configuration\n")
@@ -1900,11 +1981,12 @@ class ConfigManager:
                 return dest
         return None
 
-    def add_destination(self, name, path):
+    def add_destination(self, name, path, sync_key=None):
         """Add a saved sync destination. Returns True on success.
 
         Path should be a schemed path (usb:// or folder://).
         Plain paths are auto-prefixed with folder://.
+        Optional sync_key links this destination to a shared tracking key.
         """
         import re as _re
         if not _re.match(r'^[a-zA-Z0-9_-]+$', name):
@@ -1920,7 +2002,7 @@ class ConfigManager:
             path = f'folder://{path}'
 
         # Validate the raw filesystem path exists (skip for web-client)
-        dest = SyncDestination(name, path)
+        dest = SyncDestination(name, path, sync_key=sync_key)
         if not dest.is_web_client:
             raw = dest.raw_path
             if dest.is_usb:
@@ -1937,11 +2019,15 @@ class ConfigManager:
 
         self.destinations.append(dest)
         self._save()
-        self.logger.info(f"Added sync destination '{name}' → {path}")
+        link_msg = f" (linked to '{sync_key}')" if sync_key else ''
+        self.logger.info(f"Added sync destination '{name}' → {path}{link_msg}")
         if self.audit_logger:
+            params = {'name': name, 'path': path}
+            if sync_key:
+                params['sync_key'] = sync_key
             self.audit_logger.log(
-                'destination_add', f"Added sync destination '{name}'",
-                'completed', params={'name': name, 'path': path},
+                'destination_add', f"Added sync destination '{name}'{link_msg}",
+                'completed', params=params,
                 source=self._audit_source)
         return True
 
@@ -1959,6 +2045,33 @@ class ConfigManager:
             self.audit_logger.log(
                 'destination_delete', f"Removed sync destination '{name}'",
                 'completed', params={'name': name},
+                source=self._audit_source)
+        return True
+
+    def update_destination_link(self, name, sync_key):
+        """Set or clear a destination's sync_key. Returns True if found.
+
+        Pass sync_key=None or '' to unlink.
+        """
+        dest = self.get_destination(name)
+        if not dest:
+            self.logger.warn(f"Destination '{name}' not found")
+            return False
+        old_key = dest.sync_key
+        new_key = sync_key.strip() if sync_key else None
+        dest.sync_key = new_key
+        self._save()
+        if new_key:
+            self.logger.info(f"Linked destination '{name}' → key '{new_key}'")
+        else:
+            self.logger.info(f"Unlinked destination '{name}' (was '{old_key}')")
+        if self.audit_logger:
+            self.audit_logger.log(
+                'destination_link',
+                f"{'Linked' if new_key else 'Unlinked'} destination '{name}'"
+                + (f" → '{new_key}'" if new_key else ''),
+                'completed',
+                params={'name': name, 'sync_key': new_key, 'old_sync_key': old_key},
                 source=self._audit_source)
         return True
 
@@ -7229,7 +7342,7 @@ class PipelineOrchestrator:
             self.logger.info(f"\n=== STAGE 4: Sync to {sync_destination.name} ===")
             usb_result = sync_mgr.sync_to_destination(
                 export_dir, dest_path=sync_destination.path,
-                dest_key=sync_destination.name, dry_run=dry_run)
+                dest_key=sync_destination.effective_key, dry_run=dry_run)
 
             if usb_result.success:
                 self.stats.stages_completed.append("sync")

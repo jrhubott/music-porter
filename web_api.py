@@ -1433,13 +1433,17 @@ def api_sync_destination_add():
     data = request.get_json(force=True)
     name = data.get('name', '').strip()
     path = data.get('path', '').strip()
+    sync_key = data.get('sync_key', '').strip() or None
     if not name or not path:
         return jsonify({'error': 'name and path are required'}), 400
     config = ctx.get_config()
-    ok = config.add_destination(name, path)
+    ok = config.add_destination(name, path, sync_key=sync_key)
     if not ok:
         return jsonify({'error': f"Failed to add destination '{name}'"}), 400
-    return jsonify({'ok': True, 'name': name, 'path': path})
+    result = {'ok': True, 'name': name, 'path': path}
+    if sync_key:
+        result['sync_key'] = sync_key
+    return jsonify(result)
 
 
 @api_bp.route('/api/sync/destinations/<name>', methods=['DELETE'])
@@ -1451,6 +1455,36 @@ def api_sync_destination_delete(name):
     if not ok:
         return jsonify({'error': f"Destination '{name}' not found"}), 404
     return jsonify({'ok': True})
+
+
+@api_bp.route('/api/sync/destinations/<name>/link', methods=['PUT'])
+def api_sync_destination_link(name):
+    """Link or unlink a destination's sync_key."""
+    ctx = _ctx()
+    data = request.get_json(force=True)
+    new_sync_key = data.get('sync_key', '').strip() or None
+
+    config = ctx.get_config()
+    dest = config.get_destination(name)
+    if not dest:
+        return jsonify({'error': f"Destination '{name}' not found"}), 404
+
+    merge_stats = None
+
+    # If linking and old tracking data exists under the dest name, merge it
+    if new_sync_key and ctx.sync_tracker:
+        old_effective = dest.effective_key
+        if old_effective != new_sync_key:
+            merge_stats = ctx.sync_tracker.merge_key(old_effective, new_sync_key)
+
+    ok = config.update_destination_link(name, new_sync_key)
+    if not ok:
+        return jsonify({'error': f"Failed to update destination '{name}'"}), 400
+
+    result = {'ok': True, 'sync_key': new_sync_key}
+    if merge_stats:
+        result['merge_stats'] = merge_stats
+    return jsonify(result)
 
 
 @api_bp.route('/api/sync/run', methods=['POST'])
@@ -1499,7 +1533,7 @@ def api_sync_run():
                                   cancel_event=task.cancel_event,
                                   sync_tracker=ctx.sync_tracker)
         result = sync_mgr.sync_to_destination(
-            source_dir, dest_path=dest.path, dest_key=dest.name,
+            source_dir, dest_path=dest.path, dest_key=dest.effective_key,
             dry_run=dry_run)
         return {
             'success': result.success,

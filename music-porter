@@ -443,7 +443,8 @@ def render_destinations_list(destinations) -> None:
     for d in destinations:
         exists = Path(d.path).is_dir()
         status = "" if exists else "  [not found]"
-        print(f"    {d.name:<20}  {d.path}{status}")
+        link = f"  -> {d.sync_key}" if d.sync_key else ""
+        print(f"    {d.name:<20}  {d.path}{status}{link}")
     print()
 
 
@@ -1499,7 +1500,7 @@ class InteractiveMenu:
             return False
         result = sync_mgr.sync_to_destination(
             get_export_dir(self.output_profile.name),
-            dest_path=dest.path, dest_key=dest.name,
+            dest_path=dest.path, dest_key=dest.effective_key,
             dry_run=dry_run
         )
         render_sync_summary(result)
@@ -2226,6 +2227,12 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
                             help='Remove stale records for files no longer in export')
     sync_parser.add_argument('--list-keys', action='store_true',
                             help='List all tracked sync keys')
+    sync_parser.add_argument('--link-to', default=None, metavar='KEY',
+                            help='Link new destination to a tracking key (use with --add-dest)')
+    sync_parser.add_argument('--link-dest', nargs=2, metavar=('NAME', 'KEY'),
+                            help='Link an existing destination to a tracking key')
+    sync_parser.add_argument('--unlink-dest', metavar='NAME',
+                            help='Remove tracking key link from a destination')
 
     # Hidden alias for backwards compatibility
     subparsers.add_parser('sync-status', help=argparse.SUPPRESS)
@@ -2947,11 +2954,31 @@ def main():
 
         if getattr(args, 'add_dest', None):
             dest_name, dest_path = args.add_dest
-            ok = config.add_destination(dest_name, dest_path)
+            link_to = getattr(args, 'link_to', None)
+            ok = config.add_destination(dest_name, dest_path, sync_key=link_to)
             sys.exit(0 if ok else 1)
 
         if getattr(args, 'remove_dest', None):
             ok = config.remove_destination(args.remove_dest)
+            sys.exit(0 if ok else 1)
+
+        if getattr(args, 'link_dest', None):
+            link_name, link_key = args.link_dest
+            dest = config.get_destination(link_name)
+            if not dest:
+                logger.error(f"Destination '{link_name}' not found")
+                sys.exit(1)
+            old_effective = dest.effective_key
+            if old_effective != link_key:
+                merge_stats = sync_tracker.merge_key(old_effective, link_key)
+                if merge_stats['source_deleted']:
+                    logger.info(f"Merged tracking: {merge_stats['records_moved']} moved, "
+                                f"{merge_stats['records_merged']} merged")
+            config.update_destination_link(link_name, link_key)
+            sys.exit(0)
+
+        if getattr(args, 'unlink_dest', None):
+            ok = config.update_destination_link(args.unlink_dest, None)
             sys.exit(0 if ok else 1)
 
         # ── Tracking management subcommands ──────────────────────
@@ -3043,12 +3070,12 @@ def main():
                 sys.exit(0)
 
         result = sync_mgr.sync_to_destination(
-            source_dir, dest_path=dest.path, dest_key=dest.name,
+            source_dir, dest_path=dest.path, dest_key=dest.effective_key,
             dry_run=args.dry_run)
         render_sync_summary(result)
         if result.success and not args.dry_run:
             try:
-                tracking_status = sync_tracker.get_sync_status(dest.name, export_dir)
+                tracking_status = sync_tracker.get_sync_status(dest.effective_key, export_dir)
                 render_post_sync_tracking_summary(tracking_status)
             except Exception:
                 pass
