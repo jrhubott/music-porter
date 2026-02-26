@@ -1,3 +1,10 @@
+Version 2.31.0 (2026-02-26):
+• Migration audit logging — schema and data migrations now record deferred audit entries that are flushed to the audit trail after AuditLogger is instantiated
+• Log rotation — Logger now uses daily filenames (YYYY-MM-DD.log) instead of per-session files
+• Log pruning — new prune_logs() deletes log files older than configurable retention period (default 7 days)
+• Log retention days setting added to web UI Settings page
+• Dev version build metadata — merge-to-dev appends +<git-hash> to dev versions using SemVer build metadata format
+
 Version 2.30.0 (2026-02-26):
 • Schema versioning for config.yaml and SQLite database with sequential migration functions
 • CONFIG_SCHEMA_VERSION and DB_SCHEMA_VERSION constants with migrate_config_schema() and migrate_db_schema()

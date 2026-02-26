@@ -32,11 +32,12 @@ Merge the current feature branch into dev. This is fast and fully automatic — 
      - List the conflicted files and report them
      - Stop — do NOT attempt to resolve conflicts
 
-4. **Restore dev version suffix**
+4. **Restore dev version suffix with git hash**
    - Read VERSION from `porter_core.py` line 50
    - Extract the base version (the part before the `-branch-name` suffix)
-   - Edit `porter_core.py` line 50 to set `VERSION = "X.Y.Z-dev"` (replace the branch-name suffix with `-dev`)
-   - Stage and commit: `Restore dev version suffix`
+   - Get the short merge commit hash: `git rev-parse --short HEAD`
+   - Edit `porter_core.py` line 50 to set `VERSION = "X.Y.Z-dev+<hash>"` (SemVer build metadata format, e.g. `"2.31.0-dev+a425c6c"`)
+   - Stage and commit: `Set dev version to X.Y.Z-dev+<hash>`
    - Do NOT include Co-Authored-By lines
 
 5. **Push to remote**

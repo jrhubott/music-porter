@@ -29,6 +29,11 @@
             <label class="form-label">Workers (parallel conversion threads)</label>
             <input type="number" class="form-control form-control-sm" id="settingWorkers" min="1" max="16">
           </div>
+          <div class="mb-3">
+            <label class="form-label">Log Retention (days)</label>
+            <input type="number" class="form-control form-control-sm" id="settingLogRetention" min="1" max="365">
+            <div class="form-text">Log files older than this are pruned at startup (default: 7)</div>
+          </div>
           <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-check"></i> Save Settings</button>
         </form>
       </div>
@@ -194,6 +199,7 @@ function loadSettings() {
     currentSettings = data.settings;
     document.getElementById('settingExternalUrl').value = data.settings.external_url || '';
     document.getElementById('settingWorkers').value = data.settings.workers || 6;
+    document.getElementById('settingLogRetention').value = data.settings.log_retention_days || 7;
 
     // Profile cards
     const profiles = data.profiles;
@@ -247,6 +253,7 @@ document.getElementById('settingsForm').addEventListener('submit', function(e) {
   const data = {
     external_url: externalUrl || null,
     workers: parseInt(document.getElementById('settingWorkers').value),
+    log_retention_days: parseInt(document.getElementById('settingLogRetention').value),
   };
   fetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
     .then(r=>r.json()).then(() => { showToast('Settings saved', 'success'); });

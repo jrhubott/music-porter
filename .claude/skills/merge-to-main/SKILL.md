@@ -26,7 +26,7 @@ Merge the dev branch into main following the project's 3-tier version workflow.
 
 3. **Determine version bump**
    - Read the current VERSION from `porter_core.py` (line 50)
-   - Extract the base version (the part before the `-dev` suffix)
+   - Extract the base version (the part before the `-dev` suffix — strip any `+hash` build metadata too)
    - Analyze the commits on dev since main to determine the nature of changes
    - Ask the user which version bump to apply:
      - **PATCH** (e.g. 1.5.1 -> 1.5.2): Bug fixes, docs, minor improvements
