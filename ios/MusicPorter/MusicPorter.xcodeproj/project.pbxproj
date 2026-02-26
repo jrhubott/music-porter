@@ -47,6 +47,8 @@
 		A10000028 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000028 /* Assets.xcassets */; };
 		A10000029 /* AudioPlayerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000029 /* AudioPlayerService.swift */; };
 		A1000002A /* MiniPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002A /* MiniPlayerView.swift */; };
+		A1000002C /* USBSyncStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002C /* USBSyncStatus.swift */; };
+		A1000002D /* SyncStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002D /* SyncStatusView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -92,6 +94,8 @@
 		A20000028 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A20000029 /* AudioPlayerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlayerService.swift; sourceTree = "<group>"; };
 		A2000002A /* MiniPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniPlayerView.swift; sourceTree = "<group>"; };
+		A2000002C /* USBSyncStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = USBSyncStatus.swift; sourceTree = "<group>"; };
+		A2000002D /* SyncStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncStatusView.swift; sourceTree = "<group>"; };
 		A30000001 /* MusicPorter.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MusicPorter.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -152,6 +156,7 @@
 				A20000017 /* SSEEvent.swift */,
 				A20000018 /* FileListResponse.swift */,
 				A20000019 /* ExportDirectory.swift */,
+				A2000002C /* USBSyncStatus.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -197,6 +202,7 @@
 				A20000027 /* AppleMusicView.swift */,
 				A2000000A /* SettingsView.swift */,
 				A2000000B /* OperationsView.swift */,
+				A2000002D /* SyncStatusView.swift */,
 				A50000007 /* Components */,
 			);
 			path = Views;
@@ -327,6 +333,8 @@
 				A10000025 /* OperationViewModel.swift in Sources */,
 				A10000029 /* AudioPlayerService.swift in Sources */,
 				A1000002A /* MiniPlayerView.swift in Sources */,
+				A1000002C /* USBSyncStatus.swift in Sources */,
+				A1000002D /* SyncStatusView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
