@@ -14,7 +14,7 @@ RUN grep -viE 'selenium|webdriver.manager' requirements.txt > requirements-docke
     && rm requirements-docker.txt requirements.txt
 
 # Copy application files
-COPY music-porter porter_core.py web_ui.py web_api.py ./
+COPY music-porter porter_core.py web_ui.py web_api.py release-notes.txt ./
 COPY templates/ templates/
 
 # Pre-create data directories for volume mounts

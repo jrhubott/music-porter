@@ -1471,6 +1471,18 @@ def api_pairing_info():
 
 
 # ══════════════════════════════════════════════════════════════════
+# API: About / Release Notes
+# ══════════════════════════════════════════════════════════════════
+
+@api_bp.route('/api/about')
+def api_about():
+    """Return version info and release notes."""
+    notes_path = _ctx().project_root / 'release-notes.txt'
+    notes = notes_path.read_text() if notes_path.exists() else ''
+    return jsonify({'version': mp.VERSION, 'release_notes': notes})
+
+
+# ══════════════════════════════════════════════════════════════════
 # Audit Log
 # ══════════════════════════════════════════════════════════════════
 

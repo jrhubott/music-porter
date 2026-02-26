@@ -68,7 +68,7 @@ The system follows an integrated pipeline:
 
 **music-porter** (python) - **RECOMMENDED**
 - Unified tool combining all functionality in a single command
-- Professional subcommand architecture: `pipeline`, `download`, `convert`, `tag`, `restore`, `reset`, `delete`, `sync-usb`, `cover-art`, `summary`, `list`, `config`, `web`, `server`
+- Professional subcommand architecture: `pipeline`, `download`, `convert`, `tag`, `restore`, `reset`, `delete`, `sync-usb`, `cover-art`, `summary`, `list`, `config`, `web`, `server`, `about`
 - Interactive menu for easy operation
 - Comprehensive error handling and statistics
 - Full pipeline orchestration (download → convert → tag → USB)
@@ -254,6 +254,8 @@ Version defined in `porter_core.py` line 48. Uses semantic versioning (MAJOR.MIN
 
 **On merge to main:** Remove branch suffix, bump version, create git tag (`git tag vX.Y.Z`). PATCH for fixes, MINOR for features, MAJOR for breaking changes.
 
+**Release notes:** When bumping the version, prepend a new entry to the top of `release-notes.txt` (project root) summarizing the changes in that release. Format: `Version X.Y.Z:` header followed by bullet points (`• description`). This is displayed in the web About page and `./music-porter about` CLI command. Generate the release notes by reviewing all commits since the previous version tag.
+
 **Direct commits to main:** Always ask user before bumping version. Suggest appropriate level based on changes.
 
 **Display:** Shown in startup banner, `--version` flag, and log files.
@@ -295,9 +297,9 @@ The web dashboard (`web_ui.py`) provides a browser-based interface with full fea
 
 ### Pages & Templates
 
-11 Jinja2 templates in `templates/` using Bootstrap 5.3.3 dark theme (CDN from jsDelivr). `base.html` provides shared layout (sidebar, log panel, SSE handler). Pages: `/` (dashboard), `/playlists`, `/pipeline`, `/convert`, `/tags`, `/cover-art`, `/usb`, `/settings`, `/operations`, `/audit`.
+12 Jinja2 templates in `templates/` using Bootstrap 5.3.3 dark theme (CDN from jsDelivr). `base.html` provides shared layout (sidebar, log panel, SSE handler). Pages: `/` (dashboard), `/playlists`, `/pipeline`, `/convert`, `/tags`, `/cover-art`, `/usb`, `/settings`, `/operations`, `/audit`, `/about`.
 
-### API Endpoints (~38)
+### API Endpoints (~39)
 
 All API routes are defined in `web_api.py` as a Flask Blueprint.
 
@@ -315,6 +317,7 @@ All API routes are defined in `web_api.py` as a Flask Blueprint.
 - **Tasks:** `GET /api/tasks`, `/api/tasks/<id>`, `POST /api/tasks/<id>/cancel`, `GET /api/stream/<id>` (SSE)
 - **iOS Pairing:** `GET /api/pairing-qr`, `GET /api/pairing-info`
 - **Audit:** `GET /api/audit`, `GET /api/audit/stats`, `POST /api/audit/clear`
+- **About:** `GET /api/about`
 
 ### Architecture
 

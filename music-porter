@@ -2220,6 +2220,10 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
                                   choices=['lossless', 'high', 'medium', 'low', ''],
                                   help='Quality preset (empty to use profile default)')
 
+    # ── about ──────────────────────────────────────────────────────
+    subparsers.add_parser('about',
+        help='Show version info and release notes')
+
     return parser
 
 
@@ -2232,6 +2236,16 @@ def main():
     # Fast path: --version needs no config or dependency checks
     if '--version' in sys.argv:
         print(f"music-porter {VERSION}")
+        sys.exit(0)
+
+    # Fast path: about needs no config or dependency checks
+    if len(sys.argv) > 1 and sys.argv[1] == 'about':
+        print(f"\nMusic Porter v{VERSION}\n")
+        notes_path = Path(__file__).resolve().parent / 'release-notes.txt'
+        if notes_path.exists():
+            print(notes_path.read_text())
+        else:
+            print("Release notes not found.")
         sys.exit(0)
 
     temp_logger = Logger(verbose=False)

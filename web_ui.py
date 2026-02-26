@@ -816,6 +816,10 @@ def create_app(project_root=None, no_auth=False, server_host=None,
     def audit_page():
         return render_template('audit.html')
 
+    @app.route('/about')
+    def about_page():
+        return render_template('about.html')
+
     if behind_proxy:
         from werkzeug.middleware.proxy_fix import ProxyFix
         app.wsgi_app = ProxyFix(
