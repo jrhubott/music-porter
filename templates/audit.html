@@ -158,7 +158,6 @@
 {% block scripts %}
 <script>
 const PAGE_SIZE = 50;
-const FETCH_LIMIT = PAGE_SIZE * 10;
 let currentOffset = 0;
 let currentRawConsumed = 0;
 let offsetHistory = [];
@@ -225,29 +224,48 @@ function collapseConsecutive(entries) {
   return groups;
 }
 
-function loadAudit() {
+async function loadAudit() {
   const f = getFilters();
-  const params = new URLSearchParams({limit: FETCH_LIMIT, offset: currentOffset});
-  if (f.operation) params.set('operation', f.operation);
-  if (f.status) params.set('status', f.status);
-  if (f.from) params.set('from', f.from);
-  if (f.to) params.set('to', f.to);
+  const filterParams = {};
+  if (f.operation) filterParams.operation = f.operation;
+  if (f.status) filterParams.status = f.status;
+  if (f.from) filterParams.from = f.from;
+  if (f.to) filterParams.to = f.to;
 
-  fetch('/api/audit?' + params).then(r => r.json()).then(data => {
-    const tbody = document.getElementById('auditTable');
-    const allGroups = collapseConsecutive(data.entries);
-    const displayGroups = allGroups.slice(0, PAGE_SIZE);
-    currentRawConsumed = displayGroups.reduce((sum, g) => sum + g.count, 0);
+  let allEntries = [];
+  let fetchOffset = currentOffset;
+  let total = 0;
 
-    if (displayGroups.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No entries found</td></tr>';
-    } else {
-      tbody.innerHTML = displayGroups.map(g => {
-        const e = g.entry;
-        const opCell = g.count > 1
-          ? `<code>${e.operation}</code> <span class="badge bg-secondary">&times;${g.count}</span>`
-          : `<code>${e.operation}</code>`;
-        return `
+  // Fetch batches until we have PAGE_SIZE display rows or run out of entries
+  while (true) {
+    const params = new URLSearchParams({limit: PAGE_SIZE, offset: fetchOffset, ...filterParams});
+    const data = await fetch('/api/audit?' + params).then(r => r.json());
+    total = data.total;
+
+    if (data.entries.length === 0) break;
+    allEntries = allEntries.concat(data.entries);
+
+    const groups = collapseConsecutive(allEntries);
+    if (groups.length >= PAGE_SIZE) break;
+    if (fetchOffset + data.entries.length >= total) break;
+
+    fetchOffset += data.entries.length;
+  }
+
+  const tbody = document.getElementById('auditTable');
+  const allGroups = collapseConsecutive(allEntries);
+  const displayGroups = allGroups.slice(0, PAGE_SIZE);
+  currentRawConsumed = displayGroups.reduce((sum, g) => sum + g.count, 0);
+
+  if (displayGroups.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No entries found</td></tr>';
+  } else {
+    tbody.innerHTML = displayGroups.map(g => {
+      const e = g.entry;
+      const opCell = g.count > 1
+        ? `<code>${e.operation}</code> <span class="badge bg-secondary">&times;${g.count}</span>`
+        : `<code>${e.operation}</code>`;
+      return `
         <tr>
           <td class="text-nowrap small">${formatTime(e.timestamp)}</td>
           <td>${opCell}</td>
@@ -257,17 +275,17 @@ function loadAudit() {
           <td>${sourceBadge(e.source)}</td>
           <td>${e.params ? '<button class="btn btn-outline-secondary btn-sm py-0 px-1" onclick=\'showParams(' + JSON.stringify(JSON.stringify(e)) + ')\'><i class="bi bi-code-square"></i></button>' : ''}</td>
         </tr>
-      `}).join('');
-    }
+      `;
+    }).join('');
+  }
 
-    // Pagination
-    const hasMore = currentOffset + currentRawConsumed < data.total;
-    document.getElementById('pageInfo').textContent = data.total > 0
-      ? `Showing ${displayGroups.length} rows of ${data.total} entries`
-      : 'No entries';
-    document.getElementById('prevPage').disabled = currentOffset === 0;
-    document.getElementById('nextPage').disabled = !hasMore;
-  });
+  // Pagination
+  const hasMore = currentOffset + currentRawConsumed < total;
+  document.getElementById('pageInfo').textContent = total > 0
+    ? `Showing ${displayGroups.length} rows of ${total} entries`
+    : 'No entries';
+  document.getElementById('prevPage').disabled = currentOffset === 0;
+  document.getElementById('nextPage').disabled = !hasMore;
 }
 
 function loadStats() {
