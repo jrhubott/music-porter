@@ -55,6 +55,7 @@
       {% if not server_mode %}
       <a class="nav-link {% if request.path == '/usb' %}active{% endif %}" href="/usb"><i class="bi bi-usb-drive"></i>USB Sync</a>
       {% endif %}
+      <a class="nav-link {% if request.path == '/sync-status' %}active{% endif %}" href="/sync-status"><i class="bi bi-arrow-left-right"></i>Sync Status</a>
       <a class="nav-link {% if request.path == '/settings' %}active{% endif %}" href="/settings"><i class="bi bi-gear"></i>Settings</a>
       <hr class="my-2 border-secondary mx-3">
       <a class="nav-link {% if request.path == '/operations' %}active{% endif %}" href="/operations"><i class="bi bi-activity"></i>Operations <span class="badge bg-primary badge-running d-none" id="opsBadge">0</span></a>
