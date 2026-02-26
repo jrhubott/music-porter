@@ -85,10 +85,16 @@
       </button>
     </div>
     <div class="d-none" id="csyncProgressWrap">
-      <div class="progress mb-2" style="height: 1.4rem;">
-        <div class="progress-bar bg-info" id="csyncProgressBar" role="progressbar" style="width: 0%;">0%</div>
+      <div class="d-flex align-items-center gap-2 mb-2">
+        <div class="progress flex-grow-1" style="height: 1.4rem;">
+          <div class="progress-bar bg-info" id="csyncProgressBar" role="progressbar" style="width: 0%;">0%</div>
+        </div>
+        <button class="btn btn-outline-danger btn-sm py-0 px-2" id="csyncAbortBtn" title="Abort sync">
+          <i class="bi bi-x-lg"></i> Abort
+        </button>
       </div>
       <small class="text-muted" id="csyncProgressLabel">Starting...</small>
+      <small class="text-muted float-end" id="csyncEta"></small>
     </div>
     <div class="alert d-none mb-0" id="csyncResult"></div>
   </div>
@@ -236,6 +242,26 @@
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
         <button type="button" class="btn btn-danger btn-sm" id="confirmDeleteBtn">Delete</button>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- Rename key modal -->
+<div class="modal fade" id="renameKeyModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title">Rename Sync Key</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p>Rename <strong id="renameKeyOldName">-</strong> to:</p>
+        <input type="text" class="form-control form-control-sm" id="renameKeyNewName" placeholder="New key name" pattern="[A-Za-z0-9_-]+">
+        <p class="text-muted small mt-2 mb-0">Tracking data and destination links will be updated automatically.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="confirmRenameBtn">Rename</button>
       </div>
     </div>
   </div>
@@ -427,6 +453,9 @@ function loadSyncStatusData() {
           <button class="btn btn-outline-primary btn-sm py-0 px-1 me-1" onclick="syncToKey('${k.key_name}', 'export/${cachedProfile}')" title="${syncTitle}" ${syncDisabled}>
             <i class="bi bi-arrow-repeat"></i>
           </button>
+          <button class="btn btn-outline-warning btn-sm py-0 px-1 me-1" onclick="promptRenameKey('${k.key_name}')" title="Rename key">
+            <i class="bi bi-pencil"></i>
+          </button>
           <button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="promptDeleteKey('${k.key_name}')" title="Delete key">
             <i class="bi bi-trash"></i>
           </button>
@@ -511,6 +540,40 @@ document.getElementById('confirmDeleteBtn').addEventListener('click', function()
       loadSyncStatusData();
     })
     .catch(err => showToast('Delete failed: ' + err, 'error'));
+});
+
+let pendingRenameKey = null;
+function promptRenameKey(keyName) {
+  pendingRenameKey = keyName;
+  document.getElementById('renameKeyOldName').textContent = keyName;
+  document.getElementById('renameKeyNewName').value = keyName;
+  const modal = new bootstrap.Modal(document.getElementById('renameKeyModal'));
+  modal.show();
+  setTimeout(() => document.getElementById('renameKeyNewName').select(), 300);
+}
+
+document.getElementById('confirmRenameBtn').addEventListener('click', function() {
+  if (!pendingRenameKey) return;
+  const newKey = document.getElementById('renameKeyNewName').value.trim();
+  if (!newKey) { showToast('Enter a new key name', 'warning'); return; }
+  if (!/^[A-Za-z0-9_-]+$/.test(newKey)) { showToast('Key name must be alphanumeric, hyphens, or underscores', 'warning'); return; }
+  if (newKey === pendingRenameKey) { showToast('New name must be different', 'warning'); return; }
+
+  fetch('/api/sync/keys/' + encodeURIComponent(pendingRenameKey) + '/rename', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({new_key: newKey})
+  }).then(r => r.json()).then(data => {
+    if (data.error) { showToast(data.error, 'error'); return; }
+    bootstrap.Modal.getInstance(document.getElementById('renameKeyModal')).hide();
+    let msg = `Renamed '${pendingRenameKey}' to '${newKey}'`;
+    if (data.destinations_updated > 0) msg += ` (${data.destinations_updated} destination link(s) updated)`;
+    showToast(msg, 'success');
+    pendingRenameKey = null;
+    hideDetail();
+    loadSyncStatusData();
+    loadDestinations();
+  }).catch(err => showToast('Rename failed: ' + err, 'error'));
 });
 
 function pruneKey() {
@@ -761,8 +824,22 @@ function setClientSyncBusy(busy) {
   zipBtn.disabled = busy;
 }
 
+let csyncAborted = false;
+let csyncStartTime = 0;
+
 function showClientSyncProgress(show) {
   document.getElementById('csyncProgressWrap').classList.toggle('d-none', !show);
+  document.getElementById('csyncEta').textContent = '';
+  if (show) {
+    document.getElementById('csyncAbortBtn').classList.remove('d-none');
+  }
+}
+
+function formatEta(seconds) {
+  if (seconds < 60) return Math.ceil(seconds) + 's remaining';
+  const m = Math.floor(seconds / 60);
+  const s = Math.ceil(seconds % 60);
+  return m + 'm ' + (s < 10 ? '0' : '') + s + 's remaining';
 }
 
 function updateClientSyncProgress(current, total, label) {
@@ -771,13 +848,31 @@ function updateClientSyncProgress(current, total, label) {
   bar.style.width = pct + '%';
   bar.textContent = pct + '%';
   document.getElementById('csyncProgressLabel').textContent = label || '';
+  // ETA calculation
+  const etaEl = document.getElementById('csyncEta');
+  if (current > 0 && current < total && csyncStartTime > 0) {
+    const elapsed = (Date.now() - csyncStartTime) / 1000;
+    const rate = current / elapsed;
+    const remaining = (total - current) / rate;
+    etaEl.textContent = formatEta(remaining);
+  } else {
+    etaEl.textContent = '';
+  }
 }
 
-function showClientSyncResult(copied, skipped, failed) {
+document.getElementById('csyncAbortBtn').addEventListener('click', function() {
+  csyncAborted = true;
+  this.disabled = true;
+  this.innerHTML = '<i class="bi bi-hourglass-split"></i> Aborting...';
+});
+
+function showClientSyncResult(copied, skipped, failed, aborted) {
   const el = document.getElementById('csyncResult');
-  const cls = failed > 0 ? 'alert-warning' : 'alert-success';
+  const cls = aborted ? 'alert-warning' : (failed > 0 ? 'alert-warning' : 'alert-success');
+  const icon = aborted ? 'bi-exclamation-triangle' : 'bi-check-circle';
+  const prefix = aborted ? 'Aborted. ' : '';
   el.className = 'alert mb-0 ' + cls;
-  el.innerHTML = `<i class="bi bi-check-circle"></i> Copied: <strong>${copied}</strong> &nbsp; Skipped: <strong>${skipped}</strong> &nbsp; Failed: <strong>${failed}</strong>`;
+  el.innerHTML = `<i class="bi ${icon}"></i> ${prefix}Copied: <strong>${copied}</strong> &nbsp; Skipped: <strong>${skipped}</strong> &nbsp; Failed: <strong>${failed}</strong>`;
   el.classList.remove('d-none');
 }
 
@@ -838,6 +933,11 @@ async function clientSyncToKey(keyName, playlists) {
 
   // Scroll to progress area
   document.getElementById('clientSyncCard').scrollIntoView({behavior: 'smooth'});
+  csyncAborted = false;
+  csyncStartTime = Date.now();
+  const abortBtn = document.getElementById('csyncAbortBtn');
+  abortBtn.disabled = false;
+  abortBtn.innerHTML = '<i class="bi bi-x-lg"></i> Abort';
   setClientSyncBusy(true);
   showClientSyncProgress(true);
   document.getElementById('csyncResult').classList.add('d-none');
@@ -882,6 +982,7 @@ async function clientSyncToKey(keyName, playlists) {
 
   let processed = 0;
   for (const key of playlists) {
+    if (csyncAborted) break;
     const files = fileLists[key];
     if (!files.length) continue;
 
@@ -899,6 +1000,7 @@ async function clientSyncToKey(keyName, playlists) {
     const syncedFileMap = {};
 
     for (const fileInfo of files) {
+      if (csyncAborted) break;
       const fname = fileInfo.filename;
       processed++;
       updateClientSyncProgress(processed, grandTotal, fname);
@@ -959,8 +1061,15 @@ async function clientSyncToKey(keyName, playlists) {
     playlists: newManifestPlaylists
   });
 
-  showClientSyncResult(totalCopied, totalSkipped, totalFailed);
-  updateClientSyncProgress(grandTotal, grandTotal, 'Done');
+  if (csyncAborted) {
+    showClientSyncResult(totalCopied, totalSkipped, totalFailed, true);
+    updateClientSyncProgress(processed, grandTotal, 'Aborted');
+  } else {
+    showClientSyncResult(totalCopied, totalSkipped, totalFailed, false);
+    updateClientSyncProgress(grandTotal, grandTotal, 'Done');
+  }
+  document.getElementById('csyncEta').textContent = '';
+  document.getElementById('csyncAbortBtn').classList.add('d-none');
   setClientSyncBusy(false);
   loadSyncStatusData();
   loadDestinations();

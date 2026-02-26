@@ -2233,6 +2233,8 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
                             help='Link an existing destination to a tracking key')
     sync_parser.add_argument('--unlink-dest', metavar='NAME',
                             help='Remove tracking key link from a destination')
+    sync_parser.add_argument('--rename-key', nargs=2, metavar=('OLD', 'NEW'),
+                            help='Rename a sync key (updates tracking data and destination links)')
 
     # Hidden alias for backwards compatibility
     subparsers.add_parser('sync-status', help=argparse.SUPPRESS)
@@ -2991,6 +2993,31 @@ def main():
                 logger.ok(f"Deleted tracking data for key '{key_name}'")
             else:
                 logger.info("Cancelled")
+            sys.exit(0)
+
+        if getattr(args, 'rename_key', None):
+            old_key, new_key = args.rename_key
+            result = sync_tracker.rename_key(old_key, new_key)
+            if result is None:
+                logger.error(f"Key '{new_key}' already exists — cannot rename")
+                sys.exit(1)
+            dests_updated = config.rename_sync_key_refs(old_key, new_key)
+            if result['source_deleted']:
+                logger.ok(f"Renamed key '{old_key}' to '{new_key}' "
+                          f"({result['records_moved']} moved, {result['records_merged']} merged)")
+            else:
+                logger.ok(f"Renamed key '{old_key}' to '{new_key}' (no tracking records)")
+            if dests_updated:
+                logger.info(f"  Updated {dests_updated} destination link(s)")
+            if audit_logger:
+                audit_logger.log(
+                    'sync_key_rename',
+                    f"Renamed sync key '{old_key}' to '{new_key}'",
+                    'completed',
+                    params={'old_key': old_key, 'new_key': new_key,
+                            **result, 'destinations_updated': dests_updated},
+                    source='cli',
+                )
             sys.exit(0)
 
         if getattr(args, 'delete_playlist', None):

@@ -79,3 +79,15 @@ browser sync, and iOS — preventing duplicate tracking entries and unnecessary 
 | 18.7.3 | 1.0 | [ ] | Deleting a sync key that destinations link to removes tracking data; `sync_key` field persists in config |
 | 18.7.4 | 1.0 | [ ] | Unlinking a destination does not delete or move tracking data |
 | 18.7.5 | 1.0 | [ ] | Auto-detected USB drives (unsaved) have no `sync_key` — `effective_key` equals `name` |
+
+### 18.8 Sync Key Rename
+
+| ID | Version | Tested | Requirement |
+|----|---------|--------|-------------|
+| 18.8.1 | 1.0 | [x] | `SyncTracker.rename_key()` moves all tracking records to new key name; fails (returns `None`) if target key already exists |
+| 18.8.2 | 1.0 | [x] | `ConfigManager.rename_sync_key_refs()` updates all destination `sync_key` references from old key to new key |
+| 18.8.3 | 1.0 | [x] | `POST /api/sync/keys/<key>/rename` endpoint accepts `{new_key}`, renames key, updates destination links, and audit logs |
+| 18.8.4 | 1.0 | [x] | Web UI Sync Keys table has rename button (pencil icon) opening a modal with key name input |
+| 18.8.5 | 1.0 | [x] | CLI `--rename-key OLD NEW` flag renames key, updates destination links, and audit logs |
+| 18.8.6 | 1.0 | [x] | Renaming to an existing key returns HTTP 409 (API) or exit code 1 (CLI) with an error message |
+| 18.8.7 | 1.0 | [x] | Renaming a key with no tracking records is a no-op that still succeeds |

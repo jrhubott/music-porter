@@ -1629,6 +1629,40 @@ def api_sync_key_prune(key):
     return jsonify(result)
 
 
+@api_bp.route('/api/sync/keys/<key>/rename', methods=['POST'])
+def api_sync_key_rename(key):
+    """Rename a sync key, moving all tracking data to the new name."""
+    ctx = _ctx()
+    data = request.get_json(force=True) or {}
+    new_key = (data.get('new_key') or '').strip()
+    if not new_key:
+        return jsonify({'error': 'new_key is required'}), 400
+    import re
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', new_key):
+        return jsonify({'error': 'new_key must be alphanumeric, hyphens, or underscores'}), 400
+    if new_key == key:
+        return jsonify({'error': 'new_key must be different from the current key'}), 400
+
+    result = ctx.sync_tracker.rename_key(key, new_key)
+    if result is None:
+        return jsonify({'error': f"Key '{new_key}' already exists"}), 409
+
+    config = ctx.get_config()
+    dests_updated = config.rename_sync_key_refs(key, new_key)
+
+    if ctx.audit_logger:
+        ctx.audit_logger.log(
+            'sync_key_rename',
+            f"Renamed sync key '{key}' to '{new_key}'",
+            'completed',
+            params={'old_key': key, 'new_key': new_key,
+                    **result, 'destinations_updated': dests_updated},
+            source=ctx.detect_source(),
+        )
+    return jsonify({'ok': True, 'old_key': key, 'new_key': new_key,
+                    'stats': result, 'destinations_updated': dests_updated})
+
+
 @api_bp.route('/api/sync/client-record', methods=['POST'])
 def api_sync_client_record():
     """Record files synced via client-side (browser) sync for tracking."""

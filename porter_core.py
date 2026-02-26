@@ -1589,6 +1589,25 @@ class SyncTracker:
             finally:
                 conn.close()
 
+    def rename_key(self, old_key, new_key):
+        """Rename a sync key, moving all tracking records to the new name.
+
+        Returns dict with stats, or None if new_key already exists.
+        Unlike merge_key, rename requires the target name to be unused.
+        """
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                exists = conn.execute(
+                    "SELECT 1 FROM sync_keys WHERE key_name = ?",
+                    (new_key,),
+                ).fetchone()
+            finally:
+                conn.close()
+        if exists:
+            return None
+        return self.merge_key(old_key, new_key)
+
     def get_file_sync_map(self, playlist):
         """Map filenames to sync keys they've been synced to.
 
@@ -2085,6 +2104,20 @@ class ConfigManager:
             return existing
         ok = self.add_destination(name, path, sync_key=sync_key)
         return self.get_destination(name) if ok else None
+
+    def rename_sync_key_refs(self, old_key, new_key):
+        """Update all destination sync_key references from old_key to new_key.
+
+        Returns count of destinations updated.
+        """
+        count = 0
+        for dest in self.destinations:
+            if dest.sync_key == old_key:
+                dest.sync_key = new_key
+                count += 1
+        if count:
+            self._save()
+        return count
 
 
 # ══════════════════════════════════════════════════════════════════
