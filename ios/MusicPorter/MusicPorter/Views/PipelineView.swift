@@ -8,7 +8,7 @@ struct PipelineView: View {
     @State private var customURL = ""
     @State private var useAuto = false
     @State private var preset = "lossless"
-    @State private var copyToUsb = false
+    @State private var syncAfter = false
 
     let presets = ["lossless", "high", "medium", "low"]
 
@@ -38,7 +38,7 @@ struct PipelineView: View {
                         Picker("Quality Preset", selection: $preset) {
                             ForEach(presets, id: \.self) { Text($0) }
                         }
-                        Toggle("Copy to USB after", isOn: $copyToUsb)
+                        Toggle("Sync after processing", isOn: $syncAfter)
                     }
 
                     Section {
@@ -80,7 +80,7 @@ struct PipelineView: View {
                 url: customURL.isEmpty ? nil : customURL,
                 auto: useAuto,
                 preset: preset,
-                copyToUsb: copyToUsb
+                copyToUsb: syncAfter
             )
         }
     }

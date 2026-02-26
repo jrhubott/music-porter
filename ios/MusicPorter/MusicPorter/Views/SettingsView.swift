@@ -41,7 +41,7 @@ struct SettingsView: View {
                     NavigationLink("Task History") {
                         OperationsView()
                     }
-                    NavigationLink("USB Sync Status") {
+                    NavigationLink("Sync Status") {
                         SyncStatusView()
                     }
                 }

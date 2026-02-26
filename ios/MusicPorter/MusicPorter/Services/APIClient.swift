@@ -159,44 +159,88 @@ final class APIClient {
         return response.taskId
     }
 
-    // MARK: - USB
+    // MARK: - Sync Destinations
+
+    func getSyncDestinations() async throws -> SyncDestinationsResponse {
+        try await get("/api/sync/destinations")
+    }
+
+    func addSyncDestination(name: String, path: String) async throws {
+        let _: OkResponse = try await post("/api/sync/destinations", body: ["name": name, "path": path])
+    }
+
+    func deleteSyncDestination(name: String) async throws {
+        let _: OkResponse = try await delete("/api/sync/destinations/\(name)")
+    }
+
+    func syncToDestination(sourceDir: String, type: String, destination: String,
+                           destPath: String? = nil, usbDir: String? = nil) async throws -> String {
+        var body: [String: Any] = ["source_dir": sourceDir, "type": type, "destination": destination]
+        if let destPath { body["dest_path"] = destPath }
+        if let usbDir { body["usb_dir"] = usbDir }
+        let response: TaskIdResponse = try await postAny("/api/sync/run", body: body)
+        return response.taskId
+    }
+
+    // MARK: - Sync Status
+
+    func getSyncStatus() async throws -> [SyncKeySummary] {
+        try await get("/api/sync/status")
+    }
+
+    func getSyncStatusDetail(key: String) async throws -> SyncStatusDetail {
+        try await get("/api/sync/status/\(key)")
+    }
+
+    func getSyncKeys() async throws -> [SyncKeySummary] {
+        try await get("/api/sync/keys")
+    }
+
+    func deleteSyncKey(key: String) async throws {
+        let _: OkResponse = try await delete("/api/sync/keys/\(key)")
+    }
+
+    func deleteSyncPlaylist(key: String, playlist: String) async throws -> Int {
+        let response: DeletedCountResponse = try await delete("/api/sync/keys/\(key)/playlists/\(playlist)")
+        return response.deleted
+    }
+
+    func pruneSyncKey(key: String) async throws -> SyncPruneResult {
+        try await postAny("/api/sync/keys/\(key)/prune", body: [:] as [String: String])
+    }
+
+    // MARK: - USB (Legacy wrappers)
 
     func getUSBDrives() async throws -> [String] {
         try await get("/api/usb/drives")
     }
 
     func syncUSB(sourceDir: String, volume: String, usbDir: String? = nil) async throws -> String {
-        var body: [String: Any] = ["source_dir": sourceDir, "volume": volume]
-        if let usbDir { body["usb_dir"] = usbDir }
-        let response: TaskIdResponse = try await postAny("/api/usb/sync", body: body)
-        return response.taskId
+        try await syncToDestination(sourceDir: sourceDir, type: "usb", destination: volume, usbDir: usbDir)
     }
 
-    // MARK: - USB Sync Status
-
-    func getUSBSyncStatus() async throws -> [USBKeySummary] {
-        try await get("/api/usb/sync-status")
+    func getUSBSyncStatus() async throws -> [SyncKeySummary] {
+        try await getSyncStatus()
     }
 
-    func getUSBSyncStatusDetail(key: String) async throws -> USBSyncStatusDetail {
-        try await get("/api/usb/sync-status/\(key)")
+    func getUSBSyncStatusDetail(key: String) async throws -> SyncStatusDetail {
+        try await getSyncStatusDetail(key: key)
     }
 
-    func getUSBKeys() async throws -> [USBKeySummary] {
-        try await get("/api/usb/keys")
+    func getUSBKeys() async throws -> [SyncKeySummary] {
+        try await getSyncKeys()
     }
 
     func deleteUSBKey(key: String) async throws {
-        let _: OkResponse = try await delete("/api/usb/keys/\(key)")
+        try await deleteSyncKey(key: key)
     }
 
     func deleteUSBPlaylist(key: String, playlist: String) async throws -> Int {
-        let response: DeletedCountResponse = try await delete("/api/usb/keys/\(key)/playlists/\(playlist)")
-        return response.deleted
+        try await deleteSyncPlaylist(key: key, playlist: playlist)
     }
 
-    func pruneUSBKey(key: String) async throws -> USBPruneResult {
-        try await postAny("/api/usb/keys/\(key)/prune", body: [:] as [String: String])
+    func pruneUSBKey(key: String) async throws -> SyncPruneResult {
+        try await pruneSyncKey(key: key)
     }
 
     func getFileSyncStatus(playlist: String) async throws -> [String: [String]] {

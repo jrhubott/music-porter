@@ -2,8 +2,8 @@ import SwiftUI
 
 struct SyncStatusView: View {
     @Environment(AppState.self) private var appState
-    @State private var keys: [USBKeySummary] = []
-    @State private var detail: USBSyncStatusDetail?
+    @State private var keys: [SyncKeySummary] = []
+    @State private var detail: SyncStatusDetail?
     @State private var selectedKey: String?
     @State private var isLoading = false
     @State private var error: String?
@@ -19,9 +19,9 @@ struct SyncStatusView: View {
                     .frame(maxWidth: .infinity)
             } else if keys.isEmpty {
                 ContentUnavailableView(
-                    "No USB Sync History",
-                    systemImage: "externaldrive",
-                    description: Text("Sync files to a USB drive to start tracking.")
+                    "No Sync History",
+                    systemImage: "arrow.left.arrow.right",
+                    description: Text("Sync files to a destination to start tracking.")
                 )
             } else {
                 keysSection
@@ -37,11 +37,11 @@ struct SyncStatusView: View {
                 }
             }
         }
-        .navigationTitle("USB Sync Status")
+        .navigationTitle("Sync Status")
         .refreshable { await load() }
         .task { await load() }
         .confirmationDialog(
-            "Delete USB Key",
+            "Delete Sync Key",
             isPresented: $showDeleteConfirm,
             titleVisibility: .visible
         ) {
@@ -73,7 +73,7 @@ struct SyncStatusView: View {
     // MARK: - Keys List
 
     private var keysSection: some View {
-        Section("USB Keys") {
+        Section("Sync Keys") {
             ForEach(keys) { key in
                 Button {
                     selectedKey = key.keyName
@@ -149,7 +149,7 @@ struct SyncStatusView: View {
 
     // MARK: - Playlist Detail
 
-    private func detailSection(_ detail: USBSyncStatusDetail) -> some View {
+    private func detailSection(_ detail: SyncStatusDetail) -> some View {
         Section("Playlists: \(detail.usbKey)") {
             Button {
                 Task { await pruneKey(detail.usbKey) }
@@ -212,7 +212,7 @@ struct SyncStatusView: View {
         isLoading = true
         error = nil
         do {
-            keys = try await appState.apiClient.getUSBSyncStatus()
+            keys = try await appState.apiClient.getSyncStatus()
         } catch {
             self.error = error.localizedDescription
         }
@@ -221,7 +221,7 @@ struct SyncStatusView: View {
 
     private func loadDetail(_ key: String) async {
         do {
-            detail = try await appState.apiClient.getUSBSyncStatusDetail(key: key)
+            detail = try await appState.apiClient.getSyncStatusDetail(key: key)
         } catch {
             self.error = error.localizedDescription
         }
@@ -229,7 +229,7 @@ struct SyncStatusView: View {
 
     private func deleteKey(_ key: String) async {
         do {
-            try await appState.apiClient.deleteUSBKey(key: key)
+            try await appState.apiClient.deleteSyncKey(key: key)
             if selectedKey == key {
                 selectedKey = nil
                 detail = nil
@@ -242,7 +242,7 @@ struct SyncStatusView: View {
 
     private func deletePlaylist(_ key: String, _ playlist: String) async {
         do {
-            _ = try await appState.apiClient.deleteUSBPlaylist(key: key, playlist: playlist)
+            _ = try await appState.apiClient.deleteSyncPlaylist(key: key, playlist: playlist)
             await loadDetail(key)
             await load()
         } catch {
@@ -252,7 +252,7 @@ struct SyncStatusView: View {
 
     private func pruneKey(_ key: String) async {
         do {
-            _ = try await appState.apiClient.pruneUSBKey(key: key)
+            _ = try await appState.apiClient.pruneSyncKey(key: key)
             await loadDetail(key)
             await load()
         } catch {

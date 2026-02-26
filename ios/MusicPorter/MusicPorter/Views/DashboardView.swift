@@ -16,7 +16,7 @@ struct DashboardView: View {
                     tagIntegritySection
                     coverArtSection
                     freshnessSection
-                    usbSyncSection
+                    syncStatusSection
                     playlistsSection
 
                     if let error = vm.error {
@@ -245,14 +245,14 @@ struct DashboardView: View {
         }
     }
 
-    // MARK: - 8. USB Sync Status
+    // MARK: - 8. Sync Status
 
     @ViewBuilder
-    private var usbSyncSection: some View {
-        if !vm.usbSyncStatus.isEmpty {
-            GroupBox("USB Sync Status") {
+    private var syncStatusSection: some View {
+        if !vm.syncStatus.isEmpty {
+            GroupBox("Sync Status") {
                 VStack(spacing: 8) {
-                    ForEach(vm.usbSyncStatus) { key in
+                    ForEach(vm.syncStatus) { key in
                         NavigationLink(destination: SyncStatusView()) {
                             HStack {
                                 Image(systemName: "externaldrive.connected.to.line.below")
