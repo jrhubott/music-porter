@@ -1,3 +1,10 @@
+Version 2.24.0:
+• Add persistent SQLite-backed task history (survives server restarts)
+• Redesign Operations page with stats cards, filters, pagination, and clear tool
+• Add CLI subcommand: ./music-porter tasks (with --stats, --status, --operation flags)
+• Add 3 new API endpoints: /api/tasks/history, /api/tasks/stats, /api/tasks/clear
+• Startup recovery marks stale running/pending tasks as failed on restart
+
 Version 2.23.0:
 • Add About page with version info and release notes (CLI, web, API)
 • Create project release-notes.txt with full version history
