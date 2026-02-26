@@ -274,13 +274,13 @@ The project uses a 3-tier branch model: **feature -> dev -> main**.
 
 Version defined in `porter_core.py` line 50. Uses semantic versioning (MAJOR.MINOR.PATCH).
 
-**On `dev` branch:** `VERSION = "X.Y.Z-dev"` (e.g., `"2.31.0-dev"`). The `-dev` suffix is always present on dev.
+**On `dev` branch:** `VERSION = "X.Y.Z-dev+<hash>"` (e.g., `"2.31.0-dev+a425c6c"`). The `-dev` suffix is always present on dev, with `+<short-hash>` SemVer build metadata appended by merge-to-dev.
 
-**On feature branches:** `VERSION = "X.Y.Z-branch-name"` (e.g., `"2.31.0-cookie-management"`). Base version comes from dev, replacing `-dev` with `-branch-name`. Set as first commit.
+**On feature branches:** `VERSION = "X.Y.Z-branch-name"` (e.g., `"2.31.0-cookie-management"`). Base version comes from dev (strip the `-dev+hash` suffix), replacing with `-branch-name`. Set as first commit.
 
-**merge-to-dev:** No version change — the feature branch version stays as-is.
+**merge-to-dev:** Restores the `-dev` suffix and appends `+<short-hash>` of the merge commit (SemVer build metadata).
 
-**merge-to-main:** Remove `-dev` suffix, bump version (PATCH/MINOR/MAJOR), create git tag (`git tag vX.Y.Z`). After tagging, sync dev with main and set the next `X.Y.Z-dev` version on dev.
+**merge-to-main:** Remove `-dev+hash` suffix, bump version (PATCH/MINOR/MAJOR), create git tag (`git tag vX.Y.Z`). After tagging, sync dev with main and set the next `X.Y.Z-dev` version on dev (no hash — the next merge-to-dev adds it).
 
 **Release notes:** When bumping the version, prepend a new entry to the top of `release-notes.txt` (project root) summarizing the changes in that release. Format: `Version X.Y.Z (YYYY-MM-DD):` header followed by bullet points (`• description`). This is displayed in the web About page and `./music-porter about` CLI command. Generate the release notes by reviewing all commits since the previous version tag.
 
