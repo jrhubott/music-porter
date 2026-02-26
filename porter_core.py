@@ -47,12 +47,13 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.31.0-dev"
+VERSION = "2.31.0-migration-audit-log-rotation"
 
 DEFAULT_DATA_DIR = "data"
 DEFAULT_MUSIC_DIR = "music"
 DEFAULT_EXPORT_DIR = "export"
 DEFAULT_LOG_DIR = "logs"
+DEFAULT_LOG_RETENTION_DAYS = 7
 DEFAULT_CONFIG_FILE = "data/config.yaml"
 DEFAULT_COOKIES = "data/cookies.txt"
 DEFAULT_DB_FILE = "data/music-porter.db"
@@ -499,9 +500,9 @@ class Logger:
         try:
             self.log_dir = Path(log_dir)
             self.log_dir.mkdir(exist_ok=True)
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            self.log_file = self.log_dir / f"{timestamp}.log"
-            # Verify we can write to the log file
+            date_str = datetime.now().strftime("%Y-%m-%d")
+            self.log_file = self.log_dir / f"{date_str}.log"
+            # Verify we can write to the log file (creates or appends)
             self.log_file.touch()
         except PermissionError:
             self.log_file = None
@@ -687,12 +688,42 @@ class ProgressBar:
         return False
 
 
+def prune_logs(log_dir=DEFAULT_LOG_DIR, retention_days=DEFAULT_LOG_RETENTION_DAYS,
+               logger=None):
+    """Delete log files older than retention_days. Returns count of deleted files."""
+    log_path = Path(log_dir)
+    if not log_path.is_dir():
+        return 0
+    cutoff = time.time() - (retention_days * 86400)
+    count = 0
+    for f in log_path.glob('*.log'):
+        if f.stat().st_mtime < cutoff:
+            f.unlink()
+            count += 1
+    if count and logger:
+        logger.info(f"Pruned {count} log file{'s' if count != 1 else ''}"
+                    f" older than {retention_days} days")
+    return count
+
+
 # ══════════════════════════════════════════════════════════════════
 # Section 2b: Data Directory Migration & Audit Logger
 # ══════════════════════════════════════════════════════════════════
 
+@dataclass
+class MigrationEvent:
+    """Deferred audit entry for schema/data migrations that run before AuditLogger exists."""
+    operation: str
+    description: str
+    status: str
+    params: dict = field(default_factory=dict)
+
+
 def migrate_data_dir(logger=None):
-    """Create data/ dir and migrate config.yaml/cookies.txt from project root if needed."""
+    """Create data/ dir and migrate config.yaml/cookies.txt from project root if needed.
+
+    Returns a list of MigrationEvent entries for deferred audit logging.
+    """
     data_dir = Path(DEFAULT_DATA_DIR)
     data_dir.mkdir(exist_ok=True)
 
@@ -702,12 +733,23 @@ def migrate_data_dir(logger=None):
         ('cookies.txt.backup', 'data/cookies.txt.backup'),
         ('config.yaml.backup', 'data/config.yaml.backup'),
     ]
+    moved = []
     for old, new in migrations:
         old_path, new_path = Path(old), Path(new)
         if old_path.exists() and not new_path.exists():
             shutil.move(str(old_path), str(new_path))
+            moved.append(f"{old} → {new}")
             if logger:
                 logger.info(f"Migrated {old} → {new}")
+
+    if moved:
+        return [MigrationEvent(
+            'data_migrate',
+            f"Migrated {len(moved)} legacy file{'s' if len(moved) != 1 else ''} to data/",
+            'completed',
+            {'files': moved},
+        )]
+    return []
 
 
 def migrate_db_schema(logger=None):
@@ -715,10 +757,12 @@ def migrate_db_schema(logger=None):
 
     Call once at startup, before any DB class is instantiated.
     Creates all tables on a fresh DB; upgrades existing DBs version-by-version.
+
+    Returns a list of MigrationEvent entries for deferred audit logging.
     """
     db_path = Path(DEFAULT_DB_FILE)
     if not db_path.parent.exists():
-        return  # data/ dir not yet created — nothing to migrate
+        return []  # data/ dir not yet created — nothing to migrate
 
     fresh = not db_path.exists()
     conn = sqlite3.connect(str(db_path), check_same_thread=False)
@@ -727,7 +771,10 @@ def migrate_db_schema(logger=None):
         current = conn.execute("PRAGMA user_version").fetchone()[0]
 
         if current >= DB_SCHEMA_VERSION:
-            return  # already up to date
+            return []  # already up to date
+
+        from_version = current
+        changes = []
 
         # ── Version 0 → 1 ────────────────────────────────────────────
         if current < 1:
@@ -770,10 +817,12 @@ def migrate_db_schema(logger=None):
                             "RENAME TO sync_files")
                     conn.execute("DROP INDEX IF EXISTS idx_usb_sync_key")
                     conn.execute("DROP INDEX IF EXISTS idx_usb_sync_playlist")
+                    changes.append("renamed usb_keys → sync_keys")
                     if logger:
                         logger.info(
                             "DB migration 0→1: renamed usb_keys → sync_keys")
 
+            changes.append("ensured tables: audit_entries, task_history, sync_keys, sync_files")
             # Safety net: ensure all current tables and indexes exist
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS audit_entries (
@@ -847,8 +896,18 @@ def migrate_db_schema(logger=None):
         # if current < 2:
         #     ... version 1 → 2 migration ...
 
+        return [MigrationEvent(
+            'schema_migrate',
+            f"DB schema migrated from version {from_version} to {DB_SCHEMA_VERSION}",
+            'completed',
+            {'target': 'database', 'from_version': from_version,
+             'to_version': DB_SCHEMA_VERSION, 'changes': changes},
+        )]
+
     finally:
         conn.close()
+
+    return []
 
 
 def migrate_config_schema(logger=None):
@@ -856,22 +915,27 @@ def migrate_config_schema(logger=None):
 
     Call once at startup, before ConfigManager is instantiated.
     Consolidates inline migrations that previously lived in _load_yaml().
+
+    Returns a list of MigrationEvent entries for deferred audit logging.
     """
     conf_path = Path(DEFAULT_CONFIG_FILE)
     if not conf_path.exists():
-        return  # will be created by ConfigManager._create_default()
+        return []  # will be created by ConfigManager._create_default()
 
     try:
         import yaml
     except ImportError:
-        return  # PyYAML not yet installed — DependencyChecker handles this
+        return []  # PyYAML not yet installed — DependencyChecker handles this
 
     with open(conf_path) as f:
         data = yaml.safe_load(f) or {}
 
     current = data.get('schema_version', 0)
     if current >= CONFIG_SCHEMA_VERSION:
-        return  # already up to date
+        return []  # already up to date
+
+    from_version = current
+    changes = []
 
     dirty = False
 
@@ -885,6 +949,7 @@ def migrate_config_schema(logger=None):
                     and not dpath.startswith('web-client://')):
                 entry['path'] = f'folder://{dpath}'
                 dirty = True
+                changes.append("path scheme migration")
 
         # 2. Output types auto-seed if missing/null
         import copy
@@ -892,6 +957,7 @@ def migrate_config_schema(logger=None):
         if raw_types is None:
             data['output_types'] = copy.deepcopy(DEFAULT_OUTPUT_PROFILES)
             dirty = True
+            changes.append("added default output_types")
             if logger:
                 logger.info("Config migration 0→1: added default output_types")
 
@@ -905,6 +971,7 @@ def migrate_config_schema(logger=None):
                     if isinstance(pfields, dict) and 'usb_dir' not in pfields:
                         pfields['usb_dir'] = old_usb_dir
             dirty = True
+            changes.append("moved usb_dir into output profiles")
             if logger:
                 logger.info(
                     "Config migration 0→1: moved usb_dir into output profiles")
@@ -934,6 +1001,22 @@ def migrate_config_schema(logger=None):
         if logger:
             logger.info(
                 f"Config schema updated to version {CONFIG_SCHEMA_VERSION}")
+        return [MigrationEvent(
+            'schema_migrate',
+            f"Config schema migrated from version {from_version} to {CONFIG_SCHEMA_VERSION}",
+            'completed',
+            {'target': 'config', 'from_version': from_version,
+             'to_version': CONFIG_SCHEMA_VERSION, 'changes': changes},
+        )]
+
+    return []
+
+
+def flush_migration_events(events, audit_logger, source='cli'):
+    """Flush deferred MigrationEvent entries into the audit trail."""
+    for evt in events:
+        audit_logger.log(evt.operation, evt.description, evt.status,
+                         params=evt.params, source=source)
 
 
 class AuditLogger:
@@ -2015,6 +2098,7 @@ class ConfigManager:
             'output_type': DEFAULT_OUTPUT_TYPE,
             'workers': DEFAULT_WORKERS,
             'server_name': '',
+            'log_retention_days': DEFAULT_LOG_RETENTION_DAYS,
         }
         self._raw_output_types = copy.deepcopy(DEFAULT_OUTPUT_PROFILES)
         # Build OutputProfile instances from defaults
