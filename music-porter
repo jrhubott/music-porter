@@ -2436,6 +2436,7 @@ def _handle_tasks_command():
         print(f"Expected: {db_path}")
         return
 
+    migrate_db_schema()
     db = TaskHistoryDB(str(db_path))
 
     if args.stats:
@@ -2559,6 +2560,10 @@ def main():
             sys.exit(1)
     else:
         _init_third_party()
+
+    # Apply schema migrations before any DB or config class is instantiated
+    migrate_db_schema(logger=temp_logger)
+    migrate_config_schema(logger=temp_logger)
 
     # Initialize audit logger (uses data/music-porter.db)
     audit_logger = AuditLogger()

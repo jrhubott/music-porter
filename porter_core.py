@@ -47,7 +47,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.29.0"
+VERSION = "2.29.0-schema-versioning"
 
 DEFAULT_DATA_DIR = "data"
 DEFAULT_MUSIC_DIR = "music"
@@ -57,6 +57,11 @@ DEFAULT_CONFIG_FILE = "data/config.yaml"
 DEFAULT_COOKIES = "data/cookies.txt"
 DEFAULT_DB_FILE = "data/music-porter.db"
 DEFAULT_USB_DIR = "RZR/Music"
+
+# Schema version constants — increment and add a migration case when changing
+# the config.yaml structure or DB tables/columns.
+CONFIG_SCHEMA_VERSION = 1
+DB_SCHEMA_VERSION = 1
 
 # Excluded USB volumes by OS
 if IS_MACOS:
@@ -309,6 +314,16 @@ def validate_config(conf_path=DEFAULT_CONFIG_FILE):
     if not isinstance(data, dict):
         results.append(("error", "Config root must be a YAML mapping"))
         return results
+
+    # 2b. schema_version
+    sv = data.get('schema_version')
+    if sv is None:
+        results.append(("warning", "Missing 'schema_version' "
+                         "(run migrate_config_schema() to add it)"))
+    elif not isinstance(sv, int) or isinstance(sv, bool) or sv < 1:
+        results.append(("error", f"'schema_version' must be a positive integer, got {sv!r}"))
+    else:
+        results.append(("ok", f"schema_version = {sv}"))
 
     # 3. settings section
     settings = data.get('settings')
@@ -695,6 +710,232 @@ def migrate_data_dir(logger=None):
                 logger.info(f"Migrated {old} → {new}")
 
 
+def migrate_db_schema(logger=None):
+    """Apply sequential DB schema migrations using PRAGMA user_version.
+
+    Call once at startup, before any DB class is instantiated.
+    Creates all tables on a fresh DB; upgrades existing DBs version-by-version.
+    """
+    db_path = Path(DEFAULT_DB_FILE)
+    if not db_path.parent.exists():
+        return  # data/ dir not yet created — nothing to migrate
+
+    fresh = not db_path.exists()
+    conn = sqlite3.connect(str(db_path), check_same_thread=False)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        current = conn.execute("PRAGMA user_version").fetchone()[0]
+
+        if current >= DB_SCHEMA_VERSION:
+            return  # already up to date
+
+        # ── Version 0 → 1 ────────────────────────────────────────────
+        if current < 1:
+            if not fresh:
+                # Migrate legacy usb_keys/usb_sync_files → sync_keys/sync_files
+                tables = {r[0] for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()}
+                if 'usb_keys' in tables and 'sync_keys' not in tables:
+                    conn.execute("ALTER TABLE usb_keys RENAME TO sync_keys")
+                    conn.execute(
+                        "ALTER TABLE usb_sync_files RENAME TO sync_files")
+                    try:
+                        conn.execute(
+                            "ALTER TABLE sync_files "
+                            "RENAME COLUMN usb_key TO sync_key")
+                    except Exception:
+                        conn.execute("""
+                            CREATE TABLE sync_files_new (
+                                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                                sync_key  TEXT NOT NULL,
+                                file_path TEXT NOT NULL,
+                                playlist  TEXT NOT NULL,
+                                synced_at REAL NOT NULL,
+                                FOREIGN KEY (sync_key)
+                                    REFERENCES sync_keys(key_name)
+                                    ON DELETE CASCADE,
+                                UNIQUE(sync_key, file_path, playlist)
+                            )
+                        """)
+                        conn.execute("""
+                            INSERT INTO sync_files_new
+                                (id, sync_key, file_path, playlist, synced_at)
+                            SELECT id, usb_key, file_path, playlist, synced_at
+                            FROM sync_files
+                        """)
+                        conn.execute("DROP TABLE sync_files")
+                        conn.execute(
+                            "ALTER TABLE sync_files_new "
+                            "RENAME TO sync_files")
+                    conn.execute("DROP INDEX IF EXISTS idx_usb_sync_key")
+                    conn.execute("DROP INDEX IF EXISTS idx_usb_sync_playlist")
+                    if logger:
+                        logger.info(
+                            "DB migration 0→1: renamed usb_keys → sync_keys")
+
+            # Safety net: ensure all current tables and indexes exist
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS audit_entries (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp   TEXT NOT NULL,
+                    operation   TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    params      TEXT,
+                    status      TEXT NOT NULL,
+                    duration_s  REAL,
+                    source      TEXT NOT NULL DEFAULT 'cli'
+                )
+            """)
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_audit_timestamp
+                ON audit_entries(timestamp)""")
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_audit_operation
+                ON audit_entries(operation)""")
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_audit_status
+                ON audit_entries(status)""")
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS task_history (
+                    id          TEXT PRIMARY KEY,
+                    operation   TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    status      TEXT NOT NULL DEFAULT 'pending',
+                    result      TEXT,
+                    error       TEXT NOT NULL DEFAULT '',
+                    started_at  REAL NOT NULL DEFAULT 0,
+                    finished_at REAL NOT NULL DEFAULT 0,
+                    source      TEXT NOT NULL DEFAULT 'web'
+                )
+            """)
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_task_status
+                ON task_history(status)""")
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_task_operation
+                ON task_history(operation)""")
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_task_started_at
+                ON task_history(started_at)""")
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sync_keys (
+                    key_name    TEXT PRIMARY KEY,
+                    last_sync_at REAL NOT NULL DEFAULT 0,
+                    created_at  REAL NOT NULL DEFAULT 0
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sync_files (
+                    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sync_key  TEXT NOT NULL,
+                    file_path TEXT NOT NULL,
+                    playlist  TEXT NOT NULL,
+                    synced_at REAL NOT NULL,
+                    FOREIGN KEY (sync_key) REFERENCES sync_keys(key_name)
+                        ON DELETE CASCADE,
+                    UNIQUE(sync_key, file_path, playlist)
+                )
+            """)
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_sync_files_key
+                ON sync_files(sync_key)""")
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_sync_files_playlist
+                ON sync_files(sync_key, playlist)""")
+
+            conn.execute(f"PRAGMA user_version = {DB_SCHEMA_VERSION}")
+            conn.commit()
+            if logger:
+                logger.info(f"DB schema updated to version {DB_SCHEMA_VERSION}")
+
+        # Future migrations would go here:
+        # if current < 2:
+        #     ... version 1 → 2 migration ...
+
+    finally:
+        conn.close()
+
+
+def migrate_config_schema(logger=None):
+    """Apply sequential config.yaml schema migrations using a schema_version key.
+
+    Call once at startup, before ConfigManager is instantiated.
+    Consolidates inline migrations that previously lived in _load_yaml().
+    """
+    conf_path = Path(DEFAULT_CONFIG_FILE)
+    if not conf_path.exists():
+        return  # will be created by ConfigManager._create_default()
+
+    try:
+        import yaml
+    except ImportError:
+        return  # PyYAML not yet installed — DependencyChecker handles this
+
+    with open(conf_path) as f:
+        data = yaml.safe_load(f) or {}
+
+    current = data.get('schema_version', 0)
+    if current >= CONFIG_SCHEMA_VERSION:
+        return  # already up to date
+
+    dirty = False
+
+    # ── Version 0 → 1 ────────────────────────────────────────────────
+    if current < 1:
+        # 1. Path scheme migration: plain paths → folder://
+        for entry in data.get('destinations', []):
+            dpath = str(entry.get('path', '')).strip()
+            if (dpath and not dpath.startswith('usb://')
+                    and not dpath.startswith('folder://')
+                    and not dpath.startswith('web-client://')):
+                entry['path'] = f'folder://{dpath}'
+                dirty = True
+
+        # 2. Output types auto-seed if missing/null
+        import copy
+        raw_types = data.get('output_types')
+        if raw_types is None:
+            data['output_types'] = copy.deepcopy(DEFAULT_OUTPUT_PROFILES)
+            dirty = True
+            if logger:
+                logger.info("Config migration 0→1: added default output_types")
+
+        # 3. Relocate usb_dir from settings into per-profile
+        settings = data.get('settings', {})
+        if 'usb_dir' in settings:
+            old_usb_dir = settings.pop('usb_dir')
+            ot = data.get('output_types')
+            if isinstance(ot, dict):
+                for _pname, pfields in ot.items():
+                    if isinstance(pfields, dict) and 'usb_dir' not in pfields:
+                        pfields['usb_dir'] = old_usb_dir
+            dirty = True
+            if logger:
+                logger.info(
+                    "Config migration 0→1: moved usb_dir into output profiles")
+
+        # 4. Backfill usb_dir in each profile from defaults
+        ot = data.get('output_types')
+        if isinstance(ot, dict):
+            for pname, pfields in ot.items():
+                if isinstance(pfields, dict) and 'usb_dir' not in pfields:
+                    default_usb = DEFAULT_OUTPUT_PROFILES.get(
+                        pname, {}).get('usb_dir', '')
+                    pfields['usb_dir'] = default_usb
+                    dirty = True
+
+        data['schema_version'] = CONFIG_SCHEMA_VERSION
+        dirty = True
+
+    # Future migrations would go here:
+    # if current < 2:
+    #     ... version 1 → 2 migration ...
+
+    if dirty:
+        with open(conf_path, 'w') as f:
+            f.write("# Music Porter Configuration\n")
+            f.write("# CLI flags override these settings when specified.\n\n")
+            yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+        if logger:
+            logger.info(
+                f"Config schema updated to version {CONFIG_SCHEMA_VERSION}")
+
+
 class AuditLogger:
     """Persistent audit trail using SQLite.
 
@@ -741,6 +982,7 @@ class AuditLogger:
                 CREATE INDEX IF NOT EXISTS idx_audit_status
                 ON audit_entries(status)
             """)
+            conn.execute(f"PRAGMA user_version = {DB_SCHEMA_VERSION}")
             conn.commit()
         finally:
             conn.close()
@@ -933,6 +1175,7 @@ class TaskHistoryDB:
                    WHERE status IN ('running', 'pending')""",
                 (time.time(),),
             )
+            conn.execute(f"PRAGMA user_version = {DB_SCHEMA_VERSION}")
             conn.commit()
         finally:
             conn.close()
@@ -1161,10 +1404,6 @@ class SyncTracker:
         conn = self._connect()
         try:
             conn.execute("PRAGMA journal_mode=WAL")
-
-            # Migrate legacy tables if they exist
-            self._migrate_legacy_tables(conn)
-
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS sync_keys (
                     key_name    TEXT PRIMARY KEY,
@@ -1192,51 +1431,10 @@ class SyncTracker:
                 CREATE INDEX IF NOT EXISTS idx_sync_files_playlist
                 ON sync_files(sync_key, playlist)
             """)
+            conn.execute(f"PRAGMA user_version = {DB_SCHEMA_VERSION}")
             conn.commit()
         finally:
             conn.close()
-
-    def _migrate_legacy_tables(self, conn):
-        """Migrate usb_keys/usb_sync_files → sync_keys/sync_files if needed."""
-        tables = {r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-
-        if 'usb_keys' in tables and 'sync_keys' not in tables:
-            # Rename tables
-            conn.execute("ALTER TABLE usb_keys RENAME TO sync_keys")
-            conn.execute("ALTER TABLE usb_sync_files RENAME TO sync_files")
-
-            # Rename usb_key column → sync_key (SQLite 3.25+)
-            try:
-                conn.execute(
-                    "ALTER TABLE sync_files RENAME COLUMN usb_key TO sync_key")
-            except Exception:
-                # SQLite < 3.25: recreate table with new column name
-                conn.execute("""
-                    CREATE TABLE sync_files_new (
-                        id        INTEGER PRIMARY KEY AUTOINCREMENT,
-                        sync_key  TEXT NOT NULL,
-                        file_path TEXT NOT NULL,
-                        playlist  TEXT NOT NULL,
-                        synced_at REAL NOT NULL,
-                        FOREIGN KEY (sync_key) REFERENCES sync_keys(key_name)
-                            ON DELETE CASCADE,
-                        UNIQUE(sync_key, file_path, playlist)
-                    )
-                """)
-                conn.execute("""
-                    INSERT INTO sync_files_new (id, sync_key, file_path, playlist, synced_at)
-                    SELECT id, usb_key, file_path, playlist, synced_at FROM sync_files
-                """)
-                conn.execute("DROP TABLE sync_files")
-                conn.execute(
-                    "ALTER TABLE sync_files_new RENAME TO sync_files")
-
-            # Drop old indexes (they reference old table/column names)
-            conn.execute("DROP INDEX IF EXISTS idx_usb_sync_key")
-            conn.execute("DROP INDEX IF EXISTS idx_usb_sync_playlist")
-
-            conn.commit()
 
     def record_file(self, sync_key, playlist, file_path):
         """Record a single synced file for a sync key and playlist."""
@@ -1744,13 +1942,15 @@ class ConfigManager:
                 self._raw_output_types = {}
 
     def _load_yaml(self):
-        """Load configuration from YAML file."""
+        """Load configuration from YAML file.
+
+        Schema migrations are handled by migrate_config_schema() at startup.
+        This method only loads and validates — no inline migrations.
+        """
         import yaml
 
         with open(self.conf_path) as f:
             data = yaml.safe_load(f) or {}
-
-        dirty = False  # Track if we need to save after migrations
 
         # Load settings
         self.settings = data.get('settings', {})
@@ -1765,59 +1965,31 @@ class ConfigManager:
             elif key or url or name:
                 self.logger.warn(f"Incomplete playlist entry (need key, url, name): {entry}")
 
-        # Load destinations (with scheme migration)
+        # Load destinations
         for entry in data.get('destinations', []):
             dname = str(entry.get('name', '')).strip()
             dpath = str(entry.get('path', '')).strip()
             if dname and dpath:
-                # Migrate plain paths → folder:// scheme
-                if (not dpath.startswith('usb://') and not dpath.startswith('folder://')
-                        and not dpath.startswith('web-client://')):
-                    dpath = f'folder://{dpath}'
-                    dirty = True
                 dsync_key = str(entry.get('sync_key', '')).strip() or None
                 self.destinations.append(SyncDestination(dname, dpath, sync_key=dsync_key))
             elif dname or dpath:
                 self.logger.warn(f"Incomplete destination entry (need name, path): {entry}")
 
-        # Load output_types — auto-migrate if missing/null
+        # Load output_types
         raw_types = data.get('output_types')
         if raw_types is None:
-            # Missing or null — inject seed defaults and save (one-time migration)
-            import copy
-            raw_types = copy.deepcopy(DEFAULT_OUTPUT_PROFILES)
-            self._raw_output_types = raw_types
-            dirty = True
-            self.logger.info("Migrated config.yaml: added output_types with default profiles")
+            raise ValueError(
+                "config.yaml: missing 'output_types' section "
+                "(run migrate_config_schema() first or delete config.yaml to regenerate)")
         elif isinstance(raw_types, dict) and len(raw_types) == 0:
             raise ValueError(
                 "config.yaml: 'output_types' is empty — at least one profile is required")
-
-        # Migrate usb_dir from settings into output profiles
-        if 'usb_dir' in self.settings:
-            old_usb_dir = self.settings.pop('usb_dir')
-            if isinstance(raw_types, dict):
-                for _pname, pfields in raw_types.items():
-                    if 'usb_dir' not in pfields:
-                        pfields['usb_dir'] = old_usb_dir
-            dirty = True
-            self.logger.info("Migrated usb_dir from settings to output profiles")
-
-        # Ensure usb_dir exists in each profile (backfill from defaults)
-        if isinstance(raw_types, dict):
-            for pname, pfields in raw_types.items():
-                if 'usb_dir' not in pfields:
-                    default_usb = DEFAULT_OUTPUT_PROFILES.get(
-                        pname, {}).get('usb_dir', '')
-                    pfields['usb_dir'] = default_usb
-                    dirty = True
 
         # Validate and build OutputProfile instances
         self._raw_output_types = raw_types
         self.output_profiles = {}
         for name, fields in raw_types.items():
             _validate_profile(name, fields)
-            # Build OutputProfile — ignore unknown extra fields (forward compat)
             self.output_profiles[name] = OutputProfile(
                 name=name,
                 description=fields["description"],
@@ -1832,9 +2004,6 @@ class ConfigManager:
                 pipeline_artist=fields["pipeline_artist"],
                 usb_dir=fields.get("usb_dir", ""),
             )
-
-        if dirty:
-            self._save()
 
         self.logger.info(f"Loaded {len(self.playlists)} playlists and "
                          f"{len(self.output_profiles)} output profiles from {self.conf_path}")
@@ -1874,6 +2043,7 @@ class ConfigManager:
                 }
 
         data = {
+            'schema_version': CONFIG_SCHEMA_VERSION,
             'settings': self.settings,
             'output_types': output_types,
             'playlists': [

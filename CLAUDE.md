@@ -267,7 +267,7 @@ Version defined in `porter_core.py` line 48. Uses semantic versioning (MAJOR.MIN
 
 **On merge to main:** Remove branch suffix, bump version, create git tag (`git tag vX.Y.Z`). PATCH for fixes, MINOR for features, MAJOR for breaking changes.
 
-**Release notes:** When bumping the version, prepend a new entry to the top of `release-notes.txt` (project root) summarizing the changes in that release. Format: `Version X.Y.Z:` header followed by bullet points (`• description`). This is displayed in the web About page and `./music-porter about` CLI command. Generate the release notes by reviewing all commits since the previous version tag.
+**Release notes:** When bumping the version, prepend a new entry to the top of `release-notes.txt` (project root) summarizing the changes in that release. Format: `Version X.Y.Z (YYYY-MM-DD):` header followed by bullet points (`• description`). This is displayed in the web About page and `./music-porter about` CLI command. Generate the release notes by reviewing all commits since the previous version tag.
 
 **Direct commits to main:** Always ask user before bumping version. Suggest appropriate level based on changes.
 
@@ -404,6 +404,36 @@ All persistent state lives in `data/`: `config.yaml`, `cookies.txt`, `music-port
 ### config.yaml
 
 YAML file with `settings` (output\_type, workers), `playlists` (key, url, name), and `destinations` (name, path with `usb://` or `folder://` scheme) for saved sync destinations. Path: `data/config.yaml`. Auto-created if missing. **Precedence:** CLI flag > config.yaml > hardcoded constant.
+
+### Schema Versioning
+
+Both persistent stores have explicit version tracking with sequential migrations:
+
+- **Config:** `CONFIG_SCHEMA_VERSION` constant in `porter_core.py` (~line 63). Version stored as `schema_version` key in `config.yaml`. Migrations run in `migrate_config_schema()`.
+- **Database:** `DB_SCHEMA_VERSION` constant in `porter_core.py` (~line 64). Version stored as SQLite `PRAGMA user_version`. Migrations run in `migrate_db_schema()`.
+
+Both functions are called at startup before any DB class or ConfigManager is instantiated (in `music-porter` main(), `web_ui.py` module level, and `_handle_tasks_command()`).
+
+**When changing config.yaml structure or DB tables/columns:**
+
+1. Increment the relevant constant (`CONFIG_SCHEMA_VERSION` or `DB_SCHEMA_VERSION`)
+2. Add a new `if current < N:` migration case in the corresponding function
+3. Migrations must be idempotent and sequential (version 0→1→2→…)
+
+**Current DB schema (version 1) — 4 tables:**
+
+- `audit_entries`: id, timestamp, operation, description, params, status, duration\_s, source
+- `task_history`: id, operation, description, status, result, error, started\_at, finished\_at, source
+- `sync_keys`: key\_name, last\_sync\_at, created\_at
+- `sync_files`: id, sync\_key, file\_path, playlist, synced\_at (FK → sync\_keys)
+
+**Current config schema (version 1) — top-level keys:**
+
+- `schema_version` (integer)
+- `settings` (output\_type, workers, server\_name)
+- `output_types` (profile name → profile fields)
+- `playlists` (list of key, url, name)
+- `destinations` (list of name, path with scheme, optional sync\_key)
 
 ### USB Drive Exclusions
 

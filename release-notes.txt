@@ -1,4 +1,4 @@
-Version 2.29.0:
+Version 2.29.0 (2026-02-26):
 • Client-side sync: sync playlists to browser-local folders via File System Access API (Chromium) or download as ZIP (all browsers)
 • Local sync manifest (.music-porter-sync.json) persists sync key and file maps for incremental syncs across sessions
 • web-client:// destination type auto-registered on first browser sync, with Client badge in destinations table
@@ -10,7 +10,7 @@ Version 2.29.0:
 • Client-side sync abort button and ETA display during File System Access sync
 • Audit log UI: collapse consecutive duplicate entries, incremental page filling, and improved pagination accuracy
 
-Version 2.28.0:
+Version 2.28.0 (2026-02-26):
 • Complete unification of sync destinations: remove all legacy USB-specific code paths and aliases
 • Rename USBSyncTracker to SyncTracker, USBManager remnants cleaned up across CLI, web API, and iOS
 • Remove deprecated /api/usb/* routes, sync-usb and sync-status CLI aliases, and usb_sync.html template
@@ -20,10 +20,10 @@ Version 2.28.0:
 • iOS companion app updated with renamed model types and API paths
 • Net reduction of ~400 lines across the codebase
 
-Version 2.27.1:
+Version 2.27.1 (2026-02-25):
 • Fix sync buttons disabled on page load due to race condition in destination metadata loading
 
-Version 2.27.0:
+Version 2.27.0 (2026-02-25):
 • Add sync action buttons to sync keys and playlist breakdown tables (web and iOS)
 • Web: sync buttons in keys table and playlist detail rows with availability-based enable/disable
 • iOS: swipe-to-sync on key and playlist rows using OperationViewModel with ProgressPanel
@@ -32,7 +32,7 @@ Version 2.27.0:
 • Auto-save custom paths as sync destinations for reuse (CLI interactive, CLI --dest, web API)
 • Remove dead sync_status.html template (replaced by unified sync.html)
 
-Version 2.26.0:
+Version 2.26.0 (2026-02-25):
 • Generalize USB sync into unified sync destinations: saved named paths, USB drives, and custom paths
 • Add SyncDestination dataclass and ConfigManager CRUD (add/remove/get destinations in config.yaml)
 • Rename USBManager to SyncManager with backwards-compatible aliases
@@ -45,7 +45,7 @@ Version 2.26.0:
 • iOS companion app updated: generalized model types, new sync API methods, updated labels
 • All existing /api/usb/* routes and sync-usb CLI preserved for backwards compatibility
 
-Version 2.25.0:
+Version 2.25.0 (2026-02-25):
 • Add USB sync tracking: persistent SQLite-backed records of which files have been synced to which USB drives
 • New USBSyncTracker class with batch recording, per-key and per-playlist status, file-level sync maps
 • CLI: sync-status subcommand with --usb-key, --delete-key, --delete-playlist, --prune, --list-keys flags
@@ -55,24 +55,24 @@ Version 2.25.0:
 • Post-sync CLI summary shows tracking stats after successful USB sync
 • Pipeline and sync-usb commands automatically record synced files for tracking
 
-Version 2.24.0:
+Version 2.24.0 (2026-02-25):
 • Add persistent SQLite-backed task history (survives server restarts)
 • Redesign Operations page with stats cards, filters, pagination, and clear tool
 • Add CLI subcommand: ./music-porter tasks (with --stats, --status, --operation flags)
 • Add 3 new API endpoints: /api/tasks/history, /api/tasks/stats, /api/tasks/clear
 • Startup recovery marks stale running/pending tasks as failed on restart
 
-Version 2.23.0:
+Version 2.23.0 (2026-02-25):
 • Add About page with version info and release notes (CLI, web, API)
 • Create project release-notes.txt with full version history
 • Include release-notes.txt in Docker image
 
-Version 2.22.0:
+Version 2.22.0 (2026-02-25):
 • Add pipeline scheduler for recurring automatic playlist updates
 • Fix web server startup crash
 • Set Docker container timezone configuration
 
-Version 2.21.0:
+Version 2.21.0 (2026-02-25):
 • Add pipeline summary display to web UI
 • Fix pipeline summary duplicate count calculation
 • Add All Playlists button
@@ -80,15 +80,15 @@ Version 2.21.0:
 • Show gamdl error output on download failure
 • Change audit log entry details from inline panel to modal popup
 
-Version 2.20.0:
+Version 2.20.0 (2026-02-24):
 • Add --behind-proxy and --proxy-count flags for reverse proxy support
 • Improved reverse proxy header handling for X-Forwarded-* headers
 
-Version 2.19.1:
+Version 2.19.1 (2026-02-24):
 • Separate web API routes into web_api.py Blueprint
 • Add audit trail, data directory, and AppContext documentation
 
-Version 2.19.0:
+Version 2.19.0 (2026-02-24):
 • Add data directory management with auto-migration from project root
 • Implement AuditLogger class with SQLite backend
 • Add Audit Log page to web UI with filtering, pagination, and stats
@@ -97,143 +97,143 @@ Version 2.19.0:
 • Fix iOS auto-reconnect self-cancellation bug
 • Add server_name config option
 
-Version 2.18.1:
+Version 2.18.1 (2026-02-24):
 • Fix QR scanning via reverse proxy
 • Show external URL instead of host:port in iOS Settings when configured
 • Fix logger PermissionError crash
 
-Version 2.18.0:
+Version 2.18.0 (2026-02-24):
 • Add QR code authentication for web UI and iOS app pairing
 • Add external_url config option
 • Add config get/set commands
 
-Version 2.17.0:
+Version 2.17.0 (2026-02-24):
 • Add config CLI subcommand with verify and reset actions
 • Validate config.yaml integrity
 • Change basic profile directory_structure to nested-artist-album
 
-Version 2.16.0:
+Version 2.16.0 (2026-02-24):
 • Add duplicate detection to list diff command
 • Identify duplicate tracks across playlists
 
-Version 2.15.0:
+Version 2.15.0 (2026-02-24):
 • Add list CLI command with unconverted and diff subcommands
 • Fix unconverted count using file-level matching
 
-Version 2.14.0:
+Version 2.14.0 (2026-02-24):
 • Add clickable unconverted files count on web dashboard
 • Show conversion UI when clicking unconverted count
 
-Version 2.13.0:
+Version 2.13.0 (2026-02-23):
 • Add iOS music playback with mini player
 • Enable HTTP Range requests for MP3 streaming
 • Add swipe-down gesture to dismiss mini player
 
-Version 2.12.0:
+Version 2.12.0 (2026-02-23):
 • Add Apple Music playlist drill-down with track listing (iOS)
 • Fix single-playlist pipeline skipping download via web/iOS
 • Rename Pipeline tab to Process for iOS UX
 • Fix iOS app icon by adding Assets.xcassets to Xcode project
 
-Version 2.11.0:
+Version 2.11.0 (2026-02-23):
 • Add delete playlist data feature across CLI, web, and iOS
 • Delete source M4A and/or export MP3 files with optional config removal
 • Fix web dashboard Reset Tags always cancelling immediately
 • Disable USB export features in server mode
 • Add login screen for web dashboard in server mode
 
-Version 2.10.0:
+Version 2.10.0 (2026-02-23):
 • Add Dockerfile and docker-compose.yml
 • Set gamdl config and temp paths for Docker compatibility
 • Slim CLAUDE.md from 54K to 19K, extract iOS docs
 
-Version 2.9.0:
+Version 2.9.0 (2026-02-23):
 • Add iOS companion app with native SwiftUI interface
 • Server mode with API key authentication and Bonjour discovery
 • File serving endpoints for iOS app
 
-Version 2.7.0:
+Version 2.7.0 (2026-02-23):
 • Archive SRS 11 v2 (Web Dashboard API contracts and setup)
 • Add djLint for Jinja2/HTML template linting
 
-Version 2.6.0:
+Version 2.6.0 (2026-02-23):
 • Add graduated freshness levels in summary display
 • Categorize playlists as Current (0 days), Recent (7 days), Stale (30+ days)
 
-Version 2.5.3:
+Version 2.5.3 (2026-02-23):
 • Remove stale documentation and update .gitignore
 
-Version 2.5.2:
+Version 2.5.2 (2026-02-23):
 • Add Ruff linter for Python and PyMarkdown for Markdown linting
 • Configuration in pyproject.toml
 
-Version 2.5.0:
+Version 2.5.0 (2026-02-22):
 • Move output profiles from hardcoded constants to config.yaml
 • Add profile configuration system (ride-command, basic, custom)
 • Bootstrap dependency check before config loading
 
-Version 2.4.0:
+Version 2.4.0 (2026-02-22):
 • Extract business logic from CLI into service layer
 • Modular design with 21+ classes and separation of concerns
 
-Version 2.3.0:
+Version 2.3.0 (2026-02-20):
 • Add configurable output directory structure and filename format
 • Profile-scoped export directories: export/<profile>/<playlist>/
 
-Version 2.2.0:
+Version 2.2.0 (2026-02-19):
 • Add web UI progress bars for operations
 • Per-file log streaming via Server-Sent Events (SSE)
 • Real-time progress display
 
-Version 2.1.0:
+Version 2.1.0 (2026-02-19):
 • Add Library Stats section to web dashboard
 • Rename Playlist Summary section
 
-Version 2.0.0:
+Version 2.0.0 (2026-02-19):
 • Add web dashboard with Flask backend
 • Full CLI feature parity in web UI
 • Interactive playlist management
 • Move library summary onto dashboard
 • Improve cookie refresh for web UI
 
-Version 1.8.0:
+Version 1.8.0 (2026-02-19):
 • YAML config system for playlists and settings
 • Profile-scoped export directories
 
-Version 1.7.0:
+Version 1.7.0 (2026-02-18):
 • Add --output-type global flag
 • OutputProfile registry system for multiple export format profiles
 
-Version 1.6.1:
+Version 1.6.1 (2026-02-18):
 • Minor patch fixes
 
-Version 1.6.0:
+Version 1.6.0 (2026-02-18):
 • Add resize cover art to interactive menu
 • Cover art dimension management
 
-Version 1.5.3:
+Version 1.5.3 (2026-02-18):
 • Add Art/Mod column to summary playlist table
 • Add Girls Night Out playlist to config
 
-Version 1.5.2:
+Version 1.5.2 (2026-02-18):
 • Consolidate dependencies into single requirements.txt
 • Auto-venv setup
 • Remove deprecated legacy scripts
 
-Version 1.5.0:
+Version 1.5.0 (2026-02-18):
 • Cover art embed functionality with SHA-256 hash tracking
 • Original cover art stored in TXXX:OriginalCoverArtHash with hard-gate protection
 • Add --all flag for batch operations
 • Increase default max workers from 4 to 6
 
-Version 1.4.0:
+Version 1.4.0 (2026-02-18):
 • Add tqdm progress bars for all processing operations
 • Real-time progress display during conversions and downloads
 
-Version 1.3.1:
+Version 1.3.1 (2026-02-18):
 • Cookie auto-clean patch for non-Apple domain stripping
 
-Version 1.3.0:
+Version 1.3.0 (2026-02-18):
 • Add cookie auto-clean on startup (strip non-Apple domains)
 • Multi-threaded conversion support
 • Add git tag requirement to version management workflow
