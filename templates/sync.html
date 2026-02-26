@@ -244,6 +244,7 @@ function loadDestinations() {
     onDestChange();
     renderDestsTable(data.saved || []);
     renderSyncStatusForDest();
+    loadSyncStatusData();
   });
 }
 
@@ -572,6 +573,5 @@ function removeDest(name) {
 // ── Init ──
 loadSources();
 loadDestinations();
-loadSyncStatusData();
 </script>
 {% endblock scripts %}
