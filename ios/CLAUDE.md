@@ -27,7 +27,7 @@ Codable structs matching server JSON responses:
 - `FileListResponse` — Playlist key, profile, fileCount, files array
 - `SSEEvent` — Enum: `.log(level, message)`, `.progress(current, total, percent, stage)`, `.heartbeat`, `.done(status, result, error)`
 - `TaskInfo` — Task id, operation, description, status, result, error, elapsed; computed `isRunning`, `isCompleted`, `isFailed`
-- `USBSyncStatus` — `SyncKeySummary`, `SyncPlaylistInfo`, `SyncStatusDetail`, `SyncPruneResult`, `SyncDestination`, `SyncDestinationsResponse` (with backwards-compat typealiases for USB-prefixed names)
+- `USBSyncStatus` — `SyncKeySummary`, `SyncPlaylistInfo`, `SyncStatusDetail`, `SyncPruneResult`, `SyncDestination`, `SyncDestinationsResponse`
 
 ### Services (7 files)
 

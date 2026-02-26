@@ -127,7 +127,6 @@ Presets via `--preset` flag: `lossless` (default, CBR 320kbps), `high` (VBR q2, 
 ./music-porter pipeline --url "https://..."         # Direct URL
 ./music-porter pipeline --auto                      # All playlists
 ./music-porter pipeline --playlist X --preset high  # Quality preset
-./music-porter pipeline --playlist X --copy-to-usb  # Include USB sync
 ./music-porter pipeline --playlist X --sync-dest nas-backup  # Sync to saved destination
 
 # Download
@@ -159,7 +158,6 @@ Presets via `--preset` flag: `lossless` (default, CBR 320kbps), `high` (VBR q2, 
 ./music-porter sync --add-dest NAME PATH                     # Save a destination
 ./music-porter sync --remove-dest NAME                       # Remove a saved destination
 ./music-porter sync --status                                 # Show sync tracking
-./music-porter sync-usb export/ride-command/Pop_Workout      # Legacy USB sync
 
 # Summary
 ./music-porter summary              # Default (balanced)
@@ -325,9 +323,8 @@ All API routes are defined in `web_api.py` as a Flask Blueprint.
 - **Settings:** `GET|POST /api/settings`
 - **Config:** `GET /api/config/verify`, `POST /api/config/reset`
 - **Directories:** `GET /api/directories/music`, `GET /api/directories/export`
-- **Operations:** `POST /api/pipeline/run`, `/api/convert/run`, `/api/convert/batch`, `/api/tags/update`, `/api/tags/restore`, `/api/tags/reset`, `/api/cover-art/<action>`, `/api/usb/sync`
+- **Operations:** `POST /api/pipeline/run`, `/api/convert/run`, `/api/convert/batch`, `/api/tags/update`, `/api/tags/restore`, `/api/tags/reset`, `/api/cover-art/<action>`
 - **Files:** `GET /api/files/<key>`, `/<key>/<filename>`, `/<key>/<filename>/artwork`, `/<key>/download-all`
-- **USB:** `GET /api/usb/drives`
 - **Sync:** `GET /api/sync/destinations`, `POST /api/sync/destinations`, `DELETE /api/sync/destinations/<name>`, `POST /api/sync/run`, `GET /api/sync/status`, `GET /api/sync/status/<key>`, `GET|DELETE /api/sync/keys/<key>`, `DELETE /api/sync/keys/<key>/playlists/<playlist>`, `POST /api/sync/keys/<key>/prune`
 - **Tasks:** `GET /api/tasks`, `/api/tasks/<id>`, `POST /api/tasks/<id>/cancel`, `GET /api/stream/<id>` (SSE), `GET /api/tasks/history`, `GET /api/tasks/stats`, `POST /api/tasks/clear`
 - **iOS Pairing:** `GET /api/pairing-qr`, `GET /api/pairing-info`
@@ -405,7 +402,7 @@ All persistent state lives in `data/`: `config.yaml`, `cookies.txt`, `music-port
 
 ### config.yaml
 
-YAML file with `settings` (output\_type, usb\_dir, workers), `playlists` (key, url, name), and `destinations` (name, path) for saved sync destinations. Path: `data/config.yaml`. Auto-created if missing. **Precedence:** CLI flag > config.yaml > hardcoded constant.
+YAML file with `settings` (output\_type, workers), `playlists` (key, url, name), and `destinations` (name, path with `usb://` or `folder://` scheme) for saved sync destinations. Path: `data/config.yaml`. Auto-created if missing. **Precedence:** CLI flag > config.yaml > hardcoded constant.
 
 ### USB Drive Exclusions
 
@@ -415,7 +412,7 @@ Constant `EXCLUDED_USB_VOLUMES` in `music-porter`: `["Macintosh HD", "Macintosh 
 
 ### Key Classes in `porter_core.py`
 
-25 classes organized by concern: `Logger`, `PlaylistConfig`, `SyncDestination`, `ConfigManager`, `DependencyChecker`, `TagStatistics`, `TaggerManager`, `ConversionStatistics`, `Converter`, `Downloader`, `CookieStatus`, `CookieManager`, `SyncManager` (alias: `USBManager`), `PlaylistSummary`, `LibrarySummaryStatistics`, `SummaryManager`, `DataManager`, `PipelineStatistics`, `PipelineOrchestrator`, `InteractiveMenu`, `PlaylistResult`, `AggregateStatistics`, `CoverArtManager`, `AuditLogger`, `TaskHistoryDB`.
+25 classes organized by concern: `Logger`, `PlaylistConfig`, `SyncDestination`, `ConfigManager`, `DependencyChecker`, `TagStatistics`, `TaggerManager`, `ConversionStatistics`, `Converter`, `Downloader`, `CookieStatus`, `CookieManager`, `SyncManager`, `PlaylistSummary`, `LibrarySummaryStatistics`, `SummaryManager`, `DataManager`, `PipelineStatistics`, `PipelineOrchestrator`, `InteractiveMenu`, `PlaylistResult`, `AggregateStatistics`, `CoverArtManager`, `AuditLogger`, `TaskHistoryDB`.
 
 ### ConfigManager
 
