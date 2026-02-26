@@ -208,6 +208,20 @@ function getFilters() {
   };
 }
 
+function collapseConsecutive(entries) {
+  const groups = [];
+  for (const entry of entries) {
+    const last = groups[groups.length - 1];
+    if (last && last.entry.operation === entry.operation) {
+      last.count++;
+      last.lastEntry = entry;
+    } else {
+      groups.push({ entry, count: 1, lastEntry: entry });
+    }
+  }
+  return groups;
+}
+
 function loadAudit() {
   const f = getFilters();
   const params = new URLSearchParams({limit: PAGE_SIZE, offset: currentOffset});
@@ -221,17 +235,23 @@ function loadAudit() {
     if (data.entries.length === 0) {
       tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No entries found</td></tr>';
     } else {
-      tbody.innerHTML = data.entries.map(e => `
+      const groups = collapseConsecutive(data.entries);
+      tbody.innerHTML = groups.map(g => {
+        const e = g.entry;
+        const opCell = g.count > 1
+          ? `<code>${e.operation}</code> <span class="badge bg-secondary">&times;${g.count}</span>`
+          : `<code>${e.operation}</code>`;
+        return `
         <tr>
           <td class="text-nowrap small">${formatTime(e.timestamp)}</td>
-          <td><code>${e.operation}</code></td>
+          <td>${opCell}</td>
           <td class="small">${e.description}</td>
           <td>${statusBadge(e.status)}</td>
           <td class="small">${formatDuration(e.duration_s)}</td>
           <td>${sourceBadge(e.source)}</td>
           <td>${e.params ? '<button class="btn btn-outline-secondary btn-sm py-0 px-1" onclick=\'showParams(' + JSON.stringify(JSON.stringify(e)) + ')\'><i class="bi bi-code-square"></i></button>' : ''}</td>
         </tr>
-      `).join('');
+      `}).join('');
     }
 
     // Pagination
