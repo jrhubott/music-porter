@@ -52,6 +52,48 @@
   </div>
 </div>
 
+<!-- Client-Side Sync -->
+<div class="card mb-4" id="clientSyncCard">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-pc-display"></i> Client-Side Sync</span>
+    <span class="badge" id="csyncBrowserBadge">Detecting...</span>
+  </div>
+  <div class="card-body">
+    <div class="alert alert-info small d-none" id="csyncChromiumAlert">
+      <i class="bi bi-info-circle"></i> "Sync to Local Folder" requires a Chromium-based browser (Chrome, Edge, Brave). You can still use "Download as ZIP" in any browser.
+    </div>
+    <div id="csyncEmpty" class="text-center text-muted py-3 d-none">
+      No exported playlists found.
+    </div>
+    <div id="csyncPlaylistArea">
+      <div class="mb-2">
+        <small>
+          <a href="#" id="csyncSelectAll">Select All</a> /
+          <a href="#" id="csyncSelectNone">Select None</a>
+        </small>
+      </div>
+      <div id="csyncPlaylists" class="mb-3">
+        <span class="text-muted small">Loading playlists...</span>
+      </div>
+    </div>
+    <div class="d-flex gap-2 mb-3">
+      <button class="btn btn-primary btn-sm" id="csyncFolderBtn" disabled>
+        <i class="bi bi-folder-symlink"></i> Sync to Local Folder
+      </button>
+      <button class="btn btn-outline-secondary btn-sm" id="csyncZipBtn" disabled>
+        <i class="bi bi-file-earmark-zip"></i> Download as ZIP
+      </button>
+    </div>
+    <div class="d-none" id="csyncProgressWrap">
+      <div class="progress mb-2" style="height: 1.4rem;">
+        <div class="progress-bar bg-info" id="csyncProgressBar" role="progressbar" style="width: 0%;">0%</div>
+      </div>
+      <small class="text-muted" id="csyncProgressLabel">Starting...</small>
+    </div>
+    <div class="alert d-none mb-0" id="csyncResult"></div>
+  </div>
+</div>
+
 <!-- Section 2: Sync Status / Tracking -->
 <div class="row g-3 mb-4" id="syncStatsRow">
   <div class="col-md-4">
@@ -517,8 +559,267 @@ function removeDest(name) {
     .catch(err => showToast('Failed: ' + err, 'error'));
 }
 
+// ── Client-Side Sync ──
+const csyncHasFSA = typeof window.showDirectoryPicker === 'function';
+
+(function initClientSyncUI() {
+  const badge = document.getElementById('csyncBrowserBadge');
+  const folderBtn = document.getElementById('csyncFolderBtn');
+  const alert = document.getElementById('csyncChromiumAlert');
+  if (csyncHasFSA) {
+    badge.textContent = 'Chromium';
+    badge.classList.add('bg-success');
+    folderBtn.classList.remove('d-none');
+  } else {
+    badge.textContent = 'ZIP Only';
+    badge.classList.add('bg-warning', 'text-dark');
+    folderBtn.classList.add('d-none');
+    alert.classList.remove('d-none');
+  }
+})();
+
+function loadClientSyncPlaylists() {
+  fetch('/api/directories/export').then(r => r.json()).then(dirs => {
+    const container = document.getElementById('csyncPlaylists');
+    const emptyMsg = document.getElementById('csyncEmpty');
+    const area = document.getElementById('csyncPlaylistArea');
+    if (!dirs.length) {
+      area.classList.add('d-none');
+      emptyMsg.classList.remove('d-none');
+      return;
+    }
+    emptyMsg.classList.add('d-none');
+    area.classList.remove('d-none');
+    container.innerHTML = dirs.map(d =>
+      `<div class="form-check form-check-inline">
+        <input class="form-check-input csync-pl-cb" type="checkbox" value="${d.name}" id="csyncPl_${d.name}">
+        <label class="form-check-label small" for="csyncPl_${d.name}">${d.name} <span class="text-muted">(${d.files})</span></label>
+      </div>`
+    ).join('');
+    updateClientSyncButtons();
+    document.querySelectorAll('.csync-pl-cb').forEach(cb => {
+      cb.addEventListener('change', updateClientSyncButtons);
+    });
+  });
+}
+
+document.getElementById('csyncSelectAll').addEventListener('click', function(e) {
+  e.preventDefault();
+  document.querySelectorAll('.csync-pl-cb').forEach(cb => { cb.checked = true; });
+  updateClientSyncButtons();
+});
+document.getElementById('csyncSelectNone').addEventListener('click', function(e) {
+  e.preventDefault();
+  document.querySelectorAll('.csync-pl-cb').forEach(cb => { cb.checked = false; });
+  updateClientSyncButtons();
+});
+
+function getSelectedPlaylists() {
+  return Array.from(document.querySelectorAll('.csync-pl-cb:checked')).map(cb => cb.value);
+}
+
+function updateClientSyncButtons() {
+  const selected = getSelectedPlaylists();
+  const hasSelection = selected.length > 0;
+  const folderBtn = document.getElementById('csyncFolderBtn');
+  const zipBtn = document.getElementById('csyncZipBtn');
+  const inProgress = folderBtn.dataset.busy === '1';
+  if (csyncHasFSA) folderBtn.disabled = !hasSelection || inProgress;
+  zipBtn.disabled = !hasSelection || inProgress;
+  const tip = hasSelection ? '' : 'Select at least one playlist';
+  folderBtn.title = tip;
+  zipBtn.title = tip;
+}
+
+function setClientSyncBusy(busy) {
+  const folderBtn = document.getElementById('csyncFolderBtn');
+  const zipBtn = document.getElementById('csyncZipBtn');
+  folderBtn.dataset.busy = busy ? '1' : '0';
+  folderBtn.disabled = busy;
+  zipBtn.disabled = busy;
+}
+
+function showClientSyncProgress(show) {
+  document.getElementById('csyncProgressWrap').classList.toggle('d-none', !show);
+}
+
+function updateClientSyncProgress(current, total, label) {
+  const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+  const bar = document.getElementById('csyncProgressBar');
+  bar.style.width = pct + '%';
+  bar.textContent = pct + '%';
+  document.getElementById('csyncProgressLabel').textContent = label || '';
+}
+
+function showClientSyncResult(copied, skipped, failed) {
+  const el = document.getElementById('csyncResult');
+  const cls = failed > 0 ? 'alert-warning' : 'alert-success';
+  el.className = 'alert mb-0 ' + cls;
+  el.innerHTML = `<i class="bi bi-check-circle"></i> Copied: <strong>${copied}</strong> &nbsp; Skipped: <strong>${skipped}</strong> &nbsp; Failed: <strong>${failed}</strong>`;
+  el.classList.remove('d-none');
+}
+
+// ── File System Access API sync ──
+document.getElementById('csyncFolderBtn').addEventListener('click', async function() {
+  const playlists = getSelectedPlaylists();
+  if (!playlists.length) return;
+
+  let dirHandle;
+  try {
+    dirHandle = await window.showDirectoryPicker({mode: 'readwrite'});
+  } catch (e) {
+    if (e.name === 'AbortError') return; // user cancelled
+    showToast('Could not open folder: ' + e.message, 'error');
+    return;
+  }
+
+  setClientSyncBusy(true);
+  showClientSyncProgress(true);
+  document.getElementById('csyncResult').classList.add('d-none');
+
+  let totalCopied = 0, totalSkipped = 0, totalFailed = 0;
+
+  // Count total files across all playlists first
+  let fileLists = {};
+  let grandTotal = 0;
+  for (const key of playlists) {
+    try {
+      const resp = await fetch('/api/files/' + encodeURIComponent(key));
+      const data = await resp.json();
+      fileLists[key] = data.files || [];
+      grandTotal += fileLists[key].length;
+    } catch (e) {
+      fileLists[key] = [];
+    }
+  }
+
+  let processed = 0;
+  for (const key of playlists) {
+    const files = fileLists[key];
+    if (!files.length) continue;
+
+    let plDirHandle;
+    try {
+      plDirHandle = await dirHandle.getDirectoryHandle(key, {create: true});
+    } catch (e) {
+      totalFailed += files.length;
+      processed += files.length;
+      updateClientSyncProgress(processed, grandTotal, 'Error creating folder: ' + key);
+      continue;
+    }
+
+    const syncedFiles = [];
+    for (const fileInfo of files) {
+      const fname = fileInfo.filename;
+      processed++;
+      updateClientSyncProgress(processed, grandTotal, fname);
+
+      try {
+        // Check if file exists with matching size (incremental skip)
+        let skip = false;
+        try {
+          const existing = await plDirHandle.getFileHandle(fname);
+          const existingFile = await existing.getFile();
+          if (existingFile.size === fileInfo.size) {
+            skip = true;
+          }
+        } catch (_) {
+          // file doesn't exist — will copy
+        }
+
+        if (skip) {
+          totalSkipped++;
+          syncedFiles.push(fname);
+          continue;
+        }
+
+        // Download and write
+        const resp = await fetch('/api/files/' + encodeURIComponent(key) + '/' + encodeURIComponent(fname));
+        if (!resp.ok) { totalFailed++; continue; }
+        const blob = await resp.blob();
+        const newHandle = await plDirHandle.getFileHandle(fname, {create: true});
+        const writable = await newHandle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        totalCopied++;
+        syncedFiles.push(fname);
+      } catch (e) {
+        totalFailed++;
+        if (e.name === 'QuotaExceededError') {
+          showToast('Disk full — sync stopped at ' + fname, 'error');
+          processed = grandTotal; // skip remaining
+          break;
+        }
+      }
+    }
+
+    // Report synced files for tracking
+    if (syncedFiles.length) {
+      const syncKey = 'client-' + dirHandle.name;
+      try {
+        await fetch('/api/sync/client-record', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({sync_key: syncKey, playlist: key, files: syncedFiles})
+        });
+      } catch (_) { /* tracking failure is non-fatal */ }
+    }
+  }
+
+  showClientSyncResult(totalCopied, totalSkipped, totalFailed);
+  updateClientSyncProgress(grandTotal, grandTotal, 'Done');
+  setClientSyncBusy(false);
+  loadSyncStatusData();
+});
+
+// ── ZIP download flow ──
+document.getElementById('csyncZipBtn').addEventListener('click', async function() {
+  const playlists = getSelectedPlaylists();
+  if (!playlists.length) return;
+
+  if (playlists.length === 1) {
+    // Single playlist — use existing endpoint
+    window.location.href = '/api/files/' + encodeURIComponent(playlists[0]) + '/download-all';
+    return;
+  }
+
+  // Multiple playlists — use new multi-playlist endpoint
+  const btn = document.getElementById('csyncZipBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Building ZIP...';
+
+  try {
+    const resp = await fetch('/api/files/download-zip', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({playlists})
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      showToast(err.error || 'ZIP download failed', 'error');
+      return;
+    }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'music-porter-export.zip';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    showToast('ZIP download failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-file-earmark-zip"></i> Download as ZIP';
+    updateClientSyncButtons();
+  }
+});
+
 // ── Init ──
 loadSources();
 loadDestinations();
+loadClientSyncPlaylists();
 </script>
 {% endblock scripts %}

@@ -1332,6 +1332,62 @@ def api_files_download_all(playlist_key):
     )
 
 
+@api_bp.route('/api/files/download-zip', methods=['POST'])
+def api_files_download_zip():
+    """Stream a ZIP archive of MP3s from multiple playlists."""
+    import io
+    import zipfile
+
+    ctx = _ctx()
+    data = request.get_json(silent=True) or {}
+    playlists = data.get('playlists', [])
+    if not playlists:
+        return jsonify({'error': 'playlists array is required'}), 400
+
+    config = ctx.get_config()
+    profile = ctx.get_output_profile(config)
+
+    # Collect files per playlist, validate directories, enforce limit
+    playlist_files = []  # [(playlist_key, [Path, ...])]
+    total_count = 0
+    for key in playlists:
+        playlist_dir = ctx.project_root / mp.get_export_dir(profile.name, key)
+        safe = ctx.safe_dir(playlist_dir)
+        if not safe or not Path(safe).is_dir():
+            continue  # skip missing playlists silently
+        mp3s = sorted(Path(safe).glob('*.mp3'))
+        if not mp3s:
+            continue
+        total_count += len(mp3s)
+        if total_count > 2000:
+            return jsonify({'error': 'Too many files (limit 2000)'}), 413
+        playlist_files.append((key, mp3s))
+
+    if not playlist_files:
+        return jsonify({'error': 'No MP3 files found in selected playlists'}), 404
+
+    def generate_zip():
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_STORED) as zf:
+            for key, files in playlist_files:
+                for f in files:
+                    zf.write(f, f'{key}/{f.name}')
+        buf.seek(0)
+        while True:
+            chunk = buf.read(65536)
+            if not chunk:
+                break
+            yield chunk
+
+    return Response(
+        generate_zip(),
+        mimetype='application/zip',
+        headers={
+            'Content-Disposition': 'attachment; filename="music-porter-export.zip"',
+        },
+    )
+
+
 # ══════════════════════════════════════════════════════════════════
 # API: USB
 # ══════════════════════════════════════════════════════════════════
@@ -1534,6 +1590,36 @@ def api_sync_key_prune(key):
             source=ctx.detect_source(),
         )
     return jsonify(result)
+
+
+@api_bp.route('/api/sync/client-record', methods=['POST'])
+def api_sync_client_record():
+    """Record files synced via client-side (browser) sync for tracking."""
+    ctx = _ctx()
+    if not ctx.sync_tracker:
+        return jsonify({'error': 'Sync tracker not available'}), 400
+
+    data = request.get_json(silent=True) or {}
+    sync_key = data.get('sync_key', '')
+    playlist = data.get('playlist', '')
+    files = data.get('files', [])
+
+    if not sync_key or not playlist or not files:
+        return jsonify({'error': 'sync_key, playlist, and files are required'}), 400
+
+    ctx.sync_tracker.record_batch(sync_key, playlist, files)
+
+    if ctx.audit_logger:
+        ctx.audit_logger.log(
+            'client_sync_record',
+            f"Recorded {len(files)} file(s) for '{playlist}' on key '{sync_key}'",
+            'completed',
+            params={'sync_key': sync_key, 'playlist': playlist,
+                    'file_count': len(files)},
+            source=ctx.detect_source(),
+        )
+
+    return jsonify({'ok': True, 'recorded': len(files)})
 
 
 # ══════════════════════════════════════════════════════════════════
