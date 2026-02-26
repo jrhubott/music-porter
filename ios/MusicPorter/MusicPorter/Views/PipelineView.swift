@@ -11,6 +11,8 @@ struct PipelineView: View {
     @State private var syncAfter = false
     @State private var destinations: [SyncDestination] = []
     @State private var selectedDestination: String?
+    @State private var showExportPicker = false
+    @State private var tasks: [TaskInfo] = []
 
     let presets = ["lossless", "high", "medium", "low"]
 
@@ -18,62 +20,155 @@ struct PipelineView: View {
         NavigationStack {
             Form {
                 if !vm.isRunning {
-                    Section("Source") {
-                        Toggle("Process all playlists", isOn: $useAuto)
-
-                        if !useAuto {
-                            Picker("Playlist", selection: $selectedPlaylist) {
-                                Text("None").tag(nil as Playlist?)
-                                ForEach(playlists) { p in
-                                    Text(p.name).tag(p as Playlist?)
-                                }
-                            }
-
-                            TextField("Or enter Apple Music URL", text: $customURL)
-                                .autocorrectionDisabled()
-                                .textInputAutocapitalization(.never)
-                                .keyboardType(.URL)
-                        }
-                    }
-
-                    Section("Options") {
-                        Picker("Quality Preset", selection: $preset) {
-                            ForEach(presets, id: \.self) { Text($0) }
-                        }
-                        Toggle("Sync after processing", isOn: $syncAfter)
-                        if syncAfter && !destinations.isEmpty {
-                            Picker("Destination", selection: $selectedDestination) {
-                                Text("Select...").tag(nil as String?)
-                                ForEach(destinations) { dest in
-                                    Text(dest.name).tag(dest.name as String?)
-                                }
-                            }
-                        }
-                    }
-
-                    Section {
-                        Button {
-                            Task { await runPipeline() }
-                        } label: {
-                            HStack {
-                                Spacer()
-                                Label("Process", systemImage: "play.fill")
-                                    .fontWeight(.semibold)
-                                Spacer()
-                            }
-                        }
-                        .disabled(!canRun)
-                    }
+                    sourceSection
+                    advancedSection
+                    processButton
                 }
 
                 if vm.isRunning || !vm.logMessages.isEmpty {
                     ProgressPanel(vm: vm)
                 }
+
+                postProcessSection
+                taskHistorySection
             }
             .navigationTitle("Process")
             .task { await loadData() }
+            .onChange(of: appState.pendingPipelinePlaylist) { _, pending in
+                if let pending {
+                    selectedPlaylist = pending
+                    useAuto = false
+                    customURL = ""
+                    appState.pendingPipelinePlaylist = nil
+                }
+            }
+            .sheet(isPresented: $showExportPicker) {
+                DocumentExportPicker { url in
+                    showExportPicker = false
+                    if let url {
+                        Task { await exportToFolder(url) }
+                    }
+                }
+            }
         }
     }
+
+    // MARK: - Source
+
+    private var sourceSection: some View {
+        Section("Source") {
+            Toggle("Process all playlists", isOn: $useAuto)
+
+            if !useAuto {
+                Picker("Playlist", selection: $selectedPlaylist) {
+                    Text("None").tag(nil as Playlist?)
+                    ForEach(playlists) { p in
+                        Text(p.name).tag(p as Playlist?)
+                    }
+                }
+
+                TextField("Or enter Apple Music URL", text: $customURL)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+            }
+        }
+    }
+
+    // MARK: - Advanced Options
+
+    private var advancedSection: some View {
+        Section {
+            DisclosureGroup("Advanced Options") {
+                Picker("Quality Preset", selection: $preset) {
+                    ForEach(presets, id: \.self) { Text($0) }
+                }
+                Toggle("Sync after processing", isOn: $syncAfter)
+                if syncAfter && !destinations.isEmpty {
+                    Picker("Destination", selection: $selectedDestination) {
+                        Text("Select...").tag(nil as String?)
+                        ForEach(destinations) { dest in
+                            Text(dest.name).tag(dest.name as String?)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Process Button
+
+    private var processButton: some View {
+        Section {
+            Button {
+                Task { await runPipeline() }
+            } label: {
+                HStack {
+                    Spacer()
+                    Label("Process", systemImage: "play.fill")
+                        .fontWeight(.semibold)
+                    Spacer()
+                }
+            }
+            .disabled(!canRun)
+        }
+    }
+
+    // MARK: - Post-Process Actions
+
+    @ViewBuilder
+    private var postProcessSection: some View {
+        if !vm.isRunning && vm.isCompleted {
+            Section("Next Steps") {
+                Button {
+                    showExportPicker = true
+                } label: {
+                    Label("Export to USB", systemImage: "externaldrive")
+                }
+            }
+        }
+    }
+
+    // MARK: - Task History
+
+    private var taskHistorySection: some View {
+        Section("Recent Operations") {
+            if tasks.isEmpty {
+                Text("No recent operations")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(tasks.prefix(10)) { task in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(task.operation)
+                                .font(.subheadline.weight(.medium))
+                            Spacer()
+                            StatusBadge(
+                                text: task.status,
+                                color: statusColor(task.status))
+                        }
+                        Text(task.description)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if let elapsed = task.elapsed {
+                            Text(String(format: "%.1fs", elapsed))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                if tasks.count > 10 {
+                    NavigationLink("View All") {
+                        OperationsView()
+                    }
+                    .font(.subheadline)
+                }
+            }
+        }
+    }
+
+    // MARK: - Helpers
 
     private var canRun: Bool {
         let hasSource = useAuto || selectedPlaylist != nil || !customURL.isEmpty
@@ -86,9 +181,11 @@ struct PipelineView: View {
     private func loadData() async {
         async let p = appState.apiClient.getPlaylists()
         async let d = appState.apiClient.getSyncDestinations()
+        async let t = appState.apiClient.getTasks()
         playlists = (try? await p) ?? []
         let destResponse = try? await d
         destinations = destResponse?.destinations ?? []
+        tasks = (try? await t) ?? []
     }
 
     private func runPipeline() async {
@@ -101,6 +198,26 @@ struct PipelineView: View {
                 preset: preset,
                 syncDestination: syncDest
             )
+        }
+        // Refresh task history after completion
+        tasks = (try? await appState.apiClient.getTasks()) ?? []
+    }
+
+    private func exportToFolder(_ destDir: URL) async {
+        guard let playlist = selectedPlaylist else { return }
+        let urls = appState.downloadManager.localFiles(playlist: playlist.key)
+        guard !urls.isEmpty else { return }
+        let groups = [PlaylistExportGroup(playlist: playlist.key, urls: urls)]
+        _ = await appState.usbExport.exportFiles(groups: groups, to: destDir)
+    }
+
+    private func statusColor(_ status: String) -> Color {
+        switch status {
+        case "completed": return .green
+        case "running": return .blue
+        case "failed": return .red
+        case "cancelled": return .orange
+        default: return .gray
         }
     }
 }
