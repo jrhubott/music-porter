@@ -1,3 +1,4 @@
+git checkout main
 docker compose down
 git pull --rebase
 docker compose build
