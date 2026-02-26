@@ -88,11 +88,10 @@ struct PipelineView: View {
         async let d = appState.apiClient.getSyncDestinations()
         playlists = (try? await p) ?? []
         let destResponse = try? await d
-        destinations = (destResponse?.saved ?? []) + (destResponse?.usb ?? [])
+        destinations = destResponse?.destinations ?? []
     }
 
     private func runPipeline() async {
-        let syncType = syncAfter ? selectedDestination.map { _ in "saved" } : nil
         let syncDest = syncAfter ? selectedDestination : nil
         await vm.run(api: appState.apiClient) {
             try await appState.apiClient.runPipeline(
@@ -100,7 +99,6 @@ struct PipelineView: View {
                 url: customURL.isEmpty ? nil : customURL,
                 auto: useAuto,
                 preset: preset,
-                syncType: syncType,
                 syncDestination: syncDest
             )
         }

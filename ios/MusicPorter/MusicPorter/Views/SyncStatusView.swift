@@ -9,7 +9,6 @@ struct SyncStatusView: View {
     @State private var usbKeyNames: Set<String> = []
     @State private var vm = OperationViewModel()
     @State private var profile: String = ""
-    @State private var usbDir: String = ""
     @State private var isLoading = false
     @State private var error: String?
     @State private var showDeleteConfirm = false
@@ -187,9 +186,9 @@ struct SyncStatusView: View {
     // MARK: - Playlist Detail
 
     private func detailSection(_ detail: SyncStatusDetail) -> some View {
-        Section("Playlists: \(detail.usbKey)") {
+        Section("Playlists: \(detail.syncKey)") {
             Button {
-                Task { await pruneKey(detail.usbKey) }
+                Task { await pruneKey(detail.syncKey) }
             } label: {
                 Label("Prune Stale Records", systemImage: "eraser")
                     .font(.subheadline)
@@ -232,7 +231,7 @@ struct SyncStatusView: View {
                     }
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) {
-                            playlistToDelete = (detail.usbKey, playlist.name)
+                            playlistToDelete = (detail.syncKey, playlist.name)
                             showDeletePlaylistConfirm = true
                         } label: {
                             Label("Delete", systemImage: "trash")
@@ -240,12 +239,12 @@ struct SyncStatusView: View {
                     }
                     .swipeActions(edge: .leading) {
                         Button {
-                            Task { await syncPlaylist(detail.usbKey, playlist: playlist.name) }
+                            Task { await syncPlaylist(detail.syncKey, playlist: playlist.name) }
                         } label: {
                             Label("Sync", systemImage: "arrow.triangle.2.circlepath")
                         }
                         .tint(.blue)
-                        .disabled(!isKeyAvailable(detail.usbKey) || vm.isRunning)
+                        .disabled(!isKeyAvailable(detail.syncKey) || vm.isRunning)
                     }
                 }
             }
@@ -297,20 +296,13 @@ struct SyncStatusView: View {
             async let k = appState.apiClient.getSyncStatus()
             async let d = appState.apiClient.getSyncDestinations()
             async let st = appState.apiClient.getStatus()
-            async let se = appState.apiClient.getSettings()
             keys = try await k
             let destResponse = try? await d
-            destinations = destResponse?.saved ?? []
-            usbKeyNames = Set((destResponse?.usb ?? []).map { $0.name })
+            let allDests = destResponse?.destinations ?? []
+            destinations = allDests
+            usbKeyNames = Set(allDests.filter { $0.type == "usb" }.map { $0.name })
             if let status = try? await st {
                 profile = status.profile
-            }
-            if let settings = try? await se {
-                if case .string(let dir) = settings.settings["usb_dir"] {
-                    usbDir = dir
-                } else {
-                    usbDir = "RZR/Music"
-                }
             }
         } catch {
             self.error = error.localizedDescription
@@ -375,19 +367,13 @@ struct SyncStatusView: View {
         return destinations.first(where: { $0.name == keyName })?.available == true
     }
 
-    private func destType(for keyName: String) -> String {
-        usbKeyNames.contains(keyName) ? "usb" : "saved"
-    }
-
     // MARK: - Sync Actions
 
     private func syncKey(_ keyName: String) async {
         await vm.run(api: appState.apiClient) {
             try await appState.apiClient.syncToDestination(
                 sourceDir: "export/\(profile)",
-                type: destType(for: keyName),
-                destination: keyName,
-                usbDir: destType(for: keyName) == "usb" ? usbDir : nil
+                destination: keyName
             )
         }
         await load()
@@ -397,9 +383,7 @@ struct SyncStatusView: View {
         await vm.run(api: appState.apiClient) {
             try await appState.apiClient.syncToDestination(
                 sourceDir: "export/\(profile)/\(playlist)",
-                type: destType(for: keyName),
-                destination: keyName,
-                usbDir: destType(for: keyName) == "usb" ? usbDir : nil
+                destination: keyName
             )
         }
         await load()

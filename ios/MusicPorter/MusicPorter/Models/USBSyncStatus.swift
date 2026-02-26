@@ -52,7 +52,7 @@ typealias USBPlaylistSyncInfo = SyncPlaylistInfo
 
 /// Full sync status detail for one sync key.
 struct SyncStatusDetail: Codable {
-    let usbKey: String
+    let syncKey: String
     let lastSyncAt: Double
     let playlists: [SyncPlaylistInfo]
     let totalFiles: Int
@@ -65,7 +65,7 @@ struct SyncStatusDetail: Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case usbKey = "usb_key"
+        case syncKey = "sync_key"
         case lastSyncAt = "last_sync_at"
         case playlists
         case totalFiles = "total_files"
@@ -104,6 +104,5 @@ struct SyncDestination: Identifiable, Codable {
 
 /// Response from GET /api/sync/destinations.
 struct SyncDestinationsResponse: Codable {
-    let saved: [SyncDestination]
-    let usb: [SyncDestination]
+    let destinations: [SyncDestination]
 }

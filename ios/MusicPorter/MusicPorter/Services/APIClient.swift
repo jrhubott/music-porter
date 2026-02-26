@@ -110,15 +110,12 @@ final class APIClient {
     // MARK: - Operations
 
     func runPipeline(playlist: String? = nil, url: String? = nil, auto: Bool = false,
-                     preset: String? = nil, copyToUsb: Bool = false,
-                     syncType: String? = nil, syncDestination: String? = nil) async throws -> String {
+                     preset: String? = nil, syncDestination: String? = nil) async throws -> String {
         var body: [String: Any] = [:]
         if let playlist { body["playlist"] = playlist }
         if let url { body["url"] = url }
         if auto { body["auto"] = true }
         if let preset { body["preset"] = preset }
-        if copyToUsb { body["copy_to_usb"] = true }
-        if let syncType { body["sync_type"] = syncType }
         if let syncDestination { body["sync_destination"] = syncDestination }
         let response: TaskIdResponse = try await postAny("/api/pipeline/run", body: body)
         return response.taskId
@@ -176,11 +173,8 @@ final class APIClient {
         let _: OkResponse = try await delete("/api/sync/destinations/\(name)")
     }
 
-    func syncToDestination(sourceDir: String, type: String, destination: String,
-                           destPath: String? = nil, usbDir: String? = nil) async throws -> String {
-        var body: [String: Any] = ["source_dir": sourceDir, "type": type, "destination": destination]
-        if let destPath { body["dest_path"] = destPath }
-        if let usbDir { body["usb_dir"] = usbDir }
+    func syncToDestination(sourceDir: String, destination: String) async throws -> String {
+        let body: [String: Any] = ["source_dir": sourceDir, "destination": destination]
         let response: TaskIdResponse = try await postAny("/api/sync/run", body: body)
         return response.taskId
     }
@@ -210,40 +204,6 @@ final class APIClient {
 
     func pruneSyncKey(key: String) async throws -> SyncPruneResult {
         try await postAny("/api/sync/keys/\(key)/prune", body: [:] as [String: String])
-    }
-
-    // MARK: - USB (Legacy wrappers)
-
-    func getUSBDrives() async throws -> [String] {
-        try await get("/api/usb/drives")
-    }
-
-    func syncUSB(sourceDir: String, volume: String, usbDir: String? = nil) async throws -> String {
-        try await syncToDestination(sourceDir: sourceDir, type: "usb", destination: volume, usbDir: usbDir)
-    }
-
-    func getUSBSyncStatus() async throws -> [SyncKeySummary] {
-        try await getSyncStatus()
-    }
-
-    func getUSBSyncStatusDetail(key: String) async throws -> SyncStatusDetail {
-        try await getSyncStatusDetail(key: key)
-    }
-
-    func getUSBKeys() async throws -> [SyncKeySummary] {
-        try await getSyncKeys()
-    }
-
-    func deleteUSBKey(key: String) async throws {
-        try await deleteSyncKey(key: key)
-    }
-
-    func deleteUSBPlaylist(key: String, playlist: String) async throws -> Int {
-        try await deleteSyncPlaylist(key: key, playlist: playlist)
-    }
-
-    func pruneUSBKey(key: String) async throws -> SyncPruneResult {
-        try await pruneSyncKey(key: key)
     }
 
     func getFileSyncStatus(playlist: String) async throws -> [String: [String]] {
