@@ -18,6 +18,10 @@ final class AppState {
     var isConnected: Bool { apiClient.isConnected }
     var currentServer: ServerConnection? { apiClient.server }
 
+    // Tab coordination for guided flow
+    var selectedTab: Int = 0
+    var pendingPipelinePlaylist: Playlist?
+
     /// Non-nil when the server's API version doesn't match what this app expects.
     var apiVersionWarning: String?
 

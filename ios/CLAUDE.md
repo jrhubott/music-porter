@@ -4,7 +4,7 @@ Context for the iOS companion app (`ios/MusicPorter/`). See the root `CLAUDE.md`
 
 ## Overview
 
-Native SwiftUI app connecting to music-porter server over local network. Provides mobile interface for browsing playlists, triggering server-side operations, downloading MP3s, and exporting to USB drives.
+Native SwiftUI app connecting to music-porter server over local network. Simplified 3-tab interface focused on the core flow: **Browse Apple Music -> Add Playlist -> Sync to USB**. Also supports downloading MP3s, triggering server-side operations, and audio playback.
 
 ## Requirements
 
@@ -13,7 +13,25 @@ Native SwiftUI app connecting to music-porter server over local network. Provide
 - Apple Developer Program membership for MusicKit entitlement and device testing
 - Server running with `./music-porter server` (not `web`)
 
+## iOS App Versioning
+
+The iOS app has its **own independent version**, decoupled from the server's version.
+
+- Version constant: `MusicPorterApp.appVersion` in `MusicPorterApp.swift`
+- Only bump when iOS code changes — NOT on every server version bump
+- Uses semantic versioning (e.g., `1.1.0`)
+- Displayed in Settings > About
+- `MARKETING_VERSION` in Xcode project.pbxproj is the App Store version (may differ)
+
 ## Architecture
+
+### Navigation Structure (3 tabs)
+
+| Tab | View | Purpose |
+|-----|------|---------|
+| Library | `LibraryView` | Segmented control: "My Playlists" (server playlists with download/export) and "Apple Music" (MusicKit browse/search/add). Guided flow after adding playlists. |
+| Process | `PipelineView` | Simplified pipeline form (playlist picker + Process button). Advanced options behind DisclosureGroup. Embedded task history. Post-process USB export prompt. |
+| Settings | `SettingsView` | Server info, disconnect, sync status nav link, server dashboard nav link, profiles, about (with iOS version). |
 
 ### Models (9 files)
 
@@ -29,7 +47,7 @@ Codable structs matching server JSON responses:
 - `TaskInfo` — Task id, operation, description, status, result, error, elapsed; computed `isRunning`, `isCompleted`, `isFailed`
 - `USBSyncStatus` — `SyncKeySummary`, `SyncPlaylistInfo`, `SyncStatusDetail`, `SyncPruneResult`, `SyncDestination`, `SyncDestinationsResponse`
 
-### Services (7 files)
+### Services (8 files)
 
 Network and platform services:
 
@@ -37,43 +55,63 @@ Network and platform services:
 - `SSEClient` — Swift actor; `events(taskId:)` returns `AsyncStream<SSEEvent>` from `GET /api/stream/<task_id>`; parses `"data: {json}"` lines
 - `ServerDiscovery` — `@MainActor @Observable`; uses `NWBrowser` for `_music-porter._tcp` Bonjour browsing; resolves endpoints to IP:port; 10-second auto-stop
 - `MusicKitService` — `@MainActor @Observable`; `requestAuthorization()`, `fetchLibraryPlaylists()`, `searchPlaylists(query:)` (limit 25); read-only due to DRM
-- `FileDownloadManager` — `@MainActor @Observable`; `downloadFile()`, `downloadAll()` (ZIP), `localFiles()`, `deletePlaylist()`; stores in `~/Documents/MusicPorter/<playlist>/`; background `URLSession`
-- `USBExportService` — `@Observable`; `UIDocumentPickerViewController` integration; `exportFiles()` with progress tracking; security-scoped URL access
+- `FileDownloadManager` — `@MainActor @Observable`; `downloadFile()`, `downloadAll()`, `localFiles()`, `deletePlaylist()`; stores in `~/Documents/MusicPorter/<playlist>/`; background `URLSession`
+- `USBExportService` — `@Observable`; `exportFiles(groups:to:)` creates playlist subdirectories matching server sync behavior; `PlaylistExportGroup` struct for grouped export; security-scoped URL access
+- `AudioPlayerService` — `@MainActor @Observable`; dual-engine playback (AVPlayer for server tracks, ApplicationMusicPlayer for Apple Music); queue management, skip, seek; Now Playing Info Center integration
 - `KeychainService` — Static methods: `save(apiKey:)`, `load()`, `delete()`; service ID: `com.musicporter.apikey`
 
 ### ViewModels (5 files)
 
 `@MainActor @Observable` state management:
 
-- `AppState` — Global state injected via SwiftUI environment; owns all services; `connect()`, `disconnect()`, `attemptAutoReconnect()` (3-second timeout); persists `savedServer` in UserDefaults
+- `AppState` — Global state injected via SwiftUI environment; owns all services; `connect()`, `disconnect()`, `attemptAutoReconnect()` (3-second timeout); tab coordination (`selectedTab`, `pendingPipelinePlaylist`); persists `savedServer` in UserDefaults
 - `DashboardViewModel` — Loads `ServerStatus` and `SummaryResponse` in parallel
-- `PlaylistsViewModel` — Playlists + export directories; add/delete playlist methods
+- `PlaylistsViewModel` — Playlists + export directories + Apple Music state; add/delete playlist methods; guided flow state (`lastAddedPlaylist`, `showProcessPrompt`)
 - `PlaylistDetailViewModel` — Track listing for a single playlist
-- `OperationViewModel` — Operation lifecycle: `run()` triggers API call then SSE streaming; `handleEvent()` processes log/progress/done; `reset()` clears state
+- `OperationViewModel` — Operation lifecycle: `run()` triggers API call then SSE streaming; `handleEvent()` processes log/progress/done; `isCompleted` computed property; `reset()` clears state
 
-### Views (13 files + 3 components)
+### Views
 
 SwiftUI with enforced dark theme:
 
 | View | Purpose |
 |------|---------|
-| `MusicPorterApp` | App entry point; creates `AppState`, injects as environment, enforces `.dark` color scheme |
+| `MusicPorterApp` | App entry point; `appVersion` constant; creates `AppState`, injects as environment, enforces `.dark` color scheme |
 | `ContentView` | Root view: shows `ServerDiscoveryView` if disconnected, `MainTabView` if connected |
-| `MainTabView` | Bottom tab bar: Dashboard, Playlists, Pipeline, Downloads, Settings |
+| `MainTabView` | Bottom tab bar: Library, Process, Settings (3 tabs); MiniPlayer overlay |
+| `LibraryView` | Segmented control ("My Playlists" / "Apple Music"); playlist download/export; Apple Music browse/add; guided flow banner |
+| `PipelineView` | Simplified pipeline form + DisclosureGroup advanced options + task history + post-process USB export |
+| `SettingsView` | Server info, disconnect, sync status nav, server dashboard nav, profiles, about |
 | `ServerDiscoveryView` | Bonjour discovery list + manual IP entry; presents `PairingView` as sheet |
 | `PairingView` | SecureField for API key; validates and stores credentials |
-| `DashboardView` | Server status card, library stats card, sync status, playlist overview; pull-to-refresh |
-| `PlaylistsView` | Playlist list with add (+) and swipe-to-delete; navigates to detail |
+| `DashboardView` | Server status card, library stats, sync status, playlist overview; accessed from Settings |
 | `PlaylistDetailView` | Track list with `TrackRow` components; pull-to-refresh |
-| `PipelineView` | Pipeline form (source, preset, sync toggle) + `ProgressPanel` |
-| `DownloadView` | Server playlists with download buttons; local storage display |
-| `SettingsView` | Server info, profiles, disconnect, navigation to operations/sync status/Apple Music/USB |
-| `OperationsView` | Task history with status badges (green/blue/red/orange) |
-| `AppleMusicBrowserView` | MusicKit authorization, library browse, catalog search, send-to-server |
-| `USBSyncView` | Playlist selection with checkmarks, export button, progress bar |
+| `OperationsView` | Full task history with status badges; accessed from Process tab "View All" |
+| `SyncStatusView` | Sync keys, playlist detail, saved destinations; accessed from Settings |
+| `AppleMusicPlaylistDetailView` | Apple Music playlist track listing with playback |
+| `QRScannerView` | QR code scanner for pairing |
 | `TrackRow` | Reusable: artwork thumbnail (44x44), title, artist, size |
 | `StatusBadge` | Colored capsule badge (Valid/Invalid, Idle/Busy, completed/failed) |
 | `ProgressPanel` | Progress bar + scrollable monospace log; color-coded levels |
+| `MiniPlayerView` | Overlay player: play/pause, skip, seek, artwork |
+| `DocumentExportPicker` | UIDocumentPickerViewController wrapper for USB folder selection |
+
+### Guided Flow
+
+When a user adds a playlist from Apple Music:
+1. Success banner appears: "Playlist added! Process it now?"
+2. "Process Now" button sets `pendingPipelinePlaylist` on `AppState` and switches to Process tab
+3. PipelineView detects the pending playlist and pre-selects it
+4. After processing completes, "Export to USB" button appears
+
+### USB Export Directory Structure
+
+Files are exported with playlist subdirectories matching the server's sync behavior:
+```
+dest/<playlist_name>/Artist - Title.mp3
+```
+
+`USBExportService.exportFiles(groups:to:)` accepts `[PlaylistExportGroup]` (playlist name + file URLs) and creates subdirectories automatically. The user is informed that subdirectories will be created within their chosen location.
 
 ## Server-Side Requirements
 
@@ -158,6 +196,7 @@ Added for the iOS companion app (in addition to existing web dashboard endpoints
 - `FileDownloadManager` uses background `URLSessionConfiguration` for resilient downloads
 - `AppState` is injected as SwiftUI environment object; all services instantiated there
 - Dark color scheme enforced at app level via `.preferredColorScheme(.dark)`
+- Tab coordination: `AppState.selectedTab` and `pendingPipelinePlaylist` enable guided flow between Library and Process tabs
 
 ## Additional Resources
 

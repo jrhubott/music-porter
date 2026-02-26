@@ -20,31 +20,27 @@ struct ContentView: View {
     }
 }
 
-/// Main app tab navigation.
+/// Main app tab navigation — 3 tabs: Library, Process, Settings.
 struct MainTabView: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        TabView {
-            DashboardView()
+        @Bindable var state = appState
+        TabView(selection: $state.selectedTab) {
+            LibraryView()
                 .safeAreaInset(edge: .bottom) { miniPlayerSpacer }
-                .tabItem { Label("Dashboard", systemImage: "gauge.medium") }
-
-            PlaylistsView()
-                .safeAreaInset(edge: .bottom) { miniPlayerSpacer }
-                .tabItem { Label("Playlists", systemImage: "music.note.list") }
-
-            AppleMusicView()
-                .safeAreaInset(edge: .bottom) { miniPlayerSpacer }
-                .tabItem { Label("Apple Music", systemImage: "music.quarternote.3") }
+                .tabItem { Label("Library", systemImage: "music.note.list") }
+                .tag(0)
 
             PipelineView()
                 .safeAreaInset(edge: .bottom) { miniPlayerSpacer }
                 .tabItem { Label("Process", systemImage: "arrow.triangle.2.circlepath") }
+                .tag(1)
 
             SettingsView()
                 .safeAreaInset(edge: .bottom) { miniPlayerSpacer }
                 .tabItem { Label("Settings", systemImage: "gear") }
+                .tag(2)
         }
         .overlay(alignment: .bottom) {
             if appState.audioPlayer.hasCurrentTrack {

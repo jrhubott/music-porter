@@ -22,6 +22,19 @@ struct SettingsView: View {
                     }
                 }
 
+                Section("Sync & Status") {
+                    NavigationLink {
+                        SyncStatusView()
+                    } label: {
+                        Label("Sync Status", systemImage: "arrow.left.arrow.right")
+                    }
+                    NavigationLink {
+                        DashboardView()
+                    } label: {
+                        Label("Server Dashboard", systemImage: "gauge.medium")
+                    }
+                }
+
                 if let settings {
                     Section("Profiles") {
                         ForEach(Array(settings.profiles.keys.sorted()), id: \.self) { name in
@@ -37,17 +50,8 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("Operations") {
-                    NavigationLink("Task History") {
-                        OperationsView()
-                    }
-                    NavigationLink("Sync Status") {
-                        SyncStatusView()
-                    }
-                }
-
                 Section("About") {
-                    LabeledContent("App Version", value: "1.0.0")
+                    LabeledContent("App Version", value: MusicPorterApp.appVersion)
                 }
 
                 if let error {

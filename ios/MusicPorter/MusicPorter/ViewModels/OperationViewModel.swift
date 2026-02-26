@@ -4,6 +4,7 @@ import Foundation
 @MainActor @Observable
 final class OperationViewModel {
     var isRunning = false
+    var isCompleted: Bool { status == "completed" }
     var taskId: String?
     var logMessages: [LogEntry] = []
     var progress: Double = 0
