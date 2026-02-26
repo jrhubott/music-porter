@@ -336,16 +336,12 @@ def render_sync_summary(r) -> None:
     print("=" * 60)
 
 
-# Backwards compatibility alias
-render_usb_sync_summary = render_sync_summary
-
-
 def render_post_sync_tracking_summary(status) -> None:
     """Render compact sync tracking summary after sync."""
     print()
     print("  SYNC TRACKING")
     print("─" * 35)
-    print(f"  Sync key:           {status.usb_key}")
+    print(f"  Sync key:           {status.sync_key}")
     print(f"  Synced files:       {status.synced_files} / {status.total_files}")
     print(f"  Remaining new:      {status.new_files}")
     print("─" * 35)
@@ -379,15 +375,11 @@ def render_sync_status_summary(all_status: list) -> None:
     print()
 
 
-# Backwards compatibility alias
-render_usb_sync_status_summary = render_sync_status_summary
-
-
 def render_sync_status_detail(status) -> None:
     """Render per-playlist breakdown for one sync key."""
     print()
     print("╔" + "═" * 60 + "╗")
-    title = f"SYNC STATUS: {status.usb_key}"
+    title = f"SYNC STATUS: {status.sync_key}"
     print("║" + title.center(60) + "║")
     print("╚" + "═" * 60 + "╝")
     print()
@@ -422,10 +414,6 @@ def render_sync_status_detail(status) -> None:
     print()
 
 
-# Backwards compatibility alias
-render_usb_sync_status_detail = render_sync_status_detail
-
-
 def render_sync_keys_list(keys: list) -> None:
     """Render simple list of tracked sync keys."""
     print()
@@ -441,10 +429,6 @@ def render_sync_keys_list(keys: list) -> None:
             last = "Never"
         print(f"    {k['key_name']:<20}  {k['total_synced_files']:>5} files  Last sync: {last}")
     print()
-
-
-# Backwards compatibility alias
-render_usb_keys_list = render_sync_keys_list
 
 
 def render_destinations_list(destinations) -> None:
@@ -669,7 +653,7 @@ def _render_default_summary(r: LibrarySummaryResult) -> None:
 
     # USB sync status
     try:
-        _sync_tracker = USBSyncTracker()
+        _sync_tracker = SyncTracker()
         _usb_keys = _sync_tracker.get_all_keys_summary(r.export_dir)
         if _usb_keys:
             print("─" * 60)
@@ -1393,15 +1377,14 @@ class InteractiveMenu:
         result = orchestrator.run_full_pipeline(
             playlist=str(index + 1),
             auto=False,
-            copy_to_usb=False,
             dry_run=dry_run,
             verbose=verbose
         )
         render_pipeline_summary(result)
 
-        # Ask about USB copy
+        # Ask about sync
         if result.success and not dry_run:
-            self._ask_copy_to_usb(
+            self._ask_sync(
                 get_export_dir(self.output_profile.name, playlist.key),
                 dry_run
             )
@@ -1436,7 +1419,6 @@ class InteractiveMenu:
             result = orchestrator.run_full_pipeline(
                 playlist=str(i + 1),
                 auto=True,
-                copy_to_usb=False,
                 dry_run=dry_run,
                 verbose=verbose
             )
@@ -1455,7 +1437,7 @@ class InteractiveMenu:
 
         # Ask about USB copy after summary
         if not dry_run:
-            self._ask_copy_to_usb(get_export_dir(self.output_profile.name), dry_run)
+            self._ask_sync(get_export_dir(self.output_profile.name), dry_run)
 
         return aggregate_stats.failed_playlists == 0
 
@@ -1485,15 +1467,14 @@ class InteractiveMenu:
             result = orchestrator.run_full_pipeline(
                 url=url,
                 auto=False,
-                copy_to_usb=False,
                 dry_run=dry_run,
                 verbose=verbose
             )
             render_pipeline_summary(result)
 
-            # Ask about USB copy
+            # Ask about sync
             if result.success and not dry_run:
-                self._ask_copy_to_usb(
+                self._ask_sync(
                     get_export_dir(self.output_profile.name, orchestrator.stats.playlist_key),
                     dry_run
                 )
@@ -1511,15 +1492,15 @@ class InteractiveMenu:
         sync_mgr = SyncManager(self.logger, prompt_handler=self.prompt_handler,
                                 display_handler=self.display_handler,
                                 sync_tracker=self.sync_tracker)
-        dest_path, dest_key, is_usb = sync_mgr.select_destination(self.config)
-        if dest_path is None:
+        dest = sync_mgr.select_destination(self.config,
+                                           output_profile=self.output_profile)
+        if dest is None:
             self.logger.info("Cancelled")
             return False
-        usb_dir = DEFAULT_USB_DIR if is_usb else None
         result = sync_mgr.sync_to_destination(
             get_export_dir(self.output_profile.name),
-            dest_path=dest_path, dest_key=dest_key,
-            is_usb=is_usb, dry_run=dry_run, usb_dir=usb_dir
+            dest_path=dest.path, dest_key=dest.name,
+            dry_run=dry_run
         )
         render_sync_summary(result)
         return result.success
@@ -1769,21 +1750,18 @@ class InteractiveMenu:
                 sync_mgr = SyncManager(self.logger, prompt_handler=self.prompt_handler,
                                        display_handler=self.display_handler,
                                        sync_tracker=self.sync_tracker)
-                dest_path, dest_key, is_usb = sync_mgr.select_destination(self.config)
-                if dest_path is None:
+                dest = sync_mgr.select_destination(self.config,
+                                                   output_profile=self.output_profile)
+                if dest is None:
                     self.logger.info("Cancelled")
                     return
-                usb_dir = DEFAULT_USB_DIR if is_usb else None
                 result = sync_mgr.sync_to_destination(
-                    source_dir, dest_path=dest_path, dest_key=dest_key,
-                    is_usb=is_usb, dry_run=dry_run, usb_dir=usb_dir)
+                    source_dir, dest_path=dest.path, dest_key=dest.name,
+                    dry_run=dry_run)
                 render_sync_summary(result)
         except KeyboardInterrupt:
             print()
             pass
-
-    # Backwards compat
-    _ask_copy_to_usb = _ask_sync
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1817,19 +1795,14 @@ def resolve_quality_preset(args, logger, output_profile=None):
 
 def resolve_config_settings(args, config):
     """
-    Resolve output_type, usb_dir, workers, dir_structure, and filename_format
+    Resolve output_type, workers, dir_structure, and filename_format
     from CLI > config.yaml > constant/profile default.
-    Returns (output_type, usb_dir, workers, dir_structure, filename_format) tuple.
+    Returns (output_type, workers, dir_structure, filename_format) tuple.
     """
     # output_type: CLI > config > DEFAULT_OUTPUT_TYPE
     output_type = args.output_type
     if output_type is None:
         output_type = config.get_setting('output_type', DEFAULT_OUTPUT_TYPE)
-
-    # usb_dir: CLI > config > DEFAULT_USB_DIR
-    usb_dir = getattr(args, 'usb_dir', None)
-    if usb_dir is None:
-        usb_dir = config.get_setting('usb_dir', DEFAULT_USB_DIR)
 
     # workers: CLI > config > DEFAULT_WORKERS
     workers = args.workers
@@ -1846,7 +1819,7 @@ def resolve_config_settings(args, config):
     if filename_format is None:
         filename_format = config.get_setting('filename_format', None)
 
-    return output_type, usb_dir, workers, dir_structure, filename_format
+    return output_type, workers, dir_structure, filename_format
 
 
 def _create_quality_args_parser():
@@ -1873,10 +1846,9 @@ def _create_cookie_args_parser():
 
 
 def _create_usb_args_parser():
-    """Create shared parent parser for USB-related arguments."""
+    """Create shared parent parser for USB-related arguments (deprecated, kept for compat)."""
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument('--usb-dir', default=None,
-                        help=f'USB directory (default: {DEFAULT_USB_DIR})')
+    parser.add_argument('--usb-dir', default=None, help=argparse.SUPPRESS)
     return parser
 
 
@@ -1905,7 +1877,6 @@ SETTINGS
   Key              Type     Default          Description
   ─────────────────────────────────────────────────────────────────
   output_type      string   ride-command     Active output profile name
-  usb_dir          string   RZR/Music        USB target subdirectory
   workers          int      (CPU count)      Parallel conversion threads (>= 1)
   dir_structure    string   (from profile)   flat | nested-artist | nested-artist-album
   filename_format  string   (from profile)   full | title-only
@@ -1954,7 +1925,6 @@ EXAMPLES
 
 VALID KEYS FOR get/set
   output_type    Active output profile name
-  usb_dir        USB target subdirectory
   workers        Parallel conversion threads (integer >= 1)
   external_url   Public URL for QR code pairing (reverse proxy / Docker)
   server_name    Custom server display name (default: hostname)
@@ -2038,7 +2008,7 @@ def handle_config_command(args, config, config_load_error, config_parser):
         print()
         sys.exit(0)
 
-    CONFIGURABLE_KEYS = {'output_type', 'usb_dir', 'workers', 'external_url', 'server_name'}
+    CONFIGURABLE_KEYS = {'output_type', 'workers', 'external_url', 'server_name'}
 
     if action == 'get':
         if config_load_error:
@@ -2167,8 +2137,6 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
     pipeline_parser.add_argument('--url', help='Apple Music playlist URL')
     pipeline_parser.add_argument('--auto', action='store_true',
                                 help='Process all playlists without prompting')
-    pipeline_parser.add_argument('--copy-to-usb', action='store_true',
-                                help='Copy to USB drive after processing')
     pipeline_parser.add_argument('--sync-dest', default=None, metavar='DEST',
                                 help='Sync to destination (saved name or path) after processing')
     pipeline_parser.add_argument('--no-cover-art', action='store_true',
@@ -2233,7 +2201,6 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
 
     # ── sync ──────────────────────────────────────────────────────
     sync_parser = subparsers.add_parser('sync',
-        parents=[usb_parent],
         help='Sync files to a destination (USB, saved, or custom path)')
     sync_parser.add_argument('source_dir', nargs='?', default=None,
                             help='Source directory to sync (default: export/<profile>/)')
@@ -2247,20 +2214,20 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
                             help='Remove a saved sync destination')
     sync_parser.add_argument('--status', action='store_true',
                             help='Show sync tracking status')
-    sync_parser.add_argument('--usb-key', default=None,
+    sync_parser.add_argument('--sync-key', default=None,
                             help='Show detail for a specific sync key')
+    sync_parser.add_argument('--usb-key', default=None,
+                            help=argparse.SUPPRESS, dest='sync_key_alias')
     sync_parser.add_argument('--delete-key', default=None,
                             help='Delete tracking data for a sync key')
     sync_parser.add_argument('--delete-playlist', default=None,
-                            help='Delete tracking for a playlist (requires --usb-key)')
+                            help='Delete tracking for a playlist (requires --sync-key)')
     sync_parser.add_argument('--prune', action='store_true',
                             help='Remove stale records for files no longer in export')
     sync_parser.add_argument('--list-keys', action='store_true',
                             help='List all tracked sync keys')
 
-    # Hidden aliases for backwards compatibility
-    subparsers.add_parser('sync-usb', parents=[usb_parent],
-        help=argparse.SUPPRESS)
+    # Hidden alias for backwards compatibility
     subparsers.add_parser('sync-status', help=argparse.SUPPRESS)
 
     # ── cover-art ─────────────────────────────────────────────────
@@ -2390,12 +2357,12 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
     # config get
     config_get = config_sub.add_parser('get', help='Get a configuration value')
     config_get.add_argument('key',
-                            help='Setting name (output_type, usb_dir, workers, external_url, server_name)')
+                            help='Setting name (output_type, workers, external_url, server_name)')
 
     # config set
     config_set = config_sub.add_parser('set', help='Set a configuration value')
     config_set.add_argument('key',
-                            help='Setting name (output_type, usb_dir, workers, external_url, server_name)')
+                            help='Setting name (output_type, workers, external_url, server_name)')
     config_set.add_argument('value', help='Value to set')
 
     # ── Scheduler ──
@@ -2672,7 +2639,7 @@ def main():
     config.logger = logger
 
     # Resolve settings: CLI > config.yaml > hardcoded constant
-    output_type, usb_dir, workers, dir_structure, filename_format = resolve_config_settings(args, config)
+    output_type, workers, dir_structure, filename_format = resolve_config_settings(args, config)
     output_profile = OUTPUT_PROFILES[output_type]
 
     # Apply CLI/config overrides to profile (creates a modified copy if needed)
@@ -2795,11 +2762,10 @@ def main():
     print(f"  Logs:       {DEFAULT_LOG_DIR}/")
     print(f"  Config:     {DEFAULT_CONFIG_FILE}")
     print(f"  Cookies:    {DEFAULT_COOKIES}")
-    print(f"  USB Target: {usb_dir}")
     print()  # Blank line after paths
 
     # Log to file
-    logger.file_info(f"Default paths: downloads={DEFAULT_MUSIC_DIR}, exports={export_path_display}, logs={DEFAULT_LOG_DIR}, config={DEFAULT_CONFIG_FILE}, cookies={DEFAULT_COOKIES}, usb={usb_dir}")
+    logger.file_info(f"Default paths: downloads={DEFAULT_MUSIC_DIR}, exports={export_path_display}, logs={DEFAULT_LOG_DIR}, config={DEFAULT_CONFIG_FILE}, cookies={DEFAULT_COOKIES}")
 
     # Route to appropriate handlers based on command
     if args.command == 'convert':
@@ -2960,34 +2926,19 @@ def main():
             logger.error("Either --playlist or --url must be specified")
             sys.exit(1)
 
-    elif args.command in ('sync', 'sync-usb', 'sync-status'):
-        # Unified sync handler (replaces sync-usb and sync-status)
-        sync_tracker = USBSyncTracker()
+    elif args.command in ('sync', 'sync-status'):
+        # Unified sync handler
+        sync_tracker = SyncTracker()
         export_dir = get_export_dir(output_profile.name)
-
-        # Backwards compat: sync-usb → sync to USB
-        if args.command == 'sync-usb':
-            source_dir = getattr(args, 'source_dir', None) or export_dir
-            sync_mgr = SyncManager(logger, prompt_handler=cli_prompt,
-                                   display_handler=cli_display,
-                                   sync_tracker=sync_tracker)
-            result = sync_mgr.sync_to_usb(source_dir, usb_dir=usb_dir,
-                                           dry_run=args.dry_run)
-            render_sync_summary(result)
-            if result.success and not args.dry_run:
-                try:
-                    tracking_status = sync_tracker.get_sync_status(
-                        result.dest_key, export_dir)
-                    render_post_sync_tracking_summary(tracking_status)
-                except Exception:
-                    pass
-            sys.exit(0 if result.success else 1)
 
         # Backwards compat: sync-status → sync --status
         if args.command == 'sync-status':
             all_status = sync_tracker.get_all_keys_summary(export_dir)
             render_sync_status_summary(all_status)
             sys.exit(0)
+
+        # Resolve --sync-key (or hidden --usb-key alias)
+        sync_key = getattr(args, 'sync_key', None) or getattr(args, 'sync_key_alias', None)
 
         # ── Destination management subcommands ───────────────────
         if getattr(args, 'list_destinations', False):
@@ -3016,28 +2967,26 @@ def main():
             sys.exit(0)
 
         if getattr(args, 'delete_playlist', None):
-            if not getattr(args, 'usb_key', None):
-                logger.error("--delete-playlist requires --usb-key")
+            if not sync_key:
+                logger.error("--delete-playlist requires --sync-key")
                 sys.exit(1)
             playlist_name = args.delete_playlist
-            key_name = args.usb_key
             if cli_prompt.confirm(
-                    f"Delete tracking for playlist '{playlist_name}' on key '{key_name}'?",
+                    f"Delete tracking for playlist '{playlist_name}' on key '{sync_key}'?",
                     default=False):
-                count = sync_tracker.delete_playlist(key_name, playlist_name)
-                logger.ok(f"Deleted {count} tracking record(s) for '{playlist_name}' on '{key_name}'")
+                count = sync_tracker.delete_playlist(sync_key, playlist_name)
+                logger.ok(f"Deleted {count} tracking record(s) for '{playlist_name}' on '{sync_key}'")
             else:
                 logger.info("Cancelled")
             sys.exit(0)
 
         if getattr(args, 'prune', False):
-            usb_key = getattr(args, 'usb_key', None)
-            if usb_key:
-                result = sync_tracker.prune_stale(usb_key, export_dir)
+            if sync_key:
+                result = sync_tracker.prune_stale(sync_key, export_dir)
                 if result['pruned_count'] == 0:
-                    logger.ok(f"No stale records found for '{usb_key}'")
+                    logger.ok(f"No stale records found for '{sync_key}'")
                 else:
-                    logger.ok(f"Pruned {result['pruned_count']} stale record(s) for '{usb_key}'"
+                    logger.ok(f"Pruned {result['pruned_count']} stale record(s) for '{sync_key}'"
                               f" ({', '.join(result['playlists_affected'])})")
             else:
                 result = sync_tracker.prune_all_keys(export_dir)
@@ -3056,9 +3005,8 @@ def main():
             sys.exit(0)
 
         if getattr(args, 'status', False):
-            usb_key = getattr(args, 'usb_key', None)
-            if usb_key:
-                status = sync_tracker.get_sync_status(usb_key, export_dir)
+            if sync_key:
+                status = sync_tracker.get_sync_status(sync_key, export_dir)
                 render_sync_status_detail(status)
             else:
                 all_status = sync_tracker.get_all_keys_summary(export_dir)
@@ -3076,31 +3024,31 @@ def main():
             # Try saved destination first, then treat as path
             saved = config.get_destination(dest_arg)
             if saved:
-                dest_path, dest_key, is_usb = saved.path, saved.name, False
+                dest = saved
             elif Path(dest_arg).is_dir():
                 dest_key = SyncManager._sanitize_dest_name(Path(dest_arg).name)
-                dest_path, is_usb = dest_arg, False
+                dest = SyncDestination(dest_key, f'folder://{dest_arg}')
                 # Auto-save custom path as a destination for reuse
                 if not config.get_destination(dest_key):
-                    config.add_destination(dest_key, dest_arg)
+                    config.add_destination(dest_key, dest.path)
             else:
                 logger.error(f"'{dest_arg}' is not a saved destination name or valid directory path")
                 sys.exit(1)
         else:
             # Interactive destination picker
-            dest_path, dest_key, is_usb = sync_mgr.select_destination(config)
-            if dest_path is None:
+            dest = sync_mgr.select_destination(config,
+                                               output_profile=output_profile)
+            if dest is None:
                 logger.info("Cancelled")
                 sys.exit(0)
 
-        sync_usb_dir = usb_dir if is_usb else None
         result = sync_mgr.sync_to_destination(
-            source_dir, dest_path=dest_path, dest_key=dest_key,
-            is_usb=is_usb, dry_run=args.dry_run, usb_dir=sync_usb_dir)
+            source_dir, dest_path=dest.path, dest_key=dest.name,
+            dry_run=args.dry_run)
         render_sync_summary(result)
         if result.success and not args.dry_run:
             try:
-                tracking_status = sync_tracker.get_sync_status(dest_key, export_dir)
+                tracking_status = sync_tracker.get_sync_status(dest.name, export_dir)
                 render_post_sync_tracking_summary(tracking_status)
             except Exception:
                 pass
@@ -3316,24 +3264,22 @@ def main():
 
         embed_cover_art = not getattr(args, 'no_cover_art', False)
         quality_preset = resolve_quality_preset(args, logger, output_profile)
-        sync_tracker = USBSyncTracker()
+        sync_tracker = SyncTracker()
 
         # Resolve --sync-dest if provided
-        sync_dest = getattr(args, 'sync_dest', None)
-        sync_dest_path = None
-        sync_dest_is_usb = False
-        if sync_dest:
-            saved = config.get_destination(sync_dest)
+        sync_destination = None
+        sync_dest_arg = getattr(args, 'sync_dest', None)
+        if sync_dest_arg:
+            saved = config.get_destination(sync_dest_arg)
             if saved:
-                sync_dest_path = saved.path
-            elif Path(sync_dest).is_dir():
-                sync_dest_path = sync_dest
-                sync_dest = SyncManager._sanitize_dest_name(Path(sync_dest).name)
-                # Auto-save custom path as a destination for reuse
-                if not config.get_destination(sync_dest):
-                    config.add_destination(sync_dest, sync_dest_path)
+                sync_destination = saved
+            elif Path(sync_dest_arg).is_dir():
+                dest_key = SyncManager._sanitize_dest_name(Path(sync_dest_arg).name)
+                sync_destination = SyncDestination(dest_key, f'folder://{sync_dest_arg}')
+                if not config.get_destination(dest_key):
+                    config.add_destination(dest_key, sync_destination.path)
             else:
-                logger.error(f"'{sync_dest}' is not a saved destination or valid path")
+                logger.error(f"'{sync_dest_arg}' is not a saved destination or valid path")
                 sys.exit(1)
 
         orchestrator = PipelineOrchestrator(logger, deps, config,
@@ -3363,11 +3309,7 @@ def main():
                 pipeline_result = orchestrator.run_full_pipeline(
                     playlist=str(i + 1),
                     auto=True,
-                    copy_to_usb=args.copy_to_usb,
-                    usb_dir=usb_dir,
-                    sync_dest=sync_dest,
-                    sync_dest_path=sync_dest_path,
-                    sync_dest_is_usb=sync_dest_is_usb,
+                    sync_destination=sync_destination,
                     dry_run=args.dry_run,
                     verbose=args.verbose,
                     quality_preset=quality_preset,
@@ -3392,11 +3334,7 @@ def main():
                 playlist=args.playlist,
                 url=args.url,
                 auto=False,
-                copy_to_usb=args.copy_to_usb,
-                usb_dir=usb_dir,
-                sync_dest=sync_dest,
-                sync_dest_path=sync_dest_path,
-                sync_dest_is_usb=sync_dest_is_usb,
+                sync_destination=sync_destination,
                 dry_run=args.dry_run,
                 verbose=args.verbose,
                 quality_preset=quality_preset,
@@ -3459,7 +3397,7 @@ def main():
         # Display dependency summary
         render_dependency_check(deps.get_status(config))
 
-        sync_tracker = USBSyncTracker()
+        sync_tracker = SyncTracker()
         menu = InteractiveMenu(logger, config, deps, workers=workers,
                                output_profile=output_profile,
                                prompt_handler=cli_prompt,
