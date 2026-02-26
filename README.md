@@ -333,7 +333,7 @@ The tool includes intelligent cookie management to prevent authentication failur
 │   │   └── Pop_Workout/             # "Artist - Title.mp3"
 │   └── basic/                       # Basic profile exports
 │       └── Pop_Workout/             # "Artist - Title.mp3"
-├── logs/                            # Execution logs (timestamped)
+├── logs/                            # Execution logs (daily rotation)
 ├── .venv/                           # Python virtual environment
 └── docs/                            # Documentation
 ```
@@ -446,7 +446,7 @@ The tool uses a "hard gate" protection system for original metadata:
 
 ## Version
 
-Current version: **v2.28.0**
+Current version: **v2.31.0**
 
 ## License
 
