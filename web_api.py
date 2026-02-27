@@ -555,7 +555,8 @@ def api_settings_get():
         name: {'description': p.description, 'quality_preset': p.quality_preset,
                'artwork_size': p.artwork_size, 'id3_version': p.id3_version,
                'directory_structure': p.directory_structure,
-               'filename_format': p.filename_format}
+               'filename_format': p.filename_format,
+               'usb_dir': p.usb_dir}
         for name, p in mp.OUTPUT_PROFILES.items()
     }
     return jsonify({
