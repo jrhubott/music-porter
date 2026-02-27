@@ -107,25 +107,60 @@ final class APIClient {
         server?.apiURL(path: "api/files/\(playlist)/download-all")
     }
 
+    // MARK: - EQ Presets
+
+    func getEQPresets(profile: String? = nil) async throws -> EQPresetsResponse {
+        var path = "/api/eq"
+        if let profile { path += "?profile=\(profile)" }
+        return try await get(path)
+    }
+
+    func setEQPreset(profile: String, playlist: String? = nil, eq: EQConfig) async throws {
+        var body: [String: Any] = [
+            "profile": profile,
+            "loudnorm": eq.loudnorm,
+            "bass_boost": eq.bassBoost,
+            "treble_boost": eq.trebleBoost,
+            "compressor": eq.compressor,
+        ]
+        if let playlist { body["playlist"] = playlist }
+        let _: OkResponse = try await postAny("/api/eq", body: body)
+    }
+
+    func deleteEQPreset(profile: String, playlist: String? = nil) async throws {
+        var body: [String: Any] = ["profile": profile]
+        if let playlist { body["playlist"] = playlist }
+        let _: OkResponse = try await deleteAny("/api/eq", body: body)
+    }
+
+    func resolveEQ(profile: String, playlist: String? = nil) async throws -> EQResolveResponse {
+        var path = "/api/eq/resolve?profile=\(profile)"
+        if let playlist { path += "&playlist=\(playlist)" }
+        return try await get(path)
+    }
+
     // MARK: - Operations
 
     func runPipeline(playlist: String? = nil, url: String? = nil, auto: Bool = false,
-                     preset: String? = nil, syncDestination: String? = nil) async throws -> String {
+                     preset: String? = nil, syncDestination: String? = nil,
+                     eq: EQConfig? = nil) async throws -> String {
         var body: [String: Any] = [:]
         if let playlist { body["playlist"] = playlist }
         if let url { body["url"] = url }
         if auto { body["auto"] = true }
         if let preset { body["preset"] = preset }
         if let syncDestination { body["sync_destination"] = syncDestination }
+        if let eqDict = eq?.toDict() { body["eq"] = eqDict }
         let response: TaskIdResponse = try await postAny("/api/pipeline/run", body: body)
         return response.taskId
     }
 
     func runConvert(inputDir: String, outputDir: String? = nil, preset: String = "lossless",
-                    force: Bool = false) async throws -> String {
+                    force: Bool = false, eq: EQConfig? = nil) async throws -> String {
         var body: [String: Any] = ["input_dir": inputDir, "preset": preset]
         if let outputDir { body["output_dir"] = outputDir }
         if force { body["force"] = true }
+        if let eqDict = eq?.toDict() { body["eq"] = eqDict }
         let response: TaskIdResponse = try await postAny("/api/convert/run", body: body)
         return response.taskId
     }
@@ -309,6 +344,14 @@ final class APIClient {
         return try decodeResponse(data, response: response)
     }
 
+    private func deleteAny<T: Decodable>(_ path: String, body: [String: Any]) async throws -> T {
+        var request = try makeRequest(path, method: "DELETE")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await session.data(for: request)
+        try checkResponse(response, data: data)
+        return try decodeResponse(data, response: response)
+    }
+
     private func decodeResponse<T: Decodable>(_ data: Data, response: URLResponse) throws -> T {
         do {
             return try JSONDecoder().decode(T.self, from: data)
@@ -408,6 +451,26 @@ struct DeleteDataResponse: Codable {
         case configRemoved = "config_removed"
         case filesDeleted = "files_deleted"
         case bytesFreed = "bytes_freed"
+    }
+}
+
+struct EQPresetsResponse: Codable {
+    let configs: [EQPresetEntry]
+}
+
+struct EQPresetEntry: Codable, Identifiable {
+    var id: String { "\(profile)_\(playlist ?? "_default")" }
+    let profile: String
+    let playlist: String?
+    let loudnorm: Bool
+    let bassBoost: Bool
+    let trebleBoost: Bool
+    let compressor: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case profile, playlist, loudnorm, compressor
+        case bassBoost = "bass_boost"
+        case trebleBoost = "treble_boost"
     }
 }
 

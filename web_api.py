@@ -374,6 +374,8 @@ def api_convert_batch():
     verbose = data.get('verbose', False)
     preset = data.get('preset', 'lossless')
     no_cover_art = data.get('no_cover_art', False)
+    eq_data = data.get('eq', {})
+    no_eq = data.get('no_eq', False)
 
     if not playlists:
         return jsonify({'error': 'playlists list is required'}), 400
@@ -403,6 +405,7 @@ def api_convert_batch():
 
         total_success = 0
         total_failed = 0
+        eq_mgr = mp.EQConfigManager()
 
         for i, key in enumerate(playlists):
             if task.cancel_event.is_set():
@@ -410,6 +413,15 @@ def api_convert_batch():
             logger.info(f"[{i+1}/{len(playlists)}] Converting {key}...")
             input_dir = str(ctx.project_root / mp.DEFAULT_MUSIC_DIR / key)
             out = mp.get_export_dir(profile.name, key)
+
+            # Resolve EQ per playlist
+            if no_eq:
+                eq_config = mp.EQConfig()
+            elif eq_data and any(eq_data.values()):
+                eq_config = mp.EQConfig.from_dict(eq_data)
+            else:
+                eq_config = eq_mgr.get_eq(profile.name, key)
+
             converter = mp.Converter(
                 logger, quality_preset=preset, workers=workers,
                 embed_cover_art=not no_cover_art, output_profile=profile,
@@ -417,6 +429,7 @@ def api_convert_batch():
                 cancel_event=task.cancel_event,
                 audit_logger=ctx.audit_logger,
                 audit_source=source,
+                eq_config=eq_config,
             )
             result = converter.convert(input_dir, out, force=force,
                                        dry_run=dry_run, verbose=verbose)
@@ -804,6 +817,8 @@ def api_pipeline_run():
     sync_dest_name = data.get('sync_destination')
     dir_structure = data.get('dir_structure')
     filename_format = data.get('filename_format')
+    eq_data = data.get('eq', {})
+    no_eq = data.get('no_eq', False)
 
     if not auto and not playlist_key and not url:
         return jsonify({'error': 'Specify playlist, url, or auto'}), 400
@@ -834,6 +849,15 @@ def api_pipeline_run():
         quality_preset = preset or profile.quality_preset
         display = ctx.make_display_handler(task_id)
         task = ctx.task_manager.get(task_id)
+
+        # Resolve EQ config
+        eq_mgr = mp.EQConfigManager()
+        eq_cli_override = None
+        if no_eq:
+            eq_cli_override = mp.EQConfig()
+        elif eq_data and any(eq_data.values()):
+            eq_cli_override = mp.EQConfig.from_dict(eq_data)
+
         orchestrator = mp.PipelineOrchestrator(
             logger, deps, config,
             quality_preset=quality_preset,
@@ -844,6 +868,8 @@ def api_pipeline_run():
             audit_logger=ctx.audit_logger,
             audit_source=source,
             sync_tracker=ctx.sync_tracker,
+            eq_config_manager=eq_mgr,
+            eq_config_override=eq_cli_override,
         )
 
         # Resolve sync destination by name
@@ -907,6 +933,8 @@ def api_convert_run():
     no_cover_art = data.get('no_cover_art', False)
     dir_structure = data.get('dir_structure')
     filename_format = data.get('filename_format')
+    eq_data = data.get('eq', {})
+    no_eq = data.get('no_eq', False)
 
     if not input_dir:
         return jsonify({'error': 'input_dir is required'}), 400
@@ -934,6 +962,16 @@ def api_convert_run():
             profile = replace(profile, **overrides)
         workers = config.get_setting('workers', mp.DEFAULT_WORKERS)
 
+        # Resolve EQ config
+        eq_mgr = mp.EQConfigManager()
+        if no_eq:
+            eq_config = mp.EQConfig()
+        elif eq_data and any(eq_data.values()):
+            eq_config = mp.EQConfig.from_dict(eq_data)
+        else:
+            playlist_key = Path(input_dir).name
+            eq_config = eq_mgr.get_eq(profile.name, playlist_key)
+
         out = output_dir if output_dir else mp.get_export_dir(profile.name)
         display = ctx.make_display_handler(task_id)
         task = ctx.task_manager.get(task_id)
@@ -944,6 +982,7 @@ def api_convert_run():
             cancel_event=task.cancel_event,
             audit_logger=ctx.audit_logger,
             audit_source=source,
+            eq_config=eq_config,
         )
         convert_result = converter.convert(safe_input, out, force=force,
                                            dry_run=dry_run, verbose=verbose)
@@ -1925,6 +1964,107 @@ def api_about():
     notes_path = _ctx().project_root / 'release-notes.txt'
     notes = notes_path.read_text() if notes_path.exists() else ''
     return jsonify({'version': mp.VERSION, 'release_notes': notes})
+
+
+# ══════════════════════════════════════════════════════════════════
+# EQ Presets
+# ══════════════════════════════════════════════════════════════════
+
+
+@api_bp.route('/api/eq', methods=['GET'])
+def api_eq_list():
+    """List all EQ configs, optionally filtered by profile."""
+    profile = request.args.get('profile')
+    eq_mgr = mp.EQConfigManager()
+    if profile:
+        configs = eq_mgr.list_eq(profile)
+    else:
+        configs = eq_mgr.list_all()
+    return jsonify({'eq_presets': configs})
+
+
+@api_bp.route('/api/eq', methods=['POST'])
+def api_eq_set():
+    """Set EQ config for profile (default) or profile+playlist (override)."""
+    ctx = _ctx()
+    data = request.get_json(force=True)
+    profile = data.get('profile')
+    playlist = data.get('playlist')  # None for profile default
+    if not profile:
+        return jsonify({'error': 'profile is required'}), 400
+
+    eq = mp.EQConfig(
+        loudnorm=bool(data.get('loudnorm', False)),
+        bass_boost=bool(data.get('bass_boost', False)),
+        treble_boost=bool(data.get('treble_boost', False)),
+        compressor=bool(data.get('compressor', False)),
+    )
+    eq_mgr = mp.EQConfigManager()
+    eq_mgr.set_eq(profile, eq, playlist)
+
+    # Audit
+    source = ctx.detect_source()
+    if ctx.audit_logger:
+        desc = f"EQ updated: {profile}"
+        if playlist:
+            desc += f"/{playlist}"
+        ctx.audit_logger.log('eq_update', desc, 'completed',
+                             params={'profile': profile, 'playlist': playlist,
+                                     **eq.to_dict()},
+                             source=source)
+
+    return jsonify({'success': True, 'eq': eq.to_dict()})
+
+
+@api_bp.route('/api/eq', methods=['DELETE'])
+def api_eq_delete():
+    """Delete EQ config for profile default or playlist override."""
+    ctx = _ctx()
+    data = request.get_json(force=True)
+    profile = data.get('profile')
+    playlist = data.get('playlist')
+    if not profile:
+        return jsonify({'error': 'profile is required'}), 400
+
+    eq_mgr = mp.EQConfigManager()
+    eq_mgr.delete_eq(profile, playlist)
+
+    # Audit
+    source = ctx.detect_source()
+    if ctx.audit_logger:
+        desc = f"EQ cleared: {profile}"
+        if playlist:
+            desc += f"/{playlist}"
+        ctx.audit_logger.log('eq_update', desc, 'completed',
+                             params={'profile': profile, 'playlist': playlist,
+                                     'action': 'delete'},
+                             source=source)
+
+    return jsonify({'success': True})
+
+
+@api_bp.route('/api/eq/resolve', methods=['GET'])
+def api_eq_resolve():
+    """Resolve the effective EQ config for a profile+playlist combination."""
+    profile = request.args.get('profile')
+    playlist = request.args.get('playlist')
+    if not profile:
+        return jsonify({'error': 'profile is required'}), 400
+
+    eq_mgr = mp.EQConfigManager()
+    eq = eq_mgr.get_eq(profile, playlist)
+    return jsonify({
+        'eq': eq.to_dict(),
+        'any_enabled': eq.any_enabled,
+        'filter_chain': eq.build_filter_chain(),
+        'effects': eq.enabled_effects,
+    })
+
+
+@api_bp.route('/api/eq/effects', methods=['GET'])
+def api_eq_effects():
+    """Return list of available EQ effects with descriptions."""
+    return jsonify({'effects': mp.EQ_EFFECTS})
 
 
 # ══════════════════════════════════════════════════════════════════

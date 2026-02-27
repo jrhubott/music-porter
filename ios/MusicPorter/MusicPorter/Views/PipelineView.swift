@@ -13,6 +13,8 @@ struct PipelineView: View {
     @State private var selectedDestination: String?
     @State private var showExportPicker = false
     @State private var tasks: [TaskInfo] = []
+    @State private var eqConfig = EQConfig()
+    @State private var activeProfile = "ride-command"
 
     let presets = ["lossless", "high", "medium", "low"]
 
@@ -34,6 +36,11 @@ struct PipelineView: View {
             }
             .navigationTitle("Process")
             .task { await loadData() }
+            .onChange(of: selectedPlaylist) { _, newPlaylist in
+                if let key = newPlaylist?.key {
+                    Task { await loadEQForPlaylist(key) }
+                }
+            }
             .onChange(of: appState.pendingPipelinePlaylist) { _, pending in
                 if let pending {
                     selectedPlaylist = pending
@@ -92,7 +99,21 @@ struct PipelineView: View {
                         }
                     }
                 }
+                eqSection
             }
+        }
+    }
+
+    private var eqSection: some View {
+        Group {
+            Text("EQ Audio Effects")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+            Toggle("Loudness Normalization", isOn: $eqConfig.loudnorm)
+            Toggle("Bass Boost", isOn: $eqConfig.bassBoost)
+            Toggle("Treble Boost", isOn: $eqConfig.trebleBoost)
+            Toggle("Dynamic Compression", isOn: $eqConfig.compressor)
         }
     }
 
@@ -182,21 +203,38 @@ struct PipelineView: View {
         async let p = appState.apiClient.getPlaylists()
         async let d = appState.apiClient.getSyncDestinations()
         async let t = appState.apiClient.getTasks()
+        async let s = appState.apiClient.getSettings()
         playlists = (try? await p) ?? []
         let destResponse = try? await d
         destinations = destResponse?.destinations ?? []
         tasks = (try? await t) ?? []
+        if let settings = try? await s,
+           case .string(let outputType) = settings.settings["output_type"] {
+            activeProfile = outputType
+        }
+        // Auto-load EQ for first playlist
+        if let first = playlists.first {
+            await loadEQForPlaylist(first.key)
+        }
+    }
+
+    private func loadEQForPlaylist(_ playlist: String) async {
+        if let resolved = try? await appState.apiClient.resolveEQ(profile: activeProfile, playlist: playlist) {
+            eqConfig = resolved.eq
+        }
     }
 
     private func runPipeline() async {
         let syncDest = syncAfter ? selectedDestination : nil
+        let eqParam = eqConfig.anyEnabled ? eqConfig : nil
         await vm.run(api: appState.apiClient) {
             try await appState.apiClient.runPipeline(
                 playlist: selectedPlaylist?.key,
                 url: customURL.isEmpty ? nil : customURL,
                 auto: useAuto,
                 preset: preset,
-                syncDestination: syncDest
+                syncDestination: syncDest,
+                eq: eqParam
             )
         }
         // Refresh task history after completion

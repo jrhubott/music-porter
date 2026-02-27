@@ -86,6 +86,28 @@
           </select>
         </div>
       </div>
+      <div class="mt-3">
+        <label class="form-label d-block">EQ Audio Effects</label>
+        <div class="d-flex gap-3 flex-wrap">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="eqLoudnorm">
+            <label class="form-check-label" for="eqLoudnorm">Loudness Normalization</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="eqBassBoost">
+            <label class="form-check-label" for="eqBassBoost">Bass Boost</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="eqTrebleBoost">
+            <label class="form-check-label" for="eqTrebleBoost">Treble Boost</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="eqCompressor">
+            <label class="form-check-label" for="eqCompressor">Dynamic Compression</label>
+          </div>
+        </div>
+        <small class="text-muted">Saved presets auto-load when a playlist is selected. Checking any box overrides the saved preset.</small>
+      </div>
 
       <button type="submit" class="btn btn-primary mt-3"><i class="bi bi-play-fill"></i> Run Pipeline</button>
       <button type="button" class="btn btn-outline-primary mt-3 ms-2" id="runAllBtn"><i class="bi bi-collection-play"></i> All Playlists</button>
@@ -166,11 +188,35 @@
 
 {% block scripts %}
 <script>
+let _activeProfile = 'ride-command';
+fetch('/api/settings').then(r=>r.json()).then(d => {
+  _activeProfile = (d.settings && d.settings.output_type) || 'ride-command';
+});
+
 // Load playlists
 fetch('/api/playlists').then(r=>r.json()).then(playlists => {
   const sel = document.getElementById('pipelinePlaylist');
   sel.innerHTML = playlists.map(p => `<option value="${p.key}">${p.name} (${p.key})</option>`).join('');
   if (playlists.length === 0) sel.innerHTML = '<option value="">No playlists configured</option>';
+  // Auto-load EQ for first playlist
+  if (playlists.length > 0) loadEQForPlaylist(playlists[0].key);
+});
+
+function loadEQForPlaylist(playlist) {
+  fetch('/api/eq/resolve?profile=' + encodeURIComponent(_activeProfile) + '&playlist=' + encodeURIComponent(playlist))
+    .then(r => r.json())
+    .then(data => {
+      if (data.eq) {
+        document.getElementById('eqLoudnorm').checked = data.eq.loudnorm;
+        document.getElementById('eqBassBoost').checked = data.eq.bass_boost;
+        document.getElementById('eqTrebleBoost').checked = data.eq.treble_boost;
+        document.getElementById('eqCompressor').checked = data.eq.compressor;
+      }
+    }).catch(() => {});
+}
+
+document.getElementById('pipelinePlaylist').addEventListener('change', function() {
+  if (this.value) loadEQForPlaylist(this.value);
 });
 
 // Sync destination toggle and loading
@@ -222,6 +268,13 @@ document.getElementById('pipelineForm').addEventListener('submit', function(e) {
   if (dirStructure) data.dir_structure = dirStructure;
   const filenameFormat = document.getElementById('pipelineFilenameFormat').value;
   if (filenameFormat) data.filename_format = filenameFormat;
+  // EQ effects
+  const eq = {};
+  if (document.getElementById('eqLoudnorm').checked) eq.loudnorm = true;
+  if (document.getElementById('eqBassBoost').checked) eq.bass_boost = true;
+  if (document.getElementById('eqTrebleBoost').checked) eq.treble_boost = true;
+  if (document.getElementById('eqCompressor').checked) eq.compressor = true;
+  if (Object.keys(eq).length > 0) data.eq = eq;
 
   if (mode === 'auto') {
     data.auto = true;
@@ -264,6 +317,13 @@ document.getElementById('runAllBtn').addEventListener('click', function() {
   if (dirStructure) data.dir_structure = dirStructure;
   const filenameFormat = document.getElementById('pipelineFilenameFormat').value;
   if (filenameFormat) data.filename_format = filenameFormat;
+  // EQ effects
+  const eq2 = {};
+  if (document.getElementById('eqLoudnorm').checked) eq2.loudnorm = true;
+  if (document.getElementById('eqBassBoost').checked) eq2.bass_boost = true;
+  if (document.getElementById('eqTrebleBoost').checked) eq2.treble_boost = true;
+  if (document.getElementById('eqCompressor').checked) eq2.compressor = true;
+  if (Object.keys(eq2).length > 0) data.eq = eq2;
 
   document.getElementById('pipelineStatus').textContent = 'Running';
   document.getElementById('pipelineStatus').className = 'badge bg-primary badge-running';
