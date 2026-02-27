@@ -1,5 +1,5 @@
-git checkout main
 docker compose down
+git checkout main
 git pull --rebase
 docker compose build
 docker compose up
