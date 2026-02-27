@@ -460,10 +460,12 @@ struct ServerInfoResponse: Codable {
     let platform: String
     let profiles: [String]
     let apiVersion: Int
+    let externalURL: String?
 
     enum CodingKeys: String, CodingKey {
         case name, version, platform, profiles
         case apiVersion = "api_version"
+        case externalURL = "external_url"
     }
 }
 

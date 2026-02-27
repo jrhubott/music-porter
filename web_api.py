@@ -60,13 +60,17 @@ def api_server_info():
     ctx = _ctx()
     config = ctx.get_config()
     mp.load_output_profiles(config)
-    return jsonify({
+    result = {
         'name': ctx.get_server_name(),
         'version': mp.VERSION,
         'platform': mp.get_os_display_name(),
         'profiles': list(mp.OUTPUT_PROFILES.keys()),
         'api_version': 1,
-    })
+    }
+    external_url = current_app.config.get('EXTERNAL_URL')
+    if external_url:
+        result['external_url'] = external_url
+    return jsonify(result)
 
 
 # ══════════════════════════════════════════════════════════════════

@@ -68,10 +68,22 @@ final class AppState {
         if response.valid {
             apiClient.server?.name = response.serverName
             apiClient.server?.version = response.version
+            // Fetch external URL from server if not already set
+            if apiClient.server?.externalURL == nil {
+                await fetchExternalURL()
+            }
             savedServer = apiClient.server ?? server
             checkAPIVersion(response.apiVersion)
         } else {
             throw APIError.unauthorized
+        }
+    }
+
+    /// Fetch the server's external URL from /api/server-info and store it.
+    private func fetchExternalURL() async {
+        guard let info = try? await apiClient.getServerInfo() else { return }
+        if let ext = info.externalURL {
+            apiClient.server?.externalURL = ext
         }
     }
 
