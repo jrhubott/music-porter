@@ -109,6 +109,7 @@ export function registerSyncCommand(program: Command): void {
           playlists,
           syncKey: opts.key,
           usbDriveName,
+          profile: resolvedProfileName || undefined,
           concurrency,
           signal: abortController.signal,
           dryRun: opts.dryRun,

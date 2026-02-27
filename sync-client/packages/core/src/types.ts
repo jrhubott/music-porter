@@ -47,14 +47,13 @@ export interface FileInfo {
   title: string;
   artist: string;
   album: string;
+  uuid: string;
   has_cover_art: boolean;
-  has_protection_tags: boolean;
   synced_to?: string[];
 }
 
 export interface FileListResponse {
   playlist: string;
-  profile: string;
   file_count: number;
   files: FileInfo[];
 }
@@ -178,11 +177,14 @@ export interface DiscoveredServer {
 
 export interface ProfileInfo {
   description: string;
-  quality_preset: string;
-  artwork_size: number;
-  id3_version: number;
-  directory_structure: string;
+  title_format: string;
+  artist_format: string;
+  album_format: string;
+  extra_tags: Record<string, string>;
   filename_format: string;
+  directory_format: string;
+  id3_versions: string[];
+  artwork_size: number;
   usb_dir: string;
 }
 
@@ -190,8 +192,6 @@ export interface SettingsResponse {
   settings: Record<string, unknown>;
   profiles: Record<string, ProfileInfo>;
   quality_presets: string[];
-  dir_structures: string[];
-  filename_formats: string[];
 }
 
 // ── Config ──

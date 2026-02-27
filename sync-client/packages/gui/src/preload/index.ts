@@ -45,6 +45,7 @@ const electronAPI = {
     syncKey?: string;
     concurrency?: number;
     usbDriveName?: string;
+    profile?: string;
   }): Promise<SyncResult> => ipcRenderer.invoke('sync:start', opts),
   cancelSync: (): Promise<void> => ipcRenderer.invoke('sync:cancel'),
 

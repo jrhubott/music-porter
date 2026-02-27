@@ -120,6 +120,7 @@ export function SyncPage() {
         dest: destPath,
         playlists: selectedPlaylists.size > 0 ? [...selectedPlaylists] : undefined,
         usbDriveName: selectedDrive?.name,
+        profile: activeProfile || undefined,
       });
       setLastSyncResult(result);
     } catch {

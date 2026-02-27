@@ -21,6 +21,8 @@ export interface SyncOptions {
   syncKey?: string;
   /** USB drive name — when set, uses usb- prefix for sync key. */
   usbDriveName?: string;
+  /** Output profile name — when set, server applies profile-specific tags to downloads. */
+  profile?: string;
   /** Number of parallel downloads. */
   concurrency?: number;
   /** AbortSignal for cancellation. */
@@ -210,6 +212,7 @@ export class SyncEngine {
           playlistDir,
           syncKey,
           concurrency,
+          options.profile,
           options.signal,
           (file, success) => {
             processed++;
@@ -291,6 +294,7 @@ export class SyncEngine {
     destDir: string,
     syncKey: string,
     concurrency: number,
+    profile: string | undefined,
     signal: AbortSignal | undefined,
     onFile: (file: FileInfo, success: boolean) => void,
     log: LogCallback,
@@ -305,7 +309,7 @@ export class SyncEngine {
           return;
         }
         const file = files[index++]!;
-        const success = await this.downloadFile(playlistKey, file, destDir, signal, log);
+        const success = await this.downloadFile(playlistKey, file, destDir, profile, signal, log);
         onFile(file, success);
 
         // Record to server (fire-and-forget)
@@ -327,6 +331,7 @@ export class SyncEngine {
     playlistKey: string,
     file: FileInfo,
     destDir: string,
+    profile: string | undefined,
     signal: AbortSignal | undefined,
     log: LogCallback,
   ): Promise<boolean> {
@@ -334,7 +339,7 @@ export class SyncEngine {
     const tmpPath = filePath + TEMP_SUFFIX;
 
     try {
-      const { body } = await this.client.downloadFile(playlistKey, file.filename, signal);
+      const { body } = await this.client.downloadFile(playlistKey, file.filename, profile, signal);
       const nodeStream = Readable.fromWeb(body as import('node:stream/web').ReadableStream);
       const writeStream = createWriteStream(tmpPath);
       await pipeline(nodeStream, writeStream);

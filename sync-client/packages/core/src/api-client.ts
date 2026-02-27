@@ -152,13 +152,15 @@ export class APIClient {
     return this.get<FileListResponse>(`/api/files/${playlistKey}${params}`);
   }
 
-  /** Get a readable stream for downloading a file. */
+  /** Get a readable stream for downloading a file. Pass profile for tagged output. */
   async downloadFile(
     playlistKey: string,
     filename: string,
+    profile?: string,
     signal?: AbortSignal,
   ): Promise<{ body: ReadableStream<Uint8Array>; size: number }> {
-    const url = this.buildURL(`/api/files/${playlistKey}/${encodeURIComponent(filename)}`);
+    const profileParam = profile ? `?profile=${encodeURIComponent(profile)}` : '';
+    const url = this.buildURL(`/api/files/${playlistKey}/${encodeURIComponent(filename)}${profileParam}`);
     const response = await fetch(url, {
       headers: this.authHeaders(),
       signal,
@@ -171,9 +173,10 @@ export class APIClient {
     return { body: response.body, size };
   }
 
-  /** Build a direct URL for downloading a file (for external use). */
-  fileDownloadURL(playlistKey: string, filename: string): string {
-    return this.buildURL(`/api/files/${playlistKey}/${encodeURIComponent(filename)}`);
+  /** Build a direct URL for downloading a file (for external use). Pass profile for tagged output. */
+  fileDownloadURL(playlistKey: string, filename: string, profile?: string): string {
+    const profileParam = profile ? `?profile=${encodeURIComponent(profile)}` : '';
+    return this.buildURL(`/api/files/${playlistKey}/${encodeURIComponent(filename)}${profileParam}`);
   }
 
   // ── Sync ──
