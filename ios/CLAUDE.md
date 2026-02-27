@@ -171,13 +171,22 @@ Added for the iOS companion app (in addition to existing web dashboard endpoints
 - Rendered to terminal via `segno.terminal()` with compact mode
 - Graceful fallback if `segno` not installed (prints install hint)
 
-## Connection Flow
+## Connection Flow (Dual-URL)
+
+The app uses a local-first, external-fallback connection model:
 
 1. App launches -> `ServerDiscoveryView` browses for `_music-porter._tcp` via Bonjour
 2. User selects discovered server (or enters IP manually)
-3. `PairingView` — enter API key (displayed on server startup) or scan QR code
-4. Key validated via `POST /api/auth/validate`, stored in iOS Keychain
-5. Auto-reconnect on next launch using saved server + Keychain key (3-second timeout)
+3. `PairingView` — enter API key or scan QR code (QR includes optional external URL)
+4. `AppState.connect()` → `resolveConnection()`:
+   - Try local URL (3-second timeout when external exists, 10-second otherwise)
+   - If local fails and external URL exists, try external URL (10-second timeout)
+   - Set `APIClient.activeBaseURL` and `connectionType` on success
+5. After auth validation, fetch `/api/server-info` to get external URL if not already set
+6. `ServerConnection` saved to UserDefaults; API key stored in Keychain
+7. Auto-reconnect on next launch uses same dual-URL fallback
+
+**Connection indicator:** Settings shows house icon (local) or globe icon (external) with both URLs visible.
 
 ## Key Constraints
 
@@ -190,7 +199,8 @@ Added for the iOS companion app (in addition to existing web dashboard endpoints
 
 - All `@Observable` classes must be annotated with `@MainActor` for thread-safe UI updates
 - URL construction uses `URLComponents` (never string interpolation) to handle IPv6 addresses and special characters
-- `ServerConnection.baseURL` is a computed property constructing `http://host:port`
+- `ServerConnection.localURL` is a computed property constructing `http://host:port`; `externalURL` is stored from QR code or server-info
+- `APIClient.activeBaseURL` is the resolved URL used for all API calls; `connectionType` tracks local vs external
 - `APIClient` includes Bearer token in all requests via a shared `authenticatedRequest(for:)` helper
 - `SSEClient` is a Swift actor (not `@MainActor`) for background streaming without blocking UI
 - `FileDownloadManager` uses background `URLSessionConfiguration` for resilient downloads
