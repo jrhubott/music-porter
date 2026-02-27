@@ -2,7 +2,7 @@
 {% block title %}Pipeline - Music Porter{% endblock title %}
 {% block content %}
 <h4 class="mb-4">Pipeline</h4>
-<p class="text-muted">Full workflow: Download &rarr; Convert &rarr; Tag &rarr; (USB Sync)</p>
+<p class="text-muted">Full workflow: Download &rarr; Convert &rarr; (Sync)</p>
 
 <div class="card mb-4">
   <div class="card-body">
@@ -41,27 +41,6 @@
             <option value="high">High (VBR ~190-250kbps)</option>
             <option value="medium">Medium (VBR ~165-210kbps)</option>
             <option value="low">Low (VBR ~115-150kbps)</option>
-          </select>
-        </div>
-      </div>
-
-      <!-- Directory & Filename Options -->
-      <div class="row g-3 mt-1">
-        <div class="col-md-4">
-          <label class="form-label">Directory Layout</label>
-          <select class="form-select form-select-sm" id="pipelineDirStructure">
-            <option value="">Profile Default</option>
-            <option value="flat">Flat</option>
-            <option value="nested-artist">Nested by Artist</option>
-            <option value="nested-artist-album">Nested by Artist/Album</option>
-          </select>
-        </div>
-        <div class="col-md-4">
-          <label class="form-label">Filename Format</label>
-          <select class="form-select form-select-sm" id="pipelineFilenameFormat">
-            <option value="">Profile Default</option>
-            <option value="full">Full (Artist - Title)</option>
-            <option value="title-only">Title Only</option>
           </select>
         </div>
       </div>
@@ -152,7 +131,6 @@
                 <th>Playlist</th>
                 <th class="text-center">Downloaded</th>
                 <th class="text-center">Converted</th>
-                <th class="text-center">Tagged</th>
                 <th class="text-center">Status</th>
               </tr>
             </thead>
@@ -264,10 +242,6 @@ document.getElementById('pipelineForm').addEventListener('submit', function(e) {
   }
   const preset = document.getElementById('pipelinePreset').value;
   if (preset) data.preset = preset;
-  const dirStructure = document.getElementById('pipelineDirStructure').value;
-  if (dirStructure) data.dir_structure = dirStructure;
-  const filenameFormat = document.getElementById('pipelineFilenameFormat').value;
-  if (filenameFormat) data.filename_format = filenameFormat;
   // EQ effects
   const eq = {};
   if (document.getElementById('eqLoudnorm').checked) eq.loudnorm = true;
@@ -313,10 +287,6 @@ document.getElementById('runAllBtn').addEventListener('click', function() {
   }
   const preset = document.getElementById('pipelinePreset').value;
   if (preset) data.preset = preset;
-  const dirStructure = document.getElementById('pipelineDirStructure').value;
-  if (dirStructure) data.dir_structure = dirStructure;
-  const filenameFormat = document.getElementById('pipelineFilenameFormat').value;
-  if (filenameFormat) data.filename_format = filenameFormat;
   // EQ effects
   const eq2 = {};
   if (document.getElementById('eqLoudnorm').checked) eq2.loudnorm = true;
@@ -380,7 +350,6 @@ function renderSingleSummary(r) {
   const stages = [
     {name: 'Download', icon: 'bi-cloud-download', data: r.download_result, key: 'download'},
     {name: 'Convert', icon: 'bi-arrow-repeat', data: r.conversion_result, key: 'convert'},
-    {name: 'Tag', icon: 'bi-tag', data: r.tag_result, key: 'tag'},
     {name: 'Sync', icon: 'bi-arrow-left-right', data: r.sync_result, key: 'sync'},
   ];
 
@@ -413,14 +382,6 @@ function renderSingleSummary(r) {
         body += '<div class="d-flex justify-content-between"><span class="text-muted">Duplicates</span><span>' + duplicates + ' <small class="text-muted">(same output name)</small></span></div>';
       }
       body += summaryRow('Errors', stage.data.errors);
-      body += summaryRow('Duration', formatDuration(stage.data.duration));
-    } else if (stage.key === 'tag' && stage.data) {
-      body += summaryRow('Files processed', stage.data.files_processed);
-      body += summaryRow('Files updated', stage.data.files_updated);
-      body += summaryRow('Titles updated', stage.data.title_updated);
-      body += summaryRow('Albums updated', stage.data.album_updated);
-      body += summaryRow('Artists updated', stage.data.artist_updated);
-      body += summaryRow('Originals stored', (stage.data.title_stored || 0) + (stage.data.artist_stored || 0) + (stage.data.album_stored || 0));
       body += summaryRow('Duration', formatDuration(stage.data.duration));
     } else if (stage.key === 'sync' && stage.data) {
       body += summaryRow('Files found', stage.data.files_found);
@@ -457,7 +418,6 @@ function renderAggregateSummary(r) {
   (r.playlists || []).forEach(function(pl) {
     const dl = pl.download_stats;
     const cv = pl.conversion_stats;
-    const tg = pl.tagging_stats;
     const status = pl.success
       ? '<span class="badge bg-success">OK</span>'
       : '<span class="badge bg-danger">' + (pl.failed_stage || 'Failed') + '</span>';
@@ -469,7 +429,6 @@ function renderAggregateSummary(r) {
       '<td>' + (pl.name || pl.key) + '</td>' +
       '<td class="text-center">' + dlText + '</td>' +
       '<td class="text-center">' + cvText + '</td>' +
-      '<td class="text-center">' + (tg ? tg.title_updated : '--') + '</td>' +
       '<td class="text-center">' + status + '</td></tr>';
   });
 
@@ -481,7 +440,6 @@ function renderAggregateSummary(r) {
     '<tr class="fw-bold"><td>Total</td>' +
     '<td class="text-center">' + (cum.downloaded || 0) + ' new / ' + cumDlTotal + ' total</td>' +
     '<td class="text-center">' + cumCvNew + ' new / ' + (cum.mp3_total || 0) + ' total</td>' +
-    '<td class="text-center">' + (cum.title_updated || 0) + '</td>' +
     '<td class="text-center">' + r.successful_playlists + '/' + r.total_playlists + '</td></tr>';
 
   // Cumulative stats cards
@@ -518,10 +476,6 @@ function renderAggregateSummary(r) {
       rows.push(['Errors', cum.errors_conversion]);
       return rows;
     })()},
-    {name: 'Tag', icon: 'bi-tag', rows: [
-      ['Titles updated', cum.title_updated],
-      ['Originals stored', cum.original_tags_stored],
-    ]},
   ];
   if (cum.files_synced) {
     sections.push({name: 'Sync', icon: 'bi-arrow-left-right', rows: [
