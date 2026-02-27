@@ -1,3 +1,7 @@
+Version 2.34.0 (2026-02-26):
+• Optimize merge-to-main skill — reduced from 17 steps to 6, cut user prompts from 7 to 1-2, removed expensive diff-scanning and /todo skill invocations
+• Optimize merge-to-dev skill — reduced from 7 steps to 4, removed redundant negative section and Co-Authored-By reminders
+
 Version 2.33.0 (2026-02-26):
 • Add iOS version bump check to merge-to-main workflow — automatically detects ios/ file changes and prompts for iOS version bump
 • Bump iOS app version to 1.2.0 (retroactive for v2.32.0 iOS changes)
