@@ -46,8 +46,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Merge Gate
 
-- **All** Tested cells must be `[x]` before merging to main — `/merge-to-main` enforces this
-- SRS validation is **not** enforced at `/merge-to-dev` time — it is deferred to `/merge-to-main`
+- **All** Tested cells must be `[x]` before merging to main — `/merge-dev-to-main` enforces this
+- SRS validation is **not** enforced at `/merge-to-dev` time — it is deferred to `/merge-dev-to-main`
 - SRS files remain in `SRS/` permanently — they are **not** archived or deleted after merge
 
 ## Project Overview
@@ -266,7 +266,7 @@ The project uses a 3-tier branch model: **feature -> dev -> main**.
 
 **Merging to dev:** Use `/merge-to-dev` skill — fast and fully automatic, no user prompts, no SRS validation, no version bump.
 
-**Merging to main:** Use `/merge-to-main` skill (must be on dev) — full validation: SRS gate, version bump, tagging, release notes, sets next `-dev` version, offers branch cleanup, pushes both main and dev.
+**Merging to main:** Use `/merge-dev-to-main` skill (must be on dev) — full validation: SRS gate, version bump, tagging, release notes, sets next `-dev` version, offers branch cleanup, pushes both main and dev.
 
 **Pre-merge checklist (for main):** Clean working tree, tested with `--dry-run`/`--verbose`, no debug code, up to date with remote, README future features updated, all SRS `[x]`.
 
@@ -280,7 +280,7 @@ Version defined in `porter_core.py` line 50. Uses semantic versioning (MAJOR.MIN
 
 **merge-to-dev:** Restores the `-dev` suffix and appends `+<short-hash>` of the merge commit (SemVer build metadata).
 
-**merge-to-main:** Remove `-dev+hash` suffix, bump version (PATCH/MINOR/MAJOR), create git tag (`git tag vX.Y.Z`). After tagging, sync dev with main and set the next PATCH dev version (e.g., 2.34.0 → 2.34.1-dev) on dev (no hash — the next merge-to-dev adds it).
+**merge-dev-to-main:** Remove `-dev+hash` suffix, bump version (PATCH/MINOR/MAJOR), create git tag (`git tag vX.Y.Z`). After tagging, sync dev with main and set the next PATCH dev version (e.g., 2.34.0 → 2.34.1-dev) on dev (no hash — the next merge-to-dev adds it).
 
 **Release notes:** When bumping the version, prepend a new entry to the top of `release-notes.txt` (project root) summarizing the changes in that release. Format: `Version X.Y.Z (YYYY-MM-DD):` header followed by bullet points (`• description`). This is displayed in the web About page and `./music-porter about` CLI command. Generate the release notes by reviewing all commits since the previous version tag.
 
@@ -366,7 +366,7 @@ All API routes are defined in `web_api.py` as a Flask Blueprint.
 
 See `ios/CLAUDE.md` for full iOS companion app documentation (architecture, models, services, views, Bonjour, pairing flow).
 
-**Quick reference:** Native SwiftUI app (iOS 17+) connecting to `./music-porter server` over local network. Requires `server` command (not `web`) for API key auth, Bonjour discovery, and file serving endpoints. The iOS app has its own independent version (`MusicPorterApp.appVersion`) — `/merge-to-main` automatically detects `ios/` changes and prompts for an iOS version bump.
+**Quick reference:** Native SwiftUI app (iOS 17+) connecting to `./music-porter server` over local network. Requires `server` command (not `web`) for API key auth, Bonjour discovery, and file serving endpoints. The iOS app has its own independent version (`MusicPorterApp.appVersion`) — `/merge-dev-to-main` automatically detects `ios/` changes and prompts for an iOS version bump.
 
 ## Important Implementation Notes
 
