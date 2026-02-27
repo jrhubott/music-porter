@@ -290,6 +290,8 @@ def render_conversion_summary(r: ConversionResult) -> None:
     print(f"{'─' * 60}")
     print(f"  Preset:                  {r.quality_preset}")
     print(f"  Mode:                    {quality_desc}")
+    if r.eq_effects:
+        print(f"  EQ effects:              {', '.join(r.eq_effects)}")
     print(f"{'─' * 60}")
     print("  FILES")
     print(f"{'─' * 60}")
@@ -861,6 +863,8 @@ def render_pipeline_summary(r: PipelineResult) -> None:
             print(f"  Files overwritten:       {cr.overwritten}")
             print(f"  Files skipped:           {cr.skipped}")
             print(f"  Conversion errors:       {cr.errors}")
+            if cr.eq_effects:
+                print(f"  EQ effects:              {', '.join(cr.eq_effects)}")
             if cr.success:
                 print("  Status:                  ✅ Success")
             else:
@@ -1794,6 +1798,36 @@ def resolve_quality_preset(args, logger, output_profile=None):
     return quality_preset
 
 
+def resolve_eq_config(args, eq_manager, profile_name, playlist_key=None):
+    """
+    Resolve EQ config from CLI flags, falling back to DB presets.
+
+    Precedence: --no-eq > CLI flags > DB playlist override > DB profile default > none.
+    """
+    if getattr(args, 'no_eq', False):
+        return EQConfig()  # Explicitly disabled
+
+    # If any CLI EQ flags are set, use them (override DB)
+    cli_loudnorm = getattr(args, 'loudnorm', False)
+    cli_bass = getattr(args, 'bass_boost', False)
+    cli_treble = getattr(args, 'treble_boost', False)
+    cli_compressor = getattr(args, 'compressor', False)
+
+    if any([cli_loudnorm, cli_bass, cli_treble, cli_compressor]):
+        return EQConfig(
+            loudnorm=cli_loudnorm,
+            bass_boost=cli_bass,
+            treble_boost=cli_treble,
+            compressor=cli_compressor,
+        )
+
+    # Fall back to DB (playlist override > profile default)
+    if eq_manager:
+        return eq_manager.get_eq(profile_name, playlist_key)
+
+    return EQConfig()
+
+
 def resolve_config_settings(args, config):
     """
     Resolve output_type, workers, dir_structure, and filename_format
@@ -2117,6 +2151,19 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
     cookie_parent = _create_cookie_args_parser()
     usb_parent = _create_usb_args_parser()
 
+    # Shared parent for EQ audio effects
+    eq_parent = argparse.ArgumentParser(add_help=False)
+    eq_parent.add_argument('--loudnorm', action='store_true',
+                           help='Apply loudness normalization (EBU R128)')
+    eq_parent.add_argument('--bass-boost', action='store_true',
+                           help='Apply bass boost (+6dB below 100Hz)')
+    eq_parent.add_argument('--treble-boost', action='store_true',
+                           help='Apply treble boost (+4dB above 3kHz)')
+    eq_parent.add_argument('--compressor', action='store_true',
+                           help='Apply dynamic range compression')
+    eq_parent.add_argument('--no-eq', action='store_true',
+                           help='Disable all EQ effects (ignore saved presets)')
+
     # Shared parent for directory structure and filename format
     structure_parent = argparse.ArgumentParser(add_help=False)
     structure_parent.add_argument('--dir-structure', default=None,
@@ -2132,7 +2179,7 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
 
     # ── pipeline (default) ────────────────────────────────────────
     pipeline_parser = subparsers.add_parser('pipeline',
-        parents=[quality_parent, cookie_parent, usb_parent, structure_parent],
+        parents=[quality_parent, cookie_parent, usb_parent, structure_parent, eq_parent],
         help='Full download + convert + tag workflow (default)')
     pipeline_parser.add_argument('--playlist', help='Playlist name or number')
     pipeline_parser.add_argument('--url', help='Apple Music playlist URL')
@@ -2153,7 +2200,7 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
 
     # ── convert ───────────────────────────────────────────────────
     convert_parser = subparsers.add_parser('convert',
-        parents=[quality_parent, structure_parent],
+        parents=[quality_parent, structure_parent, eq_parent],
         help='Convert M4A → MP3 with tag preservation')
     convert_parser.add_argument('input_dir', help='Input directory with M4A files')
     convert_parser.add_argument('--output', help='Output directory')
@@ -2389,6 +2436,26 @@ For command-specific help: \033[36mmusic-porter <command> --help\033[0m
                                   choices=['lossless', 'high', 'medium', 'low', ''],
                                   help='Quality preset (empty to use profile default)')
 
+    # ── eq ─────────────────────────────────────────────────────────
+    eq_parser = subparsers.add_parser('eq',
+        help='View and manage EQ audio effect presets')
+    eq_parser.add_argument('--profile', type=str, metavar='NAME',
+                           help='Filter by output profile name')
+    eq_parser.add_argument('--playlist', type=str, metavar='KEY',
+                           help='Playlist key (for playlist-specific override)')
+    eq_parser.add_argument('--set', action='store_true',
+                           help='Set EQ config (combine with effect flags)')
+    eq_parser.add_argument('--clear', action='store_true',
+                           help='Remove EQ config for the specified profile/playlist')
+    eq_parser.add_argument('--loudnorm', action='store_true',
+                           help='Enable loudness normalization (EBU R128)')
+    eq_parser.add_argument('--bass-boost', action='store_true',
+                           help='Enable bass boost (+6dB below 100Hz)')
+    eq_parser.add_argument('--treble-boost', action='store_true',
+                           help='Enable treble boost (+4dB above 3kHz)')
+    eq_parser.add_argument('--compressor', action='store_true',
+                           help='Enable dynamic range compression')
+
     # ── about ──────────────────────────────────────────────────────
     subparsers.add_parser('about',
         help='Show version info and release notes')
@@ -2523,6 +2590,108 @@ def _render_task_history(db, limit=20, operation=None, status=None):
 
 
 # ══════════════════════════════════════════════════════════════════
+# Section 10c: EQ CLI Subcommand
+# ══════════════════════════════════════════════════════════════════
+
+def _handle_eq_command():
+    """Fast-path handler for the eq subcommand."""
+    import argparse as _ap
+    parser = _ap.ArgumentParser(prog='music-porter eq',
+                                description='View and manage EQ audio effect presets')
+    parser.add_argument('--profile', type=str, metavar='NAME',
+                        help='Filter by output profile name')
+    parser.add_argument('--playlist', type=str, metavar='KEY',
+                        help='Playlist key (for playlist-specific override)')
+    parser.add_argument('--set', action='store_true',
+                        help='Set EQ config (combine with effect flags)')
+    parser.add_argument('--clear', action='store_true',
+                        help='Remove EQ config for the specified profile/playlist')
+    parser.add_argument('--loudnorm', action='store_true',
+                        help='Enable loudness normalization (EBU R128)')
+    parser.add_argument('--bass-boost', action='store_true',
+                        help='Enable bass boost (+6dB below 100Hz)')
+    parser.add_argument('--treble-boost', action='store_true',
+                        help='Enable treble boost (+4dB above 3kHz)')
+    parser.add_argument('--compressor', action='store_true',
+                        help='Enable dynamic range compression')
+    args = parser.parse_args(sys.argv[2:])
+
+    from pathlib import Path as _P
+    db_path = _P(__file__).resolve().parent / DEFAULT_DB_FILE
+    events = migrate_db_schema()
+    eq_mgr = EQConfigManager(str(db_path))
+    if events:
+        flush_migration_events(events, AuditLogger(str(db_path)), source='cli')
+
+    # --clear: remove an EQ config
+    if args.clear:
+        if not args.profile:
+            print("Error: --clear requires --profile")
+            sys.exit(1)
+        eq_mgr.delete_eq(args.profile, args.playlist)
+        target = f"{args.profile}/{args.playlist}" if args.playlist else f"{args.profile} (default)"
+        print(f"Cleared EQ config for {target}")
+        return
+
+    # --set: save an EQ config
+    if args.set:
+        if not args.profile:
+            print("Error: --set requires --profile")
+            sys.exit(1)
+        eq = EQConfig(
+            loudnorm=args.loudnorm,
+            bass_boost=args.bass_boost,
+            treble_boost=args.treble_boost,
+            compressor=args.compressor,
+        )
+        eq_mgr.set_eq(args.profile, eq, args.playlist)
+        target = f"{args.profile}/{args.playlist}" if args.playlist else f"{args.profile} (default)"
+        if eq.any_enabled:
+            effects = ', '.join(eq.enabled_effects)
+            print(f"Set EQ for {target}: {effects}")
+        else:
+            print(f"Set EQ for {target}: (none — all effects disabled)")
+        return
+
+    # List mode: show EQ configs
+    if args.profile:
+        configs = eq_mgr.list_eq(args.profile)
+    else:
+        configs = eq_mgr.list_all()
+
+    if not configs:
+        print("\nNo EQ presets configured.")
+        print("\nUsage:")
+        print("  ./music-porter eq --profile ride-command --set --loudnorm --bass-boost")
+        print("  ./music-porter eq --profile ride-command --playlist Pop --set --compressor")
+        print("  ./music-porter eq --profile ride-command --playlist Pop --clear")
+        return
+
+    print(f"\n{'═' * 70}")
+    print("  EQ Presets")
+    print(f"{'═' * 70}")
+    print(f"  {'Profile':<20} {'Playlist':<20} {'Effects':<30}")
+    print(f"  {'─' * 20} {'─' * 20} {'─' * 30}")
+
+    for cfg in configs:
+        profile = cfg['profile']
+        playlist = cfg['playlist'] or '(default)'
+        effects = []
+        if cfg['loudnorm']:
+            effects.append('loudnorm')
+        if cfg['bass_boost']:
+            effects.append('bass_boost')
+        if cfg['treble_boost']:
+            effects.append('treble_boost')
+        if cfg['compressor']:
+            effects.append('compressor')
+        effects_str = ', '.join(effects) if effects else '(none)'
+        print(f"  {profile:<20} {playlist:<20} {effects_str:<30}")
+
+    print(f"{'═' * 70}\n")
+
+
+# ══════════════════════════════════════════════════════════════════
 # Section 11: Entry Point (Placeholder)
 # ══════════════════════════════════════════════════════════════════
 
@@ -2546,6 +2715,11 @@ def main():
     # Fast path: tasks only needs TaskHistoryDB
     if len(sys.argv) > 1 and sys.argv[1] == 'tasks':
         _handle_tasks_command()
+        sys.exit(0)
+
+    # Fast path: eq only needs EQConfigManager (DB)
+    if len(sys.argv) > 1 and sys.argv[1] == 'eq':
+        _handle_eq_command()
         sys.exit(0)
 
     temp_logger = Logger(verbose=False)
@@ -2806,10 +2980,14 @@ def main():
         output_dir = args.output or get_export_dir(output_profile.name)
         embed_cover_art = not getattr(args, 'no_cover_art', False)
         quality_preset = resolve_quality_preset(args, logger, output_profile)
+        eq_manager = EQConfigManager()
+        playlist_key = Path(args.input_dir).name if args.input_dir else None
+        eq_config = resolve_eq_config(args, eq_manager, output_profile.name, playlist_key)
         converter = Converter(logger, quality_preset=quality_preset, workers=workers,
                               embed_cover_art=embed_cover_art, output_profile=output_profile,
                               display_handler=cli_display,
-                              audit_logger=audit_logger)
+                              audit_logger=audit_logger,
+                              eq_config=eq_config)
         result = converter.convert(
             args.input_dir,
             output_dir,
@@ -3373,6 +3551,17 @@ def main():
                 logger.error(f"'{sync_dest_arg}' is not a saved destination or valid path")
                 sys.exit(1)
 
+        # Resolve EQ: build CLI override if flags are set, otherwise use DB manager
+        eq_manager = EQConfigManager()
+        eq_cli_override = None
+        if getattr(args, 'no_eq', False):
+            eq_cli_override = EQConfig()  # Explicit disable
+        elif any([getattr(args, 'loudnorm', False), getattr(args, 'bass_boost', False),
+                  getattr(args, 'treble_boost', False), getattr(args, 'compressor', False)]):
+            eq_cli_override = EQConfig(
+                loudnorm=args.loudnorm, bass_boost=args.bass_boost,
+                treble_boost=args.treble_boost, compressor=args.compressor)
+
         orchestrator = PipelineOrchestrator(logger, deps, config,
                                           quality_preset=quality_preset,
                                           cookie_path=args.cookies,
@@ -3382,7 +3571,9 @@ def main():
                                           prompt_handler=cli_prompt,
                                           display_handler=cli_display,
                                           audit_logger=audit_logger,
-                                          sync_tracker=sync_tracker)
+                                          sync_tracker=sync_tracker,
+                                          eq_config_manager=eq_manager,
+                                          eq_config_override=eq_cli_override)
 
         # Determine what to process
         if args.auto:

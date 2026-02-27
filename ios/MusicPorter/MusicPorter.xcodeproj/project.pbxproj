@@ -49,6 +49,7 @@
 		A1000002A /* MiniPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002A /* MiniPlayerView.swift */; };
 		A1000002C /* USBSyncStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002C /* USBSyncStatus.swift */; };
 		A1000002D /* SyncStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002D /* SyncStatusView.swift */; };
+		A1000002E /* EQConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002E /* EQConfig.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -96,6 +97,7 @@
 		A2000002A /* MiniPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniPlayerView.swift; sourceTree = "<group>"; };
 		A2000002C /* USBSyncStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = USBSyncStatus.swift; sourceTree = "<group>"; };
 		A2000002D /* SyncStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncStatusView.swift; sourceTree = "<group>"; };
+		A2000002E /* EQConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EQConfig.swift; sourceTree = "<group>"; };
 		A30000001 /* MusicPorter.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MusicPorter.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -157,6 +159,7 @@
 				A20000018 /* FileListResponse.swift */,
 				A20000019 /* ExportDirectory.swift */,
 				A2000002C /* USBSyncStatus.swift */,
+				A2000002E /* EQConfig.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -335,6 +338,7 @@
 				A1000002A /* MiniPlayerView.swift in Sources */,
 				A1000002C /* USBSyncStatus.swift in Sources */,
 				A1000002D /* SyncStatusView.swift in Sources */,
+				A1000002E /* EQConfig.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

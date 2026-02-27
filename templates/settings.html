@@ -139,6 +139,87 @@
   </div>
 </div>
 
+<!-- EQ Presets -->
+<div class="card mt-4">
+  <div class="card-body">
+    <h6 class="card-title"><i class="bi bi-soundwave"></i> EQ Presets</h6>
+    <p class="text-muted small mb-3">Configure default audio effects per profile. Playlist overrides take precedence over the profile default.</p>
+
+    <h6 class="mb-2">Profile Default</h6>
+    <div class="d-flex gap-3 flex-wrap align-items-center">
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="eqDefaultLoudnorm">
+        <label class="form-check-label" for="eqDefaultLoudnorm">Loudness Normalization</label>
+      </div>
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="eqDefaultBassBoost">
+        <label class="form-check-label" for="eqDefaultBassBoost">Bass Boost</label>
+      </div>
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="eqDefaultTrebleBoost">
+        <label class="form-check-label" for="eqDefaultTrebleBoost">Treble Boost</label>
+      </div>
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="eqDefaultCompressor">
+        <label class="form-check-label" for="eqDefaultCompressor">Dynamic Compression</label>
+      </div>
+      <button type="button" class="btn btn-primary btn-sm" id="btnSaveEqDefault"><i class="bi bi-check"></i> Save Default</button>
+    </div>
+
+    <hr class="my-3">
+    <h6 class="mb-2">Playlist Overrides</h6>
+    <div class="table-responsive">
+      <table class="table table-sm table-dark table-striped mb-0">
+        <thead>
+          <tr>
+            <th>Playlist</th>
+            <th class="text-center">Loudnorm</th>
+            <th class="text-center">Bass</th>
+            <th class="text-center">Treble</th>
+            <th class="text-center">Compressor</th>
+            <th class="text-center">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="eqPlaylistRows">
+          <tr><td colspan="6" class="text-muted">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mt-3">
+      <div class="row g-2 align-items-end">
+        <div class="col-auto">
+          <label class="form-label mb-1">Add Override</label>
+          <select class="form-select form-select-sm" id="eqAddPlaylist" style="width:auto">
+            <option value="">Select playlist...</option>
+          </select>
+        </div>
+        <div class="col-auto pt-4">
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" id="eqAddLoudnorm">
+            <label class="form-check-label" for="eqAddLoudnorm">Loudnorm</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" id="eqAddBassBoost">
+            <label class="form-check-label" for="eqAddBassBoost">Bass</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" id="eqAddTrebleBoost">
+            <label class="form-check-label" for="eqAddTrebleBoost">Treble</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" id="eqAddCompressor">
+            <label class="form-check-label" for="eqAddCompressor">Compress</label>
+          </div>
+        </div>
+        <div class="col-auto pt-4">
+          <button type="button" class="btn btn-outline-primary btn-sm" id="btnAddEqOverride"><i class="bi bi-plus"></i> Add</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- iOS Pairing (server mode only) -->
 {% if server_mode %}
 <div class="card mt-4">
@@ -452,6 +533,96 @@ document.getElementById('btnRunNow').addEventListener('click', function() {
 
 loadSchedulerStatus();
 setInterval(loadSchedulerStatus, 30000);
+
+// ── EQ Presets ──
+function getActiveProfile() {
+  return (currentSettings && currentSettings.output_type) || 'ride-command';
+}
+
+function loadEQPresets() {
+  const profile = getActiveProfile();
+  fetch('/api/eq?profile=' + encodeURIComponent(profile)).then(r => r.json()).then(data => {
+    const configs = data.configs || [];
+    // Profile default
+    const def = configs.find(c => !c.playlist);
+    document.getElementById('eqDefaultLoudnorm').checked = def ? def.loudnorm : false;
+    document.getElementById('eqDefaultBassBoost').checked = def ? def.bass_boost : false;
+    document.getElementById('eqDefaultTrebleBoost').checked = def ? def.treble_boost : false;
+    document.getElementById('eqDefaultCompressor').checked = def ? def.compressor : false;
+
+    // Playlist overrides
+    const overrides = configs.filter(c => c.playlist);
+    const tbody = document.getElementById('eqPlaylistRows');
+    if (overrides.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="text-muted">No playlist overrides</td></tr>';
+    } else {
+      tbody.innerHTML = overrides.map(c => {
+        const check = v => v ? '<i class="bi bi-check-lg text-success"></i>' : '<i class="bi bi-dash text-muted"></i>';
+        return '<tr>' +
+          '<td>' + c.playlist + '</td>' +
+          '<td class="text-center">' + check(c.loudnorm) + '</td>' +
+          '<td class="text-center">' + check(c.bass_boost) + '</td>' +
+          '<td class="text-center">' + check(c.treble_boost) + '</td>' +
+          '<td class="text-center">' + check(c.compressor) + '</td>' +
+          '<td class="text-center"><button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="deleteEQOverride(\'' + c.playlist.replace(/'/g, "\\'") + '\')"><i class="bi bi-trash"></i></button></td>' +
+          '</tr>';
+      }).join('');
+    }
+  }).catch(() => {});
+}
+
+function loadEQPlaylistOptions() {
+  fetch('/api/playlists').then(r => r.json()).then(playlists => {
+    const sel = document.getElementById('eqAddPlaylist');
+    sel.innerHTML = '<option value="">Select playlist...</option>' +
+      playlists.map(p => '<option value="' + p.key + '">' + p.name + '</option>').join('');
+  }).catch(() => {});
+}
+
+document.getElementById('btnSaveEqDefault').addEventListener('click', function() {
+  const data = {
+    profile: getActiveProfile(),
+    loudnorm: document.getElementById('eqDefaultLoudnorm').checked,
+    bass_boost: document.getElementById('eqDefaultBassBoost').checked,
+    treble_boost: document.getElementById('eqDefaultTrebleBoost').checked,
+    compressor: document.getElementById('eqDefaultCompressor').checked,
+  };
+  fetch('/api/eq', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)})
+    .then(r => r.json()).then(() => { showToast('EQ default saved', 'success'); loadEQPresets(); });
+});
+
+document.getElementById('btnAddEqOverride').addEventListener('click', function() {
+  const playlist = document.getElementById('eqAddPlaylist').value;
+  if (!playlist) { showToast('Select a playlist', 'warning'); return; }
+  const data = {
+    profile: getActiveProfile(),
+    playlist: playlist,
+    loudnorm: document.getElementById('eqAddLoudnorm').checked,
+    bass_boost: document.getElementById('eqAddBassBoost').checked,
+    treble_boost: document.getElementById('eqAddTrebleBoost').checked,
+    compressor: document.getElementById('eqAddCompressor').checked,
+  };
+  fetch('/api/eq', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)})
+    .then(r => r.json()).then(() => {
+      showToast('EQ override added for ' + playlist, 'success');
+      loadEQPresets();
+      // Reset add form
+      document.getElementById('eqAddPlaylist').value = '';
+      document.getElementById('eqAddLoudnorm').checked = false;
+      document.getElementById('eqAddBassBoost').checked = false;
+      document.getElementById('eqAddTrebleBoost').checked = false;
+      document.getElementById('eqAddCompressor').checked = false;
+    });
+});
+
+function deleteEQOverride(playlist) {
+  const data = { profile: getActiveProfile(), playlist: playlist };
+  fetch('/api/eq', {method: 'DELETE', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)})
+    .then(r => r.json()).then(() => { showToast('EQ override removed', 'success'); loadEQPresets(); });
+}
+
+loadEQPresets();
+loadEQPlaylistOptions();
 
 // ── iOS Pairing ──
 (function() {

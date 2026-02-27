@@ -432,13 +432,15 @@ Both functions are called at startup before any DB class or ConfigManager is ins
 1. Increment the relevant constant (`CONFIG_SCHEMA_VERSION` or `DB_SCHEMA_VERSION`)
 2. Add a new `if current < N:` migration case in the corresponding function
 3. Migrations must be idempotent and sequential (version 0→1→2→…)
+4. **Never modify existing version blocks** — each `if current < N:` block sets the version to exactly N (not `DB_SCHEMA_VERSION`/`CONFIG_SCHEMA_VERSION`). New changes go exclusively in a new `if current < N:` block. Fresh installs run through all migrations sequentially (0→1→2→…N). This applies to both DB and config migrations.
 
-**Current DB schema (version 1) — 4 tables:**
+**Current DB schema (version 2) — 5 tables:**
 
 - `audit_entries`: id, timestamp, operation, description, params, status, duration\_s, source
 - `task_history`: id, operation, description, status, result, error, started\_at, finished\_at, source
 - `sync_keys`: key\_name, last\_sync\_at, created\_at
 - `sync_files`: id, sync\_key, file\_path, playlist, synced\_at (FK → sync\_keys)
+- `eq_presets`: id, profile, playlist, loudnorm, bass\_boost, treble\_boost, compressor, updated\_at (UNIQUE profile+playlist)
 
 **Current config schema (version 1) — top-level keys:**
 
@@ -456,7 +458,7 @@ Constant `EXCLUDED_USB_VOLUMES` in `music-porter`: `["Macintosh HD", "Macintosh 
 
 ### Key Classes in `porter_core.py`
 
-25 classes organized by concern: `Logger`, `PlaylistConfig`, `SyncDestination`, `ConfigManager`, `DependencyChecker`, `TagStatistics`, `TaggerManager`, `ConversionStatistics`, `Converter`, `Downloader`, `CookieStatus`, `CookieManager`, `SyncManager`, `PlaylistSummary`, `LibrarySummaryStatistics`, `SummaryManager`, `DataManager`, `PipelineStatistics`, `PipelineOrchestrator`, `InteractiveMenu`, `PlaylistResult`, `AggregateStatistics`, `CoverArtManager`, `AuditLogger`, `TaskHistoryDB`.
+26 classes organized by concern: `Logger`, `PlaylistConfig`, `SyncDestination`, `ConfigManager`, `DependencyChecker`, `TagStatistics`, `TaggerManager`, `ConversionStatistics`, `Converter`, `Downloader`, `CookieStatus`, `CookieManager`, `SyncManager`, `PlaylistSummary`, `LibrarySummaryStatistics`, `SummaryManager`, `DataManager`, `PipelineStatistics`, `PipelineOrchestrator`, `InteractiveMenu`, `PlaylistResult`, `AggregateStatistics`, `CoverArtManager`, `AuditLogger`, `TaskHistoryDB`, `EQConfigManager`.
 
 ### ConfigManager
 
