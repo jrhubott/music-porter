@@ -65,7 +65,7 @@ TXXX_TRACK_UUID = "TrackUUID"
 
 # Schema version constants — increment and add a migration case when changing
 # the config.yaml structure or DB tables/columns.
-CONFIG_SCHEMA_VERSION = 1
+CONFIG_SCHEMA_VERSION = 2
 DB_SCHEMA_VERSION = 4
 
 # Excluded USB volumes by OS
@@ -206,15 +206,14 @@ APPLE_COOKIE_DOMAIN = 'apple.com'
 class OutputProfile:
     name: str
     description: str
-    directory_structure: str  # "flat", "nested-artist", "nested-artist-album"
-    filename_format: str      # "full", "title-only"
-    id3_version: int          # 3 = ID3v2.3, 4 = ID3v2.4
-    strip_id3v1: bool         # Remove ID3v1 tags
-    title_tag_format: str     # "artist_title" → tag as "Artist - Title"
+    title_format: str         # TIT2 template — e.g. "{artist} - {title}"
+    artist_format: str        # TPE1 template — e.g. "Various" or "{artist}"
+    album_format: str         # TALB template — e.g. "{playlist}" or "{album}"
+    extra_tags: dict           # Frame ID → template value, e.g. {"TCON": "Workout"}
+    filename_format: str      # Output filename template — e.g. "{artist} - {title}"
+    directory_format: str     # Output subdirectory template — "" (flat), "{artist}"
+    id3_versions: list        # ID3 versions to include — e.g. ["v2.3"] or ["v2.4", "v1"]
     artwork_size: int         # >0=resize to max px, 0=original, -1=strip
-    quality_preset: str       # "lossless", "high", "medium", "low"
-    pipeline_album: str       # "playlist_name" or "original"
-    pipeline_artist: str      # "various" or "original"
     usb_dir: str = ""         # Subdirectory within USB volumes (e.g. "RZR/Music")
 
 
@@ -223,28 +222,26 @@ class OutputProfile:
 DEFAULT_OUTPUT_PROFILES: dict = {
     "ride-command": {
         "description": "Polaris Ride Command infotainment system",
-        "directory_structure": "flat",
-        "filename_format": "full",
-        "id3_version": 3,
-        "strip_id3v1": True,
-        "title_tag_format": "artist_title",
+        "title_format": "{artist} - {title}",
+        "artist_format": "Various",
+        "album_format": "{playlist}",
+        "extra_tags": {"TCON": "Playlist"},
+        "filename_format": "{artist} - {title}",
+        "directory_format": "",
+        "id3_versions": ["v2.3"],
         "artwork_size": 100,
-        "quality_preset": "lossless",
-        "pipeline_album": "playlist_name",
-        "pipeline_artist": "various",
         "usb_dir": "RZR/Music",
     },
     "basic": {
         "description": "Standard MP3 with original tags and artwork",
-        "directory_structure": "nested-artist-album",
-        "filename_format": "full",
-        "id3_version": 4,
-        "strip_id3v1": True,
-        "title_tag_format": "artist_title",
+        "title_format": "{title}",
+        "artist_format": "{artist}",
+        "album_format": "{album}",
+        "extra_tags": {},
+        "filename_format": "{artist} - {title}",
+        "directory_format": "{artist}/{album}",
+        "id3_versions": ["v2.4"],
         "artwork_size": 0,
-        "quality_preset": "lossless",
-        "pipeline_album": "original",
-        "pipeline_artist": "original",
         "usb_dir": "",
     },
 }
@@ -252,18 +249,17 @@ DEFAULT_OUTPUT_PROFILES: dict = {
 OUTPUT_PROFILES: dict = {}  # Populated at runtime by load_output_profiles()
 DEFAULT_OUTPUT_TYPE = "ride-command"
 
-# Valid choices for directory structure and filename format
-VALID_DIR_STRUCTURES = ("flat", "nested-artist", "nested-artist-album")
-VALID_FILENAME_FORMATS = ("full", "title-only")
+# Valid ID3 version tokens for the id3_versions list
+VALID_ID3_VERSIONS = ("v2.3", "v2.4", "v1")
 
 # Profile name validation: lowercase alphanumeric with hyphens
 VALID_PROFILE_NAME_RE = re.compile(r'^[a-z0-9]+(-[a-z0-9]+)*$')
 
 # Required fields for each profile entry in config.yaml
 _PROFILE_REQUIRED_FIELDS = (
-    "description", "directory_structure", "filename_format", "id3_version",
-    "strip_id3v1", "title_tag_format", "artwork_size", "quality_preset",
-    "pipeline_album", "pipeline_artist",
+    "description", "title_format", "artist_format", "album_format",
+    "extra_tags", "filename_format", "directory_format", "id3_versions",
+    "artwork_size",
 )
 
 
@@ -290,55 +286,51 @@ def _validate_profile(name, data):
         raise ValueError(
             f"Profile '{name}': 'description' must be a non-empty string")
 
-    ds = data["directory_structure"]
-    if ds not in VALID_DIR_STRUCTURES:
-        raise ValueError(
-            f"Profile '{name}': 'directory_structure' must be one of "
-            f"{VALID_DIR_STRUCTURES}, got '{ds}'")
+    # Template string fields — must be non-empty strings
+    for field in ("title_format", "artist_format", "album_format"):
+        val = data[field]
+        if not isinstance(val, str) or not val.strip():
+            raise ValueError(
+                f"Profile '{name}': '{field}' must be a non-empty string")
 
+    # extra_tags — must be a dict with string keys and string values
+    et = data["extra_tags"]
+    if not isinstance(et, dict):
+        raise ValueError(
+            f"Profile '{name}': 'extra_tags' must be a mapping, got {type(et).__name__}")
+    for frame_id, val in et.items():
+        if not isinstance(frame_id, str) or not isinstance(val, str):
+            raise ValueError(
+                f"Profile '{name}': 'extra_tags' keys and values must be strings, "
+                f"got {frame_id!r}: {val!r}")
+
+    # filename_format — must be a non-empty template string
     ff = data["filename_format"]
-    if ff not in VALID_FILENAME_FORMATS:
+    if not isinstance(ff, str) or not ff.strip():
         raise ValueError(
-            f"Profile '{name}': 'filename_format' must be one of "
-            f"{VALID_FILENAME_FORMATS}, got '{ff}'")
+            f"Profile '{name}': 'filename_format' must be a non-empty string")
 
-    iv = data["id3_version"]
-    if iv not in (3, 4):
+    # directory_format — empty string means flat output
+    df = data["directory_format"]
+    if not isinstance(df, str):
         raise ValueError(
-            f"Profile '{name}': 'id3_version' must be 3 or 4, got {iv!r}")
+            f"Profile '{name}': 'directory_format' must be a string, got {df!r}")
 
-    si = data["strip_id3v1"]
-    if not isinstance(si, bool):
+    # id3_versions — must be a non-empty list of valid version tokens
+    iv = data["id3_versions"]
+    if not isinstance(iv, list) or not iv:
         raise ValueError(
-            f"Profile '{name}': 'strip_id3v1' must be a boolean, got {si!r}")
-
-    ttf = data["title_tag_format"]
-    if ttf != "artist_title":
-        raise ValueError(
-            f"Profile '{name}': 'title_tag_format' must be 'artist_title', got '{ttf}'")
+            f"Profile '{name}': 'id3_versions' must be a non-empty list")
+    for v in iv:
+        if v not in VALID_ID3_VERSIONS:
+            raise ValueError(
+                f"Profile '{name}': 'id3_versions' contains invalid version '{v}' "
+                f"(valid: {', '.join(VALID_ID3_VERSIONS)})")
 
     asize = data["artwork_size"]
-    if not isinstance(asize, int) or asize < -1:
+    if not isinstance(asize, int) or isinstance(asize, bool) or asize < -1:
         raise ValueError(
             f"Profile '{name}': 'artwork_size' must be an integer >= -1, got {asize!r}")
-
-    qp = data["quality_preset"]
-    if qp not in QUALITY_PRESETS:
-        raise ValueError(
-            f"Profile '{name}': 'quality_preset' must be one of "
-            f"{list(QUALITY_PRESETS.keys())}, got '{qp}'")
-
-    pa = data["pipeline_album"]
-    if pa not in ("playlist_name", "original"):
-        raise ValueError(
-            f"Profile '{name}': 'pipeline_album' must be 'playlist_name' or "
-            f"'original', got '{pa}'")
-
-    par = data["pipeline_artist"]
-    if par not in ("various", "original"):
-        raise ValueError(
-            f"Profile '{name}': 'pipeline_artist' must be 'various' or "
-            f"'original', got '{par}'")
 
     # usb_dir is optional (defaults to "")
     if "usb_dir" in data:
@@ -349,7 +341,7 @@ def _validate_profile(name, data):
 
 
 _KNOWN_SETTINGS_KEYS = {
-    'output_type', 'workers', 'dir_structure', 'filename_format',
+    'output_type', 'workers', 'quality_preset',
     'api_key', 'server_name', 'log_retention_days', 'scheduler',
 }
 
@@ -547,6 +539,26 @@ def get_library_dir(playlist_key=None):
     if playlist_key:
         return f"{DEFAULT_LIBRARY_DIR}/{playlist_key}"
     return DEFAULT_LIBRARY_DIR
+
+
+class SafeTemplateDict(dict):
+    """Dict subclass that returns '{key}' for missing keys in format_map().
+
+    Allows templates to contain variables that may not be available without
+    raising KeyError — unknown variables are left as literal placeholders.
+    """
+
+    def __missing__(self, key):
+        return f"{{{key}}}"
+
+
+def apply_template(template, **variables):
+    """Apply template variables using str.format_map with safe fallback.
+
+    Supported variables: title, artist, album, playlist, playlist_key.
+    Unknown variables are left as literal '{name}' in the output.
+    """
+    return template.format_map(SafeTemplateDict(variables))
 
 
 # Third-party imports — deferred so the script can start without a venv
@@ -1170,10 +1182,82 @@ def migrate_config_schema(logger=None):
         data['schema_version'] = 1
         dirty = True
 
-    # Future migrations would go here:
-    # if current < 2:
-    #     data['schema_version'] = 2
-    #     ... version 1 → 2 migration ...
+    # ── Version 1 → 2: template-based output profiles ──────────────
+    if current < 2:
+        ot = data.get('output_types')
+        if isinstance(ot, dict):
+            for pname, pf in ot.items():
+                if not isinstance(pf, dict):
+                    continue
+
+                # Move quality_preset from profile to settings (global)
+                qp = pf.pop('quality_preset', None)
+                if qp and 'quality_preset' not in data.get('settings', {}):
+                    data.setdefault('settings', {})['quality_preset'] = qp
+
+                # Convert pipeline_album → album_format
+                pa = pf.pop('pipeline_album', None)
+                if 'album_format' not in pf:
+                    if pa == 'playlist_name':
+                        pf['album_format'] = '{playlist}'
+                    else:
+                        pf['album_format'] = '{album}'
+
+                # Convert pipeline_artist → artist_format
+                par = pf.pop('pipeline_artist', None)
+                if 'artist_format' not in pf:
+                    if par == 'various':
+                        pf['artist_format'] = 'Various'
+                    else:
+                        pf['artist_format'] = '{artist}'
+
+                # Convert title_tag_format → title_format
+                ttf = pf.pop('title_tag_format', None)
+                if 'title_format' not in pf:
+                    if ttf == 'artist_title':
+                        pf['title_format'] = '{artist} - {title}'
+                    else:
+                        pf['title_format'] = '{title}'
+
+                # Convert directory_structure → directory_format
+                ds = pf.pop('directory_structure', None)
+                if 'directory_format' not in pf:
+                    if ds == 'nested-artist':
+                        pf['directory_format'] = '{artist}'
+                    elif ds == 'nested-artist-album':
+                        pf['directory_format'] = '{artist}/{album}'
+                    else:
+                        pf['directory_format'] = ''
+
+                # Convert filename_format fixed values → templates
+                ff = pf.get('filename_format', '')
+                if ff == 'full':
+                    pf['filename_format'] = '{artist} - {title}'
+                elif ff == 'title-only':
+                    pf['filename_format'] = '{title}'
+
+                # Convert id3_version + strip_id3v1 → id3_versions list
+                iv = pf.pop('id3_version', None)
+                si = pf.pop('strip_id3v1', None)
+                if 'id3_versions' not in pf:
+                    v2_tag = f'v2.{iv}' if iv in (3, 4) else 'v2.3'
+                    if si is False:
+                        pf['id3_versions'] = [v2_tag, 'v1']
+                    else:
+                        pf['id3_versions'] = [v2_tag]
+
+                # Add extra_tags if missing
+                if 'extra_tags' not in pf:
+                    pf['extra_tags'] = {}
+
+            dirty = True
+            changes.append("migrated output profiles to template-based format")
+            if logger:
+                logger.info(
+                    "Config migration 1→2: migrated profiles to templates")
+
+        data['schema_version'] = 2
+        dirty = True
 
     if dirty:
         with open(conf_path, 'w') as f:
@@ -2720,15 +2804,14 @@ class ConfigManager:
             self.output_profiles[name] = OutputProfile(
                 name=name,
                 description=fields["description"],
-                directory_structure=fields["directory_structure"],
+                title_format=fields["title_format"],
+                artist_format=fields["artist_format"],
+                album_format=fields["album_format"],
+                extra_tags=dict(fields.get("extra_tags", {})),
                 filename_format=fields["filename_format"],
-                id3_version=fields["id3_version"],
-                strip_id3v1=fields["strip_id3v1"],
-                title_tag_format=fields["title_tag_format"],
+                directory_format=fields["directory_format"],
+                id3_versions=list(fields["id3_versions"]),
                 artwork_size=fields["artwork_size"],
-                quality_preset=fields["quality_preset"],
-                pipeline_album=fields["pipeline_album"],
-                pipeline_artist=fields["pipeline_artist"],
                 usb_dir=fields.get("usb_dir", ""),
             )
 
@@ -2741,6 +2824,7 @@ class ConfigManager:
         self.settings = {
             'output_type': DEFAULT_OUTPUT_TYPE,
             'workers': DEFAULT_WORKERS,
+            'quality_preset': DEFAULT_QUALITY_PRESET,
             'server_name': '',
             'log_retention_days': DEFAULT_LOG_RETENTION_DAYS,
         }
@@ -2766,9 +2850,9 @@ class ConfigManager:
         else:
             output_types = {}
             for name, p in self.output_profiles.items():
-                output_types[name] = {
-                    f: getattr(p, f) for f in _PROFILE_REQUIRED_FIELDS
-                }
+                fields = {f: getattr(p, f) for f in _PROFILE_REQUIRED_FIELDS}
+                fields['usb_dir'] = p.usb_dir
+                output_types[name] = fields
 
         data = {
             'schema_version': CONFIG_SCHEMA_VERSION,
