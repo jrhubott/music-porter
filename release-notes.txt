@@ -1,3 +1,6 @@
+Version 2.35.0 (2026-02-26):
+• Fix next dev version after release to use PATCH increment (e.g., 2.34.0 → 2.34.1-dev) instead of MINOR (2.35.0-dev), preserving ability to do patch releases
+
 Version 2.34.0 (2026-02-26):
 • Optimize merge-to-main skill — reduced from 17 steps to 6, cut user prompts from 7 to 1-2, removed expensive diff-scanning and /todo skill invocations
 • Optimize merge-to-dev skill — reduced from 7 steps to 4, removed redundant negative section and Co-Authored-By reminders
