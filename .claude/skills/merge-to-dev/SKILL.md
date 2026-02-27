@@ -3,7 +3,7 @@ name: merge-to-dev
 description: Merge the current feature branch into dev — fast and fully automatic
 model: opus
 disable-model-invocation: true
-allowed-tools: Bash, Read, Edit, Grep, Glob
+allowed-tools: Bash, Read, Edit, Grep, Glob, AskUserQuestion
 ---
 
 Merge the current feature branch into dev. Fully automatic — no user prompts.
@@ -31,5 +31,5 @@ Merge the current feature branch into dev. Fully automatic — no user prompts.
 
 4. **Push and report**
    - `git push origin dev` (warn and stop on failure — never force push)
-   - `git checkout <branch>` (return to feature branch)
    - Show `git log dev --oneline -5` to confirm
+   - Ask the user whether to stay on dev (default) or switch back to the feature branch
