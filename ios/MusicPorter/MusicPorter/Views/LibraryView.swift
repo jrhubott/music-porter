@@ -17,6 +17,12 @@ struct LibraryView: View {
     @State private var exportScope: ExportScope = .all
     @State private var downloadTask: Task<Void, Never>?
     @State private var downloadError: String?
+    @State private var backgroundedAt: Date?
+    @State private var downloadGeneration = 0
+
+    /// Minimum seconds in background before considering a download stalled.
+    /// iOS reclaims sockets after suspension; connections are dead after this threshold.
+    private let backgroundStallThreshold: TimeInterval = 3
 
     // Delete server data state
     @State private var serverDeleteKey: String?
@@ -124,6 +130,9 @@ struct LibraryView: View {
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active {
                     resumeIfStalled()
+                    backgroundedAt = nil
+                } else if newPhase == .background {
+                    backgroundedAt = Date()
                 }
             }
         }
@@ -569,18 +578,22 @@ struct LibraryView: View {
     }
 
     private func startDownloadPlaylist(_ name: String) {
-        // Cancel any stale suspended task to avoid duplicates
         downloadTask?.cancel()
+        downloadGeneration += 1
+        let generation = downloadGeneration
         downloadTask = Task {
             downloadingPlaylist = name
             downloadError = nil
             do {
                 try await appState.downloadManager.downloadAll(playlist: name)
             } catch is CancellationError {
-                // User cancelled
+                // User cancelled or replaced by resumeIfStalled
             } catch {
                 downloadError = error.localizedDescription
             }
+            // Only clean up if we're still the active download generation.
+            // A newer task (from resumeIfStalled) may have replaced us.
+            guard downloadGeneration == generation else { return }
             storageUsed = appState.downloadManager.localStorageUsed()
             appState.downloadManager.clearProgress()
             downloadingPlaylist = nil
@@ -589,8 +602,9 @@ struct LibraryView: View {
     }
 
     private func startDownloadAll() {
-        // Cancel any stale suspended task to avoid duplicates
         downloadTask?.cancel()
+        downloadGeneration += 1
+        let generation = downloadGeneration
         downloadTask = Task {
             isDownloadingAll = true
             downloadError = nil
@@ -598,10 +612,11 @@ struct LibraryView: View {
             do {
                 try await appState.downloadManager.downloadAllPlaylists(dirs: vm.exportDirs)
             } catch is CancellationError {
-                // User cancelled
+                // User cancelled or replaced by resumeIfStalled
             } catch {
                 downloadError = error.localizedDescription
             }
+            guard downloadGeneration == generation else { return }
             storageUsed = appState.downloadManager.localStorageUsed()
             appState.downloadManager.clearProgress()
             isDownloadingAll = false
@@ -610,25 +625,33 @@ struct LibraryView: View {
     }
 
     /// Resume a stalled download after returning from background.
-    /// The foreground Task may have been suspended by the OS; this detects
-    /// remaining files and starts a new download task that skips completed files.
+    /// iOS reclaims sockets after suspension; this uses background duration
+    /// to distinguish brief app switches from real stalls.
     private func resumeIfStalled() {
-        guard let playlist = appState.downloadManager.stalledDownloadPlaylist() else { return }
+        guard appState.downloadManager.stalledDownloadPlaylist() != nil else { return }
 
-        // A stalled download exists. The foreground Task may be:
-        // - nil (app was terminated and relaunched)
-        // - cancelled (user cancelled before backgrounding)
-        // - alive but frozen (OS suspended it during lock screen)
-        // In all cases except active cancellation, we should restart.
-        if let task = downloadTask, task.isCancelled { return }
+        if downloadTask == nil {
+            // App was relaunched or previous download completed/failed — restart
+            if isDownloadingAll {
+                startDownloadAll()
+            } else if let playlist = appState.downloadManager.stalledDownloadPlaylist() {
+                startDownloadPlaylist(playlist)
+            }
+            return
+        }
 
-        // Cancel the frozen task (if any) before starting a fresh one
+        // Download task exists. Only intervene if backgrounded long enough for
+        // the OS to reclaim sockets. Brief app switches don't interrupt.
+        guard let bgTime = backgroundedAt,
+              Date().timeIntervalSince(bgTime) > backgroundStallThreshold else { return }
+
+        // Connections are dead after suspension — cancel stale task, start fresh
         downloadTask?.cancel()
         downloadTask = nil
 
         if isDownloadingAll {
             startDownloadAll()
-        } else {
+        } else if let playlist = appState.downloadManager.stalledDownloadPlaylist() {
             startDownloadPlaylist(playlist)
         }
     }
