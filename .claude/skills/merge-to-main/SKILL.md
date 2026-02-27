@@ -100,34 +100,28 @@ Merge the dev branch into main following the project's 3-tier version workflow.
     - Verify VERSION matches the expected clean `X.Y.Z`: read line 50 of `porter_core.py`
     - If any check fails, warn the user and ask whether to proceed with tagging or abort
 
-13. **Update SRS metadata**
-    - For each SRS file found in step 5, update its status line from "In Progress" to "Complete" and add `**Implemented in:** vX.Y.Z`
-    - Stage and commit: `Mark SRS complete for vX.Y.Z`
-    - Do NOT include Co-Authored-By lines
-    - SRS files remain in `SRS/` permanently — do NOT archive or delete them
-
-14. **Tag the release**
+13. **Tag the release**
     - `git tag vX.Y.Z`
 
-15. **Set next dev version**
+14. **Set next dev version**
     - `git checkout dev && git merge main` (sync dev with main)
     - Ask the user for the next anticipated version (suggest next PATCH as default, e.g. if releasing 2.30.0, suggest 2.31.0)
     - Edit `porter_core.py` line 50 to set `VERSION = "X.Y.Z-dev"` (with `-dev` suffix)
     - Stage and commit: `Set next dev version to X.Y.Z-dev`
     - Do NOT include Co-Authored-By lines
 
-16. **Clean up feature branches**
+15. **Clean up feature branches**
     - List branches already merged into dev: `git branch --merged dev` (exclude main and dev from the list)
     - If there are merged branches, show the list and ask the user which to delete
     - For each branch the user wants to delete, run `git branch -d <branch-name>`
     - If no merged branches exist, skip this step silently
 
-17. **Push to remote**
+16. **Push to remote**
     - Ask the user if they want to push to origin now
     - If yes, run `git push origin main dev --tags`
     - If push fails (e.g. rejected), warn the user and show the error — do NOT force push
 
-18. **Report**
+17. **Report**
     - Show the final `git log --oneline -5` on main to confirm
     - Show the tag: `git tag -l 'vX.Y.Z'`
     - Show the current dev version: read line 50 of `porter_core.py`
