@@ -1,5 +1,5 @@
 ---
-name: merge-to-main
+name: merge-dev-to-main
 description: Merge dev into main with version bump, tagging, and release workflow
 model: opus
 disable-model-invocation: true

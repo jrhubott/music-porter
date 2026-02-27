@@ -33,7 +33,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from flask import (
@@ -343,6 +343,8 @@ _SCHEDULER_DEFAULTS = {
     'preset': None,
     'retry_minutes': 15,
     'max_retries': 3,
+    'run_at': None,
+    'on_missed': 'run',
 }
 
 
@@ -352,14 +354,19 @@ class PipelineScheduler:
     Each timer firing schedules the next one, allowing clean cancellation
     and reconfiguration without blocked sleeping threads.
 
+    State is persisted to the scheduled_jobs DB table so schedules survive
+    server restarts.  For intervals >= 24h, an optional ``run_at`` (HH:MM)
+    targets a specific local time-of-day instead of "now + interval".
+
     Lifecycle: created in start_server(), stored on AppContext.
     start() begins the timer chain if config says enabled.
     stop() cancels any pending timer (called on server shutdown).
     reconfigure() updates settings and restarts the timer if needed.
     """
 
-    def __init__(self, ctx):
+    def __init__(self, ctx, jobs_db):
         self._ctx = ctx
+        self._jobs_db = jobs_db
         self._timer = None
         self._lock = threading.RLock()
 
@@ -370,6 +377,8 @@ class PipelineScheduler:
         self._preset = None
         self._retry_minutes = 15
         self._max_retries = 3
+        self._run_at = None
+        self._on_missed = 'run'
 
         # Runtime state
         self._last_run_time = None
@@ -389,16 +398,105 @@ class PipelineScheduler:
         self._preset = sched.get('preset')
         self._retry_minutes = sched.get('retry_minutes', 15)
         self._max_retries = sched.get('max_retries', 3)
+        self._run_at = sched.get('run_at') or None
+        self._on_missed = sched.get('on_missed', 'run')
+
+    def _compute_delay(self):
+        """Return seconds until next run.
+
+        If run_at is set and interval >= 24h, calculate delay to next
+        local-time occurrence of HH:MM. For intervals > 24h, add extra
+        full days beyond the first 24h.  Otherwise: interval_hours * 3600.
+        """
+        if self._run_at and self._interval_hours >= 24:
+            try:
+                hh, mm = (int(x) for x in self._run_at.split(':'))
+            except (ValueError, AttributeError):
+                return self._interval_hours * 3600
+
+            now = datetime.now()
+            target = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+
+            # If target is in the past today, advance to tomorrow
+            if target <= now:
+                target += timedelta(days=1)
+
+            # For intervals > 24h, add extra days (e.g. 48h = every 2 days)
+            extra_days = int(self._interval_hours / 24) - 1
+            if extra_days > 0:
+                target += timedelta(days=extra_days)
+
+            return (target - now).total_seconds()
+
+        return self._interval_hours * 3600
+
+    def _persist_state(self):
+        """Write current runtime state to the scheduled_jobs DB table."""
+        self._jobs_db.upsert(
+            'pipeline',
+            next_run_time=self._next_run_time,
+            last_run_time=self._last_run_time,
+            last_run_status=self._last_run_status or '',
+            last_run_error=self._last_run_error or '',
+            on_missed=self._on_missed,
+        )
 
     def start(self):
-        """Load config and start timer chain if enabled. Called at server startup."""
+        """Load config and start timer chain if enabled.
+
+        Restores persisted state from DB:
+        - If next_run_time is in the future, resume with remaining delay
+        - If next_run_time is in the past, apply on_missed policy
+        - If no persisted state, start fresh with _compute_delay()
+        """
         with self._lock:
             self._load_config()
-            if self._enabled:
-                self._schedule_next(self._interval_hours * 3600)
+            if not self._enabled:
+                return
+
+            persisted = self._jobs_db.get('pipeline')
+            now = time.time()
+
+            if persisted:
+                # Restore last run info for status display
+                if persisted.get('last_run_time'):
+                    self._last_run_time = persisted['last_run_time']
+                if persisted.get('last_run_status'):
+                    self._last_run_status = persisted['last_run_status']
+                if persisted.get('last_run_error'):
+                    self._last_run_error = persisted['last_run_error']
+
+                nrt = persisted.get('next_run_time')
+                if nrt is not None:
+                    if nrt > now:
+                        # Persisted time in future — resume with remaining delay
+                        self._schedule_next(nrt - now)
+                        return
+                    else:
+                        # Persisted time in past — missed run
+                        on_missed = persisted.get('on_missed', self._on_missed)
+                        if on_missed == 'run':
+                            # Execute immediately, _audit_callback will
+                            # schedule next
+                            success = self._execute()
+                            if not success:
+                                # Busy — schedule next normally
+                                self._schedule_next(self._compute_delay())
+                            return
+                        else:
+                            # Skip missed run, advance to next occurrence
+                            self._schedule_next(self._compute_delay())
+                            return
+
+            # No persisted state — fresh start
+            self._schedule_next(self._compute_delay())
 
     def stop(self):
-        """Cancel any pending timer. Called at server shutdown."""
+        """Cancel any pending timer. Called at server shutdown.
+
+        Persisted next_run_time stays in DB for missed-run detection
+        on next restart.
+        """
         with self._lock:
             if self._timer:
                 self._timer.cancel()
@@ -422,8 +520,16 @@ class PipelineScheduler:
 
             self._load_config()
             self._retry_count = 0
+
+            # Persist new on_missed policy and clear next_run_time
+            self._jobs_db.upsert(
+                'pipeline',
+                next_run_time=None,
+                on_missed=self._on_missed,
+            )
+
             if self._enabled:
-                self._schedule_next(self._interval_hours * 3600)
+                self._schedule_next(self._compute_delay())
 
     def run_now(self):
         """Trigger an immediate scheduled run. Returns True if submitted."""
@@ -441,6 +547,7 @@ class PipelineScheduler:
         self._timer.name = 'PipelineScheduler'
         self._timer.start()
         self._next_run_time = time.time() + delay_seconds
+        self._persist_state()
 
     def _on_timer(self):
         """Timer callback. Attempts to execute, retries or reschedules."""
@@ -460,7 +567,8 @@ class PipelineScheduler:
                 self._last_run_time = time.time()
                 self._retry_count = 0
                 if self._enabled:
-                    self._schedule_next(self._interval_hours * 3600)
+                    self._schedule_next(self._compute_delay())
+                self._persist_state()
 
     def _execute(self):
         """Submit pipeline task to TaskManager. Returns True if submitted."""
@@ -547,7 +655,8 @@ class PipelineScheduler:
                 self._last_run_error = task.error or ''
                 self._retry_count = 0
                 if self._enabled and not self._timer:
-                    self._schedule_next(self._interval_hours * 3600)
+                    self._schedule_next(self._compute_delay())
+                self._persist_state()
 
             self._ctx.audit_logger.log(
                 'scheduled_pipeline',
@@ -583,6 +692,8 @@ class PipelineScheduler:
                 'preset': self._preset,
                 'retry_minutes': self._retry_minutes,
                 'max_retries': self._max_retries,
+                'run_at': self._run_at,
+                'on_missed': self._on_missed,
                 'running': self._running,
                 'last_run_time': self._last_run_time,
                 'last_run_iso': (
@@ -1022,7 +1133,8 @@ def start_server(host='127.0.0.1', port=5555, no_auth=False,
 
     # Initialize and start the pipeline scheduler
     ctx = app.config['CTX']
-    ctx.scheduler = PipelineScheduler(ctx)
+    jobs_db = mp.ScheduledJobsDB()
+    ctx.scheduler = PipelineScheduler(ctx, jobs_db)
     ctx.scheduler.start()
 
     # Bonjour/mDNS advertisement

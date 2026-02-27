@@ -1,3 +1,10 @@
+Version 2.35.1 (2026-02-26):
+• Scheduler persistence — schedule state (next_run_time, last_run_time, on_missed policy) persists in DB across server restarts via new scheduled_jobs table
+• Time-of-day scheduling — optional run_at (HH:MM) for intervals >= 24h targets a specific local time instead of drifting on restart
+• Configurable missed-run behavior — choose "run immediately" or "skip to next" when a scheduled time is missed (server was down)
+• Fix spurious "unknown key" warnings for scheduler, server_name, and log_retention_days in config verify
+• Rename merge-to-main skill to merge-dev-to-main for clarity
+
 Version 2.35.0 (2026-02-26):
 • Fix next dev version after release to use PATCH increment (e.g., 2.34.0 → 2.34.1-dev) instead of MINOR (2.35.0-dev), preserving ability to do patch releases
 
