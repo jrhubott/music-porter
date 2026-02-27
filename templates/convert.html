@@ -64,6 +64,28 @@
           <label class="form-check-label" for="convertVerbose">Verbose</label>
         </div>
       </div>
+      <div class="mt-3">
+        <label class="form-label d-block">EQ Audio Effects</label>
+        <div class="d-flex gap-3 flex-wrap">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="eqLoudnorm">
+            <label class="form-check-label" for="eqLoudnorm">Loudness Normalization</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="eqBassBoost">
+            <label class="form-check-label" for="eqBassBoost">Bass Boost</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="eqTrebleBoost">
+            <label class="form-check-label" for="eqTrebleBoost">Treble Boost</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="eqCompressor">
+            <label class="form-check-label" for="eqCompressor">Dynamic Compression</label>
+          </div>
+        </div>
+        <small class="text-muted">Saved presets auto-load when a playlist is selected. Checking any box overrides the saved preset.</small>
+      </div>
       <button type="submit" class="btn btn-primary mt-3"><i class="bi bi-play-fill"></i> Convert</button>
     </form>
   </div>
@@ -84,10 +106,35 @@
 
 {% block scripts %}
 <script>
+let _activeProfile = 'ride-command';
+fetch('/api/settings').then(r=>r.json()).then(d => {
+  _activeProfile = (d.settings && d.settings.output_type) || 'ride-command';
+});
+
 fetch('/api/directories/music').then(r=>r.json()).then(dirs => {
   const sel = document.getElementById('convertInput');
   sel.innerHTML = dirs.map(d => `<option value="music/${d}">music/${d}</option>`).join('');
   if (dirs.length === 0) sel.innerHTML = '<option value="">No music directories found</option>';
+  // Auto-load EQ for first playlist
+  if (dirs.length > 0) loadEQForPlaylist(dirs[0]);
+});
+
+function loadEQForPlaylist(playlist) {
+  fetch('/api/eq/resolve?profile=' + encodeURIComponent(_activeProfile) + '&playlist=' + encodeURIComponent(playlist))
+    .then(r => r.json())
+    .then(data => {
+      if (data.eq) {
+        document.getElementById('eqLoudnorm').checked = data.eq.loudnorm;
+        document.getElementById('eqBassBoost').checked = data.eq.bass_boost;
+        document.getElementById('eqTrebleBoost').checked = data.eq.treble_boost;
+        document.getElementById('eqCompressor').checked = data.eq.compressor;
+      }
+    }).catch(() => {});
+}
+
+document.getElementById('convertInput').addEventListener('change', function() {
+  const dir = this.value;
+  if (dir) loadEQForPlaylist(dir.replace('music/', ''));
 });
 
 document.getElementById('convertForm').addEventListener('submit', function(e) {
@@ -105,6 +152,13 @@ document.getElementById('convertForm').addEventListener('submit', function(e) {
   if (dirStructure) data.dir_structure = dirStructure;
   const filenameFormat = document.getElementById('convertFilenameFormat').value;
   if (filenameFormat) data.filename_format = filenameFormat;
+  // EQ effects
+  const eq = {};
+  if (document.getElementById('eqLoudnorm').checked) eq.loudnorm = true;
+  if (document.getElementById('eqBassBoost').checked) eq.bass_boost = true;
+  if (document.getElementById('eqTrebleBoost').checked) eq.treble_boost = true;
+  if (document.getElementById('eqCompressor').checked) eq.compressor = true;
+  if (Object.keys(eq).length > 0) data.eq = eq;
   if (!data.input_dir) { showToast('Select a source directory', 'warning'); return; }
 
   document.getElementById('convertStatus').textContent = 'Running';

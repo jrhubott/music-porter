@@ -440,13 +440,13 @@ The tool uses a "hard gate" protection system for original metadata:
 11. **Scheduling** - Automatic periodic syncing on schedule
 12. **Notification system** - Email/SMS alerts for completed operations
 13. ~~**Custom filename templates** - Configurable output filename patterns~~ *(implemented in v2.3.0)*
-14. **Equalizer presets** - Apply audio processing (normalization, compression)
+14. ~~**Equalizer presets** - Apply audio processing (normalization, compression)~~ *(implemented in v2.32.0)*
 15. **Collaborative playlists** - Share playlists with others for collaborative management
 16. ~~**Additional output type profiles** - Add device-specific profiles beyond Ride Command (e.g., generic car stereo, nested directory structures, alternative filename formats)~~ *(implemented in v1.7.0)*
 
 ## Version
 
-Current version: **v2.31.0**
+Current version: **v2.32.0**
 
 ## License
 

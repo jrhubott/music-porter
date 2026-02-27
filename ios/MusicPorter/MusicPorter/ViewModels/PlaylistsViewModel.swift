@@ -21,6 +21,10 @@ final class PlaylistsViewModel {
     var searchQuery = ""
     var addingPlaylistURL: String?
 
+    // Guided flow state — set after adding a playlist from Apple Music
+    var lastAddedPlaylist: Playlist?
+    var showProcessPrompt = false
+
     func load(api: APIClient) async {
         isLoading = true
         error = nil
@@ -112,10 +116,20 @@ final class PlaylistsViewModel {
         do {
             try await api.addPlaylist(key: key, url: url, name: name)
             await load(api: api)
+            // Set guided flow state
+            if let added = playlists.first(where: { $0.key == key }) {
+                lastAddedPlaylist = added
+                showProcessPrompt = true
+            }
         } catch {
             self.error = error.localizedDescription
         }
         addingPlaylistURL = nil
+    }
+
+    func dismissProcessPrompt() {
+        showProcessPrompt = false
+        lastAddedPlaylist = nil
     }
 
     func isAlreadyAdded(url: URL?) -> Bool {

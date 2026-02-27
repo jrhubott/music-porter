@@ -18,8 +18,16 @@ final class AppState {
     var isConnected: Bool { apiClient.isConnected }
     var currentServer: ServerConnection? { apiClient.server }
 
+    // Tab coordination for guided flow
+    var selectedTab: Int = 0
+    var pendingPipelinePlaylist: Playlist?
+
     /// Non-nil when the server's API version doesn't match what this app expects.
     var apiVersionWarning: String?
+
+    // Reconnect state
+    var isReconnecting = false
+    var reconnectAttempt = 0
 
     // Auto-reconnect task (cancellable to avoid race with QR scan connect)
     private var autoReconnectTask: Task<Bool, Never>?
@@ -42,6 +50,8 @@ final class AppState {
     func cancelAutoReconnect() {
         autoReconnectTask?.cancel()
         autoReconnectTask = nil
+        isReconnecting = false
+        reconnectAttempt = 0
     }
 
     func connect(server: ServerConnection, apiKey: String) async throws {
@@ -83,33 +93,47 @@ final class AppState {
     }
 
     /// Try to reconnect using saved server and keychain API key.
-    /// Times out after 3 seconds to avoid blocking the UI.
-    /// Stores the task so it can be cancelled by a QR scan connect.
+    /// Retries with increasing backoff until connected or cancelled.
+    /// Never clears savedServer on failure — only explicit disconnect does that.
     func attemptAutoReconnect() async -> Bool {
         guard let server = savedServer, let apiKey = KeychainService.load() else { return false }
+        isReconnecting = true
+        reconnectAttempt = 0
+
         let task = Task<Bool, Never> {
-            do {
-                try await withThrowingTaskGroup(of: Bool.self) { group in
-                    group.addTask {
-                        try await self.connect(server: server, apiKey: apiKey)
-                        return true
+            while !Task.isCancelled {
+                reconnectAttempt += 1
+                do {
+                    _ = try await withThrowingTaskGroup(of: Bool.self) { group in
+                        group.addTask {
+                            try await self.connect(server: server, apiKey: apiKey)
+                            return true
+                        }
+                        group.addTask {
+                            try await Task.sleep(for: .seconds(5))
+                            throw CancellationError()
+                        }
+                        let result = try await group.next() ?? false
+                        group.cancelAll()
+                        return result
                     }
-                    group.addTask {
-                        try await Task.sleep(for: .seconds(3))
-                        throw CancellationError()
+                    // Connected successfully
+                    isReconnecting = false
+                    reconnectAttempt = 0
+                    return true
+                } catch {
+                    if Task.isCancelled { break }
+                    // Wait before retrying — backoff: 3s, 5s, 10s, then 10s cap
+                    let delay: UInt64 = switch reconnectAttempt {
+                    case 1: 3_000_000_000
+                    case 2: 5_000_000_000
+                    default: 10_000_000_000
                     }
-                    let result = try await group.next() ?? false
-                    group.cancelAll()
-                    return result
+                    try? await Task.sleep(nanoseconds: delay)
                 }
-                return true
-            } catch {
-                if !Task.isCancelled {
-                    // Clear stale saved connection on failure (but not if cancelled by QR scan)
-                    savedServer = nil
-                }
-                return false
             }
+            isReconnecting = false
+            return false
         }
         autoReconnectTask = task
         let result = await task.value

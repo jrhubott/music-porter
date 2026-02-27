@@ -47,7 +47,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.31.0"
+VERSION = "2.32.0"
 
 DEFAULT_DATA_DIR = "data"
 DEFAULT_MUSIC_DIR = "music"
@@ -62,7 +62,7 @@ DEFAULT_USB_DIR = "RZR/Music"
 # Schema version constants — increment and add a migration case when changing
 # the config.yaml structure or DB tables/columns.
 CONFIG_SCHEMA_VERSION = 1
-DB_SCHEMA_VERSION = 1
+DB_SCHEMA_VERSION = 2
 
 # Excluded USB volumes by OS
 if IS_MACOS:
@@ -88,6 +88,75 @@ QUALITY_PRESETS = {
     'low': {'mode': 'vbr', 'value': '6'},         # ~115-150kbps VBR
 }
 DEFAULT_QUALITY_PRESET = 'lossless'
+
+# ── EQ Audio Effects ──────────────────────────────────────────────
+# Available audio effects with their FFmpeg filter strings.
+EQ_EFFECTS = {
+    'loudnorm': {
+        'description': 'Loudness normalization (EBU R128)',
+        'filter': 'loudnorm=I=-14:TP=-1:LRA=11',
+    },
+    'bass_boost': {
+        'description': 'Bass boost (+6dB below 100Hz)',
+        'filter': 'bass=gain=6:frequency=100:width_type=h:width=100',
+    },
+    'treble_boost': {
+        'description': 'Treble boost (+4dB above 3kHz)',
+        'filter': 'treble=gain=4:frequency=3000:width_type=h:width=2000',
+    },
+    'compressor': {
+        'description': 'Dynamic range compression',
+        'filter': 'acompressor=threshold=-20dB:ratio=4:attack=5:release=50',
+    },
+}
+
+# Canonical filter chain order (shape signal → compress → normalize last)
+EQ_CHAIN_ORDER = ['bass_boost', 'treble_boost', 'compressor', 'loudnorm']
+
+
+@dataclass
+class EQConfig:
+    """Audio equalizer/processing configuration."""
+    loudnorm: bool = False
+    bass_boost: bool = False
+    treble_boost: bool = False
+    compressor: bool = False
+
+    @property
+    def any_enabled(self) -> bool:
+        return any([self.loudnorm, self.bass_boost,
+                    self.treble_boost, self.compressor])
+
+    @property
+    def enabled_effects(self) -> list[str]:
+        """Return list of enabled effect names in canonical chain order."""
+        return [e for e in EQ_CHAIN_ORDER if getattr(self, e)]
+
+    def build_filter_chain(self) -> str | None:
+        """Build the FFmpeg audio filter chain string.
+        Returns None if no effects are enabled."""
+        if not self.any_enabled:
+            return None
+        filters = [EQ_EFFECTS[e]['filter'] for e in self.enabled_effects]
+        return ','.join(filters)
+
+    def to_dict(self) -> dict:
+        return {
+            'loudnorm': self.loudnorm,
+            'bass_boost': self.bass_boost,
+            'treble_boost': self.treble_boost,
+            'compressor': self.compressor,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> EQConfig:
+        return cls(
+            loudnorm=bool(data.get('loudnorm', False)),
+            bass_boost=bool(data.get('bass_boost', False)),
+            treble_boost=bool(data.get('treble_boost', False)),
+            compressor=bool(data.get('compressor', False)),
+        )
+
 
 # Freshness thresholds for summary display (calendar days)
 FRESHNESS_CURRENT_DAYS = 0
@@ -719,13 +788,43 @@ class MigrationEvent:
     params: dict = field(default_factory=dict)
 
 
+def _secure_path(path, logger=None):
+    """Set owner-only permissions (0o700 for dirs, 0o600 for files).
+
+    Protects sensitive files (config.yaml with API key, cookies.txt,
+    database) from being read by other users on the system.
+    Best-effort: logs a warning on failure (Docker bind mounts,
+    read-only filesystems) but does not crash. Skipped on Windows.
+    """
+    if IS_WINDOWS:
+        return
+    try:
+        p = Path(path)
+        if p.is_dir():
+            p.chmod(0o700)
+        elif p.exists():
+            p.chmod(0o600)
+    except OSError as e:
+        if logger:
+            logger.warn(f"Could not set permissions on {path}: {e}")
+
+
 def migrate_data_dir(logger=None):
     """Create data/ dir and migrate config.yaml/cookies.txt from project root if needed.
+
+    Also enforces owner-only permissions on the data directory and all
+    sensitive files within it (config.yaml, cookies.txt, database).
 
     Returns a list of MigrationEvent entries for deferred audit logging.
     """
     data_dir = Path(DEFAULT_DATA_DIR)
     data_dir.mkdir(exist_ok=True)
+    _secure_path(data_dir, logger)
+
+    # Enforce owner-only permissions on all sensitive files every startup
+    for sensitive_file in (DEFAULT_CONFIG_FILE, DEFAULT_COOKIES, DEFAULT_DB_FILE,
+                           'data/cookies.txt.backup', 'data/config.yaml.backup'):
+        _secure_path(Path(sensitive_file), logger)
 
     migrations = [
         ('config.yaml', DEFAULT_CONFIG_FILE),
@@ -887,14 +986,35 @@ def migrate_db_schema(logger=None):
             conn.execute("""CREATE INDEX IF NOT EXISTS idx_sync_files_playlist
                 ON sync_files(sync_key, playlist)""")
 
-            conn.execute(f"PRAGMA user_version = {DB_SCHEMA_VERSION}")
+            conn.execute("PRAGMA user_version = 1")
             conn.commit()
             if logger:
-                logger.info(f"DB schema updated to version {DB_SCHEMA_VERSION}")
+                logger.info("DB schema initialized at version 1")
 
-        # Future migrations would go here:
-        # if current < 2:
-        #     ... version 1 → 2 migration ...
+        # ── Version 1 → 2: eq_presets table ──────────────────────────
+        if current < 2:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS eq_presets (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile      TEXT NOT NULL,
+                    playlist     TEXT,
+                    loudnorm     INTEGER NOT NULL DEFAULT 0,
+                    bass_boost   INTEGER NOT NULL DEFAULT 0,
+                    treble_boost INTEGER NOT NULL DEFAULT 0,
+                    compressor   INTEGER NOT NULL DEFAULT 0,
+                    updated_at   REAL NOT NULL DEFAULT 0,
+                    UNIQUE(profile, playlist)
+                )
+            """)
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_eq_profile
+                ON eq_presets(profile)""")
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_eq_profile_playlist
+                ON eq_presets(profile, playlist)""")
+            conn.execute("PRAGMA user_version = 2")
+            conn.commit()
+            changes.append("added eq_presets table for audio EQ configuration")
+            if logger:
+                logger.info("DB migration 1→2: added eq_presets table")
 
         return [MigrationEvent(
             'schema_migrate',
@@ -986,11 +1106,12 @@ def migrate_config_schema(logger=None):
                     pfields['usb_dir'] = default_usb
                     dirty = True
 
-        data['schema_version'] = CONFIG_SCHEMA_VERSION
+        data['schema_version'] = 1
         dirty = True
 
     # Future migrations would go here:
     # if current < 2:
+    #     data['schema_version'] = 2
     #     ... version 1 → 2 migration ...
 
     if dirty:
@@ -1912,6 +2033,176 @@ class SyncTracker:
 
 # Backwards compatibility alias
 USBSyncTracker = SyncTracker
+
+
+class EQConfigManager:
+    """Persistent EQ configuration per profile/playlist using SQLite.
+
+    Follows the AuditLogger/SyncTracker pattern:
+    WAL mode, write lock, lockless reads, connection-per-call.
+
+    Precedence: playlist-specific override > profile default > none (no EQ).
+    """
+
+    def __init__(self, db_path=DEFAULT_DB_FILE):
+        self._db_path = str(db_path)
+        Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._write_lock = threading.Lock()
+        self._init_db()
+
+    def _connect(self):
+        conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_db(self):
+        conn = self._connect()
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS eq_presets (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile      TEXT NOT NULL,
+                    playlist     TEXT,
+                    loudnorm     INTEGER NOT NULL DEFAULT 0,
+                    bass_boost   INTEGER NOT NULL DEFAULT 0,
+                    treble_boost INTEGER NOT NULL DEFAULT 0,
+                    compressor   INTEGER NOT NULL DEFAULT 0,
+                    updated_at   REAL NOT NULL DEFAULT 0,
+                    UNIQUE(profile, playlist)
+                )
+            """)
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_eq_profile
+                ON eq_presets(profile)""")
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_eq_profile_playlist
+                ON eq_presets(profile, playlist)""")
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_eq(self, profile: str, playlist: str | None = None) -> EQConfig:
+        """Get effective EQ config. Checks playlist override first, then profile default."""
+        conn = self._connect()
+        try:
+            if playlist:
+                row = conn.execute(
+                    "SELECT loudnorm, bass_boost, treble_boost, compressor "
+                    "FROM eq_presets WHERE profile = ? AND playlist = ?",
+                    (profile, playlist),
+                ).fetchone()
+                if row:
+                    return EQConfig(
+                        loudnorm=bool(row['loudnorm']),
+                        bass_boost=bool(row['bass_boost']),
+                        treble_boost=bool(row['treble_boost']),
+                        compressor=bool(row['compressor']),
+                    )
+            # Fall back to profile default (playlist IS NULL)
+            row = conn.execute(
+                "SELECT loudnorm, bass_boost, treble_boost, compressor "
+                "FROM eq_presets WHERE profile = ? AND playlist IS NULL",
+                (profile,),
+            ).fetchone()
+            if row:
+                return EQConfig(
+                    loudnorm=bool(row['loudnorm']),
+                    bass_boost=bool(row['bass_boost']),
+                    treble_boost=bool(row['treble_boost']),
+                    compressor=bool(row['compressor']),
+                )
+            return EQConfig()  # No EQ configured
+        finally:
+            conn.close()
+
+    def set_eq(self, profile: str, eq: EQConfig, playlist: str | None = None):
+        """Set EQ config for a profile (default) or profile+playlist (override)."""
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                now = time.time()
+                if playlist:
+                    # Playlist override: UPSERT via ON CONFLICT
+                    conn.execute(
+                        """INSERT INTO eq_presets
+                               (profile, playlist, loudnorm, bass_boost,
+                                treble_boost, compressor, updated_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?)
+                           ON CONFLICT(profile, playlist) DO UPDATE SET
+                               loudnorm=excluded.loudnorm,
+                               bass_boost=excluded.bass_boost,
+                               treble_boost=excluded.treble_boost,
+                               compressor=excluded.compressor,
+                               updated_at=excluded.updated_at""",
+                        (profile, playlist, int(eq.loudnorm), int(eq.bass_boost),
+                         int(eq.treble_boost), int(eq.compressor), now),
+                    )
+                else:
+                    # Profile default (playlist IS NULL): delete+insert
+                    # because SQLite UNIQUE treats NULLs as distinct
+                    conn.execute(
+                        "DELETE FROM eq_presets "
+                        "WHERE profile = ? AND playlist IS NULL",
+                        (profile,),
+                    )
+                    conn.execute(
+                        """INSERT INTO eq_presets
+                               (profile, playlist, loudnorm, bass_boost,
+                                treble_boost, compressor, updated_at)
+                           VALUES (?, NULL, ?, ?, ?, ?, ?)""",
+                        (profile, int(eq.loudnorm), int(eq.bass_boost),
+                         int(eq.treble_boost), int(eq.compressor), now),
+                    )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def delete_eq(self, profile: str, playlist: str | None = None):
+        """Delete EQ config for a profile default or playlist override."""
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                if playlist:
+                    conn.execute(
+                        "DELETE FROM eq_presets "
+                        "WHERE profile = ? AND playlist = ?",
+                        (profile, playlist),
+                    )
+                else:
+                    conn.execute(
+                        "DELETE FROM eq_presets "
+                        "WHERE profile = ? AND playlist IS NULL",
+                        (profile,),
+                    )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def list_eq(self, profile: str) -> list[dict]:
+        """List all EQ configs for a profile (default + all playlist overrides)."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT profile, playlist, loudnorm, bass_boost, treble_boost, "
+                "compressor, updated_at FROM eq_presets WHERE profile = ? "
+                "ORDER BY playlist IS NOT NULL, playlist",
+                (profile,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def list_all(self) -> list[dict]:
+        """List all EQ configs across all profiles."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT profile, playlist, loudnorm, bass_boost, treble_boost, "
+                "compressor, updated_at FROM eq_presets "
+                "ORDER BY profile, playlist IS NOT NULL, playlist",
+            ).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -3202,6 +3493,7 @@ class ConversionResult:
     skipped: int
     errors: int
     mp3_total: int = 0
+    eq_effects: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -4018,7 +4310,7 @@ class Converter:
 
     def __init__(self, logger=None, quality_preset='lossless', workers=None, embed_cover_art=True,
                  output_profile=None, display_handler=None, cancel_event=None,
-                 audit_logger=None, audit_source='cli'):
+                 audit_logger=None, audit_source='cli', eq_config=None):
         self.logger = logger or Logger()
         self.display_handler = display_handler or NullDisplayHandler()
         self.cancel_event = cancel_event
@@ -4030,6 +4322,7 @@ class Converter:
         self.workers = workers if workers is not None else DEFAULT_WORKERS
         self.embed_cover_art = embed_cover_art
         self.output_profile = output_profile or OUTPUT_PROFILES[DEFAULT_OUTPUT_TYPE]
+        self.eq_config = eq_config or EQConfig()
 
     def _get_quality_settings(self, preset):
         """Resolve quality preset to FFmpeg parameters."""
@@ -4120,6 +4413,10 @@ class Converter:
                 else:
                     quality_desc += f" {self.quality_settings['value']}kbps"
                 self.logger.debug(f"Quality:      {quality_desc} (preset: {self.quality_preset})")
+                if self.eq_config.any_enabled:
+                    effects = ', '.join(self.eq_config.enabled_effects)
+                    self.logger.debug(f"EQ effects:   {effects}")
+                    self.logger.debug(f"Filter chain: {self.eq_config.build_filter_chain()}")
                 self.logger.debug("Source tags:")
                 self.logger.debug(f"  → Title:  '{title}'")
                 self.logger.debug(f"  → Artist: '{artist}'")
@@ -4148,6 +4445,9 @@ class Converter:
                 else:
                     reason = "stripped by profile" if artwork_size == -1 else "disabled"
                     self.logger.dry_run(f"  → Cover art:  ({reason})")
+                if self.eq_config.any_enabled:
+                    effects = ', '.join(self.eq_config.enabled_effects)
+                    self.logger.dry_run(f"  → EQ effects: {effects}")
                 return
 
             # Ensure parent directories exist (needed for nested structures)
@@ -4162,6 +4462,11 @@ class Converter:
                     ffmpeg_params['q:a'] = self.quality_settings['value']
                 else:  # cbr for lossless
                     ffmpeg_params['b:a'] = self.quality_settings['value'] + 'k'
+
+                # Apply EQ filter chain if configured
+                filter_chain = self.eq_config.build_filter_chain()
+                if filter_chain:
+                    ffmpeg_params['af'] = filter_chain
 
                 (
                     _ffmpeg
@@ -4290,6 +4595,10 @@ class Converter:
         if force:
             self.logger.info("Force mode enabled — existing files will be overwritten")
 
+        if self.eq_config.any_enabled:
+            effects = ', '.join(self.eq_config.enabled_effects)
+            self.logger.info(f"EQ effects: {effects}")
+
         if not dry_run:
             output_path.mkdir(parents=True, exist_ok=True)
 
@@ -4352,7 +4661,8 @@ class Converter:
                 'completed' if self.stats.errors == 0 else 'failed',
                 params={'input_dir': str(input_dir), 'output_dir': str(output_dir),
                         'preset': self.quality_preset, 'converted': self.stats.converted,
-                        'errors': self.stats.errors},
+                        'errors': self.stats.errors,
+                        'eq_effects': self.eq_config.enabled_effects},
                 duration_s=duration, source=self._audit_source)
         return ConversionResult(
             success=self.stats.errors == 0,
@@ -4369,6 +4679,7 @@ class Converter:
             skipped=self.stats.skipped,
             errors=self.stats.errors,
             mp3_total=mp3_count,
+            eq_effects=self.eq_config.enabled_effects,
         )
 
 
@@ -7477,12 +7788,14 @@ class PipelineOrchestrator:
                  cookie_path=DEFAULT_COOKIES, workers=None, embed_cover_art=True,
                  output_profile=None, prompt_handler=None, display_handler=None,
                  cancel_event=None, audit_logger=None, audit_source='cli',
-                 sync_tracker=None):
+                 sync_tracker=None, eq_config_manager=None, eq_config_override=None):
         self.logger = logger or Logger()
         self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
         self.display_handler = display_handler or NullDisplayHandler()
         self.cancel_event = cancel_event
         self.audit_logger = audit_logger
+        self.eq_config_manager = eq_config_manager
+        self.eq_config_override = eq_config_override
         self._audit_source = audit_source
         self.sync_tracker = sync_tracker
         self.deps = deps or DependencyChecker(self.logger)
@@ -7579,11 +7892,19 @@ class PipelineOrchestrator:
 
         # Use quality_preset parameter if provided, otherwise use instance default
         preset = quality_preset if quality_preset is not None else self.quality_preset
+
+        # Resolve EQ: CLI override > DB playlist override > DB profile default > none
+        eq_config = self.eq_config_override
+        if eq_config is None and self.eq_config_manager:
+            eq_config = self.eq_config_manager.get_eq(
+                self.output_profile.name, self.stats.playlist_key)
+
         converter = Converter(self.logger, quality_preset=preset, workers=self.workers,
                               embed_cover_art=self.embed_cover_art,
                               output_profile=self.output_profile,
                               display_handler=self.display_handler,
-                              cancel_event=self.cancel_event)
+                              cancel_event=self.cancel_event,
+                              eq_config=eq_config)
         convert_result = converter.convert(
             music_dir,
             export_dir,
