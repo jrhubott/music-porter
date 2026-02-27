@@ -377,6 +377,12 @@ See `ios/CLAUDE.md` for full iOS companion app documentation (architecture, mode
 
 **Quick reference:** Native SwiftUI app (iOS 17+) connecting to `./music-porter server` over local network. Requires `server` command (not `web`) for API key auth, Bonjour discovery, and file serving endpoints. The iOS app has its own independent version (`MusicPorterApp.appVersion`) — `/merge-dev-to-main` automatically detects `ios/` changes and prompts for an iOS version bump.
 
+## Sync Client (Desktop)
+
+See `sync-client/CLAUDE.md` for full sync client documentation (architecture, core library, CLI, Electron GUI).
+
+**Quick reference:** Cross-platform standalone sync client (`sync-client/` subdirectory) connecting to `./music-porter server` via API. Provides both a CLI tool (`mporter-sync`) and an Electron desktop app. Built with TypeScript as an npm workspaces monorepo (`@mporter/core`, `@mporter/cli`, `@mporter/gui`). The sync client has its own independent version (`VERSION` in `sync-client/packages/core/src/constants.ts`) — `/merge-dev-to-main` automatically detects `sync-client/` changes and prompts for a sync client version bump.
+
 ## Important Implementation Notes
 
 ### CLI / Web Feature Parity

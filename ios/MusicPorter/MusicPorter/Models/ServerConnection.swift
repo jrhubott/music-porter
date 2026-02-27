@@ -8,12 +8,10 @@ struct ServerConnection: Identifiable, Codable, Hashable {
     var name: String
     var version: String?
     var platform: String?
-    var url: String?
+    var externalURL: String?
 
-    var baseURL: URL? {
-        if let url, let parsed = URL(string: url) {
-            return parsed
-        }
+    /// Build local URL from host and port.
+    var localURL: URL? {
         var components = URLComponents()
         components.scheme = "http"
         components.host = host  // URLComponents handles IPv6 bracketing automatically
@@ -21,11 +19,14 @@ struct ServerConnection: Identifiable, Codable, Hashable {
         return components.url
     }
 
-    func apiURL(path: String) -> URL? {
-        guard var components = baseURL.flatMap({ URLComponents(url: $0, resolvingAgainstBaseURL: false) }) else {
-            return nil
-        }
-        components.path = path.hasPrefix("/") ? path : "/" + path
-        return components.url
+    var hasExternalURL: Bool {
+        guard let externalURL else { return false }
+        return URL(string: externalURL) != nil
+    }
+
+    // Backward-compatible JSON keys (saved data uses "url")
+    enum CodingKeys: String, CodingKey {
+        case host, port, name, version, platform
+        case externalURL = "url"
     }
 }

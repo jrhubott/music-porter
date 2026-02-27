@@ -51,6 +51,18 @@ struct LibraryView: View {
                 }
             }
             .navigationTitle("Library")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    if !appState.activeProfile.isEmpty {
+                        Text(appState.activeProfile)
+                            .font(.caption)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Capsule())
+                    }
+                }
+            }
             .navigationDestination(for: Playlist.self) { playlist in
                 PlaylistDetailView(playlist: playlist)
             }
@@ -664,6 +676,10 @@ struct LibraryView: View {
     private func exportToFolder(_ destDir: URL) async {
         appState.usbExport.reset()
 
+        // Append profile's USB directory if configured
+        let usbDir = appState.usbDir
+        let targetDir = usbDir.isEmpty ? destDir : destDir.appendingPathComponent(usbDir)
+
         let playlistKeys: [String]
         switch exportScope {
         case .all:
@@ -703,7 +719,7 @@ struct LibraryView: View {
         }
 
         _ = await appState.usbExport.exportFiles(
-            groups: groups, to: destDir,
+            groups: groups, to: targetDir,
             cacheToDevice: appState.usbExport.cacheToDevice)
     }
 

@@ -412,6 +412,10 @@ struct PlaylistsView: View {
     private func exportToFolder(_ destDir: URL) async {
         appState.usbExport.reset()
 
+        // Append profile's USB directory if configured
+        let usbDir = appState.usbDir
+        let targetDir = usbDir.isEmpty ? destDir : destDir.appendingPathComponent(usbDir)
+
         let urls: [URL]
         switch exportScope {
         case .all:
@@ -425,7 +429,7 @@ struct PlaylistsView: View {
             return
         }
 
-        _ = await appState.usbExport.exportFiles(urls: urls, to: destDir)
+        _ = await appState.usbExport.exportFiles(urls: urls, to: targetDir)
     }
 
     private func deleteLocal(_ name: String) {
