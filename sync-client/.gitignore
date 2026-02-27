@@ -4,3 +4,9 @@ out/
 .vite/
 *.tsbuildinfo
 .DS_Store
+
+# Preload CJS build artifacts (compiled into src/ by tsconfig.preload.json)
+packages/gui/src/preload/*.js
+packages/gui/src/preload/*.js.map
+packages/gui/src/preload/*.d.ts
+packages/gui/src/preload/*.d.ts.map
