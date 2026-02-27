@@ -6,57 +6,30 @@ disable-model-invocation: true
 allowed-tools: Bash, Read, Edit, Grep, Glob
 ---
 
-Merge the current feature branch into dev. This is fast and fully automatic — no user prompts, no questions asked.
+Merge the current feature branch into dev. Fully automatic — no user prompts.
 
 ## Steps
 
-1. **Verify state**
-   - Confirm we are on a feature or bugfix branch (not dev, not main)
-   - Run `git status` to ensure the working tree is clean — abort if there are uncommitted changes
-   - Run `git log dev..HEAD --oneline` to summarize what will be merged
+1. **Verify and sync**
+   - Confirm on a feature/bugfix branch (not dev, not main) — abort otherwise
+   - Abort if working tree is not clean (`git status`)
+   - Show `git log dev..HEAD --oneline` to summarize what will be merged
+   - `git fetch origin` (skip if no remote)
+   - If local dev is behind remote, update it: `git checkout dev && git pull origin dev && git checkout -`
+   - If dev has diverged from remote, abort and report
 
-2. **Sync with remote**
-   - Run `git fetch origin` to get latest remote state
-   - Skip this step if no `origin` remote exists (local-only repo)
-   - Check if local dev is behind remote: `git rev-list dev..origin/dev --count`
-   - If behind, update local dev: `git checkout dev && git pull origin dev && git checkout -` (return to feature branch)
-   - If diverged (local dev is both ahead and behind origin/dev), abort — report the divergence and stop
-
-3. **Merge into dev**
+2. **Merge into dev**
    - `git checkout dev`
-   - `git merge <branch-name> --no-ff` (preserve branch history in merge commit)
-   - Do NOT include Co-Authored-By lines in the merge commit
-   - If merge conflicts occur:
-     - Run `git merge --abort`
-     - Run `git checkout <branch-name>` (return to the original feature branch)
-     - List the conflicted files and report them
-     - Stop — do NOT attempt to resolve conflicts
+   - `git merge <branch> --no-ff`
+   - On conflict: `git merge --abort`, return to feature branch, list conflicts, stop
 
-4. **Restore dev version suffix with git hash**
+3. **Restore dev version**
    - Read VERSION from `porter_core.py` line 50
-   - Extract the base version (the part before the `-branch-name` suffix)
-   - Get the short merge commit hash: `git rev-parse --short HEAD`
-   - Edit `porter_core.py` line 50 to set `VERSION = "X.Y.Z-dev+<hash>"` (SemVer build metadata format, e.g. `"2.31.0-dev+a425c6c"`)
-   - Stage and commit: `Set dev version to X.Y.Z-dev+<hash>`
-   - Do NOT include Co-Authored-By lines
+   - Get short merge commit hash: `git rev-parse --short HEAD`
+   - Set `VERSION = "X.Y.Z-dev+<hash>"` (base version from before branch suffix)
+   - Commit: `Set dev version to X.Y.Z-dev+<hash>`
 
-5. **Push to remote**
-   - Run `git push origin dev`
-   - If push fails, warn and stop — do NOT force push
-
-6. **Return to feature branch**
-   - `git checkout <branch-name>` (return to the original feature branch)
-   - Do NOT delete the feature branch — cleanup happens at merge-to-main time
-
-7. **Report**
-   - Show `git log dev --oneline -5` to confirm the merge
-   - Report success
-
-## What this skill does NOT do
-
-- No version bump (only restores the `-dev` suffix on dev)
-- No SRS validation (deferred to merge-to-main)
-- No README checks
-- No linting enforcement
-- No tagging
-- No user prompts or questions — everything is automatic
+4. **Push and report**
+   - `git push origin dev` (warn and stop on failure — never force push)
+   - `git checkout <branch>` (return to feature branch)
+   - Show `git log dev --oneline -5` to confirm
