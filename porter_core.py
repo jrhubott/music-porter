@@ -6673,7 +6673,8 @@ class SyncManager:
         return sanitized or 'custom-dest'
 
     def sync_to_destination(self, source_dir, dest_path, dest_key,
-                            dry_run=False):
+                            dry_run=False, tag_applicator=None,
+                            profile=None, playlist_name=None):
         """Sync files to any destination with incremental copy logic.
 
         Args:
@@ -6681,6 +6682,13 @@ class SyncManager:
             dest_path: Schemed path (usb:// or folder://) or raw filesystem path
             dest_key: Tracking key name (destination name)
             dry_run: Preview changes without copying
+            tag_applicator: Optional TagApplicator for profile-based tagging
+            profile: Optional OutputProfile (required if tag_applicator is set)
+            playlist_name: Display name of playlist (for template variables)
+
+        When tag_applicator and profile are provided, files are tagged on-the-fly
+        during copy using the profile's template settings.  When omitted, files
+        are copied as-is (raw library MP3s).
 
         Returns:
             SyncResult with operation stats.
@@ -6699,7 +6707,8 @@ class SyncManager:
             fs_path = dest_path
 
         if not source_path.exists():
-            self.logger.error(f"Source directory does not exist: {source_path}")
+            self.logger.error(
+                f"Source directory does not exist: {source_path}")
             return SyncResult(success=False, source=str(source_dir),
                               destination='', dest_key=dest_key or '',
                               duration=0, is_usb=is_usb)
@@ -6721,45 +6730,79 @@ class SyncManager:
         dest = Path(fs_path)
         self.logger.info(f"Syncing {source_path} to {dest}")
 
+        # Helper to resolve the destination path for a source file
+        def _resolve_dest_path(src_file, track_meta=None):
+            if tag_applicator and profile and track_meta:
+                pname = playlist_name or track_meta.get('playlist', '')
+                fname = tag_applicator.build_output_filename(
+                    track_meta, profile, pname)
+                subdir = tag_applicator.build_output_subdir(
+                    track_meta, profile, pname)
+                if subdir:
+                    return dest / subdir / fname
+                return dest / fname
+            # Fallback: preserve relative path
+            if source_path.is_dir():
+                return dest / src_file.relative_to(source_path)
+            return dest / src_file.name
+
+        # Helper to look up track metadata from tag_applicator's TrackDB
+        def _get_track_meta(src_file):
+            if not tag_applicator or not tag_applicator.track_db:
+                return None
+            # Build the file_path key as stored in TrackDB
+            try:
+                rel = src_file.relative_to(Path(get_library_dir()))
+                return tag_applicator.track_db.get_track_by_path(str(rel))
+            except ValueError:
+                return None
+
         if dry_run:
             self.logger.dry_run(f"Would create directory: {dest}")
             for src_file in mp3_files:
-                rel_path = src_file.relative_to(source_path) if source_path.is_dir() else src_file.name
-                dst_file = dest / rel_path
+                track_meta = _get_track_meta(src_file)
+                dst_file = _resolve_dest_path(src_file, track_meta)
                 if self._should_copy_file(src_file, dst_file):
                     self.logger.dry_run(f"Would copy: {src_file.name}")
                     stats.files_copied += 1
                 else:
                     if self.logger.verbose:
-                        self.logger.dry_run(f"Would skip (unchanged): {src_file.name}")
+                        self.logger.dry_run(
+                            f"Would skip (unchanged): {src_file.name}")
                     stats.files_skipped += 1
             if is_usb:
-                self.logger.dry_run("Would prompt to eject USB drive after copy")
+                self.logger.dry_run(
+                    "Would prompt to eject USB drive after copy")
             duration = time.time() - start_time
 
             return SyncResult(
                 success=True, source=str(source_path), destination=str(dest),
                 dest_key=dest_key, duration=duration, is_usb=is_usb,
                 files_found=stats.files_found, files_copied=stats.files_copied,
-                files_skipped=stats.files_skipped, files_failed=stats.files_failed)
+                files_skipped=stats.files_skipped,
+                files_failed=stats.files_failed)
 
         # Create destination directory
         try:
             dest.mkdir(parents=True, exist_ok=True)
         except Exception as e:
-            self.logger.error(f"Failed to create destination directory: {e}")
+            self.logger.error(
+                f"Failed to create destination directory: {e}")
             stats.files_failed = stats.files_found
             duration = time.time() - start_time
 
             return SyncResult(
-                success=False, source=str(source_path), destination=str(dest),
+                success=False, source=str(source_path),
+                destination=str(dest),
                 dest_key=dest_key, duration=duration, is_usb=is_usb,
                 files_found=stats.files_found, files_copied=stats.files_copied,
-                files_skipped=stats.files_skipped, files_failed=stats.files_failed)
+                files_skipped=stats.files_skipped,
+                files_failed=stats.files_failed)
 
         # Copy files with incremental check
         progress = _DisplayProgress(
-            self.display_handler, total=len(mp3_files), desc="Syncing files",
+            self.display_handler, total=len(mp3_files),
+            desc="Syncing files",
         )
 
         try:
@@ -6768,27 +6811,37 @@ class SyncManager:
                     self.logger.warn("Sync cancelled by user")
                     break
                 try:
-                    if source_path.is_dir():
-                        rel_path = src_file.relative_to(source_path)
-                    else:
-                        rel_path = src_file.name
-                    dst_file = dest / rel_path
+                    track_meta = _get_track_meta(src_file)
+                    dst_file = _resolve_dest_path(src_file, track_meta)
 
                     dst_file.parent.mkdir(parents=True, exist_ok=True)
 
                     if self._should_copy_file(src_file, dst_file):
-                        shutil.copy2(src_file, dst_file)
+                        if (tag_applicator and profile
+                                and track_meta):
+                            # Apply profile tags on-the-fly during copy
+                            pname = (playlist_name
+                                     or track_meta.get('playlist', ''))
+                            tag_applicator.apply_tags_to_file(
+                                str(src_file), track_meta, profile,
+                                pname, str(dst_file))
+                        else:
+                            # Raw copy (no profile tagging)
+                            shutil.copy2(src_file, dst_file)
                         stats.files_copied += 1
                         if self.logger.verbose:
                             self.logger.info(f"Copied: {src_file.name}")
                         else:
-                            self.logger.file_info(f"Copied: {src_file.name}")
+                            self.logger.file_info(
+                                f"Copied: {src_file.name}")
                     else:
                         stats.files_skipped += 1
                         if self.logger.verbose:
-                            self.logger.info(f"Skipped (unchanged): {src_file.name}")
+                            self.logger.info(
+                                f"Skipped (unchanged): {src_file.name}")
                         else:
-                            self.logger.file_info(f"Skipped (unchanged): {src_file.name}")
+                            self.logger.file_info(
+                                f"Skipped (unchanged): {src_file.name}")
 
                     if self.sync_tracker and not dry_run:
                         pl_name, fname = self._extract_sync_info(
@@ -6798,7 +6851,8 @@ class SyncManager:
 
                 except Exception as e:
                     stats.files_failed += 1
-                    self.logger.error(f"Failed to copy {src_file.name}: {e}")
+                    self.logger.error(
+                        f"Failed to copy {src_file.name}: {e}")
 
                 progress.update(1)
         finally:
@@ -6815,7 +6869,8 @@ class SyncManager:
             success=stats.files_failed == 0, source=str(source_path),
             destination=str(dest), dest_key=dest_key, duration=duration,
             is_usb=is_usb, files_found=stats.files_found,
-            files_copied=stats.files_copied, files_skipped=stats.files_skipped,
+            files_copied=stats.files_copied,
+            files_skipped=stats.files_skipped,
             files_failed=stats.files_failed)
 
     def sync_to_usb(self, source_dir, usb_dir=DEFAULT_USB_DIR, dry_run=False, volume=None):
