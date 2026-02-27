@@ -38,7 +38,7 @@ Merge dev into main following the 3-tier version workflow.
 5. **Tag and set next dev version**
    - `git tag vX.Y.Z`
    - `git checkout dev && git merge main`
-   - Auto-set next version: increment PATCH of released version, set `VERSION = "X.Y.Z-dev"` (no hash — merge-to-dev adds it)
+   - Auto-set next version: increment only the PATCH component (e.g., 2.34.0 → 2.34.1-dev, NOT 2.35.0-dev), set `VERSION = "X.Y.Z-dev"` (no hash — merge-to-dev adds it)
    - Commit: `Set next dev version to X.Y.Z-dev`
 
 6. **Push, clean up, report**

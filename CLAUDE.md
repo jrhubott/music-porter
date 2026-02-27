@@ -280,7 +280,7 @@ Version defined in `porter_core.py` line 50. Uses semantic versioning (MAJOR.MIN
 
 **merge-to-dev:** Restores the `-dev` suffix and appends `+<short-hash>` of the merge commit (SemVer build metadata).
 
-**merge-to-main:** Remove `-dev+hash` suffix, bump version (PATCH/MINOR/MAJOR), create git tag (`git tag vX.Y.Z`). After tagging, sync dev with main and set the next `X.Y.Z-dev` version on dev (no hash — the next merge-to-dev adds it).
+**merge-to-main:** Remove `-dev+hash` suffix, bump version (PATCH/MINOR/MAJOR), create git tag (`git tag vX.Y.Z`). After tagging, sync dev with main and set the next PATCH dev version (e.g., 2.34.0 → 2.34.1-dev) on dev (no hash — the next merge-to-dev adds it).
 
 **Release notes:** When bumping the version, prepend a new entry to the top of `release-notes.txt` (project root) summarizing the changes in that release. Format: `Version X.Y.Z (YYYY-MM-DD):` header followed by bullet points (`• description`). This is displayed in the web About page and `./music-porter about` CLI command. Generate the release notes by reviewing all commits since the previous version tag.
 
