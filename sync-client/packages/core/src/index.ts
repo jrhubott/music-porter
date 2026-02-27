@@ -73,3 +73,18 @@ export type { LogCallback, ProgressCallback } from './progress.js';
 // Classes
 export { APIClient } from './api-client.js';
 export { ConfigStore } from './config-store.js';
+export { SyncEngine } from './sync-engine.js';
+export type { SyncOptions } from './sync-engine.js';
+export { DriveManager } from './drive-manager.js';
+export type { DriveChangeCallback } from './drive-manager.js';
+export { ServerDiscovery } from './discovery.js';
+export type { DiscoveryCallback } from './discovery.js';
+
+// Manifest utilities
+export {
+  readManifest,
+  writeManifest,
+  getManifestFiles,
+  createManifest,
+  updateManifestPlaylist,
+} from './manifest.js';
