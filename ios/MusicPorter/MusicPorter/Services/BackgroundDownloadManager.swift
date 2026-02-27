@@ -47,6 +47,14 @@ final class BackgroundDownloadManager: NSObject, URLSessionDownloadDelegate {
         task.resume()
     }
 
+    /// Enqueue multiple downloads on the background session (used for foreground-to-background handoff).
+    func enqueueRemaining(_ items: [(request: URLRequest, playlist: String, filename: String, destDir: URL)]) {
+        for item in items {
+            enqueue(request: item.request, playlist: item.playlist,
+                    filename: item.filename, destDir: item.destDir)
+        }
+    }
+
     /// Cancel all pending and in-progress background downloads.
     func cancelAll() {
         session.getTasksWithCompletionHandler { _, _, downloadTasks in

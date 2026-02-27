@@ -601,6 +601,7 @@ struct LibraryView: View {
 
     private func cancelDownload() {
         downloadTask?.cancel()
+        appState.downloadManager.cancelDownloads()
     }
 
     private func exportToFolder(_ destDir: URL) async {

@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// REST API client for the music-porter server.
 @MainActor @Observable
@@ -105,6 +106,16 @@ final class APIClient {
 
     func downloadAllURL(playlist: String) -> URL? {
         server?.apiURL(path: "api/files/\(playlist)/download-all")
+    }
+
+    /// Fetch cover art image with authentication.
+    func fetchArtwork(playlist: String, filename: String) async -> UIImage? {
+        guard let url = artworkURL(playlist: playlist, filename: filename) else { return nil }
+        let request = authenticatedRequest(for: url)
+        guard let (data, response) = try? await session.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode) else { return nil }
+        return UIImage(data: data)
     }
 
     // MARK: - EQ Presets

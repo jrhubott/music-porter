@@ -6,6 +6,8 @@ struct PendingDownloadState: Codable {
     let totalFiles: Int
     var completedFiles: [String]
     var failedFiles: [String]
+    /// Full list of filenames to download (needed for background handoff).
+    var allFiles: [String]
 }
 
 /// Lightweight UserDefaults-backed persistence for background download progress.
@@ -45,5 +47,13 @@ enum DownloadStateStore {
             states[index].failedFiles.append(filename)
         }
         save(states)
+    }
+
+    /// Return filenames that haven't completed or failed yet for a given playlist.
+    static func remainingFiles(playlist: String) -> [String] {
+        let states = load()
+        guard let state = states.first(where: { $0.playlist == playlist }) else { return [] }
+        let done = Set(state.completedFiles).union(state.failedFiles)
+        return state.allFiles.filter { !done.contains($0) }
     }
 }
