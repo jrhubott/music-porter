@@ -47,7 +47,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.35.2-dev"
+VERSION = "2.35.2-ios-direct-export"
 
 DEFAULT_DATA_DIR = "data"
 DEFAULT_MUSIC_DIR = "music"
