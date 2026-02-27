@@ -66,14 +66,24 @@ Merge the dev branch into main following the project's 3-tier version workflow.
    - Prepend a new entry to the top of `release-notes.txt` with format: `Version X.Y.Z (YYYY-MM-DD):` header followed by bullet points (`• description`)
    - Stage `release-notes.txt`
 
-9. **Update version and commit on dev**
+9. **Check iOS app version**
+   - Run `git diff $(git describe --tags --abbrev=0 main)..dev --name-only -- ios/` to detect iOS file changes since the last release
+   - If no iOS files changed → skip this step silently
+   - If iOS files changed:
+     - Read the current `appVersion` from `ios/MusicPorter/MusicPorter/MusicPorterApp.swift`
+     - Show the user the current iOS version and a summary of iOS changes
+     - Ask what the new iOS version should be (suggest PATCH bump as default)
+     - Update the `appVersion` constant in `MusicPorterApp.swift`
+     - Include the iOS version bump as a bullet point in the release notes generated in step 8 (e.g., `• iOS app version bumped to X.Y.Z`)
+
+10. **Update version and commit on dev**
    - Edit `porter_core.py` line 50 to set `VERSION = "X.Y.Z"` (clean version, no `-dev` suffix)
-   - Stage the version change (and README, release-notes.txt if modified)
+   - Stage the version change (and README, release-notes.txt, MusicPorterApp.swift if modified)
    - Commit on dev with message: `Update version to X.Y.Z for merge to main`
    - Do NOT include Co-Authored-By lines
    - **Important:** This commit must happen BEFORE checking out main, otherwise uncommitted changes will block the checkout
 
-10. **Merge**
+11. **Merge**
     - `git checkout main`
     - `git merge dev --no-ff` (preserve branch history in merge commit)
     - If merge conflicts occur:
@@ -84,40 +94,40 @@ Merge the dev branch into main following the project's 3-tier version workflow.
       - Do NOT include Co-Authored-By lines in the merge commit
     - If the user wants to abandon the merge, run `git merge --abort` and stop
 
-11. **Verify merge**
+12. **Verify merge**
     - Verify working tree is clean: `git status`
     - Verify dev commits are present: `git log --oneline -10` should include the dev branch commits
     - Verify VERSION matches the expected clean `X.Y.Z`: read line 50 of `porter_core.py`
     - If any check fails, warn the user and ask whether to proceed with tagging or abort
 
-12. **Update SRS metadata**
+13. **Update SRS metadata**
     - For each SRS file found in step 5, update its status line from "In Progress" to "Complete" and add `**Implemented in:** vX.Y.Z`
     - Stage and commit: `Mark SRS complete for vX.Y.Z`
     - Do NOT include Co-Authored-By lines
     - SRS files remain in `SRS/` permanently — do NOT archive or delete them
 
-13. **Tag the release**
+14. **Tag the release**
     - `git tag vX.Y.Z`
 
-14. **Set next dev version**
+15. **Set next dev version**
     - `git checkout dev && git merge main` (sync dev with main)
     - Ask the user for the next anticipated version (suggest next PATCH as default, e.g. if releasing 2.30.0, suggest 2.31.0)
     - Edit `porter_core.py` line 50 to set `VERSION = "X.Y.Z-dev"` (with `-dev` suffix)
     - Stage and commit: `Set next dev version to X.Y.Z-dev`
     - Do NOT include Co-Authored-By lines
 
-15. **Clean up feature branches**
+16. **Clean up feature branches**
     - List branches already merged into dev: `git branch --merged dev` (exclude main and dev from the list)
     - If there are merged branches, show the list and ask the user which to delete
     - For each branch the user wants to delete, run `git branch -d <branch-name>`
     - If no merged branches exist, skip this step silently
 
-16. **Push to remote**
+17. **Push to remote**
     - Ask the user if they want to push to origin now
     - If yes, run `git push origin main dev --tags`
     - If push fails (e.g. rejected), warn the user and show the error — do NOT force push
 
-17. **Report**
+18. **Report**
     - Show the final `git log --oneline -5` on main to confirm
     - Show the tag: `git tag -l 'vX.Y.Z'`
     - Show the current dev version: read line 50 of `porter_core.py`
