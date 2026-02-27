@@ -104,7 +104,7 @@ final class AppState {
             while !Task.isCancelled {
                 reconnectAttempt += 1
                 do {
-                    try await withThrowingTaskGroup(of: Bool.self) { group in
+                    _ = try await withThrowingTaskGroup(of: Bool.self) { group in
                         group.addTask {
                             try await self.connect(server: server, apiKey: apiKey)
                             return true

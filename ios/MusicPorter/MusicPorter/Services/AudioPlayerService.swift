@@ -341,7 +341,7 @@ final class AudioPlayerService {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(500))
                 guard !Task.isCancelled else { break }
-                await self?.pollAppleMusicState()
+                self?.pollAppleMusicState()
             }
         }
     }

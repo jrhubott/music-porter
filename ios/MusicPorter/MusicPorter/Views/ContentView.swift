@@ -15,7 +15,7 @@ struct ContentView: View {
             }
         }
         .task {
-            await appState.attemptAutoReconnect()
+            _ = await appState.attemptAutoReconnect()
         }
     }
 }

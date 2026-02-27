@@ -28,7 +28,6 @@ actor SSEClient {
 
                 do {
                     let (bytes, _) = try await URLSession.shared.bytes(for: request)
-                    var buffer = ""
 
                     for try await line in bytes.lines {
                         if line.hasPrefix("data: ") {
