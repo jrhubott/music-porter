@@ -26,12 +26,45 @@ final class FileDownloadManager {
     var bulkProgress: BulkDownloadProgress?
 
     @ObservationIgnored private var apiClient: APIClient?
+    @ObservationIgnored private let backgroundManager = BackgroundDownloadManager.shared
 
     func configure(apiClient: APIClient) {
         self.apiClient = apiClient
+        wireBackgroundCallbacks()
     }
 
-    /// Download a single MP3 file.
+    /// Wire up background download delegate callbacks to update UI state.
+    private func wireBackgroundCallbacks() {
+        backgroundManager.onFileComplete = { [weak self] playlist, filename, error in
+            if let error {
+                DownloadStateStore.markFileFailed(playlist: playlist, filename: filename)
+                print("Background download failed: \(playlist)/\(filename) — \(error.localizedDescription)")
+            } else {
+                DownloadStateStore.markFileComplete(playlist: playlist, filename: filename)
+            }
+
+            // Update progress on the main actor
+            DispatchQueue.main.async { [weak self] in
+                guard let self, var progress = self.downloadProgress else { return }
+                progress.completed += 1
+                progress.currentFile = filename
+                self.downloadProgress = progress
+
+                // Check if batch is complete
+                if progress.completed >= progress.total {
+                    DownloadStateStore.clear()
+                }
+            }
+        }
+
+        backgroundManager.onAllComplete = {
+            DispatchQueue.main.async {
+                DownloadStateStore.clear()
+            }
+        }
+    }
+
+    /// Download a single MP3 file using the background session.
     func downloadFile(playlist: String, filename: String) async throws -> URL {
         guard let apiClient, let url = apiClient.fileDownloadURL(playlist: playlist, filename: filename) else {
             throw FileDownloadError.notConfigured
@@ -40,20 +73,38 @@ final class FileDownloadManager {
         let request = apiClient.authenticatedRequest(for: url)
         let destDir = getPlaylistDirectory(playlist: playlist)
         try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
-        let destFile = destDir.appendingPathComponent(filename)
 
-        let (tempURL, _) = try await URLSession.shared.download(for: request)
+        return try await withCheckedThrowingContinuation { continuation in
+            let previousHandler = backgroundManager.onFileComplete
 
-        if FileManager.default.fileExists(atPath: destFile.path) {
-            try FileManager.default.removeItem(at: destFile)
+            backgroundManager.onFileComplete = { [weak self] completedPlaylist, completedFilename, error in
+                // Call through to the previous handler for state store updates
+                previousHandler?(completedPlaylist, completedFilename, error)
+
+                // Only handle our specific file
+                guard completedPlaylist == playlist && completedFilename == filename else { return }
+
+                // Restore previous handler
+                DispatchQueue.main.async {
+                    self?.backgroundManager.onFileComplete = previousHandler
+                }
+
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    let destFile = destDir.appendingPathComponent(filename)
+                    continuation.resume(returning: destFile)
+                }
+            }
+
+            backgroundManager.enqueue(
+                request: request, playlist: playlist,
+                filename: filename, destDir: destDir)
         }
-        try FileManager.default.moveItem(at: tempURL, to: destFile)
-
-        return destFile
     }
 
-    /// Download all files in a playlist individually, skipping files that already exist locally.
-    /// Respects cooperative cancellation — checks `Task.isCancelled` between files.
+    /// Download all files in a playlist, skipping files that already exist locally.
+    /// Uses background URLSession so downloads continue when the app is backgrounded.
     func downloadAll(playlist: String) async throws {
         guard let apiClient else {
             throw FileDownloadError.notConfigured
@@ -74,36 +125,50 @@ final class FileDownloadManager {
         let destDir = getPlaylistDirectory(playlist: playlist)
         try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
 
-        for (index, track) in toDownload.enumerated() {
+        // Persist download state for recovery after app termination
+        let pendingState = PendingDownloadState(
+            playlist: playlist,
+            totalFiles: total,
+            completedFiles: [],
+            failedFiles: []
+        )
+        var allStates = DownloadStateStore.load()
+        allStates.removeAll { $0.playlist == playlist }
+        allStates.append(pendingState)
+        DownloadStateStore.save(allStates)
+
+        // Enqueue all downloads on the background session
+        for track in toDownload {
             try Task.checkCancellation()
-
-            downloadProgress = DownloadProgress(
-                completed: index, total: total, currentFile: track.filename)
-
             guard let url = apiClient.fileDownloadURL(playlist: playlist, filename: track.filename) else {
                 continue
             }
-
             let request = apiClient.authenticatedRequest(for: url)
+            backgroundManager.enqueue(
+                request: request, playlist: playlist,
+                filename: track.filename, destDir: destDir)
+        }
 
-            do {
-                let (tempURL, response) = try await URLSession.shared.download(for: request)
+        // Wait for all downloads to complete by polling state store
+        // The background delegate callbacks update progress and state store
+        try await waitForDownloads(playlist: playlist, total: total)
+    }
 
-                // Check for successful HTTP status
-                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
-                    continue
-                }
+    /// Wait for all background downloads to finish for a playlist.
+    private func waitForDownloads(playlist: String, total: Int) async throws {
+        while true {
+            try Task.checkCancellation()
+            try await Task.sleep(for: .milliseconds(500))
 
-                let destFile = destDir.appendingPathComponent(track.filename)
-                if FileManager.default.fileExists(atPath: destFile.path) {
-                    try FileManager.default.removeItem(at: destFile)
-                }
-                try FileManager.default.moveItem(at: tempURL, to: destFile)
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                // Skip failed files and continue with the rest
-                continue
+            let states = DownloadStateStore.load()
+            guard let state = states.first(where: { $0.playlist == playlist }) else {
+                // State was cleared — downloads are complete
+                break
+            }
+
+            let done = state.completedFiles.count + state.failedFiles.count
+            if done >= total {
+                break
             }
         }
 
@@ -135,10 +200,50 @@ final class FileDownloadManager {
         )
     }
 
+    /// Reconcile background download state when the app returns to foreground.
+    /// Checks what's on disk vs what was pending and updates progress accordingly.
+    func reconcileBackgroundDownloads() {
+        let states = DownloadStateStore.load()
+        guard !states.isEmpty else { return }
+
+        for state in states {
+            let completed = state.completedFiles.count
+            let failed = state.failedFiles.count
+            let done = completed + failed
+
+            if done >= state.totalFiles {
+                // All done — clear this playlist's state
+                continue
+            }
+
+            // Update progress to reflect actual state
+            downloadProgress = DownloadProgress(
+                completed: done,
+                total: state.totalFiles,
+                currentFile: ""
+            )
+        }
+
+        // If all states are complete, clear everything
+        let allDone = states.allSatisfy { state in
+            (state.completedFiles.count + state.failedFiles.count) >= state.totalFiles
+        }
+        if allDone {
+            DownloadStateStore.clear()
+            downloadProgress = nil
+        }
+    }
+
     /// Clear download progress (call after download completes).
     func clearProgress() {
         downloadProgress = nil
         bulkProgress = nil
+    }
+
+    /// Cancel all in-progress background downloads.
+    func cancelDownloads() {
+        backgroundManager.cancelAll()
+        DownloadStateStore.clear()
     }
 
     /// Get the local directory for a playlist's downloads.

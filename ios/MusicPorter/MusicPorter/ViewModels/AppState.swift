@@ -58,6 +58,7 @@ final class AppState {
         apiClient.configure(server: server, apiKey: apiKey)
         downloadManager.configure(apiClient: apiClient)
         audioPlayer.configure(apiClient: apiClient)
+        usbExport.configure(apiClient: apiClient, downloadManager: downloadManager)
         let response = try await apiClient.validateConnection()
         if response.valid {
             apiClient.server?.name = response.serverName
