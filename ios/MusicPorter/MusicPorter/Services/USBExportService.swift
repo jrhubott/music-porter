@@ -71,17 +71,19 @@ final class USBExportService {
                 // If directory creation fails, count all files in this group as failed
                 failed += group.urls.count
                 processed += group.urls.count
+                let currentProcessed = processed
                 await MainActor.run {
-                    self.exportProgress = Double(processed) / Double(total)
+                    self.exportProgress = Double(currentProcessed) / Double(total)
                 }
                 continue
             }
 
             for source in group.urls {
                 let name = source.lastPathComponent
+                let currentProcessed = processed
                 await MainActor.run {
                     self.currentFileName = "\(group.playlist)/\(name)"
-                    self.exportProgress = Double(processed) / Double(total)
+                    self.exportProgress = Double(currentProcessed) / Double(total)
                 }
 
                 let dest = playlistDir.appendingPathComponent(name)
