@@ -4079,14 +4079,7 @@ class PipelineResult:
     stages_skipped: list = field(default_factory=list)
     download_result: DownloadResult | None = None
     conversion_result: ConversionResult | None = None
-    tag_result: TagUpdateResult | None = None
-    cover_art_result: CoverArtResult | None = None
     usb_result: USBSyncResult | None = None
-    # Pipeline-specific stats carried over from PipelineStatistics
-    tagging_album: str | None = None
-    tagging_artist: str | None = None
-    cover_art_embedded: int = 0
-    cover_art_missing: int = 0
     usb_destination: str | None = None
 
     def to_dict(self) -> dict:
@@ -8353,15 +8346,6 @@ class PipelineStatistics:
         # Conversion stats
         self.conversion_stats = None
 
-        # Tagging stats
-        self.tagging_stats = None
-        self.tagging_album = None
-        self.tagging_artist = None
-
-        # Cover art stats
-        self.cover_art_embedded = 0
-        self.cover_art_missing = 0
-
         # Sync stats
         self.sync_success = False
         self.sync_destination = None
@@ -8381,10 +8365,9 @@ class PlaylistResult:
         self.key = key
         self.name = name
         self.success = False
-        self.failed_stage = None  # "download", "convert", "tag", "sync"
+        self.failed_stage = None  # "download", "convert", "sync"
         self.download_stats = None  # DownloadStatistics
         self.conversion_stats = None  # ConversionStatistics
-        self.tagging_stats = None  # TagStatistics
         self.sync_success = False
         self.duration = 0.0
 
@@ -8485,13 +8468,14 @@ class AggregateStatistics:
 
 
 class PipelineOrchestrator:
-    """Coordinates multi-stage workflows: download → convert → tag → USB sync."""
+    """Coordinates multi-stage workflows: download → convert → sync."""
 
     def __init__(self, logger=None, deps=None, config=None, quality_preset='lossless',
-                 cookie_path=DEFAULT_COOKIES, workers=None, embed_cover_art=True,
-                 output_profile=None, prompt_handler=None, display_handler=None,
+                 cookie_path=DEFAULT_COOKIES, workers=None,
+                 prompt_handler=None, display_handler=None,
                  cancel_event=None, audit_logger=None, audit_source='cli',
-                 sync_tracker=None, eq_config_manager=None, eq_config_override=None):
+                 sync_tracker=None, track_db=None,
+                 eq_config_manager=None, eq_config_override=None):
         self.logger = logger or Logger()
         self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
         self.display_handler = display_handler or NullDisplayHandler()
@@ -8501,49 +8485,29 @@ class PipelineOrchestrator:
         self.eq_config_override = eq_config_override
         self._audit_source = audit_source
         self.sync_tracker = sync_tracker
+        self.track_db = track_db
         self.deps = deps or DependencyChecker(self.logger)
         self.config = config or ConfigManager(logger=self.logger)
         self.stats = PipelineStatistics()
         self.quality_preset = quality_preset
         self.cookie_path = cookie_path
         self.workers = workers
-        self.embed_cover_art = embed_cover_art
-        self.output_profile = output_profile or OUTPUT_PROFILES[DEFAULT_OUTPUT_TYPE]
 
     def run_full_pipeline(self, playlist=None, url=None, auto=False,
                          sync_destination=None,
                          dry_run=False, verbose=False, quality_preset=None,
-                         validate_cookies=True, auto_refresh_cookies=False,
-                         # Legacy params (ignored, kept for backwards compat)
-                         copy_to_usb=False, usb_dir=None,
-                         sync_dest=None, sync_dest_path=None, sync_dest_is_usb=False):
-        """
-        Execute the complete pipeline: download → convert → tag → sync.
+                         validate_cookies=True, auto_refresh_cookies=False):
+        """Execute the complete pipeline: download → convert → sync.
 
         Args:
             sync_destination: SyncDestination object for post-pipeline sync (optional)
         """
-        # Legacy param compat: build SyncDestination from old-style params
-        if sync_destination is None and (copy_to_usb or sync_dest_path):
-            if sync_dest_path:
-                scheme = 'usb://' if sync_dest_is_usb else 'folder://'
-                _path = sync_dest_path
-                if sync_dest_is_usb and usb_dir:
-                    _path = str(Path(sync_dest_path) / usb_dir)
-                sync_destination = SyncDestination(
-                    sync_dest or Path(sync_dest_path).name,
-                    f'{scheme}{_path}')
-            elif copy_to_usb:
-                # Will be handled via sync_to_usb at Stage 4
-                pass
         self.stats.start_time = time.time()
         convert_result = None
-        tag_result = None
         usb_result = None
 
         # ── Stage 1: Determine source ─────────────────────────────────
         if url:
-            # Direct URL provided
             self.logger.info("=== STAGE 1: Download from URL ===")
             success = self._download_from_url(url, auto, dry_run, verbose,
                                              validate_cookies, auto_refresh_cookies)
@@ -8557,7 +8521,6 @@ class PipelineOrchestrator:
                     stages_skipped=list(self.stats.stages_skipped))
 
         elif playlist:
-            # Playlist key or index provided
             self.logger.info("=== STAGE 1: Download playlist ===")
             success = self._download_playlist(playlist, auto, dry_run, verbose,
                                              validate_cookies, auto_refresh_cookies)
@@ -8571,7 +8534,8 @@ class PipelineOrchestrator:
                     stages_skipped=list(self.stats.stages_skipped))
 
         else:
-            self.logger.error("Either --playlist or --url must be specified for pipeline")
+            self.logger.error(
+                "Either --playlist or --url must be specified for pipeline")
             duration = time.time() - self.stats.start_time
             return PipelineResult(
                 success=False, playlist_name=None, playlist_key=None,
@@ -8588,33 +8552,30 @@ class PipelineOrchestrator:
                 stages_failed=["cancelled"],
                 stages_skipped=list(self.stats.stages_skipped))
 
-        # ── Stage 2: Convert M4A → MP3 ────────────────────────────────
+        # ── Stage 2: Convert M4A → clean library MP3 ─────────────────
         self.logger.info("\n=== STAGE 2: Convert M4A → MP3 ===")
         music_dir = f"{DEFAULT_MUSIC_DIR}/{self.stats.playlist_key}"
-        export_dir = get_export_dir(self.output_profile.name, self.stats.playlist_key)
+        library_dir = get_library_dir(self.stats.playlist_key)
 
-        # Use quality_preset parameter if provided, otherwise use instance default
-        preset = quality_preset if quality_preset is not None else self.quality_preset
+        preset = (quality_preset if quality_preset is not None
+                  else self.quality_preset)
 
-        # Resolve EQ: CLI override > DB playlist override > DB profile default > none
+        # Resolve EQ: override > DB playlist > none
         eq_config = self.eq_config_override
         if eq_config is None and self.eq_config_manager:
             eq_config = self.eq_config_manager.get_eq(
-                self.output_profile.name, self.stats.playlist_key)
+                DEFAULT_OUTPUT_TYPE, self.stats.playlist_key)
 
-        converter = Converter(self.logger, quality_preset=preset, workers=self.workers,
-                              embed_cover_art=self.embed_cover_art,
-                              output_profile=self.output_profile,
-                              display_handler=self.display_handler,
-                              cancel_event=self.cancel_event,
-                              eq_config=eq_config)
+        converter = Converter(
+            self.logger, quality_preset=preset, workers=self.workers,
+            track_db=self.track_db,
+            display_handler=self.display_handler,
+            cancel_event=self.cancel_event,
+            eq_config=eq_config)
         convert_result = converter.convert(
-            music_dir,
-            export_dir,
-            force=False,
-            dry_run=dry_run,
-            verbose=verbose
-        )
+            music_dir, library_dir,
+            playlist_key=self.stats.playlist_key,
+            force=False, dry_run=dry_run, verbose=verbose)
 
         if convert_result.success:
             self.stats.stages_completed.append("convert")
@@ -8634,69 +8595,25 @@ class PipelineOrchestrator:
                 stages_failed=["cancelled"],
                 stages_skipped=list(self.stats.stages_skipped))
 
-        # ── Stage 3: Update tags ───────────────────────────────────────
-        self.logger.info("\n=== STAGE 3: Update tags ===")
-
-        # Determine album/artist from profile settings
-        if self.output_profile.pipeline_album == "playlist_name":
-            new_album = self.stats.playlist_name
-        else:  # "original"
-            new_album = None
-
-        if self.output_profile.pipeline_artist == "various":
-            new_artist = "Various"
-        else:  # "original"
-            new_artist = None
-
-        tagger = TaggerManager(self.logger, output_profile=self.output_profile,
-                               display_handler=self.display_handler,
-                               cancel_event=self.cancel_event)
-        tag_result = tagger.update_tags(
-            export_dir,
-            new_album=new_album,
-            new_artist=new_artist,
-            dry_run=dry_run,
-            verbose=verbose
-        )
-
-        if tag_result.success:
-            self.stats.stages_completed.append("tag")
-            self.stats.tagging_stats = tagger.stats
-            self.stats.tagging_album = new_album
-            self.stats.tagging_artist = new_artist
-        else:
-            self.stats.stages_failed.append("tag")
-            self.logger.error("Tagging stage failed")
-
-        # ── Stage 3b: Cover art check ────────────────────────────────
-        if self.embed_cover_art and self.output_profile.artwork_size != -1:
-            self._check_and_embed_cover_art(export_dir, auto, dry_run, verbose)
-
-        # ── Cancellation check before Stage 4 ────────────────────────
-        if _is_cancelled(self.cancel_event):
-            self.logger.warn("Pipeline cancelled by user")
-            duration = time.time() - self.stats.start_time
-            return PipelineResult(
-                success=False, playlist_name=self.stats.playlist_name,
-                playlist_key=self.stats.playlist_key, duration=duration,
-                stages_completed=list(self.stats.stages_completed),
-                stages_failed=["cancelled"],
-                stages_skipped=list(self.stats.stages_skipped))
-
-        # ── Stage 4: Sync (optional) ──────────────────────────────────
+        # ── Stage 3: Sync (optional) ─────────────────────────────────
         if sync_destination:
-            sync_mgr = SyncManager(self.logger, prompt_handler=self.prompt_handler,
-                                   display_handler=self.display_handler,
-                                   cancel_event=self.cancel_event,
-                                   sync_tracker=self.sync_tracker)
-            self.logger.info(f"\n=== STAGE 4: Sync to {sync_destination.name} ===")
+            sync_mgr = SyncManager(
+                self.logger, prompt_handler=self.prompt_handler,
+                display_handler=self.display_handler,
+                cancel_event=self.cancel_event,
+                sync_tracker=self.sync_tracker)
+            self.logger.info(
+                f"\n=== STAGE 3: Sync to {sync_destination.name} ===")
             usb_result = sync_mgr.sync_to_destination(
-                export_dir, dest_path=sync_destination.path,
+                library_dir, dest_path=sync_destination.path,
                 dest_key=sync_destination.effective_key, dry_run=dry_run)
 
             if usb_result.success:
                 self.stats.stages_completed.append("sync")
-                self.stats.sync_stats = {"files_copied": usb_result.files_copied, "files_skipped": usb_result.files_skipped}
+                self.stats.sync_stats = {
+                    "files_copied": usb_result.files_copied,
+                    "files_skipped": usb_result.files_skipped,
+                }
                 self.stats.sync_success = True
                 self.stats.sync_destination = usb_result.destination
             else:
@@ -8708,13 +8625,16 @@ class PipelineOrchestrator:
             self.audit_logger.log(
                 'pipeline',
                 f"Pipeline: {self.stats.playlist_name or 'unknown'}",
-                'completed' if len(self.stats.stages_failed) == 0 else 'failed',
-                params={'playlist_key': self.stats.playlist_key,
-                        'stages_completed': list(self.stats.stages_completed),
-                        'stages_failed': list(self.stats.stages_failed)},
+                'completed' if not self.stats.stages_failed else 'failed',
+                params={
+                    'playlist_key': self.stats.playlist_key,
+                    'stages_completed': list(self.stats.stages_completed),
+                    'stages_failed': list(self.stats.stages_failed),
+                },
                 duration_s=duration, source=self._audit_source)
+
         return PipelineResult(
-            success=len(self.stats.stages_failed) == 0,
+            success=not self.stats.stages_failed,
             playlist_name=self.stats.playlist_name,
             playlist_key=self.stats.playlist_key,
             duration=duration,
@@ -8723,12 +8643,7 @@ class PipelineOrchestrator:
             stages_skipped=list(self.stats.stages_skipped),
             download_result=self.stats.download_stats,
             conversion_result=convert_result,
-            tag_result=tag_result,
             usb_result=usb_result,
-            tagging_album=self.stats.tagging_album,
-            tagging_artist=self.stats.tagging_artist,
-            cover_art_embedded=self.stats.cover_art_embedded,
-            cover_art_missing=self.stats.cover_art_missing,
             usb_destination=self.stats.sync_destination,
         )
 
