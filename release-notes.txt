@@ -1,3 +1,8 @@
+Version 2.33.0 (2026-02-26):
+• Add iOS version bump check to merge-to-main workflow — automatically detects ios/ file changes and prompts for iOS version bump
+• Bump iOS app version to 1.2.0 (retroactive for v2.32.0 iOS changes)
+• Mark all EQ preset SRS requirements as tested (entry 19)
+
 Version 2.32.0 (2026-02-26):
 • Equalizer presets — four audio effects (loudnorm, bass boost, treble boost, compressor) configurable per output profile and playlist
 • iOS app refactor — simplified to 3 tabs (Library, Process, Settings) with guided flow for Browse → Add → Process → Export
@@ -5,6 +10,7 @@ Version 2.32.0 (2026-02-26):
 • File permission hardening — restrict data directory to owner-only permissions with Docker-compatible best-effort fallback
 • Resolve 5 Swift compiler warnings (unused variable, unnecessary await, unused results, Swift 6 concurrency)
 • Update Xcode project settings from Xcode 16.2
+• iOS app version bumped to 1.2.0
 
 Version 2.31.0 (2026-02-26):
 • Migration audit logging — schema and data migrations now record deferred audit entries that are flushed to the audit trail after AuditLogger is instantiated

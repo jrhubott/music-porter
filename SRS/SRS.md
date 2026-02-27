@@ -2486,84 +2486,84 @@ profile and per playlist in SQLite, with full CLI, web, and iOS parity.
 
 | ID | Version | Tested | Requirement |
 |----|---------|--------|-------------|
-| 19.1.1 | 1.0 | [ ] | Four effects are available: `loudnorm` (EBU R128 loudness normalization), `bass_boost` (+6dB below 100Hz), `treble_boost` (+4dB above 3kHz), `compressor` (dynamic range compression) |
-| 19.1.2 | 1.0 | [ ] | Each effect is independently togglable (on/off boolean) |
-| 19.1.3 | 1.0 | [ ] | Multiple effects can be combined into a single FFmpeg audio filter chain |
-| 19.1.4 | 1.0 | [ ] | Filter chain order is fixed and canonical: `bass_boost`, `treble_boost`, `compressor`, `loudnorm` (normalization always last) |
-| 19.1.5 | 1.0 | [ ] | Each effect has a default FFmpeg filter string defined as a constant in `EQ_EFFECTS` |
+| 19.1.1 | 1.0 | [x] | Four effects are available: `loudnorm` (EBU R128 loudness normalization), `bass_boost` (+6dB below 100Hz), `treble_boost` (+4dB above 3kHz), `compressor` (dynamic range compression) |
+| 19.1.2 | 1.0 | [x] | Each effect is independently togglable (on/off boolean) |
+| 19.1.3 | 1.0 | [x] | Multiple effects can be combined into a single FFmpeg audio filter chain |
+| 19.1.4 | 1.0 | [x] | Filter chain order is fixed and canonical: `bass_boost`, `treble_boost`, `compressor`, `loudnorm` (normalization always last) |
+| 19.1.5 | 1.0 | [x] | Each effect has a default FFmpeg filter string defined as a constant in `EQ_EFFECTS` |
 
 ##### 19.2 EQ Configuration Storage
 
 | ID | Version | Tested | Requirement |
 |----|---------|--------|-------------|
-| 19.2.1 | 1.0 | [ ] | EQ configurations are stored in the SQLite database (`eq_presets` table), not config.yaml |
-| 19.2.2 | 1.0 | [ ] | DB schema migration (version 1 to 2) creates the `eq_presets` table with profile and profile+playlist indexes |
-| 19.2.3 | 1.0 | [ ] | Each output profile can have a default EQ config (profile-level, playlist IS NULL) |
-| 19.2.4 | 1.0 | [ ] | Each output profile + playlist combination can have an override EQ config |
-| 19.2.5 | 1.0 | [ ] | Precedence: CLI flags > playlist override > profile default > none (no EQ) |
-| 19.2.6 | 1.0 | [ ] | `EQConfigManager` class follows the AuditLogger/SyncTracker DB pattern (WAL mode, write lock, connection-per-call) |
+| 19.2.1 | 1.0 | [x] | EQ configurations are stored in the SQLite database (`eq_presets` table), not config.yaml |
+| 19.2.2 | 1.0 | [x] | DB schema migration (version 1 to 2) creates the `eq_presets` table with profile and profile+playlist indexes |
+| 19.2.3 | 1.0 | [x] | Each output profile can have a default EQ config (profile-level, playlist IS NULL) |
+| 19.2.4 | 1.0 | [x] | Each output profile + playlist combination can have an override EQ config |
+| 19.2.5 | 1.0 | [x] | Precedence: CLI flags > playlist override > profile default > none (no EQ) |
+| 19.2.6 | 1.0 | [x] | `EQConfigManager` class follows the AuditLogger/SyncTracker DB pattern (WAL mode, write lock, connection-per-call) |
 
 ##### 19.3 Converter Integration
 
 | ID | Version | Tested | Requirement |
 |----|---------|--------|-------------|
-| 19.3.1 | 1.0 | [ ] | `Converter` class accepts optional `eq_config` parameter (defaults to no effects) |
-| 19.3.2 | 1.0 | [ ] | FFmpeg audio filter chain is applied via the `af` parameter when any effect is enabled |
-| 19.3.3 | 1.0 | [ ] | Verbose mode logs the active EQ effects and the full FFmpeg filter chain string |
-| 19.3.4 | 1.0 | [ ] | Dry run mode previews which EQ effects would be applied without converting |
-| 19.3.5 | 1.0 | [ ] | `ConversionResult` includes the list of active EQ effect names |
-| 19.3.6 | 1.0 | [ ] | Audit log entries for conversion include the EQ effects applied in params |
-| 19.3.7 | 1.0 | [ ] | `PipelineOrchestrator` resolves EQ from the DB for each playlist during the convert stage |
+| 19.3.1 | 1.0 | [x] | `Converter` class accepts optional `eq_config` parameter (defaults to no effects) |
+| 19.3.2 | 1.0 | [x] | FFmpeg audio filter chain is applied via the `af` parameter when any effect is enabled |
+| 19.3.3 | 1.0 | [x] | Verbose mode logs the active EQ effects and the full FFmpeg filter chain string |
+| 19.3.4 | 1.0 | [x] | Dry run mode previews which EQ effects would be applied without converting |
+| 19.3.5 | 1.0 | [x] | `ConversionResult` includes the list of active EQ effect names |
+| 19.3.6 | 1.0 | [x] | Audit log entries for conversion include the EQ effects applied in params |
+| 19.3.7 | 1.0 | [x] | `PipelineOrchestrator` resolves EQ from the DB for each playlist during the convert stage |
 
 ##### 19.4 CLI Interface
 
 | ID | Version | Tested | Requirement |
 |----|---------|--------|-------------|
-| 19.4.1 | 1.0 | [ ] | `convert` subcommand accepts `--loudnorm`, `--bass-boost`, `--treble-boost`, `--compressor` flags |
-| 19.4.2 | 1.0 | [ ] | `pipeline` subcommand accepts the same four EQ flags |
-| 19.4.3 | 1.0 | [ ] | `--no-eq` flag disables all EQ effects (ignores saved presets) |
-| 19.4.4 | 1.0 | [ ] | CLI EQ flags override saved DB presets when provided |
-| 19.4.5 | 1.0 | [ ] | Conversion and pipeline summary output shows active EQ effects when any are enabled |
-| 19.4.6 | 1.0 | [ ] | `eq` subcommand allows viewing, setting, and clearing stored EQ configs per profile and playlist |
+| 19.4.1 | 1.0 | [x] | `convert` subcommand accepts `--loudnorm`, `--bass-boost`, `--treble-boost`, `--compressor` flags |
+| 19.4.2 | 1.0 | [x] | `pipeline` subcommand accepts the same four EQ flags |
+| 19.4.3 | 1.0 | [x] | `--no-eq` flag disables all EQ effects (ignores saved presets) |
+| 19.4.4 | 1.0 | [x] | CLI EQ flags override saved DB presets when provided |
+| 19.4.5 | 1.0 | [x] | Conversion and pipeline summary output shows active EQ effects when any are enabled |
+| 19.4.6 | 1.0 | [x] | `eq` subcommand allows viewing, setting, and clearing stored EQ configs per profile and playlist |
 
 ##### 19.5 Web API
 
 | ID | Version | Tested | Requirement |
 |----|---------|--------|-------------|
-| 19.5.1 | 1.0 | [ ] | `GET /api/eq` lists all EQ configs, with optional `?profile=` filter |
-| 19.5.2 | 1.0 | [ ] | `POST /api/eq` sets EQ config for a profile (default) or profile+playlist (override) |
-| 19.5.3 | 1.0 | [ ] | `DELETE /api/eq` removes an EQ config entry |
-| 19.5.4 | 1.0 | [ ] | `GET /api/eq/resolve` returns the effective EQ for a profile+playlist combination including filter chain |
-| 19.5.5 | 1.0 | [ ] | `GET /api/eq/effects` returns available effect definitions with descriptions and filter strings |
-| 19.5.6 | 1.0 | [ ] | `/api/convert/run` accepts optional `eq` object and `no_eq` flag |
-| 19.5.7 | 1.0 | [ ] | `/api/pipeline/run` accepts optional `eq` object and `no_eq` flag |
-| 19.5.8 | 1.0 | [ ] | EQ changes are audited via AuditLogger with operation `eq_update` |
+| 19.5.1 | 1.0 | [x] | `GET /api/eq` lists all EQ configs, with optional `?profile=` filter |
+| 19.5.2 | 1.0 | [x] | `POST /api/eq` sets EQ config for a profile (default) or profile+playlist (override) |
+| 19.5.3 | 1.0 | [x] | `DELETE /api/eq` removes an EQ config entry |
+| 19.5.4 | 1.0 | [x] | `GET /api/eq/resolve` returns the effective EQ for a profile+playlist combination including filter chain |
+| 19.5.5 | 1.0 | [x] | `GET /api/eq/effects` returns available effect definitions with descriptions and filter strings |
+| 19.5.6 | 1.0 | [x] | `/api/convert/run` accepts optional `eq` object and `no_eq` flag |
+| 19.5.7 | 1.0 | [x] | `/api/pipeline/run` accepts optional `eq` object and `no_eq` flag |
+| 19.5.8 | 1.0 | [x] | EQ changes are audited via AuditLogger with operation `eq_update` |
 
 ##### 19.6 Web UI
 
 | ID | Version | Tested | Requirement |
 |----|---------|--------|-------------|
-| 19.6.1 | 1.0 | [ ] | Convert page has checkbox toggles for all four EQ effects |
-| 19.6.2 | 1.0 | [ ] | Pipeline page has checkbox toggles for all four EQ effects |
-| 19.6.3 | 1.0 | [ ] | Selecting a playlist auto-loads the saved EQ config via `/api/eq/resolve` |
-| 19.6.4 | 1.0 | [ ] | Settings page has an EQ Presets management section for profile defaults and playlist overrides |
-| 19.6.5 | 1.0 | [ ] | Settings page displays existing playlist overrides with delete capability |
+| 19.6.1 | 1.0 | [x] | Convert page has checkbox toggles for all four EQ effects |
+| 19.6.2 | 1.0 | [x] | Pipeline page has checkbox toggles for all four EQ effects |
+| 19.6.3 | 1.0 | [x] | Selecting a playlist auto-loads the saved EQ config via `/api/eq/resolve` |
+| 19.6.4 | 1.0 | [x] | Settings page has an EQ Presets management section for profile defaults and playlist overrides |
+| 19.6.5 | 1.0 | [x] | Settings page displays existing playlist overrides with delete capability |
 
 ##### 19.7 iOS Companion App
 
 | ID | Version | Tested | Requirement |
 |----|---------|--------|-------------|
-| 19.7.1 | 1.0 | [ ] | `EQConfig` model struct exists with Codable conformance and snake\_case CodingKeys |
-| 19.7.2 | 1.0 | [ ] | `APIClient` has methods for EQ read and write operations |
-| 19.7.3 | 1.0 | [ ] | Pipeline view advanced section has toggles for EQ effects |
-| 19.7.4 | 1.0 | [ ] | EQ parameters are included in pipeline and convert API calls |
+| 19.7.1 | 1.0 | [x] | `EQConfig` model struct exists with Codable conformance and snake\_case CodingKeys |
+| 19.7.2 | 1.0 | [x] | `APIClient` has methods for EQ read and write operations |
+| 19.7.3 | 1.0 | [x] | Pipeline view advanced section has toggles for EQ effects |
+| 19.7.4 | 1.0 | [x] | EQ parameters are included in pipeline and convert API calls |
 
 ##### 19.8 Edge Cases
 
 | ID | Version | Tested | Requirement |
 |----|---------|--------|-------------|
-| 19.8.1 | 1.0 | [ ] | Files already converted without EQ are not re-converted unless `--force` is used |
-| 19.8.2 | 1.0 | [ ] | Deleting a profile's EQ default does not affect playlist-specific overrides |
-| 19.8.3 | 1.0 | [ ] | Deleting a playlist from config.yaml does not automatically clean up EQ entries (orphans are harmless) |
-| 19.8.4 | 1.0 | [ ] | Empty EQ config (all effects false) is functionally equivalent to no EQ — no filter chain is added to FFmpeg |
-| 19.8.5 | 1.0 | [ ] | `loudnorm` filter works correctly in the conversion pipeline (FFmpeg handles two-pass internally) |
+| 19.8.1 | 1.0 | [x] | Files already converted without EQ are not re-converted unless `--force` is used |
+| 19.8.2 | 1.0 | [x] | Deleting a profile's EQ default does not affect playlist-specific overrides |
+| 19.8.3 | 1.0 | [x] | Deleting a playlist from config.yaml does not automatically clean up EQ entries (orphans are harmless) |
+| 19.8.4 | 1.0 | [x] | Empty EQ config (all effects false) is functionally equivalent to no EQ — no filter chain is added to FFmpeg |
+| 19.8.5 | 1.0 | [x] | `loudnorm` filter works correctly in the conversion pipeline (FFmpeg handles two-pass internally) |

@@ -366,7 +366,7 @@ All API routes are defined in `web_api.py` as a Flask Blueprint.
 
 See `ios/CLAUDE.md` for full iOS companion app documentation (architecture, models, services, views, Bonjour, pairing flow).
 
-**Quick reference:** Native SwiftUI app (iOS 17+) connecting to `./music-porter server` over local network. Requires `server` command (not `web`) for API key auth, Bonjour discovery, and file serving endpoints.
+**Quick reference:** Native SwiftUI app (iOS 17+) connecting to `./music-porter server` over local network. Requires `server` command (not `web`) for API key auth, Bonjour discovery, and file serving endpoints. The iOS app has its own independent version (`MusicPorterApp.appVersion`) — `/merge-to-main` automatically detects `ios/` changes and prompts for an iOS version bump.
 
 ## Important Implementation Notes
 
