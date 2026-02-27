@@ -613,14 +613,22 @@ struct LibraryView: View {
     /// The foreground Task may have been suspended by the OS; this detects
     /// remaining files and starts a new download task that skips completed files.
     private func resumeIfStalled() {
-        // Only resume if our foreground task isn't actively running
-        guard downloadTask == nil || downloadTask?.isCancelled == true else { return }
+        guard let playlist = appState.downloadManager.stalledDownloadPlaylist() else { return }
+
+        // A stalled download exists. The foreground Task may be:
+        // - nil (app was terminated and relaunched)
+        // - cancelled (user cancelled before backgrounding)
+        // - alive but frozen (OS suspended it during lock screen)
+        // In all cases except active cancellation, we should restart.
+        if let task = downloadTask, task.isCancelled { return }
+
+        // Cancel the frozen task (if any) before starting a fresh one
+        downloadTask?.cancel()
+        downloadTask = nil
 
         if isDownloadingAll {
-            // Bulk download was interrupted — restart with remaining dirs
             startDownloadAll()
-        } else if let playlist = appState.downloadManager.stalledDownloadPlaylist() {
-            // Single playlist download was interrupted — restart it
+        } else {
             startDownloadPlaylist(playlist)
         }
     }
