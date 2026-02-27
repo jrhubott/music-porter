@@ -47,7 +47,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.36.1-sync-client"
+VERSION = "2.36.1-dev+eaf03f6"
 
 DEFAULT_DATA_DIR = "data"
 DEFAULT_MUSIC_DIR = "music"
