@@ -52,6 +52,7 @@ VERSION = "2.36.1-server-only-architecture"
 DEFAULT_DATA_DIR = "data"
 DEFAULT_MUSIC_DIR = "music"
 DEFAULT_EXPORT_DIR = "export"
+DEFAULT_LIBRARY_DIR = "library"
 DEFAULT_LOG_DIR = "logs"
 DEFAULT_LOG_RETENTION_DAYS = 7
 DEFAULT_CONFIG_FILE = "data/config.yaml"
@@ -59,10 +60,13 @@ DEFAULT_COOKIES = "data/cookies.txt"
 DEFAULT_DB_FILE = "data/music-porter.db"
 DEFAULT_USB_DIR = "RZR/Music"
 
+# TXXX frame name used to uniquely identify library MP3 files in the DB
+TXXX_TRACK_UUID = "TrackUUID"
+
 # Schema version constants — increment and add a migration case when changing
 # the config.yaml structure or DB tables/columns.
 CONFIG_SCHEMA_VERSION = 1
-DB_SCHEMA_VERSION = 3
+DB_SCHEMA_VERSION = 4
 
 # Excluded USB volumes by OS
 if IS_MACOS:
@@ -536,6 +540,13 @@ def get_export_dir(profile_name, playlist_key=None):
     if playlist_key:
         return f"{DEFAULT_EXPORT_DIR}/{profile_name}/{playlist_key}"
     return f"{DEFAULT_EXPORT_DIR}/{profile_name}"
+
+
+def get_library_dir(playlist_key=None):
+    """Build library path: library/ or library/<playlist>/"""
+    if playlist_key:
+        return f"{DEFAULT_LIBRARY_DIR}/{playlist_key}"
+    return DEFAULT_LIBRARY_DIR
 
 
 # Third-party imports — deferred so the script can start without a venv
@@ -1036,6 +1047,35 @@ def migrate_db_schema(logger=None):
             changes.append("added scheduled_jobs table for persistent scheduling")
             if logger:
                 logger.info("DB migration 2→3: added scheduled_jobs table")
+
+        # ── Version 3 → 4: tracks table for library metadata ─────────
+        if current < 4:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS tracks (
+                    uuid            TEXT PRIMARY KEY,
+                    playlist        TEXT NOT NULL,
+                    file_path       TEXT NOT NULL,
+                    title           TEXT NOT NULL,
+                    artist          TEXT NOT NULL,
+                    album           TEXT NOT NULL,
+                    cover_art_path  TEXT,
+                    cover_art_hash  TEXT,
+                    duration_s      REAL,
+                    file_size_bytes INTEGER,
+                    source_m4a_path TEXT,
+                    created_at      REAL NOT NULL,
+                    updated_at      REAL NOT NULL
+                )
+            """)
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_tracks_playlist
+                ON tracks(playlist)""")
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_tracks_file_path
+                ON tracks(file_path)""")
+            conn.execute("PRAGMA user_version = 4")
+            conn.commit()
+            changes.append("added tracks table for library metadata storage")
+            if logger:
+                logger.info("DB migration 3→4: added tracks table")
 
         return [MigrationEvent(
             'schema_migrate',
@@ -2158,6 +2198,194 @@ class SyncTracker:
 
 # Backwards compatibility alias
 USBSyncTracker = SyncTracker
+
+
+class TrackDB:
+    """Persistent library track metadata using SQLite.
+
+    Stores title, artist, album, cover art references, and file info for
+    every MP3 in the library.  Library MP3s carry only a TXXX:TrackUUID
+    tag; all human-readable metadata lives here and is applied on-the-fly
+    by TagApplicator during sync/download.
+
+    Follows the AuditLogger/SyncTracker pattern:
+    WAL mode, write lock, lockless reads, connection-per-call.
+    """
+
+    def __init__(self, db_path=DEFAULT_DB_FILE):
+        self._db_path = str(db_path)
+        Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._write_lock = threading.Lock()
+        self._init_db()
+
+    def _connect(self):
+        conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_db(self):
+        conn = self._connect()
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS tracks (
+                    uuid            TEXT PRIMARY KEY,
+                    playlist        TEXT NOT NULL,
+                    file_path       TEXT NOT NULL,
+                    title           TEXT NOT NULL,
+                    artist          TEXT NOT NULL,
+                    album           TEXT NOT NULL,
+                    cover_art_path  TEXT,
+                    cover_art_hash  TEXT,
+                    duration_s      REAL,
+                    file_size_bytes INTEGER,
+                    source_m4a_path TEXT,
+                    created_at      REAL NOT NULL,
+                    updated_at      REAL NOT NULL
+                )
+            """)
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_tracks_playlist
+                ON tracks(playlist)""")
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_tracks_file_path
+                ON tracks(file_path)""")
+            conn.execute(f"PRAGMA user_version = {DB_SCHEMA_VERSION}")
+            conn.commit()
+        finally:
+            conn.close()
+
+    # ── Write methods (lock-protected) ────────────────────────────
+
+    def insert_track(self, uuid, playlist, file_path, title, artist, album,
+                     cover_art_path=None, cover_art_hash=None,
+                     duration_s=None, file_size_bytes=None,
+                     source_m4a_path=None):
+        """Insert or replace a track record."""
+        now = time.time()
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    """INSERT INTO tracks
+                       (uuid, playlist, file_path, title, artist, album,
+                        cover_art_path, cover_art_hash, duration_s,
+                        file_size_bytes, source_m4a_path,
+                        created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(uuid) DO UPDATE SET
+                        playlist = excluded.playlist,
+                        file_path = excluded.file_path,
+                        title = excluded.title,
+                        artist = excluded.artist,
+                        album = excluded.album,
+                        cover_art_path = excluded.cover_art_path,
+                        cover_art_hash = excluded.cover_art_hash,
+                        duration_s = excluded.duration_s,
+                        file_size_bytes = excluded.file_size_bytes,
+                        source_m4a_path = excluded.source_m4a_path,
+                        updated_at = excluded.updated_at""",
+                    (uuid, playlist, file_path, title, artist, album,
+                     cover_art_path, cover_art_hash, duration_s,
+                     file_size_bytes, source_m4a_path, now, now),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def delete_track(self, uuid):
+        """Delete a single track by UUID."""
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                conn.execute("DELETE FROM tracks WHERE uuid = ?", (uuid,))
+                conn.commit()
+            finally:
+                conn.close()
+
+    def delete_tracks_by_playlist(self, playlist):
+        """Delete all tracks belonging to a playlist."""
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "DELETE FROM tracks WHERE playlist = ?", (playlist,))
+                conn.commit()
+            finally:
+                conn.close()
+
+    # ── Read methods (lockless — WAL mode) ────────────────────────
+
+    def get_track(self, uuid):
+        """Return a single track as a dict, or None."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM tracks WHERE uuid = ?", (uuid,)
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def get_track_by_path(self, file_path):
+        """Return a track by its library file_path, or None."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM tracks WHERE file_path = ?", (file_path,)
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def get_tracks_by_playlist(self, playlist):
+        """Return all tracks for a playlist, ordered by title."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM tracks WHERE playlist = ? ORDER BY title",
+                (playlist,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_all_playlists(self):
+        """Return a sorted list of distinct playlist names."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT DISTINCT playlist FROM tracks ORDER BY playlist"
+            ).fetchall()
+            return [r['playlist'] for r in rows]
+        finally:
+            conn.close()
+
+    def get_playlist_stats(self):
+        """Return per-playlist aggregate stats.
+
+        Returns list of dicts with keys: playlist, track_count, total_size_bytes.
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute("""
+                SELECT playlist,
+                       COUNT(*) AS track_count,
+                       COALESCE(SUM(file_size_bytes), 0) AS total_size_bytes
+                FROM tracks
+                GROUP BY playlist
+                ORDER BY playlist
+            """).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_track_count(self):
+        """Return the total number of tracks across all playlists."""
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT COUNT(*) AS cnt FROM tracks").fetchone()
+            return row['cnt'] if row else 0
+        finally:
+            conn.close()
 
 
 class EQConfigManager:
