@@ -4,6 +4,7 @@ import MusicKit
 /// Combined Library tab with segmented control for "My Playlists" and "Apple Music".
 struct LibraryView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.scenePhase) private var scenePhase
     @State private var vm = PlaylistsViewModel()
     @State private var selectedSegment = 0
 
@@ -16,6 +17,12 @@ struct LibraryView: View {
     @State private var exportScope: ExportScope = .all
     @State private var downloadTask: Task<Void, Never>?
     @State private var downloadError: String?
+    @State private var backgroundedAt: Date?
+    @State private var downloadGeneration = 0
+
+    /// Minimum seconds in background before considering a download stalled.
+    /// iOS reclaims sockets after suspension; connections are dead after this threshold.
+    private let backgroundStallThreshold: TimeInterval = 3
 
     // Delete server data state
     @State private var serverDeleteKey: String?
@@ -120,6 +127,14 @@ struct LibraryView: View {
             .task {
                 await load()
             }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .active {
+                    resumeIfStalled()
+                    backgroundedAt = nil
+                } else if newPhase == .background {
+                    backgroundedAt = Date()
+                }
+            }
         }
     }
 
@@ -219,13 +234,43 @@ struct LibraryView: View {
                 } label: {
                     Label("Export to USB", systemImage: "externaldrive")
                 }
-                .disabled(appState.usbExport.isExporting || !hasLocalFiles)
+                .disabled(appState.usbExport.isExporting || !hasExportableFiles)
             }
             .buttonStyle(.borderless)
+
+            Toggle("Also save to device", isOn: Binding(
+                get: { appState.usbExport.cacheToDevice },
+                set: { appState.usbExport.cacheToDevice = $0 }
+            ))
+            .font(.subheadline)
 
             Text("Files are organized into playlist folders on USB.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
+
+            exportSourceSummary
+        }
+    }
+
+    @ViewBuilder
+    private var exportSourceSummary: some View {
+        let localCount = vm.exportDirs.reduce(0) { $0 + appState.downloadManager.localFiles(playlist: $1.name).count }
+        let serverTotal = vm.exportDirs.reduce(0) { $0 + $1.files }
+        let serverOnly = max(0, serverTotal - localCount)
+        if serverTotal > 0 {
+            HStack(spacing: 4) {
+                Image(systemName: "iphone")
+                    .imageScale(.small)
+                Text("\(localCount) local")
+                if serverOnly > 0 {
+                    Text("·")
+                    Image(systemName: "cloud")
+                        .imageScale(.small)
+                    Text("\(serverOnly) from server")
+                }
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
         }
     }
 
@@ -280,6 +325,18 @@ struct LibraryView: View {
                     ProgressView(value: appState.usbExport.exportProgress)
                         .tint(.orange)
                     HStack {
+                        if let source = appState.usbExport.currentFileSource {
+                            switch source {
+                            case .local:
+                                Image(systemName: "iphone")
+                                    .imageScale(.small)
+                                    .foregroundStyle(.secondary)
+                            case .server:
+                                Image(systemName: "cloud")
+                                    .imageScale(.small)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                         Text("Exporting...")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -407,7 +464,7 @@ struct LibraryView: View {
             }
         }
         .swipeActions(edge: .leading) {
-            if hasLocal {
+            if hasLocal || serverCount > 0 {
                 Button {
                     exportScope = .playlist(playlist.key)
                     showExportPicker = true
@@ -509,8 +566,8 @@ struct LibraryView: View {
 
     // MARK: - Helpers
 
-    private var hasLocalFiles: Bool {
-        vm.exportDirs.contains { !appState.downloadManager.localFiles(playlist: $0.name).isEmpty }
+    private var hasExportableFiles: Bool {
+        !vm.exportDirs.isEmpty && vm.exportDirs.contains { $0.files > 0 }
     }
 
     // MARK: - Actions
@@ -521,16 +578,22 @@ struct LibraryView: View {
     }
 
     private func startDownloadPlaylist(_ name: String) {
+        downloadTask?.cancel()
+        downloadGeneration += 1
+        let generation = downloadGeneration
         downloadTask = Task {
             downloadingPlaylist = name
             downloadError = nil
             do {
                 try await appState.downloadManager.downloadAll(playlist: name)
             } catch is CancellationError {
-                // User cancelled
+                // User cancelled or replaced by resumeIfStalled
             } catch {
                 downloadError = error.localizedDescription
             }
+            // Only clean up if we're still the active download generation.
+            // A newer task (from resumeIfStalled) may have replaced us.
+            guard downloadGeneration == generation else { return }
             storageUsed = appState.downloadManager.localStorageUsed()
             appState.downloadManager.clearProgress()
             downloadingPlaylist = nil
@@ -539,6 +602,9 @@ struct LibraryView: View {
     }
 
     private func startDownloadAll() {
+        downloadTask?.cancel()
+        downloadGeneration += 1
+        let generation = downloadGeneration
         downloadTask = Task {
             isDownloadingAll = true
             downloadError = nil
@@ -546,10 +612,11 @@ struct LibraryView: View {
             do {
                 try await appState.downloadManager.downloadAllPlaylists(dirs: vm.exportDirs)
             } catch is CancellationError {
-                // User cancelled
+                // User cancelled or replaced by resumeIfStalled
             } catch {
                 downloadError = error.localizedDescription
             }
+            guard downloadGeneration == generation else { return }
             storageUsed = appState.downloadManager.localStorageUsed()
             appState.downloadManager.clearProgress()
             isDownloadingAll = false
@@ -557,31 +624,87 @@ struct LibraryView: View {
         }
     }
 
+    /// Resume a stalled download after returning from background.
+    /// iOS reclaims sockets after suspension; this uses background duration
+    /// to distinguish brief app switches from real stalls.
+    private func resumeIfStalled() {
+        guard appState.downloadManager.stalledDownloadPlaylist() != nil else { return }
+
+        if downloadTask == nil {
+            // App was relaunched or previous download completed/failed — restart
+            if isDownloadingAll {
+                startDownloadAll()
+            } else if let playlist = appState.downloadManager.stalledDownloadPlaylist() {
+                startDownloadPlaylist(playlist)
+            }
+            return
+        }
+
+        // Download task exists. Only intervene if backgrounded long enough for
+        // the OS to reclaim sockets. Brief app switches don't interrupt.
+        guard let bgTime = backgroundedAt,
+              Date().timeIntervalSince(bgTime) > backgroundStallThreshold else { return }
+
+        // Connections are dead after suspension — cancel stale task, start fresh
+        downloadTask?.cancel()
+        downloadTask = nil
+
+        if isDownloadingAll {
+            startDownloadAll()
+        } else if let playlist = appState.downloadManager.stalledDownloadPlaylist() {
+            startDownloadPlaylist(playlist)
+        }
+    }
+
     private func cancelDownload() {
         downloadTask?.cancel()
+        appState.downloadManager.cancelDownloads()
     }
 
     private func exportToFolder(_ destDir: URL) async {
         appState.usbExport.reset()
 
-        let groups: [PlaylistExportGroup]
+        let playlistKeys: [String]
         switch exportScope {
         case .all:
-            groups = vm.exportDirs.compactMap { dir in
-                let urls = appState.downloadManager.localFiles(playlist: dir.name)
-                return urls.isEmpty ? nil : PlaylistExportGroup(playlist: dir.name, urls: urls)
-            }
+            playlistKeys = vm.exportDirs.filter { $0.files > 0 }.map(\.name)
         case .playlist(let name):
-            let urls = appState.downloadManager.localFiles(playlist: name)
-            groups = urls.isEmpty ? [] : [PlaylistExportGroup(playlist: name, urls: urls)]
+            playlistKeys = [name]
+        }
+
+        var groups: [PlaylistExportGroup] = []
+
+        for key in playlistKeys {
+            let localFiles = appState.downloadManager.localFiles(playlist: key)
+            let localNames = Set(localFiles.map(\.lastPathComponent))
+
+            // Build local entries
+            var entries = localFiles.map { url in
+                ExportManifestEntry(playlist: key, filename: url.lastPathComponent, source: .local(url))
+            }
+
+            // Fetch server file list for files not available locally
+            if let serverFiles = try? await appState.apiClient.getFiles(playlist: key) {
+                for track in serverFiles.files where !localNames.contains(track.filename) {
+                    entries.append(ExportManifestEntry(
+                        playlist: key, filename: track.filename,
+                        source: .server(playlist: key, filename: track.filename)))
+                }
+            }
+
+            if !entries.isEmpty {
+                groups.append(PlaylistExportGroup(playlist: key, entries: entries))
+            }
         }
 
         guard !groups.isEmpty else {
-            downloadError = "No local files to export"
+            downloadError = "No files to export"
             return
         }
 
-        _ = await appState.usbExport.exportFiles(groups: groups, to: destDir)
+        _ = await appState.usbExport.exportFiles(
+            groups: groups, to: destDir,
+            cacheToDevice: appState.usbExport.cacheToDevice)
     }
 
     private func deleteLocal(_ name: String) {

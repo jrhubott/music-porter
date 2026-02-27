@@ -1,3 +1,14 @@
+Version 2.36.0 (2026-02-27):
+• iOS direct export — download MP3s to device and export to USB drives directly from the iOS app (SRS-20)
+• iOS background downloads — downloads continue when the app is backgrounded or locked via background URLSession (SRS-21)
+• Concurrent downloads — 6x throughput improvement with batched state store writes
+• Fix MiniPlayer artwork for server tracks using authenticated fetch instead of unauthenticated AsyncImage
+• Add local/server indicators and authenticated artwork loading to playlist detail view
+• Compact TrackRow layout with icon and file size in artist row
+• Fix resumeIfStalled() with duration-based stall detection and generation guard
+• Fix foreground download resume and streaming ZIP memory usage
+• iOS app version bumped to 1.3.0
+
 Version 2.35.1 (2026-02-26):
 • Scheduler persistence — schedule state (next_run_time, last_run_time, on_missed policy) persists in DB across server restarts via new scheduled_jobs table
 • Time-of-day scheduling — optional run_at (HH:MM) for intervals >= 24h targets a specific local time instead of drifting on restart

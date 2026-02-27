@@ -110,7 +110,11 @@ struct MiniPlayerView: View {
 
     @ViewBuilder
     private var artwork: some View {
-        if let url = audioPlayer.nowPlaying?.artworkURL {
+        if let image = audioPlayer.artworkImage {
+            Image(uiImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+        } else if let url = audioPlayer.nowPlaying?.artworkURL {
             AsyncImage(url: url) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {

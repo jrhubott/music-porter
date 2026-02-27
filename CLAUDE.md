@@ -14,6 +14,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - When implementing a future feature from the README list, **strikethrough** the item (~~text~~) with a note like "*(implemented in vX.Y.Z)*" instead of removing it
 - Keep the original numbering intact
 
+### Code Style
+
+- **No magic numbers** — define named constants for numeric values; avoid bare literals in logic
+
 ## Requirements Handling
 
 ### Workflow
@@ -258,7 +262,12 @@ The project uses a 3-tier branch model: **feature -> dev -> main**.
 
 **Creating:** Start from dev, create branch, set `VERSION = "X.Y.Z-branch-name"` in `porter_core.py` line 50 (base version from dev, replacing `-dev` with `-branch-name`) as first commit.
 
-**Planning mode:** When planning mode is used from the `dev` branch, a feature branch **MUST** be created as the **very first step** before any implementation changes are made. Never modify files on `dev` for plan-based work — create the feature branch and set the branch version first, then begin implementation.
+**Planning mode — CRITICAL:** After a plan is approved, the **absolute first step** before doing ANYTHING is to ask the user which branch to use via `AskUserQuestion`. This is **non-negotiable** — do NOT start reading code, editing files, or any other action. The branch question MUST be the very first thing after plan approval:
+- **Feature branch** (default, recommended) — creates `feature/<name>` branch from dev
+- **Bugfix branch** — creates `bugfix/<name>` branch from dev
+- **Stay on dev** — no branch created, work directly on dev
+
+If a branch is created, set the branch version in `porter_core.py` as the first commit, then begin implementation. Never modify implementation files before the branch question is answered.
 
 **Working:** Keep branch version throughout development. For long-lived branches, rebase on `origin/dev` periodically.
 

@@ -146,6 +146,12 @@ struct PipelineView: View {
                 } label: {
                     Label("Export to USB", systemImage: "externaldrive")
                 }
+
+                Toggle("Also save to device", isOn: Binding(
+                    get: { appState.usbExport.cacheToDevice },
+                    set: { appState.usbExport.cacheToDevice = $0 }
+                ))
+                .font(.subheadline)
             }
         }
     }
@@ -243,10 +249,29 @@ struct PipelineView: View {
 
     private func exportToFolder(_ destDir: URL) async {
         guard let playlist = selectedPlaylist else { return }
-        let urls = appState.downloadManager.localFiles(playlist: playlist.key)
-        guard !urls.isEmpty else { return }
-        let groups = [PlaylistExportGroup(playlist: playlist.key, urls: urls)]
-        _ = await appState.usbExport.exportFiles(groups: groups, to: destDir)
+
+        let localFiles = appState.downloadManager.localFiles(playlist: playlist.key)
+        let localNames = Set(localFiles.map(\.lastPathComponent))
+
+        // Build local entries
+        var entries = localFiles.map { url in
+            ExportManifestEntry(playlist: playlist.key, filename: url.lastPathComponent, source: .local(url))
+        }
+
+        // Add server-only files as fallback
+        if let serverFiles = try? await appState.apiClient.getFiles(playlist: playlist.key) {
+            for track in serverFiles.files where !localNames.contains(track.filename) {
+                entries.append(ExportManifestEntry(
+                    playlist: playlist.key, filename: track.filename,
+                    source: .server(playlist: playlist.key, filename: track.filename)))
+            }
+        }
+
+        guard !entries.isEmpty else { return }
+        let groups = [PlaylistExportGroup(playlist: playlist.key, entries: entries)]
+        _ = await appState.usbExport.exportFiles(
+            groups: groups, to: destDir,
+            cacheToDevice: appState.usbExport.cacheToDevice)
     }
 
     private func statusColor(_ status: String) -> Color {

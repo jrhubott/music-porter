@@ -21,7 +21,7 @@ struct PlaylistDetailView: View {
                         playlist: playlist.key,
                         api: appState.apiClient,
                         isNowPlaying: appState.audioPlayer.currentServerTrackID == track.filename,
-                        syncedTo: vm.syncMap[track.filename] ?? []
+                        isLocal: vm.localFilenames.contains(track.filename)
                     )
                 }
                 .buttonStyle(.plain)
@@ -38,7 +38,7 @@ struct PlaylistDetailView: View {
             }
         }
         .navigationTitle(playlist.name)
-        .refreshable { await vm.load(api: appState.apiClient, playlist: playlist.key) }
-        .task { await vm.load(api: appState.apiClient, playlist: playlist.key) }
+        .refreshable { await vm.load(api: appState.apiClient, playlist: playlist.key, downloadManager: appState.downloadManager) }
+        .task { await vm.load(api: appState.apiClient, playlist: playlist.key, downloadManager: appState.downloadManager) }
     }
 }
