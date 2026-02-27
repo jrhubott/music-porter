@@ -1,0 +1,101 @@
+/* Bootstrap dark theme overrides to match web dashboard */
+:root {
+  --bs-body-bg: #212529;
+  --bs-body-color: #dee2e6;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  margin: 0;
+  overflow: hidden;
+}
+
+/* App layout */
+.app-layout {
+  display: flex;
+  height: 100vh;
+}
+
+.app-sidebar {
+  width: 220px;
+  background: #1a1d21;
+  border-right: 1px solid #343a40;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem 0;
+  flex-shrink: 0;
+}
+
+.app-sidebar .nav-link {
+  color: #adb5bd;
+  padding: 0.6rem 1.2rem;
+  border-radius: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.app-sidebar .nav-link:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.app-sidebar .nav-link.active {
+  color: #fff;
+  background: rgba(13, 110, 253, 0.2);
+  border-left: 3px solid #0d6efd;
+}
+
+.app-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.5rem;
+}
+
+/* Connection status badge */
+.connection-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.8rem;
+  color: #6c757d;
+  border-top: 1px solid #343a40;
+  margin-top: auto;
+}
+
+.connection-badge .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #198754;
+}
+
+.connection-badge .dot.disconnected {
+  background: #dc3545;
+}
+
+/* Playlist card */
+.playlist-card {
+  background: #2b3035;
+  border: 1px solid #343a40;
+  border-radius: 0.5rem;
+  padding: 1rem;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.playlist-card:hover {
+  border-color: #0d6efd;
+}
+
+.playlist-card.selected {
+  border-color: #0d6efd;
+  background: rgba(13, 110, 253, 0.1);
+}
+
+/* Progress */
+.sync-progress-bar {
+  height: 6px;
+  border-radius: 3px;
+}
