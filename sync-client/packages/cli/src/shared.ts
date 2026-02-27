@@ -1,5 +1,5 @@
 import { ConfigStore, APIClient } from '@mporter/core';
-import { printError, printField } from './formatters.js';
+import { printError } from './formatters.js';
 import chalk from 'chalk';
 
 /** Create an APIClient that is configured and connected. Returns null on failure. */

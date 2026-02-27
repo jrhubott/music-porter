@@ -5,6 +5,7 @@ import {
   SyncEngine,
   DriveManager,
   ServerDiscovery,
+  VERSION,
 } from '@mporter/core';
 import type {
   ConnectionState,
@@ -43,11 +44,32 @@ export function registerIPCHandlers(): void {
     try {
       const response = await apiClient.resolveConnection();
       // Update stored server name
+      let configChanged = false;
       if (server.name !== response.server_name) {
         server.name = response.server_name;
+        configChanged = true;
+      }
+
+      // Fetch external URL from server-info (same as iOS fetchExternalURL)
+      try {
+        const info = await apiClient.getServerInfo();
+        if (info.external_url && server.externalURL !== info.external_url) {
+          server.externalURL = info.external_url;
+          apiClient.configure(server.localURL, server.externalURL, apiKey ?? undefined);
+          configChanged = true;
+        }
+      } catch {
+        // Non-critical — external URL is optional
+      }
+
+      if (configChanged) {
         configStore.serverConfig = server;
       }
-      return apiClient.connectionState;
+
+      const state = apiClient.connectionState;
+      state.serverName = response.server_name;
+      state.serverVersion = response.version;
+      return state;
     } catch {
       return { connected: false };
     }
@@ -69,11 +91,31 @@ export function registerIPCHandlers(): void {
   ipcMain.handle('server:discover', async (): Promise<DiscoveredServer[]> => {
     return new Promise((resolve) => {
       const discovery = new ServerDiscovery();
-      const DISCOVERY_TIMEOUT_MS = 10000;
-      discovery.startSearch(() => {});
+      const DISCOVERY_TIMEOUT_MS = 8000;
+      const EARLY_RESOLVE_DELAY_MS = 2000;
+      let resolved = false;
+
+      discovery.startSearch((servers) => {
+        // Resolve early after a short delay once we find servers
+        // (wait a bit for additional servers on the network)
+        if (servers.length > 0 && !resolved) {
+          setTimeout(() => {
+            if (!resolved) {
+              resolved = true;
+              discovery.stopSearch();
+              resolve(servers);
+            }
+          }, EARLY_RESOLVE_DELAY_MS);
+        }
+      });
+
+      // Final timeout — resolve with whatever we have
       setTimeout(() => {
-        discovery.stopSearch();
-        resolve(discovery.discoveredServers);
+        if (!resolved) {
+          resolved = true;
+          discovery.stopSearch();
+          resolve(discovery.discoveredServers);
+        }
       }, DISCOVERY_TIMEOUT_MS);
     });
   });
@@ -158,6 +200,12 @@ export function registerIPCHandlers(): void {
 
   ipcMain.handle('prefs:update', (_event, updates: Partial<SyncPreferences>): void => {
     configStore.updatePreferences(updates);
+  });
+
+  // ── App Info ──
+
+  ipcMain.handle('app:getVersion', (): string => {
+    return VERSION;
   });
 }
 

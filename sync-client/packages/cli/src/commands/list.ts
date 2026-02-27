@@ -1,5 +1,4 @@
 import type { Command } from 'commander';
-import { ConfigStore, APIClient } from '@mporter/core';
 import { printTable, printError, formatBytes } from '../formatters.js';
 import { createConnectedClient } from '../shared.js';
 

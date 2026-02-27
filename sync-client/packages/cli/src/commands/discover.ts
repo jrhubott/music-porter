@@ -1,6 +1,6 @@
 import type { Command } from 'commander';
-import { ServerDiscovery, DEFAULT_PORT } from '@mporter/core';
-import { printTable, printField, printSuccess } from '../formatters.js';
+import { ServerDiscovery } from '@mporter/core';
+import { printField, printSuccess } from '../formatters.js';
 import chalk from 'chalk';
 
 const SEARCH_TIMEOUT_MS = 10000;

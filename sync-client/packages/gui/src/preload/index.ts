@@ -70,6 +70,9 @@ const electronAPI = {
     ipcRenderer.on('drives:change', handler);
     return () => ipcRenderer.removeListener('drives:change', handler);
   },
+
+  // App info
+  getVersion: (): Promise<string> => ipcRenderer.invoke('app:getVersion'),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);

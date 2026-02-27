@@ -31,6 +31,7 @@ export interface ServerInfoResponse {
   platform: string;
   profiles: string[];
   api_version: number;
+  external_url?: string;
 }
 
 export interface Playlist {

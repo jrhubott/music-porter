@@ -3,9 +3,8 @@ import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { DEFAULT_CONCURRENCY, TEMP_SUFFIX } from './constants.js';
-import { SyncError } from './errors.js';
 import type { APIClient } from './api-client.js';
-import type { FileInfo, SyncManifest, SyncProgress, SyncResult } from './types.js';
+import type { FileInfo, SyncManifest, SyncResult } from './types.js';
 import type { LogCallback, ProgressCallback } from './progress.js';
 import {
   readManifest,

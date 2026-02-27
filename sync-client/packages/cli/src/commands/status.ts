@@ -1,5 +1,5 @@
 import type { Command } from 'commander';
-import { printTable, printField, printError, formatBytes } from '../formatters.js';
+import { printTable, printField, printError } from '../formatters.js';
 import { createConnectedClient } from '../shared.js';
 
 export function registerStatusCommand(program: Command): void {

@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { VERSION } from '@mporter/core';
 import type { SyncPreferences, ServerConfig } from '@mporter/core';
 import { useIPC } from '../hooks/useIPC.js';
 import { useAppState } from '../store/app-state.js';
@@ -9,15 +8,21 @@ export function SettingsPage() {
   const { connection, setConnection, setActivePage } = useAppState();
   const [config, setConfig] = useState<ServerConfig | null>(null);
   const [prefs, setPrefs] = useState<SyncPreferences | null>(null);
+  const [version, setVersion] = useState('');
 
   useEffect(() => {
     loadSettings();
   }, []);
 
   async function loadSettings() {
-    const [cfg, p] = await Promise.all([ipc.getServerConfig(), ipc.getPreferences()]);
+    const [cfg, p, ver] = await Promise.all([
+      ipc.getServerConfig(),
+      ipc.getPreferences(),
+      ipc.getVersion(),
+    ]);
     setConfig(cfg);
     setPrefs(p);
+    setVersion(ver);
   }
 
   async function disconnect() {
@@ -131,7 +136,7 @@ export function SettingsPage() {
         <div className="card-body">
           <div className="mb-1">
             <small className="text-secondary">Sync Client Version</small>
-            <div>{VERSION}</div>
+            <div>{version}</div>
           </div>
           {connection.serverVersion && (
             <div>

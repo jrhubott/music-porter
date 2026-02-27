@@ -1,8 +1,14 @@
 import { app, BrowserWindow, nativeTheme } from 'electron';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { registerIPCHandlers } from './ipc-handlers.js';
 import { createTray } from './tray.js';
 import { startDriveWatcher } from './drive-watcher.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const DEBUG = process.argv.includes('--debug');
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -29,11 +35,14 @@ function createWindow(): void {
     },
   });
 
-  // In development, load from Vite dev server
   if (process.env['VITE_DEV_SERVER_URL']) {
     mainWindow.loadURL(process.env['VITE_DEV_SERVER_URL']);
   } else {
     mainWindow.loadFile(join(__dirname, '..', 'renderer', 'index.html'));
+  }
+
+  if (DEBUG) {
+    mainWindow.webContents.openDevTools();
   }
 
   mainWindow.on('closed', () => {

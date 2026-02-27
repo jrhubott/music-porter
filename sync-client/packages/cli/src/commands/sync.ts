@@ -2,16 +2,13 @@ import type { Command } from 'commander';
 import cliProgress from 'cli-progress';
 import chalk from 'chalk';
 import {
-  ConfigStore,
-  APIClient,
   SyncEngine,
-  EXIT_SUCCESS,
   EXIT_ERROR,
   EXIT_PARTIAL_FAILURE,
   DEFAULT_CONCURRENCY,
 } from '@mporter/core';
 import type { SyncProgress } from '@mporter/core';
-import { formatBytes, formatDuration, printError, printSuccess, printField } from '../formatters.js';
+import { formatDuration, printError, printSuccess, printField } from '../formatters.js';
 import { createConnectedClient } from '../shared.js';
 
 export function registerSyncCommand(program: Command): void {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import { VERSION, EXIT_SUCCESS } from '@mporter/core';
+import { VERSION } from '@mporter/core';
 import { registerServerCommand } from './commands/server.js';
 import { registerDiscoverCommand } from './commands/discover.js';
 import { registerListCommand } from './commands/list.js';

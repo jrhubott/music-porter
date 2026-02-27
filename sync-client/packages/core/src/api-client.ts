@@ -40,10 +40,9 @@ export class APIClient {
   private apiKey?: string;
   private activeURL?: string;
   private connType?: ConnectionType;
-  private defaultTimeout: number;
 
-  constructor(options?: APIClientOptions) {
-    this.defaultTimeout = options?.timeout ?? STANDARD_TIMEOUT_MS;
+  constructor(_options?: APIClientOptions) {
+    // Options reserved for future use
   }
 
   // ── Configuration ──

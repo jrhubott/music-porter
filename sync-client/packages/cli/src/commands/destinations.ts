@@ -1,6 +1,6 @@
 import type { Command } from 'commander';
 import { DriveManager } from '@mporter/core';
-import { printTable, printError, printSuccess, printField, formatBytes } from '../formatters.js';
+import { printTable, printError, formatBytes } from '../formatters.js';
 import { createConnectedClient } from '../shared.js';
 
 export function registerDestinationsCommand(program: Command): void {
