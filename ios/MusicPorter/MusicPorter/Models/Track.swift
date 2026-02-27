@@ -9,13 +9,12 @@ struct Track: Identifiable, Codable, Hashable {
     var title: String?
     var artist: String?
     var album: String?
+    var uuid: String?
     var hasCoverArt: Bool?
-    var hasProtectionTags: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case filename, size, duration, title, artist, album
+        case filename, size, duration, title, artist, album, uuid
         case hasCoverArt = "has_cover_art"
-        case hasProtectionTags = "has_protection_tags"
     }
 
     /// Display title (falls back to filename stem).

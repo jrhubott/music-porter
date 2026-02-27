@@ -281,7 +281,8 @@ struct PipelineView: View {
         let groups = [PlaylistExportGroup(playlist: playlist.key, entries: entries)]
         _ = await appState.usbExport.exportFiles(
             groups: groups, to: targetDir,
-            cacheToDevice: appState.usbExport.cacheToDevice)
+            cacheToDevice: appState.usbExport.cacheToDevice,
+            profile: appState.activeProfile)
     }
 
     private func statusColor(_ status: String) -> Color {

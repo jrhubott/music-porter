@@ -50,7 +50,7 @@ final class USBExportService {
     /// Copy files grouped by playlist to a destination directory, creating subdirectories per playlist.
     /// Directory structure: `destDir/<playlist>/<filename>.mp3`
     @MainActor
-    func exportFiles(groups: [PlaylistExportGroup], to destDir: URL, cacheToDevice: Bool = false) async -> ExportResult {
+    func exportFiles(groups: [PlaylistExportGroup], to destDir: URL, cacheToDevice: Bool = false, profile: String? = nil) async -> ExportResult {
         isExporting = true
         exportProgress = 0
         currentFileName = nil
@@ -74,7 +74,7 @@ final class USBExportService {
             }
         }
 
-        let result = await copyGroupedFiles(groups, to: destDir, cacheToDevice: cacheToDevice)
+        let result = await copyGroupedFiles(groups, to: destDir, cacheToDevice: cacheToDevice, profile: profile)
         isExporting = false
         currentFileSource = nil
         lastExportResult = result
@@ -103,7 +103,7 @@ final class USBExportService {
     }
 
     private func copyGroupedFiles(
-        _ groups: [PlaylistExportGroup], to destDir: URL, cacheToDevice: Bool
+        _ groups: [PlaylistExportGroup], to destDir: URL, cacheToDevice: Bool, profile: String? = nil
     ) async -> ExportResult {
         let accessing = destDir.startAccessingSecurityScopedResource()
         defer { if accessing { destDir.stopAccessingSecurityScopedResource() } }
@@ -160,7 +160,7 @@ final class USBExportService {
                         // Resolve URL and build request on MainActor (APIClient is @MainActor)
                         let request: URLRequest? = await MainActor.run {
                             guard let apiClient,
-                                  let url = apiClient.fileDownloadURL(playlist: playlist, filename: filename) else {
+                                  let url = apiClient.fileDownloadURL(playlist: playlist, filename: filename, profile: profile) else {
                                 return nil
                             }
                             return apiClient.authenticatedRequest(for: url)

@@ -720,7 +720,8 @@ struct LibraryView: View {
 
         _ = await appState.usbExport.exportFiles(
             groups: groups, to: targetDir,
-            cacheToDevice: appState.usbExport.cacheToDevice)
+            cacheToDevice: appState.usbExport.cacheToDevice,
+            profile: appState.activeProfile)
     }
 
     private func deleteLocal(_ name: String) {
