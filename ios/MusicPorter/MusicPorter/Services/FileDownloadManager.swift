@@ -20,6 +20,34 @@ struct BulkDownloadProgress {
     var currentPlaylistName: String
 }
 
+/// Gates concurrent access to a fixed number of slots.
+private actor ConcurrencyLimiter {
+    private let limit: Int
+    private var active = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(limit: Int) { self.limit = limit }
+
+    func acquire() async {
+        if active < limit {
+            active += 1
+        } else {
+            await withCheckedContinuation { continuation in
+                waiters.append(continuation)
+            }
+        }
+    }
+
+    func release() {
+        if let next = waiters.first {
+            waiters.removeFirst()
+            next.resume()
+        } else {
+            active -= 1
+        }
+    }
+}
+
 /// Manages downloading MP3 files from the server to the device.
 /// Uses foreground URLSession for fast LAN downloads, with automatic
 /// handoff to background URLSession when the app is backgrounded.
@@ -31,6 +59,15 @@ final class FileDownloadManager {
     @ObservationIgnored private var apiClient: APIClient?
     @ObservationIgnored private let backgroundManager = BackgroundDownloadManager.shared
     @ObservationIgnored private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+
+    /// Dedicated URLSession with tuned timeouts and connection limits for LAN downloads.
+    @ObservationIgnored private let downloadSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 300
+        config.httpMaximumConnectionsPerHost = 6
+        return URLSession(configuration: config)
+    }()
 
     func configure(apiClient: APIClient) {
         self.apiClient = apiClient
@@ -79,7 +116,7 @@ final class FileDownloadManager {
         let destDir = getPlaylistDirectory(playlist: playlist)
         try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
 
-        let (tempURL, _) = try await URLSession.shared.download(for: request)
+        let (tempURL, _) = try await downloadSession.download(for: request)
 
         let destFile = destDir.appendingPathComponent(filename)
         if FileManager.default.fileExists(atPath: destFile.path) {
@@ -91,8 +128,8 @@ final class FileDownloadManager {
     }
 
     /// Download all files in a playlist, skipping files that already exist locally.
-    /// Uses foreground URLSession for fast LAN downloads. If the app is backgrounded,
-    /// remaining files are handed off to the background URLSession.
+    /// Uses foreground URLSession with concurrent downloads for fast LAN throughput.
+    /// If the app is backgrounded, remaining files are handed off to the background URLSession.
     func downloadAll(playlist: String) async throws {
         guard let apiClient else {
             throw FileDownloadError.notConfigured
@@ -129,9 +166,10 @@ final class FileDownloadManager {
 
         // Begin a UIKit background task so we get ~30s of execution if the app backgrounds
         backgroundTaskID = UIApplication.shared.beginBackgroundTask { [weak self] in
-            // Expiration handler: hand off remaining files to background URLSession
+            // Expiration handler: flush state and hand off remaining files to background URLSession
             guard let self else { return }
             Task { @MainActor in
+                DownloadStateStore.flushIfDirty()
                 self.handOffToBackground(playlist: playlist, destDir: destDir)
                 self.endBackgroundTask()
             }
@@ -139,6 +177,8 @@ final class FileDownloadManager {
 
         defer {
             endBackgroundTask()
+            // Flush any remaining cached state
+            DownloadStateStore.flushIfDirty()
             // If all files completed, clear state
             let remaining = DownloadStateStore.remainingFiles(playlist: playlist)
             if remaining.isEmpty {
@@ -152,41 +192,68 @@ final class FileDownloadManager {
             }
         }
 
-        // Sequential foreground downloads — fast on LAN
+        // Prepare all authenticated requests on @MainActor before entering TaskGroup
+        var downloadItems: [(filename: String, request: URLRequest)] = []
         for track in toDownload {
-            try Task.checkCancellation()
-
             guard let url = apiClient.fileDownloadURL(playlist: playlist, filename: track.filename) else {
                 continue
             }
             let request = apiClient.authenticatedRequest(for: url)
+            downloadItems.append((filename: track.filename, request: request))
+        }
 
-            downloadProgress?.currentFile = track.filename
+        // Concurrent foreground downloads — fast on LAN
+        let limiter = ConcurrencyLimiter(limit: 6)
+        let session = downloadSession
 
-            do {
-                let (tempURL, _) = try await URLSession.shared.download(for: request)
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for item in downloadItems {
+                group.addTask { [weak self] in
+                    await limiter.acquire()
+                    defer { Task { await limiter.release() } }
 
-                let destFile = destDir.appendingPathComponent(track.filename)
-                if FileManager.default.fileExists(atPath: destFile.path) {
-                    try FileManager.default.removeItem(at: destFile)
+                    try Task.checkCancellation()
+
+                    do {
+                        let (tempURL, _) = try await session.download(for: item.request)
+
+                        let destFile = destDir.appendingPathComponent(item.filename)
+                        if FileManager.default.fileExists(atPath: destFile.path) {
+                            try FileManager.default.removeItem(at: destFile)
+                        }
+                        try FileManager.default.moveItem(at: tempURL, to: destFile)
+
+                        await self?.fileCompleted(
+                            playlist: playlist, filename: item.filename, failed: false)
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        await self?.fileCompleted(
+                            playlist: playlist, filename: item.filename, failed: true)
+                        print("Download failed: \(item.filename) — \(error.localizedDescription)")
+                    }
                 }
-                try FileManager.default.moveItem(at: tempURL, to: destFile)
-
-                DownloadStateStore.markFileComplete(playlist: playlist, filename: track.filename)
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                DownloadStateStore.markFileFailed(playlist: playlist, filename: track.filename)
-                print("Download failed: \(track.filename) — \(error.localizedDescription)")
             }
-
-            if var progress = downloadProgress {
-                progress.completed += 1
-                downloadProgress = progress
-            }
+            try await group.waitForAll()
         }
 
         downloadProgress = DownloadProgress(completed: total, total: total, currentFile: "")
+    }
+
+    /// Update state store and UI progress after a single file completes.
+    /// Serializes concurrent progress updates on the main actor.
+    private func fileCompleted(playlist: String, filename: String, failed: Bool) {
+        if failed {
+            DownloadStateStore.markFileFailed(playlist: playlist, filename: filename)
+        } else {
+            DownloadStateStore.markFileComplete(playlist: playlist, filename: filename)
+        }
+
+        if var progress = downloadProgress {
+            progress.completed += 1
+            progress.currentFile = filename
+            downloadProgress = progress
+        }
     }
 
     /// Hand off remaining unfinished downloads to the background URLSession.
