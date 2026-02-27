@@ -10,12 +10,23 @@ struct SettingsView: View {
             List {
                 Section("Server") {
                     if let server = appState.currentServer {
-                        if let url = server.url {
-                            LabeledContent("URL", value: url)
-                        } else {
-                            LabeledContent("Host", value: "\(server.host):\(server.port)")
+                        HStack(spacing: 12) {
+                            connectionIcon
+                                .font(.title2)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(server.name)
+                                    .font(.headline)
+                                connectionLabel
+                            }
                         }
-                        LabeledContent("Name", value: server.name)
+
+                        if let baseURL = appState.apiClient.activeBaseURL {
+                            LabeledContent("Active URL", value: baseURL.absoluteString)
+                        }
+                        if server.hasExternalURL {
+                            LabeledContent("External URL", value: server.externalURL!)
+                        }
+                        LabeledContent("Local URL", value: server.localURL?.absoluteString ?? "\(server.host):\(server.port)")
                     }
                     Button("Disconnect", role: .destructive) {
                         appState.disconnect()
@@ -63,6 +74,26 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .task { await loadSettings() }
+        }
+    }
+
+    @ViewBuilder
+    private var connectionIcon: some View {
+        if appState.apiClient.connectionType == .external {
+            Image(systemName: "globe")
+                .foregroundStyle(.blue)
+        } else {
+            Image(systemName: "house")
+                .foregroundStyle(.green)
+        }
+    }
+
+    @ViewBuilder
+    private var connectionLabel: some View {
+        if let type = appState.apiClient.connectionType {
+            Text(type == .local ? "Connected via Local Network" : "Connected via External URL")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 

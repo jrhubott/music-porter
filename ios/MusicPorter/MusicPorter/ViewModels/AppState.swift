@@ -6,6 +6,11 @@ final class AppState {
     /// The API version this iOS app expects from the server.
     static let supportedAPIVersion = 1
 
+    /// Timeout for local URL connection attempts when an external URL is available.
+    private static let localTimeoutSeconds = 3
+    /// Timeout for external URL or local-only connection attempts.
+    private static let standardTimeoutSeconds = 10
+
     // Services
     let apiClient = APIClient()
     let discovery = ServerDiscovery()
@@ -59,7 +64,7 @@ final class AppState {
         downloadManager.configure(apiClient: apiClient)
         audioPlayer.configure(apiClient: apiClient)
         usbExport.configure(apiClient: apiClient, downloadManager: downloadManager)
-        let response = try await apiClient.validateConnection()
+        let response = try await resolveConnection(server: server)
         if response.valid {
             apiClient.server?.name = response.serverName
             apiClient.server?.version = response.version
@@ -67,6 +72,54 @@ final class AppState {
             checkAPIVersion(response.apiVersion)
         } else {
             throw APIError.unauthorized
+        }
+    }
+
+    /// Try local URL first, then fall back to external URL.
+    private func resolveConnection(server: ServerConnection) async throws -> AuthValidateResponse {
+        var lastError: Error = APIError.notConfigured
+
+        // Use shorter timeout for local when external is available as fallback
+        let localTimeout = server.hasExternalURL
+            ? Self.localTimeoutSeconds
+            : Self.standardTimeoutSeconds
+
+        // Try local URL first
+        if let localURL = server.localURL {
+            apiClient.setActiveURL(localURL, type: .local)
+            do {
+                return try await validateWithTimeout(seconds: localTimeout)
+            } catch {
+                lastError = error
+            }
+        }
+
+        // Try external URL
+        if let extStr = server.externalURL, let externalURL = URL(string: extStr) {
+            apiClient.setActiveURL(externalURL, type: .external)
+            do {
+                return try await validateWithTimeout(seconds: Self.standardTimeoutSeconds)
+            } catch {
+                lastError = error
+            }
+        }
+
+        throw lastError
+    }
+
+    /// Validate the connection with a timeout.
+    private func validateWithTimeout(seconds: Int) async throws -> AuthValidateResponse {
+        try await withThrowingTaskGroup(of: AuthValidateResponse.self) { group in
+            group.addTask {
+                try await self.apiClient.validateConnection()
+            }
+            group.addTask {
+                try await Task.sleep(for: .seconds(seconds))
+                throw URLError(.timedOut)
+            }
+            let result = try await group.next()!
+            group.cancelAll()
+            return result
         }
     }
 
@@ -105,19 +158,7 @@ final class AppState {
             while !Task.isCancelled {
                 reconnectAttempt += 1
                 do {
-                    _ = try await withThrowingTaskGroup(of: Bool.self) { group in
-                        group.addTask {
-                            try await self.connect(server: server, apiKey: apiKey)
-                            return true
-                        }
-                        group.addTask {
-                            try await Task.sleep(for: .seconds(5))
-                            throw CancellationError()
-                        }
-                        let result = try await group.next() ?? false
-                        group.cancelAll()
-                        return result
-                    }
+                    try await connect(server: server, apiKey: apiKey)
                     // Connected successfully
                     isReconnecting = false
                     reconnectAttempt = 0

@@ -1,12 +1,20 @@
 import Foundation
 import UIKit
 
+/// Connection type indicating which URL the client resolved to.
+enum ConnectionType: String {
+    case local
+    case external
+}
+
 /// REST API client for the music-porter server.
 @MainActor @Observable
 final class APIClient {
     var server: ServerConnection?
     var apiKey: String?
     var isConnected = false
+    var activeBaseURL: URL?
+    var connectionType: ConnectionType?
 
     private var session: URLSession = {
         let config = URLSessionConfiguration.default
@@ -23,6 +31,12 @@ final class APIClient {
         KeychainService.save(apiKey: apiKey)
     }
 
+    /// Set the active URL and connection type after resolving dual-URL.
+    func setActiveURL(_ url: URL, type: ConnectionType) {
+        activeBaseURL = url
+        connectionType = type
+    }
+
     /// Validate the API key against the server.
     func validateConnection() async throws -> AuthValidateResponse {
         let response: AuthValidateResponse = try await post("/api/auth/validate", body: [:] as [String: String])
@@ -34,7 +48,21 @@ final class APIClient {
         server = nil
         apiKey = nil
         isConnected = false
+        activeBaseURL = nil
+        connectionType = nil
         KeychainService.delete()
+    }
+
+    // MARK: - URL Construction
+
+    /// Build a full API URL from a path using the active base URL.
+    func buildURL(path: String) -> URL? {
+        guard let baseURL = activeBaseURL else { return nil }
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        components.path = path.hasPrefix("/") ? path : "/" + path
+        return components.url
     }
 
     // MARK: - Status & Info
@@ -97,15 +125,20 @@ final class APIClient {
     }
 
     func fileDownloadURL(playlist: String, filename: String) -> URL? {
-        server?.apiURL(path: "api/files/\(playlist)/\(filename)")
+        buildURL(path: "/api/files/\(playlist)/\(filename)")
     }
 
     func artworkURL(playlist: String, filename: String) -> URL? {
-        server?.apiURL(path: "api/files/\(playlist)/\(filename)/artwork")
+        buildURL(path: "/api/files/\(playlist)/\(filename)/artwork")
     }
 
     func downloadAllURL(playlist: String) -> URL? {
-        server?.apiURL(path: "api/files/\(playlist)/download-all")
+        buildURL(path: "/api/files/\(playlist)/download-all")
+    }
+
+    /// URL for SSE task event streaming.
+    func streamURL(taskId: String) -> URL? {
+        buildURL(path: "/api/stream/\(taskId)")
     }
 
     /// Fetch cover art image with authentication.
@@ -306,8 +339,7 @@ final class APIClient {
     // MARK: - HTTP Helpers
 
     private func makeRequest(_ path: String, method: String) throws -> URLRequest {
-        guard let server else { throw APIError.notConfigured }
-        guard let url = server.apiURL(path: path) else { throw APIError.invalidResponse }
+        guard let url = buildURL(path: path) else { throw APIError.notConfigured }
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")

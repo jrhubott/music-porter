@@ -149,32 +149,22 @@ struct ServerDiscoveryView: View {
         scanError = nil
         let server = ServerConnection(
             host: payload.host, port: payload.port, name: payload.host,
-            url: payload.url)
+            externalURL: payload.url)
         Task {
             appState.cancelAutoReconnect()
-            // Try 1: connect using full QR payload (may use external URL)
+            // connect() handles dual-URL fallback (local first, then external)
             do {
                 try await appState.connect(server: server, apiKey: payload.key)
                 isConnectingFromScan = false
                 return
             } catch {}
 
-            // Try 2: if payload had a URL, retry with direct host:port only
-            if payload.url != nil {
-                let directServer = ServerConnection(
-                    host: payload.host, port: payload.port, name: payload.host)
-                do {
-                    try await appState.connect(server: directServer, apiKey: payload.key)
-                    isConnectingFromScan = false
-                    return
-                } catch {}
-            }
-
             // Fallback: open PairingView with pre-filled API key
             isConnectingFromScan = false
             scannedApiKey = payload.key
             selectedServer = ServerConnection(
-                host: payload.host, port: payload.port, name: payload.host)
+                host: payload.host, port: payload.port, name: payload.host,
+                externalURL: payload.url)
         }
     }
 }

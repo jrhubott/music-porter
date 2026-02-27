@@ -5,12 +5,17 @@ struct PairingView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
 
-    let server: ServerConnection
+    @State private var server: ServerConnection
     var initialApiKey: String?
     @State private var apiKey = ""
     @State private var isValidating = false
     @State private var error: String?
     @State private var showScanner = false
+
+    init(server: ServerConnection, initialApiKey: String? = nil) {
+        _server = State(initialValue: server)
+        self.initialApiKey = initialApiKey
+    }
 
     var body: some View {
         NavigationStack {
@@ -26,6 +31,11 @@ struct PairingView: View {
                             Text("\(server.host):\(server.port)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                            if let ext = server.externalURL {
+                                Text(ext)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
@@ -87,6 +97,9 @@ struct PairingView: View {
                     onScan: { payload in
                         showScanner = false
                         apiKey = payload.key
+                        if let url = payload.url {
+                            server.externalURL = url
+                        }
                         Task { await pair() }
                     },
                     onError: { errorMsg in
