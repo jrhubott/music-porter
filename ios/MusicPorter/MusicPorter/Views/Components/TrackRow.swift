@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// In-memory artwork cache shared across all TrackRow instances.
-private final class ArtworkCache {
+/// In-memory artwork cache shared across TrackRow and AudioPlayerService.
+final class ArtworkCache {
     static let shared = ArtworkCache()
     private var cache: [String: UIImage] = [:]
     private let lock = NSLock()

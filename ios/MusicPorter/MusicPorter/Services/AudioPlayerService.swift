@@ -1,6 +1,7 @@
 import AVFoundation
 import MediaPlayer
 import MusicKit
+import UIKit
 
 /// Dual-engine audio player for server MP3s (AVPlayer) and Apple Music tracks (ApplicationMusicPlayer).
 @MainActor @Observable
@@ -21,7 +22,7 @@ final class AudioPlayerService {
         let source: PlaybackSource
 
         static func == (lhs: NowPlayingInfo, rhs: NowPlayingInfo) -> Bool {
-            lhs.title == rhs.title && lhs.artist == rhs.artist && lhs.duration == rhs.duration
+            lhs.title == rhs.title && lhs.artist == rhs.artist && lhs.duration == rhs.duration && lhs.artworkURL == rhs.artworkURL
         }
     }
 
@@ -32,6 +33,7 @@ final class AudioPlayerService {
     var playbackProgress: Double = 0 // 0...1
     var currentTime: TimeInterval = 0
     var duration: TimeInterval = 0
+    var artworkImage: UIImage?
 
     var hasCurrentTrack: Bool { nowPlaying != nil }
 
@@ -110,8 +112,22 @@ final class AudioPlayerService {
             duration: track.duration ?? 0,
             source: .serverTrack
         )
+        artworkImage = nil
         currentServerTrackID = track.filename
         currentAppleMusicTrackID = nil
+
+        // Fetch artwork via authenticated API (AsyncImage can't send Bearer tokens)
+        let artworkPlaylist = playlist
+        let artworkFilename = track.filename
+        Task {
+            let cacheKey = "\(artworkPlaylist)/\(artworkFilename)"
+            if let cached = ArtworkCache.shared.get(cacheKey) {
+                self.artworkImage = cached
+            } else if let image = await apiClient.fetchArtwork(playlist: artworkPlaylist, filename: artworkFilename) {
+                ArtworkCache.shared.set(cacheKey, image: image)
+                self.artworkImage = image
+            }
+        }
         duration = track.duration ?? 0
 
         setupAVPlayerObservers(player: player)
@@ -139,6 +155,7 @@ final class AudioPlayerService {
             duration: track.duration ?? 0,
             source: .appleMusic
         )
+        artworkImage = nil
         currentAppleMusicTrackID = track.id
         currentServerTrackID = nil
         duration = track.duration ?? 0
@@ -260,6 +277,7 @@ final class AudioPlayerService {
     func stop() {
         stopInternal()
         nowPlaying = nil
+        artworkImage = nil
         isPlaying = false
         playbackProgress = 0
         currentTime = 0
