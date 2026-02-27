@@ -51,6 +51,8 @@
 		A1000002D /* SyncStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002D /* SyncStatusView.swift */; };
 		A1000002E /* EQConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002E /* EQConfig.swift */; };
 		A1000002F /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002F /* LibraryView.swift */; };
+		A10000030 /* BackgroundDownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000032 /* BackgroundDownloadManager.swift */; };
+		A10000031 /* DownloadStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000033 /* DownloadStateStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -100,6 +102,8 @@
 		A2000002F /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		A20000030 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A20000031 /* MusicPorter.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MusicPorter.entitlements; sourceTree = "<group>"; };
+		A20000032 /* BackgroundDownloadManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundDownloadManager.swift; sourceTree = "<group>"; };
+		A20000033 /* DownloadStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadStateStore.swift; sourceTree = "<group>"; };
 		A30000001 /* MusicPorter.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MusicPorter.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -166,6 +170,8 @@
 				A2000001F /* FileDownloadManager.swift */,
 				A20000020 /* USBExportService.swift */,
 				A20000029 /* AudioPlayerService.swift */,
+				A20000032 /* BackgroundDownloadManager.swift */,
+				A20000033 /* DownloadStateStore.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -343,6 +349,8 @@
 				A1000002D /* SyncStatusView.swift in Sources */,
 				A1000002E /* EQConfig.swift in Sources */,
 				A1000002F /* LibraryView.swift in Sources */,
+				A10000030 /* BackgroundDownloadManager.swift in Sources */,
+				A10000031 /* DownloadStateStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
