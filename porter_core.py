@@ -4743,10 +4743,16 @@ class ConversionStatistics:
 
 
 class Converter:
-    """Manages M4A to MP3 conversion with tag preservation."""
+    """Converts M4A files to clean library MP3s.
 
-    def __init__(self, logger=None, quality_preset='lossless', workers=None, embed_cover_art=True,
-                 output_profile=None, display_handler=None, cancel_event=None,
+    Library MP3s contain only a TXXX:TrackUUID identifier tag.
+    All human-readable metadata (title, artist, album) is stored in TrackDB.
+    Cover art is extracted to disk files.
+    Profile-specific tags are applied later by TagApplicator during sync/download.
+    """
+
+    def __init__(self, logger=None, quality_preset='lossless', workers=None,
+                 track_db=None, display_handler=None, cancel_event=None,
                  audit_logger=None, audit_source='cli', eq_config=None):
         self.logger = logger or Logger()
         self.display_handler = display_handler or NullDisplayHandler()
@@ -4757,8 +4763,7 @@ class Converter:
         self.quality_preset = quality_preset
         self.quality_settings = self._get_quality_settings(quality_preset)
         self.workers = workers if workers is not None else DEFAULT_WORKERS
-        self.embed_cover_art = embed_cover_art
-        self.output_profile = output_profile or OUTPUT_PROFILES[DEFAULT_OUTPUT_TYPE]
+        self.track_db = track_db
         self.eq_config = eq_config or EQConfig()
 
     def _get_quality_settings(self, preset):
@@ -4784,30 +4789,45 @@ class Converter:
         return sanitize_filename(name)
 
     def _build_output_filename(self, artist: str, title: str) -> str:
-        """Build output filename based on the active output profile."""
-        if self.output_profile.filename_format == "title-only":
-            return f"{title}.mp3"
-        # Default: artist_title
+        """Build library output filename: 'Artist - Title.mp3'."""
         return f"{artist} - {title}.mp3"
 
-    def _build_output_path(self, base_path: Path, filename: str, artist: str | None = None, album: str | None = None) -> Path:
-        """Build output file path based on the active output profile."""
-        structure = self.output_profile.directory_structure
-        if structure == "nested-artist":
-            safe_artist = artist or "Unknown Artist"
-            return base_path / safe_artist / filename
-        elif structure == "nested-artist-album":
-            safe_artist = artist or "Unknown Artist"
-            safe_album = album or "Unknown Album"
-            return base_path / safe_artist / safe_album / filename
-        # Default: flat
+    def _build_output_path(self, base_path: Path, filename: str) -> Path:
+        """Build library output path — always flat: base_path/filename."""
         return base_path / filename
 
-    def _convert_single_file(self, input_file, input_path, output_path, force, dry_run, verbose, progress_bar=None):
-        """Convert a single M4A file to MP3. Thread-safe for parallel execution."""
+    @staticmethod
+    def _extract_cover_art_to_disk(m4a_file, artwork_dir, track_uuid):
+        """Extract cover art from M4A source and save to disk.
+
+        Returns (relative_path, sha256_hash) or (None, None) if no art found.
+        The relative_path is relative to the playlist library directory.
+        """
         import hashlib
 
-        from mutagen.id3 import APIC, ID3, TALB, TIT2, TPE1, TXXX, ID3NoHeaderError
+        cover_data, cover_mime = read_m4a_cover_art(m4a_file)
+        if not cover_data:
+            return None, None
+
+        ext = 'png' if cover_mime == APIC_MIME_PNG else 'jpg'
+        artwork_dir = Path(artwork_dir)
+        artwork_dir.mkdir(parents=True, exist_ok=True)
+
+        art_filename = f"{track_uuid}.{ext}"
+        art_path = artwork_dir / art_filename
+        art_path.write_bytes(cover_data)
+
+        art_hash = hashlib.sha256(cover_data).hexdigest()[:16]
+        return f"artwork/{art_filename}", art_hash
+
+    def _convert_single_file(self, input_file, input_path, output_path,
+                             playlist_key, force, dry_run, verbose,
+                             progress_bar=None):
+        """Convert a single M4A file to a clean library MP3. Thread-safe."""
+        import uuid as _uuid
+
+        from mutagen.id3 import ID3, TXXX, ID3NoHeaderError
+        from mutagen.mp3 import MP3
 
         display_name = input_file.relative_to(input_path)
         count = self.stats.next_progress()
@@ -4816,20 +4836,17 @@ class Converter:
             # Read M4A tags
             title, artist, album = read_m4a_tags(input_file)
 
-            # Create output filename based on active output profile
+            # Build output filename — always "Artist - Title.mp3" (flat)
             safe_title = self._sanitize_filename(title)
             safe_artist = self._sanitize_filename(artist)
-            safe_album = self._sanitize_filename(album)
             output_filename = self._build_output_filename(safe_artist, safe_title)
-            output_file = self._build_output_path(output_path, output_filename, safe_artist, safe_album)
+            output_file = self._build_output_path(output_path, output_filename)
             already_exists = output_file.exists()
 
             if already_exists and not force:
                 self.stats.increment('skipped')
-                collision_hint = ""
-                if self.output_profile.filename_format != "full":
-                    collision_hint = " (possible filename collision — try 'full' format)"
-                msg = f"[{count}/{self.stats.total_found}] Skipping (already exists): {output_filename}{collision_hint}"
+                msg = (f"[{count}/{self.stats.total_found}] "
+                       f"Skipping (already exists): {output_filename}")
                 if progress_bar and not verbose:
                     self.logger.file_info(msg)
                 else:
@@ -4840,20 +4857,25 @@ class Converter:
 
             if verbose:
                 self.logger.debug(f"Source file:  '{input_file}'")
-                self.logger.debug(f"File size:    {input_file.stat().st_size / 1024:.1f} KB")
+                self.logger.debug(
+                    f"File size:    {input_file.stat().st_size / 1024:.1f} KB")
                 if already_exists and force:
-                    self.logger.debug(f"Force flag set — overwriting: '{output_filename}'")
-                # Display quality settings
+                    self.logger.debug(
+                        f"Force flag set — overwriting: '{output_filename}'")
                 quality_desc = f"{self.quality_settings['mode'].upper()}"
                 if self.quality_settings['mode'] == 'vbr':
                     quality_desc += f" quality {self.quality_settings['value']}"
                 else:
-                    quality_desc += f" {self.quality_settings['value']}kbps"
-                self.logger.debug(f"Quality:      {quality_desc} (preset: {self.quality_preset})")
+                    quality_desc += (
+                        f" {self.quality_settings['value']}kbps")
+                self.logger.debug(
+                    f"Quality:      {quality_desc} "
+                    f"(preset: {self.quality_preset})")
                 if self.eq_config.any_enabled:
                     effects = ', '.join(self.eq_config.enabled_effects)
                     self.logger.debug(f"EQ effects:   {effects}")
-                    self.logger.debug(f"Filter chain: {self.eq_config.build_filter_chain()}")
+                    self.logger.debug(
+                        f"Filter chain: {self.eq_config.build_filter_chain()}")
                 self.logger.debug("Source tags:")
                 self.logger.debug(f"  → Title:  '{title}'")
                 self.logger.debug(f"  → Artist: '{artist}'")
@@ -4861,46 +4883,41 @@ class Converter:
 
             if dry_run:
                 if already_exists and force:
-                    self.logger.dry_run(f"Would overwrite: '{output_filename}'")
+                    self.logger.dry_run(
+                        f"Would overwrite: '{output_filename}'")
                 else:
-                    self.logger.dry_run(f"Would convert:   '{display_name}'")
-                output_display = str(output_file.relative_to(output_path)) if self.output_profile.directory_structure != "flat" else output_filename
-                self.logger.dry_run(f"  → Output:     '{output_display}'")
+                    self.logger.dry_run(
+                        f"Would convert:   '{display_name}'")
+                self.logger.dry_run(f"  → Output:     '{output_filename}'")
                 self.logger.dry_run(f"  → Title:      '{title}'")
                 self.logger.dry_run(f"  → Artist:     '{artist}'")
                 self.logger.dry_run(f"  → Album:      '{album}'")
-                artwork_size = self.output_profile.artwork_size
-                if self.embed_cover_art and artwork_size != -1:
-                    cover_data, cover_mime = read_m4a_cover_art(input_file)
-                    if cover_data:
-                        art_desc = f"{len(cover_data) / 1024:.1f} KB ({cover_mime})"
-                        if artwork_size > 0:
-                            art_desc += f", resize to {artwork_size}px"
-                        self.logger.dry_run(f"  → Cover art:  {art_desc}")
-                    else:
-                        self.logger.dry_run("  → Cover art:  (none found in source)")
+                cover_data, _ = read_m4a_cover_art(input_file)
+                if cover_data:
+                    self.logger.dry_run(
+                        f"  → Cover art:  "
+                        f"{len(cover_data) / 1024:.1f} KB (extract to disk)")
                 else:
-                    reason = "stripped by profile" if artwork_size == -1 else "disabled"
-                    self.logger.dry_run(f"  → Cover art:  ({reason})")
+                    self.logger.dry_run(
+                        "  → Cover art:  (none found in source)")
                 if self.eq_config.any_enabled:
                     effects = ', '.join(self.eq_config.enabled_effects)
                     self.logger.dry_run(f"  → EQ effects: {effects}")
                 return
 
-            # Ensure parent directories exist (needed for nested structures)
+            # Ensure output directory exists
             output_file.parent.mkdir(parents=True, exist_ok=True)
 
-            # Run ffmpeg conversion
+            # FFmpeg conversion M4A → MP3
             import ffmpeg as _ffmpeg
             try:
-                # Build FFmpeg parameters based on quality mode
                 ffmpeg_params = {'acodec': 'libmp3lame'}
                 if self.quality_settings['mode'] == 'vbr':
                     ffmpeg_params['q:a'] = self.quality_settings['value']
-                else:  # cbr for lossless
-                    ffmpeg_params['b:a'] = self.quality_settings['value'] + 'k'
+                else:
+                    ffmpeg_params['b:a'] = (
+                        self.quality_settings['value'] + 'k')
 
-                # Apply EQ filter chain if configured
                 filter_chain = self.eq_config.build_filter_chain()
                 if filter_chain:
                     ffmpeg_params['af'] = filter_chain
@@ -4912,69 +4929,71 @@ class Converter:
                     .run(overwrite_output=True, quiet=True)
                 )
             except _ffmpeg.Error as e:
-                # Re-raise as generic exception to be caught by outer try/except
-                error_msg = e.stderr.decode('utf-8') if e.stderr else str(e)
-                raise Exception(f"FFmpeg conversion failed: {error_msg}") from e
+                error_msg = (e.stderr.decode('utf-8')
+                             if e.stderr else str(e))
+                raise Exception(
+                    f"FFmpeg conversion failed: {error_msg}") from e
 
-            # Write basic ID3 tags from source M4A (no modifications)
+            # Generate track UUID
+            track_uuid = _uuid.uuid4().hex
+
+            # Write ONLY the TrackUUID identifier tag (no TIT2/TPE1/TALB/APIC)
             try:
                 tags = ID3(str(output_file))
             except ID3NoHeaderError:
                 tags = ID3()
 
-            tags["TIT2"] = TIT2(encoding=3, text=title)
-            tags["TPE1"] = TPE1(encoding=3, text=artist)
-            tags["TALB"] = TALB(encoding=3, text=album)
+            # Remove any tags ffmpeg may have copied from the M4A
+            tags.delete(str(output_file))
+            tags = ID3()
+            tags.add(TXXX(encoding=3, desc=TXXX_TRACK_UUID,
+                          text=[track_uuid]))
+            tags.save(str(output_file), v2_version=4, v1=0)
 
-            # Embed cover art from source M4A
-            artwork_size = self.output_profile.artwork_size
-            if self.embed_cover_art and artwork_size != -1:
-                cover_data, cover_mime = read_m4a_cover_art(input_file)
-                if cover_data:
-                    # Hash is always computed from original (pre-resize) data
-                    if not _txxx_exists(tags, TXXX_ORIGINAL_COVER_ART_HASH):
-                        art_hash = hashlib.sha256(cover_data).hexdigest()[:16]
-                        tags.add(TXXX(encoding=3,
-                                      desc=TXXX_ORIGINAL_COVER_ART_HASH,
-                                      text=[art_hash]))
-                    # Resize if profile specifies a max dimension
-                    embed_data, embed_mime = cover_data, cover_mime
-                    if artwork_size > 0:
-                        embed_data, embed_mime = resize_cover_art_bytes(cover_data, artwork_size, cover_mime)
-                    tags.add(APIC(
-                        encoding=3,
-                        mime=embed_mime,
-                        type=APIC_TYPE_FRONT_COVER,
-                        desc='Cover',
-                        data=embed_data,
-                    ))
-                    if verbose:
-                        size_desc = f"{len(embed_data) / 1024:.1f} KB ({embed_mime})"
-                        if artwork_size > 0 and len(embed_data) != len(cover_data):
-                            size_desc += f" (resized to {artwork_size}px)"
-                        self.logger.debug(f"  → Cover art: {size_desc}")
-                else:
-                    if verbose:
-                        self.logger.debug("  → Cover art: (none found in source)")
+            # Extract cover art to disk
+            artwork_dir = output_path / "artwork"
+            cover_art_path, cover_art_hash = self._extract_cover_art_to_disk(
+                input_file, artwork_dir, track_uuid)
 
-            # Save using profile-driven ID3 version and v1 settings
-            tags.save(str(output_file),
-                      v2_version=self.output_profile.id3_version,
-                      v1=0 if self.output_profile.strip_id3v1 else 1)
+            if verbose and cover_art_path:
+                art_file = artwork_dir / f"{track_uuid}.*"
+                self.logger.debug(f"  → Cover art: extracted to {cover_art_path}")
+
+            # Get MP3 duration and file size
+            mp3_info = MP3(str(output_file))
+            duration_s = mp3_info.info.length if mp3_info.info else None
+            file_size_bytes = output_file.stat().st_size
+
+            # Insert metadata into TrackDB
+            if self.track_db:
+                self.track_db.insert_track(
+                    uuid=track_uuid,
+                    playlist=playlist_key,
+                    file_path=str(output_file.relative_to(
+                        Path(get_library_dir()))),
+                    title=title,
+                    artist=artist,
+                    album=album,
+                    cover_art_path=cover_art_path,
+                    cover_art_hash=cover_art_hash,
+                    duration_s=duration_s,
+                    file_size_bytes=file_size_bytes,
+                    source_m4a_path=str(input_file),
+                )
 
             if verbose:
-                self.logger.debug("Tags AFTER conversion (copied from source):")
-                self.logger.debug(f"  → Title:  '{title}'")
-                self.logger.debug(f"  → Artist: '{artist}'")
-                self.logger.debug(f"  → Album:  '{album}'")
-                self.logger.debug(f"Output size: {output_file.stat().st_size / 1024:.1f} KB")
+                self.logger.debug(f"  → UUID:     {track_uuid}")
+                self.logger.debug(
+                    f"Output size: {file_size_bytes / 1024:.1f} KB")
 
             if already_exists and force:
                 self.stats.increment('overwritten')
-                msg = f"[{count}/{self.stats.total_found}] Overwritten: {output_filename}"
+                msg = (f"[{count}/{self.stats.total_found}] "
+                       f"Overwritten: {output_filename}")
             else:
                 self.stats.increment('converted')
-                msg = f"[{count}/{self.stats.total_found}] Converted: {output_filename}"
+                msg = (f"[{count}/{self.stats.total_found}] "
+                       f"Converted: {output_filename}")
             if progress_bar and not verbose:
                 self.logger.file_info(msg)
             else:
@@ -4988,21 +5007,32 @@ class Converter:
             if progress_bar:
                 progress_bar.update(1)
 
-    def convert(self, input_dir, output_dir, force=False, dry_run=False, verbose=False):
-        """
-        Recursively scan input_dir for .m4a files, convert them to MP3
-        using ffmpeg, and save all output files flat into output_dir.
-        Tags are written immediately after each conversion.
+    def convert(self, input_dir, output_dir, playlist_key=None,
+                force=False, dry_run=False, verbose=False):
+        """Convert M4A files to clean library MP3s.
+
+        Recursively scans input_dir for .m4a files, converts to MP3 with
+        ffmpeg, and saves flat into output_dir.  Each MP3 gets only a
+        TXXX:TrackUUID tag; metadata is stored in TrackDB.
+
+        Args:
+            playlist_key: Playlist identifier for TrackDB records.
+                         Defaults to output directory name.
         """
         start_time = time.time()
 
         input_path = Path(input_dir)
         output_path = Path(output_dir)
 
+        if playlist_key is None:
+            playlist_key = output_path.name
+
         if input_path.resolve() == output_path.resolve():
-            self.logger.error("Input and output directories cannot be the same")
+            self.logger.error(
+                "Input and output directories cannot be the same")
             return ConversionResult(
-                success=False, input_dir=str(input_dir), output_dir=str(output_dir),
+                success=False, input_dir=str(input_dir),
+                output_dir=str(output_dir),
                 duration=0, quality_preset=self.quality_preset,
                 quality_mode=self.quality_settings['mode'],
                 quality_value=self.quality_settings['value'],
@@ -5018,7 +5048,8 @@ class Converter:
         if not m4a_files:
             self.logger.info(f"No .m4a files found in '{input_dir}'")
             return ConversionResult(
-                success=True, input_dir=str(input_dir), output_dir=str(output_dir),
+                success=True, input_dir=str(input_dir),
+                output_dir=str(output_dir),
                 duration=0, quality_preset=self.quality_preset,
                 quality_mode=self.quality_settings['mode'],
                 quality_value=self.quality_settings['value'],
@@ -5026,11 +5057,13 @@ class Converter:
                 overwritten=0, skipped=0, errors=0)
 
         self.stats.total_found = len(m4a_files)
-        self.logger.info(f"Found {self.stats.total_found} .m4a file(s) (recursive)")
-        self.logger.info(f"Output directory: '{output_dir}' ({display_name(self.output_profile.directory_structure)})")
+        self.logger.info(
+            f"Found {self.stats.total_found} .m4a file(s) (recursive)")
+        self.logger.info(f"Output directory: '{output_dir}' (flat)")
 
         if force:
-            self.logger.info("Force mode enabled — existing files will be overwritten")
+            self.logger.info(
+                "Force mode enabled — existing files will be overwritten")
 
         if self.eq_config.any_enabled:
             effects = ', '.join(self.eq_config.enabled_effects)
@@ -5039,18 +5072,20 @@ class Converter:
         if not dry_run:
             output_path.mkdir(parents=True, exist_ok=True)
 
-        # Determine effective worker count
         effective_workers = min(self.workers, self.stats.total_found)
 
         progress = _DisplayProgress(
-            self.display_handler, total=self.stats.total_found, desc="Converting",
+            self.display_handler, total=self.stats.total_found,
+            desc="Converting",
         )
 
         try:
             if effective_workers > 1:
-                self.logger.info(f"Using {effective_workers} parallel workers")
+                self.logger.info(
+                    f"Using {effective_workers} parallel workers")
 
-                with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+                with ThreadPoolExecutor(
+                        max_workers=effective_workers) as executor:
                     futures = {}
                     for input_file in m4a_files:
                         if _is_cancelled(self.cancel_event):
@@ -5058,49 +5093,62 @@ class Converter:
                         futures[executor.submit(
                             self._convert_single_file,
                             input_file, input_path, output_path,
-                            force, dry_run, verbose, progress
+                            playlist_key, force, dry_run, verbose,
+                            progress
                         )] = input_file
 
                     for future in as_completed(futures):
                         if _is_cancelled(self.cancel_event):
                             for f in futures:
                                 f.cancel()
-                            self.logger.warn("Conversion cancelled by user")
+                            self.logger.warn(
+                                "Conversion cancelled by user")
                             break
-                        # Exceptions are already handled inside _convert_single_file,
-                        # but catch any unexpected errors from the future itself
                         try:
                             future.result()
                         except Exception as e:
                             input_file = futures[future]
-                            self.logger.error(f"Unexpected error processing '{input_file.name}': {e}")
+                            self.logger.error(
+                                f"Unexpected error processing "
+                                f"'{input_file.name}': {e}")
                             self.stats.increment('errors')
             else:
                 for input_file in m4a_files:
                     if _is_cancelled(self.cancel_event):
-                        self.logger.warn("Conversion cancelled by user")
+                        self.logger.warn(
+                            "Conversion cancelled by user")
                         break
                     self._convert_single_file(
                         input_file, input_path, output_path,
-                        force, dry_run, verbose, progress
+                        playlist_key, force, dry_run, verbose,
+                        progress
                     )
         finally:
             progress.close()
 
         duration = time.time() - start_time
 
-        mp3_count = len([f for f in output_path.rglob("*.mp3") if not f.name.startswith('._')])
+        mp3_count = len([
+            f for f in output_path.rglob("*.mp3")
+            if not f.name.startswith('._')
+        ])
         self.stats.mp3_total = mp3_count
 
         if self.audit_logger:
             self.audit_logger.log(
                 'convert', f"Convert: {input_dir}",
                 'completed' if self.stats.errors == 0 else 'failed',
-                params={'input_dir': str(input_dir), 'output_dir': str(output_dir),
-                        'preset': self.quality_preset, 'converted': self.stats.converted,
-                        'errors': self.stats.errors,
-                        'eq_effects': self.eq_config.enabled_effects},
+                params={
+                    'input_dir': str(input_dir),
+                    'output_dir': str(output_dir),
+                    'playlist_key': playlist_key,
+                    'preset': self.quality_preset,
+                    'converted': self.stats.converted,
+                    'errors': self.stats.errors,
+                    'eq_effects': self.eq_config.enabled_effects,
+                },
                 duration_s=duration, source=self._audit_source)
+
         return ConversionResult(
             success=self.stats.errors == 0,
             input_dir=str(input_dir),
