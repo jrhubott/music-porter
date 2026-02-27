@@ -51,25 +51,23 @@ struct TrackRow: View {
                     .font(.body)
                     .lineLimit(1)
                     .foregroundStyle(isNowPlaying ? Color.accentColor : .primary)
-                if let artist = track.artist {
-                    Text(artist)
-                        .font(.caption)
+                HStack(spacing: 4) {
+                    if let artist = track.artist {
+                        Text(artist)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Image(systemName: isLocal ? "iphone" : "cloud")
+                        .font(.caption2)
+                        .foregroundStyle(isLocal ? .green : .secondary)
+                    Text(ByteCountFormatter.string(fromByteCount: Int64(track.size), countStyle: .file))
+                        .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .frame(minWidth: 54, alignment: .trailing)
                 }
             }
-
-            Spacer()
-
-            // Local/server indicator
-            Image(systemName: isLocal ? "iphone" : "cloud")
-                .font(.caption2)
-                .foregroundStyle(isLocal ? .green : .secondary)
-
-            // File size
-            Text(ByteCountFormatter.string(fromByteCount: Int64(track.size), countStyle: .file))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
         }
         .task(id: cacheKey) {
             guard track.hasCoverArt == true else { return }
