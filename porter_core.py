@@ -47,7 +47,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.32.0-dev+48e66e4"
+VERSION = "2.32.0-dev+ac92dfe"
 
 DEFAULT_DATA_DIR = "data"
 DEFAULT_MUSIC_DIR = "music"
