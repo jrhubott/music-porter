@@ -1,3 +1,8 @@
+Version 2.33.0 (2026-02-26):
+• Add iOS version bump check to merge-to-main workflow — automatically detects ios/ file changes and prompts for iOS version bump
+• Bump iOS app version to 1.2.0 (retroactive for v2.32.0 iOS changes)
+• Mark all EQ preset SRS requirements as tested (entry 19)
+
 Version 2.32.0 (2026-02-26):
 • Equalizer presets — four audio effects (loudnorm, bass boost, treble boost, compressor) configurable per output profile and playlist
 • iOS app refactor — simplified to 3 tabs (Library, Process, Settings) with guided flow for Browse → Add → Process → Export
