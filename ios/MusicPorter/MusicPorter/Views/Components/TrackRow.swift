@@ -22,7 +22,6 @@ struct TrackRow: View {
     let api: APIClient
     var isNowPlaying: Bool = false
     var isLocal: Bool = false
-    var syncedTo: [String] = []
 
     @State private var artwork: UIImage?
 
@@ -66,14 +65,6 @@ struct TrackRow: View {
             Image(systemName: isLocal ? "iphone" : "cloud")
                 .font(.caption2)
                 .foregroundStyle(isLocal ? .green : .secondary)
-
-            // USB sync indicator
-            if !syncedTo.isEmpty {
-                Image(systemName: "externaldrive.fill")
-                    .font(.caption2)
-                    .foregroundStyle(.green)
-                    .help("Synced to: \(syncedTo.joined(separator: ", "))")
-            }
 
             // File size
             Text(ByteCountFormatter.string(fromByteCount: Int64(track.size), countStyle: .file))
