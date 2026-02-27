@@ -11,15 +11,12 @@
 		A10000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000002 /* ContentView.swift */; };
 		A10000003 /* ServerDiscoveryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000003 /* ServerDiscoveryView.swift */; };
 		A10000004 /* PairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000004 /* PairingView.swift */; };
-		A1000002B /* QRScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002B /* QRScannerView.swift */; };
 		A10000005 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000005 /* DashboardView.swift */; };
 		A10000006 /* PlaylistsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000006 /* PlaylistsView.swift */; };
 		A10000007 /* PlaylistDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000007 /* PlaylistDetailView.swift */; };
 		A10000008 /* PipelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000008 /* PipelineView.swift */; };
-		A10000027 /* AppleMusicView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000027 /* AppleMusicView.swift */; };
 		A1000000A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000A /* SettingsView.swift */; };
 		A1000000B /* OperationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000B /* OperationsView.swift */; };
-		A10000026 /* DocumentExportPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000026 /* DocumentExportPicker.swift */; };
 		A1000000E /* ProgressPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000E /* ProgressPanel.swift */; };
 		A1000000F /* StatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000F /* StatusBadge.swift */; };
 		A10000010 /* TrackRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010 /* TrackRow.swift */; };
@@ -44,12 +41,16 @@
 		A10000023 /* PlaylistsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000023 /* PlaylistsViewModel.swift */; };
 		A10000024 /* PlaylistDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000024 /* PlaylistDetailViewModel.swift */; };
 		A10000025 /* OperationViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000025 /* OperationViewModel.swift */; };
+		A10000026 /* DocumentExportPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000026 /* DocumentExportPicker.swift */; };
+		A10000027 /* AppleMusicView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000027 /* AppleMusicView.swift */; };
 		A10000028 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000028 /* Assets.xcassets */; };
 		A10000029 /* AudioPlayerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000029 /* AudioPlayerService.swift */; };
 		A1000002A /* MiniPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002A /* MiniPlayerView.swift */; };
+		A1000002B /* QRScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002B /* QRScannerView.swift */; };
 		A1000002C /* USBSyncStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002C /* USBSyncStatus.swift */; };
 		A1000002D /* SyncStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002D /* SyncStatusView.swift */; };
 		A1000002E /* EQConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002E /* EQConfig.swift */; };
+		A1000002F /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002F /* LibraryView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -57,15 +58,12 @@
 		A20000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A20000003 /* ServerDiscoveryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDiscoveryView.swift; sourceTree = "<group>"; };
 		A20000004 /* PairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingView.swift; sourceTree = "<group>"; };
-		A2000002B /* QRScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerView.swift; sourceTree = "<group>"; };
 		A20000005 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		A20000006 /* PlaylistsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistsView.swift; sourceTree = "<group>"; };
 		A20000007 /* PlaylistDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistDetailView.swift; sourceTree = "<group>"; };
 		A20000008 /* PipelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipelineView.swift; sourceTree = "<group>"; };
-		A20000027 /* AppleMusicView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicView.swift; sourceTree = "<group>"; };
 		A2000000A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A2000000B /* OperationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationsView.swift; sourceTree = "<group>"; };
-		A20000026 /* DocumentExportPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentExportPicker.swift; sourceTree = "<group>"; };
 		A2000000E /* ProgressPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressPanel.swift; sourceTree = "<group>"; };
 		A2000000F /* StatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBadge.swift; sourceTree = "<group>"; };
 		A20000010 /* TrackRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackRow.swift; sourceTree = "<group>"; };
@@ -90,14 +88,18 @@
 		A20000023 /* PlaylistsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistsViewModel.swift; sourceTree = "<group>"; };
 		A20000024 /* PlaylistDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistDetailViewModel.swift; sourceTree = "<group>"; };
 		A20000025 /* OperationViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationViewModel.swift; sourceTree = "<group>"; };
-		A20000030 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		A20000031 /* MusicPorter.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MusicPorter.entitlements; sourceTree = "<group>"; };
+		A20000026 /* DocumentExportPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentExportPicker.swift; sourceTree = "<group>"; };
+		A20000027 /* AppleMusicView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicView.swift; sourceTree = "<group>"; };
 		A20000028 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A20000029 /* AudioPlayerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlayerService.swift; sourceTree = "<group>"; };
 		A2000002A /* MiniPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniPlayerView.swift; sourceTree = "<group>"; };
+		A2000002B /* QRScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerView.swift; sourceTree = "<group>"; };
 		A2000002C /* USBSyncStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = USBSyncStatus.swift; sourceTree = "<group>"; };
 		A2000002D /* SyncStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncStatusView.swift; sourceTree = "<group>"; };
 		A2000002E /* EQConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EQConfig.swift; sourceTree = "<group>"; };
+		A2000002F /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
+		A20000030 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A20000031 /* MusicPorter.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MusicPorter.entitlements; sourceTree = "<group>"; };
 		A30000001 /* MusicPorter.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MusicPorter.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -110,17 +112,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
-
-/* Begin PBXResourcesBuildPhase section */
-		A40000002 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				A10000028 /* Assets.xcassets in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXGroup section */
 		A50000001 = {
@@ -206,6 +197,7 @@
 				A2000000A /* SettingsView.swift */,
 				A2000000B /* OperationsView.swift */,
 				A2000002D /* SyncStatusView.swift */,
+				A2000002F /* LibraryView.swift */,
 				A50000007 /* Components */,
 			);
 			path = Views;
@@ -267,7 +259,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1500;
-				LastUpgradeCheck = 1500;
+				LastUpgradeCheck = 2620;
 				TargetAttributes = {
 					A60000001 = {
 						CreatedOnToolsVersion = 15.0;
@@ -291,6 +283,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A40000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000028 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		A70000001 /* Sources */ = {
@@ -339,6 +342,7 @@
 				A1000002C /* USBSyncStatus.swift in Sources */,
 				A1000002D /* SyncStatusView.swift in Sources */,
 				A1000002E /* EQConfig.swift in Sources */,
+				A1000002F /* LibraryView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -353,22 +357,48 @@
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 87NLB3L2H3;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_OPTIMIZATION_LEVEL = 0;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"DEBUG=1",
 					"$(inherited)",
 				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
 				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -382,14 +412,40 @@
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 87NLB3L2H3;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
 				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				VALIDATE_PRODUCT = YES;
@@ -404,7 +460,6 @@
 				CODE_SIGN_ENTITLEMENTS = MusicPorter/MusicPorter.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 87NLB3L2H3;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MusicPorter/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -433,7 +488,6 @@
 				CODE_SIGN_ENTITLEMENTS = MusicPorter/MusicPorter.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 87NLB3L2H3;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MusicPorter/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
