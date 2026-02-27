@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, statSync, createWriteStream, renameSync, unlinkS
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
-import { DEFAULT_CONCURRENCY, TEMP_SUFFIX } from './constants.js';
+import { CLIENT_SYNC_KEY_PREFIX, DEFAULT_CONCURRENCY, TEMP_SUFFIX, USB_SYNC_KEY_PREFIX } from './constants.js';
 import type { APIClient } from './api-client.js';
 import type { FileInfo, SyncManifest, SyncResult } from './types.js';
 import type { LogCallback, ProgressCallback } from './progress.js';
@@ -19,6 +19,8 @@ export interface SyncOptions {
   playlists?: string[];
   /** Override the sync key. */
   syncKey?: string;
+  /** USB drive name — when set, uses usb- prefix for sync key. */
+  usbDriveName?: string;
   /** Number of parallel downloads. */
   concurrency?: number;
   /** AbortSignal for cancellation. */
@@ -66,7 +68,7 @@ export class SyncEngine {
     const manifest = readManifest(destDir);
 
     // Phase 2: Resolve sync key
-    const syncKey = this.resolveSyncKey(options.syncKey, manifest, destDir);
+    const syncKey = this.resolveSyncKey(options.syncKey, manifest, destDir, options.usbDriveName);
     log('info', `Sync key: ${syncKey}`);
 
     // Phase 3: Determine which playlists to sync
@@ -351,16 +353,20 @@ export class SyncEngine {
     }
   }
 
-  /** Resolve the sync key from explicit, manifest, or generated. */
+  /** Resolve the sync key from explicit, USB drive name, manifest, or generated. */
   private resolveSyncKey(
     explicit: string | undefined,
     manifest: SyncManifest | null,
     destDir: string,
+    usbDriveName?: string,
   ): string {
     if (explicit) return explicit;
+    // USB drive name takes priority over manifest — the manifest may
+    // contain a stale key from before USB-aware sync was implemented.
+    if (usbDriveName) return `${USB_SYNC_KEY_PREFIX}${usbDriveName}`;
     if (manifest?.sync_key) return manifest.sync_key;
     // Generate from directory name
     const dirName = destDir.split('/').pop() ?? destDir.split('\\').pop() ?? 'sync';
-    return `client-${dirName}`;
+    return `${CLIENT_SYNC_KEY_PREFIX}${dirName}`;
   }
 }

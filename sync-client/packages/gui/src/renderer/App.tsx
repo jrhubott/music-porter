@@ -2,20 +2,18 @@ import { useEffect } from 'react';
 import { useAppState } from './store/app-state.js';
 import { useIPC } from './hooks/useIPC.js';
 import { ConnectPage } from './pages/ConnectPage.js';
-import { PlaylistsPage } from './pages/PlaylistsPage.js';
 import { SyncPage } from './pages/SyncPage.js';
 import { DestinationsPage } from './pages/DestinationsPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
 
 const NAV_ITEMS = [
-  { id: 'playlists', label: 'Playlists', icon: 'bi-music-note-list' },
   { id: 'sync', label: 'Sync', icon: 'bi-arrow-repeat' },
   { id: 'destinations', label: 'Destinations', icon: 'bi-hdd' },
   { id: 'settings', label: 'Settings', icon: 'bi-gear' },
 ];
 
 export function App() {
-  const { connection, setConnection, activePage, setActivePage, setDrives } = useAppState();
+  const { connection, setConnection, activePage, setActivePage, setDrives, activeProfile } = useAppState();
   const ipc = useIPC();
 
   useEffect(() => {
@@ -35,7 +33,7 @@ export function App() {
       const state = await ipc.connect();
       if (state.connected) {
         setConnection(state);
-        setActivePage('playlists');
+        setActivePage('sync');
       }
     } catch {
       // Not configured yet
@@ -58,7 +56,13 @@ export function App() {
         <div className="px-3 mb-3">
           <h6 className="text-light mb-0">Music Porter Sync</h6>
           {connection.serverName && (
-            <small className="text-secondary">{connection.serverName}</small>
+            <small className="text-secondary d-block">{connection.serverName}</small>
+          )}
+          {activeProfile && (
+            <small className="text-info">
+              <i className="bi bi-layers me-1" />
+              {activeProfile}
+            </small>
           )}
         </div>
 
@@ -97,7 +101,6 @@ export function App() {
 
       {/* Content */}
       <main className="app-content">
-        {activePage === 'playlists' && <PlaylistsPage />}
         {activePage === 'sync' && <SyncPage />}
         {activePage === 'destinations' && <DestinationsPage />}
         {activePage === 'settings' && <SettingsPage />}

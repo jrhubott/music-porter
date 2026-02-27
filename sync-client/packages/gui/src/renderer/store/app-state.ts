@@ -3,6 +3,7 @@ import type {
   ConnectionState,
   DriveInfo,
   Playlist,
+  ProfileInfo,
   SyncProgress,
   SyncResult,
 } from '@mporter/core';
@@ -19,6 +20,12 @@ interface AppState {
   togglePlaylist: (key: string) => void;
   selectAllPlaylists: () => void;
   clearSelection: () => void;
+
+  // Profiles
+  serverProfiles: Record<string, ProfileInfo>;
+  setServerProfiles: (profiles: Record<string, ProfileInfo>) => void;
+  activeProfile: string;
+  setActiveProfile: (profile: string) => void;
 
   // Drives
   drives: DriveInfo[];
@@ -61,6 +68,12 @@ export const useAppState = create<AppState>((set, get) => ({
       selectedPlaylists: new Set(state.playlists.map((p) => p.key)),
     })),
   clearSelection: () => set({ selectedPlaylists: new Set() }),
+
+  // Profiles
+  serverProfiles: {},
+  setServerProfiles: (serverProfiles) => set({ serverProfiles }),
+  activeProfile: '',
+  setActiveProfile: (activeProfile) => set({ activeProfile }),
 
   // Drives
   drives: [],

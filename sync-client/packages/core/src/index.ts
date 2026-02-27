@@ -11,8 +11,10 @@ export type {
   FileListResponse,
   OkResponse,
   Playlist,
+  ProfileInfo,
   ServerConfig,
   ServerInfoResponse,
+  SettingsResponse,
   SyncDestination,
   SyncDestinationsResponse,
   SyncKeySummary,
@@ -34,6 +36,7 @@ export {
   AUTH_HEADER_PREFIX,
   BONJOUR_BROWSE_TIMEOUT_MS,
   BONJOUR_SERVICE_TYPE,
+  CLIENT_SYNC_KEY_PREFIX,
   DEFAULT_CONCURRENCY,
   DEFAULT_PORT,
   DRIVE_POLL_INTERVAL_MS,
@@ -48,6 +51,7 @@ export {
   MANIFEST_FILENAME,
   STANDARD_TIMEOUT_MS,
   TEMP_SUFFIX,
+  USB_SYNC_KEY_PREFIX,
   VERSION,
 } from './constants.js';
 

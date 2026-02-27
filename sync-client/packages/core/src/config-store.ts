@@ -11,9 +11,15 @@ const FILE_PERMISSIONS = 0o600;
 
 const DEFAULT_PREFERENCES: SyncPreferences = {
   concurrency: DEFAULT_CONCURRENCY,
-  autoSyncOnUSB: false,
+  autoSyncDrives: [],
   notifications: true,
 };
+
+/** Legacy preferences shape for migration from autoSyncOnUSB. */
+interface LegacyPreferences {
+  autoSyncOnUSB?: boolean;
+  autoSyncDrives?: string[];
+}
 
 /** Persistent JSON config store for server connection and preferences. */
 export class ConfigStore {
@@ -43,6 +49,17 @@ export class ConfigStore {
     return this.config.server !== null;
   }
 
+  // ── Profile ──
+
+  get profile(): string | undefined {
+    return this.config.profile;
+  }
+
+  set profile(name: string | undefined) {
+    this.config.profile = name;
+    this.save();
+  }
+
   // ── Preferences ──
 
   get preferences(): SyncPreferences {
@@ -52,6 +69,29 @@ export class ConfigStore {
   updatePreferences(updates: Partial<SyncPreferences>): void {
     this.config.preferences = { ...this.config.preferences, ...updates };
     this.save();
+  }
+
+  // ── Auto-Sync Drive Helpers ──
+
+  addAutoSyncDrive(name: string): void {
+    const drives = this.config.preferences.autoSyncDrives;
+    if (!drives.includes(name)) {
+      drives.push(name);
+      this.save();
+    }
+  }
+
+  removeAutoSyncDrive(name: string): void {
+    const drives = this.config.preferences.autoSyncDrives;
+    const index = drives.indexOf(name);
+    if (index !== -1) {
+      drives.splice(index, 1);
+      this.save();
+    }
+  }
+
+  isAutoSyncDrive(name: string): boolean {
+    return this.config.preferences.autoSyncDrives.includes(name);
   }
 
   // ── API Key (separate file with restricted permissions) ──
@@ -93,9 +133,19 @@ export class ConfigStore {
       }
       const raw = readFileSync(this.configPath, 'utf-8');
       const parsed = JSON.parse(raw) as Partial<AppConfig>;
+      const prefs = { ...DEFAULT_PREFERENCES, ...parsed.preferences };
+
+      // Migrate legacy autoSyncOnUSB → autoSyncDrives
+      const legacy = parsed.preferences as LegacyPreferences | undefined;
+      if (legacy && 'autoSyncOnUSB' in legacy && !('autoSyncDrives' in legacy)) {
+        prefs.autoSyncDrives = [];
+        delete (prefs as Record<string, unknown>)['autoSyncOnUSB'];
+      }
+
       return {
         server: parsed.server ?? null,
-        preferences: { ...DEFAULT_PREFERENCES, ...parsed.preferences },
+        preferences: prefs,
+        profile: parsed.profile,
       };
     } catch (err) {
       throw new ConfigError(`Failed to load config: ${err}`);

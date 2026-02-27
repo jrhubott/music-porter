@@ -174,15 +174,36 @@ export interface DiscoveredServer {
   apiVersion?: number;
 }
 
+// ── Profile ──
+
+export interface ProfileInfo {
+  description: string;
+  quality_preset: string;
+  artwork_size: number;
+  id3_version: number;
+  directory_structure: string;
+  filename_format: string;
+  usb_dir: string;
+}
+
+export interface SettingsResponse {
+  settings: Record<string, unknown>;
+  profiles: Record<string, ProfileInfo>;
+  quality_presets: string[];
+  dir_structures: string[];
+  filename_formats: string[];
+}
+
 // ── Config ──
 
 export interface SyncPreferences {
   concurrency: number;
-  autoSyncOnUSB: boolean;
+  autoSyncDrives: string[];
   notifications: boolean;
 }
 
 export interface AppConfig {
   server: ServerConfig | null;
   preferences: SyncPreferences;
+  profile?: string;
 }

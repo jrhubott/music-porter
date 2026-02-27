@@ -126,6 +126,10 @@ export function registerIPCHandlers(): void {
     return apiClient.getPlaylists();
   });
 
+  ipcMain.handle('data:getSettings', async () => {
+    return apiClient.getSettings();
+  });
+
   ipcMain.handle('data:getFiles', async (_event, playlistKey: string) => {
     return apiClient.getFiles(playlistKey, true);
   });
@@ -148,7 +152,13 @@ export function registerIPCHandlers(): void {
     'sync:start',
     async (
       event,
-      opts: { dest: string; playlists?: string[]; syncKey?: string; concurrency?: number },
+      opts: {
+        dest: string;
+        playlists?: string[];
+        syncKey?: string;
+        concurrency?: number;
+        usbDriveName?: string;
+      },
     ): Promise<SyncResult> => {
       activeSyncAbort = new AbortController();
       const engine = new SyncEngine(apiClient);
@@ -156,6 +166,7 @@ export function registerIPCHandlers(): void {
       return engine.sync(opts.dest, {
         playlists: opts.playlists,
         syncKey: opts.syncKey,
+        usbDriveName: opts.usbDriveName,
         concurrency: opts.concurrency,
         signal: activeSyncAbort.signal,
         onProgress: (progress: SyncProgress) => {
@@ -200,6 +211,14 @@ export function registerIPCHandlers(): void {
 
   ipcMain.handle('prefs:update', (_event, updates: Partial<SyncPreferences>): void => {
     configStore.updatePreferences(updates);
+  });
+
+  ipcMain.handle('prefs:getProfile', (): string | undefined => {
+    return configStore.profile;
+  });
+
+  ipcMain.handle('prefs:setProfile', (_event, name: string): void => {
+    configStore.profile = name;
   });
 
   // ── App Info ──

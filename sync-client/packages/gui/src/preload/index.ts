@@ -6,6 +6,7 @@ import type {
   FileListResponse,
   Playlist,
   ServerConfig,
+  SettingsResponse,
   SyncDestinationsResponse,
   SyncKeySummary,
   SyncPreferences,
@@ -28,6 +29,7 @@ const electronAPI = {
 
   // Data
   getPlaylists: (): Promise<Playlist[]> => ipcRenderer.invoke('data:getPlaylists'),
+  getSettings: (): Promise<SettingsResponse> => ipcRenderer.invoke('data:getSettings'),
   getFiles: (playlistKey: string): Promise<FileListResponse> =>
     ipcRenderer.invoke('data:getFiles', playlistKey),
   getSyncStatus: (key: string): Promise<SyncStatusDetail> =>
@@ -42,6 +44,7 @@ const electronAPI = {
     playlists?: string[];
     syncKey?: string;
     concurrency?: number;
+    usbDriveName?: string;
   }): Promise<SyncResult> => ipcRenderer.invoke('sync:start', opts),
   cancelSync: (): Promise<void> => ipcRenderer.invoke('sync:cancel'),
 
@@ -54,6 +57,8 @@ const electronAPI = {
   getPreferences: (): Promise<SyncPreferences> => ipcRenderer.invoke('prefs:get'),
   updatePreferences: (updates: Partial<SyncPreferences>): Promise<void> =>
     ipcRenderer.invoke('prefs:update', updates),
+  getProfile: (): Promise<string | undefined> => ipcRenderer.invoke('prefs:getProfile'),
+  setProfile: (name: string): Promise<void> => ipcRenderer.invoke('prefs:setProfile', name),
 
   // Events (main -> renderer)
   onSyncProgress: (callback: (progress: SyncProgress) => void) => {
@@ -69,6 +74,12 @@ const electronAPI = {
     ) => callback(data);
     ipcRenderer.on('drives:change', handler);
     return () => ipcRenderer.removeListener('drives:change', handler);
+  },
+  onAutoSync: (callback: (data: { drive: DriveInfo }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: { drive: DriveInfo }) =>
+      callback(data);
+    ipcRenderer.on('drives:autoSync', handler);
+    return () => ipcRenderer.removeListener('drives:autoSync', handler);
   },
 
   // App info

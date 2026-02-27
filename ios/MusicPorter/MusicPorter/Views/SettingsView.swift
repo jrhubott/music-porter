@@ -2,7 +2,6 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
-    @State private var settings: SettingsResponse?
     @State private var error: String?
 
     var body: some View {
@@ -46,16 +45,20 @@ struct SettingsView: View {
                     }
                 }
 
-                if let settings {
-                    Section("Profiles") {
-                        ForEach(Array(settings.profiles.keys.sorted()), id: \.self) { name in
-                            if let profile = settings.profiles[name] {
-                                VStack(alignment: .leading) {
-                                    Text(name).font(.headline)
-                                    Text(profile.description)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
+                if !appState.profiles.isEmpty {
+                    Section("Output Profile") {
+                        Picker("Profile", selection: Binding(
+                            get: { appState.activeProfile },
+                            set: { appState.activeProfile = $0 }
+                        )) {
+                            ForEach(Array(appState.profiles.keys.sorted()), id: \.self) { name in
+                                Text(name).tag(name)
+                            }
+                        }
+                        if let profile = appState.profiles[appState.activeProfile] {
+                            LabeledContent("Description", value: profile.description)
+                            if !profile.usbDir.isEmpty {
+                                LabeledContent("USB Directory", value: profile.usbDir)
                             }
                         }
                     }
@@ -98,10 +101,11 @@ struct SettingsView: View {
     }
 
     private func loadSettings() async {
-        do {
-            settings = try await appState.apiClient.getSettings()
-        } catch {
-            self.error = error.localizedDescription
+        // Profiles are fetched by AppState on connect; refresh if empty
+        if appState.profiles.isEmpty {
+            if let settings = try? await appState.apiClient.getSettings() {
+                appState.profiles = settings.profiles
+            }
         }
     }
 }

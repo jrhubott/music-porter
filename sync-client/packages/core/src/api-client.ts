@@ -18,6 +18,7 @@ import type {
   FileListResponse,
   Playlist,
   ServerInfoResponse,
+  SettingsResponse,
   SyncDestinationsResponse,
   SyncKeySummary,
   SyncStatusDetail,
@@ -200,6 +201,12 @@ export class APIClient {
 
   async getSyncDestinations(): Promise<SyncDestinationsResponse> {
     return this.get<SyncDestinationsResponse>('/api/sync/destinations');
+  }
+
+  // ── Settings ──
+
+  async getSettings(): Promise<SettingsResponse> {
+    return this.get<SettingsResponse>('/api/settings');
   }
 
   // ── Server Info ──

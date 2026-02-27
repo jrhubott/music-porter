@@ -554,6 +554,7 @@ struct ProfileInfo: Codable {
     let id3Version: Int
     let directoryStructure: String
     let filenameFormat: String
+    let usbDir: String
 
     enum CodingKeys: String, CodingKey {
         case description
@@ -562,6 +563,7 @@ struct ProfileInfo: Codable {
         case id3Version = "id3_version"
         case directoryStructure = "directory_structure"
         case filenameFormat = "filename_format"
+        case usbDir = "usb_dir"
     }
 }
 

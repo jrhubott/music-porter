@@ -27,6 +27,18 @@ final class AppState {
     var selectedTab: Int = 0
     var pendingPipelinePlaylist: Playlist?
 
+    // Profiles
+    var profiles: [String: ProfileInfo] = [:]
+    var activeProfile: String {
+        get { UserDefaults.standard.string(forKey: "activeProfile") ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: "activeProfile") }
+    }
+
+    /// Resolved USB directory from the active profile.
+    var usbDir: String {
+        profiles[activeProfile]?.usbDir ?? ""
+    }
+
     /// Non-nil when the server's API version doesn't match what this app expects.
     var apiVersionWarning: String?
 
@@ -74,8 +86,19 @@ final class AppState {
             }
             savedServer = apiClient.server ?? server
             checkAPIVersion(response.apiVersion)
+            await fetchProfiles()
         } else {
             throw APIError.unauthorized
+        }
+    }
+
+    /// Fetch profiles from server and set active profile if not already set.
+    private func fetchProfiles() async {
+        guard let settings = try? await apiClient.getSettings() else { return }
+        profiles = settings.profiles
+        // Set active profile from server default if user hasn't chosen one
+        if activeProfile.isEmpty, case .string(let outputType) = settings.settings["output_type"] {
+            activeProfile = outputType
         }
     }
 

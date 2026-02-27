@@ -1,8 +1,9 @@
 import { createInterface } from 'node:readline';
+import { join } from 'node:path';
 import chalk from 'chalk';
 import { ConfigStore, APIClient, SyncEngine, DriveManager, VERSION } from '@mporter/core';
 import { printField, printError, printSuccess, formatBytes, formatDuration } from './formatters.js';
-import type { SyncProgress } from '@mporter/core';
+import type { ProfileInfo, SyncProgress } from '@mporter/core';
 
 /** Run the interactive menu (when CLI is invoked with no arguments). */
 export async function runInteractiveMode(): Promise<void> {
@@ -38,6 +39,27 @@ export async function runInteractiveMode(): Promise<void> {
     return;
   }
 
+  // Fetch profiles for usb_dir resolution
+  let profiles: Record<string, ProfileInfo> = {};
+  let activeOutputType = '';
+  try {
+    const settings = await client.getSettings();
+    profiles = settings.profiles;
+    activeOutputType = (settings.settings['output_type'] as string) ?? '';
+  } catch {
+    // Non-critical — profiles not available
+  }
+
+  // Resolve active profile: stored preference > server's output_type > first available
+  const profileNames = Object.keys(profiles);
+  const activeProfileName = config.profile || activeOutputType || profileNames[0] || '';
+  const activeProfile = profiles[activeProfileName];
+  const usbDir = activeProfile?.usb_dir ?? '';
+
+  if (activeProfileName) {
+    printField('Profile', activeProfileName);
+  }
+
   // Show playlists
   const playlists = await client.getPlaylists();
   console.log(`\nPlaylists (${playlists.length}):`);
@@ -52,7 +74,8 @@ export async function runInteractiveMode(): Promise<void> {
     console.log(`\nDetected Drives:`);
     drives.forEach((d) => {
       const free = d.freeSpace !== undefined ? ` (${formatBytes(d.freeSpace)} free)` : '';
-      console.log(`  ${d.name}${chalk.dim(free)} — ${chalk.dim(d.path)}`);
+      const usbPath = usbDir ? ` → ${chalk.cyan(join(d.path, usbDir))}` : '';
+      console.log(`  ${d.name}${chalk.dim(free)}${usbPath} — ${chalk.dim(d.path)}`);
     });
   }
 
@@ -99,11 +122,13 @@ export async function runInteractiveMode(): Promise<void> {
 
   // Pick destination
   let dest = process.cwd();
+  let usbDriveName: string | undefined;
   if (drives.length > 0) {
     console.log('\nSelect destination:');
     console.log(`  ${chalk.dim('0.')} Current directory (${process.cwd()})`);
     drives.forEach((d, i) => {
-      console.log(`  ${chalk.dim(`${i + 1}.`)} ${d.name} (${d.path})`);
+      const targetPath = usbDir ? join(d.path, usbDir) : d.path;
+      console.log(`  ${chalk.dim(`${i + 1}.`)} ${d.name} (${targetPath})`);
     });
 
     const rl2 = createInterface({ input: process.stdin, output: process.stdout });
@@ -116,7 +141,9 @@ export async function runInteractiveMode(): Promise<void> {
 
     const destNum = parseInt(destAnswer, 10);
     if (destNum >= 1 && destNum <= drives.length) {
-      dest = drives[destNum - 1]!.path;
+      const drive = drives[destNum - 1]!;
+      dest = usbDir ? join(drive.path, usbDir) : drive.path;
+      usbDriveName = drive.name;
     }
   }
 
@@ -125,6 +152,7 @@ export async function runInteractiveMode(): Promise<void> {
   const engine = new SyncEngine(client);
   const result = await engine.sync(dest, {
     playlists: selectedPlaylists,
+    usbDriveName,
     onProgress: (progress: SyncProgress) => {
       if (progress.phase === 'syncing' && progress.file) {
         process.stdout.write(

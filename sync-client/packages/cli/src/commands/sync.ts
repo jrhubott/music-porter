@@ -1,7 +1,10 @@
+import { join } from 'node:path';
 import type { Command } from 'commander';
 import cliProgress from 'cli-progress';
 import chalk from 'chalk';
 import {
+  ConfigStore,
+  DriveManager,
   SyncEngine,
   EXIT_ERROR,
   EXIT_PARTIAL_FAILURE,
@@ -18,21 +21,58 @@ export function registerSyncCommand(program: Command): void {
     .option('-p, --playlist <key>', 'Sync a specific playlist')
     .option('-d, --dest <path>', 'Destination path or saved destination name')
     .option('-k, --key <name>', 'Override sync key')
+    .option('--profile <name>', 'Output profile to use (determines USB directory)')
     .option('--concurrency <n>', 'Number of parallel downloads', String(DEFAULT_CONCURRENCY))
     .option('--dry-run', 'Preview sync without downloading')
     .action(async (opts: {
       playlist?: string;
       dest?: string;
       key?: string;
+      profile?: string;
       concurrency?: string;
       dryRun?: boolean;
     }) => {
       const client = await createConnectedClient();
       if (!client) return;
 
-      const dest = opts.dest ?? process.cwd();
+      const configStore = new ConfigStore();
       const concurrency = parseInt(opts.concurrency ?? String(DEFAULT_CONCURRENCY), 10);
       const playlists = opts.playlist ? [opts.playlist] : undefined;
+
+      // Resolve profile and usb_dir
+      let usbDir = '';
+      let resolvedProfileName = opts.profile ?? configStore.profile ?? '';
+      try {
+        const settings = await client.getSettings();
+        if (!resolvedProfileName) {
+          resolvedProfileName = (settings.settings['output_type'] as string) ?? '';
+        }
+        if (resolvedProfileName && settings.profiles[resolvedProfileName]) {
+          usbDir = settings.profiles[resolvedProfileName]!.usb_dir;
+        }
+      } catch {
+        // Non-critical — proceed without usb_dir
+      }
+
+      // Resolve destination, detecting USB drives
+      let dest = opts.dest ?? process.cwd();
+      let usbDriveName: string | undefined;
+
+      if (opts.dest) {
+        // Check if --dest points to a detected USB drive
+        const driveManager = new DriveManager();
+        const drives = driveManager.listDrives();
+        const matchingDrive = drives.find(
+          (d) => d.path === opts.dest || opts.dest!.startsWith(d.path),
+        );
+        if (matchingDrive) {
+          usbDriveName = matchingDrive.name;
+          // Append usb_dir if dest is the drive root
+          if (usbDir && opts.dest === matchingDrive.path) {
+            dest = join(matchingDrive.path, usbDir);
+          }
+        }
+      }
 
       const abortController = new AbortController();
 
@@ -58,14 +98,17 @@ export function registerSyncCommand(program: Command): void {
         console.log(chalk.dim('Dry run — no files will be downloaded.\n'));
       }
 
+      if (resolvedProfileName) console.log(`Profile: ${resolvedProfileName}`);
       console.log(`Syncing to: ${dest}`);
       if (opts.key) console.log(`Sync key: ${opts.key}`);
+      if (usbDriveName) console.log(`USB drive: ${usbDriveName}`);
       console.log();
 
       try {
         const result = await engine.sync(dest, {
           playlists,
           syncKey: opts.key,
+          usbDriveName,
           concurrency,
           signal: abortController.signal,
           dryRun: opts.dryRun,
