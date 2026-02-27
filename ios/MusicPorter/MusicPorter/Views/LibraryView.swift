@@ -4,6 +4,7 @@ import MusicKit
 /// Combined Library tab with segmented control for "My Playlists" and "Apple Music".
 struct LibraryView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.scenePhase) private var scenePhase
     @State private var vm = PlaylistsViewModel()
     @State private var selectedSegment = 0
 
@@ -119,6 +120,11 @@ struct LibraryView: View {
             }
             .task {
                 await load()
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .active {
+                    resumeIfStalled()
+                }
             }
         }
     }
@@ -563,6 +569,8 @@ struct LibraryView: View {
     }
 
     private func startDownloadPlaylist(_ name: String) {
+        // Cancel any stale suspended task to avoid duplicates
+        downloadTask?.cancel()
         downloadTask = Task {
             downloadingPlaylist = name
             downloadError = nil
@@ -581,6 +589,8 @@ struct LibraryView: View {
     }
 
     private func startDownloadAll() {
+        // Cancel any stale suspended task to avoid duplicates
+        downloadTask?.cancel()
         downloadTask = Task {
             isDownloadingAll = true
             downloadError = nil
@@ -596,6 +606,22 @@ struct LibraryView: View {
             appState.downloadManager.clearProgress()
             isDownloadingAll = false
             downloadTask = nil
+        }
+    }
+
+    /// Resume a stalled download after returning from background.
+    /// The foreground Task may have been suspended by the OS; this detects
+    /// remaining files and starts a new download task that skips completed files.
+    private func resumeIfStalled() {
+        // Only resume if our foreground task isn't actively running
+        guard downloadTask == nil || downloadTask?.isCancelled == true else { return }
+
+        if isDownloadingAll {
+            // Bulk download was interrupted — restart with remaining dirs
+            startDownloadAll()
+        } else if let playlist = appState.downloadManager.stalledDownloadPlaylist() {
+            // Single playlist download was interrupted — restart it
+            startDownloadPlaylist(playlist)
         }
     }
 

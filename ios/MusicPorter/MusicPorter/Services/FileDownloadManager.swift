@@ -341,6 +341,18 @@ final class FileDownloadManager {
         }
     }
 
+    /// Returns the playlist name if there's an incomplete download that should be resumed.
+    /// Checks persisted download state for any playlist with remaining (undownloaded) files.
+    func stalledDownloadPlaylist() -> String? {
+        let states = DownloadStateStore.load()
+        for state in states {
+            if !DownloadStateStore.remainingFiles(playlist: state.playlist).isEmpty {
+                return state.playlist
+            }
+        }
+        return nil
+    }
+
     /// Clear download progress (call after download completes).
     func clearProgress() {
         downloadProgress = nil

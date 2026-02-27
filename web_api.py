@@ -1346,12 +1346,127 @@ def api_files_artwork(playlist_key, filename):
         return jsonify({'error': f'Could not read artwork: {e}'}), 500
 
 
+def _crc32_of_file(filepath):
+    """Compute CRC32 of a file without loading it entirely into memory."""
+    import zlib
+    crc = 0
+    with open(filepath, 'rb') as fh:
+        while True:
+            chunk = fh.read(65536)
+            if not chunk:
+                break
+            crc = zlib.crc32(chunk, crc)
+    return crc & 0xFFFFFFFF
+
+
+def _streaming_zip(file_entries):
+    """Yield ZIP_STORED bytes one file at a time, then central directory.
+
+    Each entry in file_entries is (archive_name: str, file_path: Path).
+    Since ZIP_STORED has no compression, sizes and CRC32 are known upfront,
+    so local headers are complete before file data is written.
+    Memory usage: O(64 KB buffer) regardless of total archive size.
+    """
+    import struct
+
+    entries = []  # (name_bytes, crc, size, local_header_offset)
+    offset = 0
+
+    for archive_name, file_path in file_entries:
+        name_bytes = archive_name.encode('utf-8')
+        size = file_path.stat().st_size
+        crc = _crc32_of_file(file_path)
+
+        # Local file header (30 bytes + filename)
+        header = struct.pack(
+            '<4sHHHHHIIIHH',
+            b'PK\x03\x04',   # signature
+            20,               # version needed (2.0)
+            0,                # flags
+            0,                # compression (stored)
+            0,                # mod time
+            0,                # mod date
+            crc,              # crc-32
+            size,             # compressed size
+            size,             # uncompressed size
+            len(name_bytes),  # filename length
+            0,                # extra field length
+        ) + name_bytes
+        yield header
+
+        # File data in 64 KB chunks
+        with open(file_path, 'rb') as fh:
+            while True:
+                chunk = fh.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+
+        entries.append((name_bytes, crc, size, offset))
+        offset += len(header) + size
+
+    # Central directory
+    cd_offset = offset
+    for name_bytes, crc, size, local_offset in entries:
+        cd_entry = struct.pack(
+            '<4sHHHHHHIIIHHHHHII',
+            b'PK\x01\x02',   # signature
+            20,               # version made by
+            20,               # version needed
+            0,                # flags
+            0,                # compression
+            0,                # mod time
+            0,                # mod date
+            crc,
+            size,             # compressed size
+            size,             # uncompressed size
+            len(name_bytes),  # filename length
+            0,                # extra field length
+            0,                # file comment length
+            0,                # disk number start
+            0,                # internal file attributes
+            0,                # external file attributes
+            local_offset,     # relative offset of local header
+        ) + name_bytes
+        yield cd_entry
+        offset += len(cd_entry)
+
+    # End of central directory record
+    cd_size = offset - cd_offset
+    num_entries = len(entries)
+    yield struct.pack(
+        '<4sHHHHIIH',
+        b'PK\x05\x06',  # signature
+        0,               # disk number
+        0,               # disk with central directory
+        num_entries,      # entries on this disk
+        num_entries,      # total entries
+        cd_size,          # size of central directory
+        cd_offset,        # offset of central directory
+        0,               # comment length
+    )
+
+
+def _streaming_zip_size(file_entries):
+    """Pre-compute the total byte size of a streaming ZIP archive.
+
+    Allows setting Content-Length so download clients can show progress.
+    """
+    total = 0
+    num_files = 0
+    for archive_name, file_path in file_entries:
+        name_len = len(archive_name.encode('utf-8'))
+        size = file_path.stat().st_size
+        total += 30 + name_len + size   # local header + data
+        total += 46 + name_len          # central directory entry
+        num_files += 1
+    total += 22  # end of central directory record
+    return total, num_files
+
+
 @api_bp.route('/api/files/<playlist_key>/download-all')
 def api_files_download_all(playlist_key):
     """Stream a ZIP archive of all MP3s in a playlist."""
-    import io
-    import zipfile
-
     ctx = _ctx()
     config = ctx.get_config()
     profile = ctx.get_output_profile(config)
@@ -1364,34 +1479,23 @@ def api_files_download_all(playlist_key):
     if not mp3_files:
         return jsonify({'error': 'No MP3 files found'}), 404
 
-    def generate_zip():
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_STORED) as zf:
-            for f in mp3_files:
-                zf.write(f, f.name)
-        buf.seek(0)
-        while True:
-            chunk = buf.read(65536)
-            if not chunk:
-                break
-            yield chunk
+    file_entries = [(f.name, f) for f in mp3_files]
+    content_length, _ = _streaming_zip_size(file_entries)
 
     zip_name = f"{playlist_key}.zip"
     return Response(
-        generate_zip(),
+        _streaming_zip(file_entries),
         mimetype='application/zip',
         headers={
             'Content-Disposition': f'attachment; filename="{zip_name}"',
-        }
+            'Content-Length': str(content_length),
+        },
     )
 
 
 @api_bp.route('/api/files/download-zip', methods=['POST'])
 def api_files_download_zip():
     """Stream a ZIP archive of MP3s from multiple playlists."""
-    import io
-    import zipfile
-
     ctx = _ctx()
     data = request.get_json(silent=True) or {}
     playlists = data.get('playlists', [])
@@ -1420,24 +1524,19 @@ def api_files_download_zip():
     if not playlist_files:
         return jsonify({'error': 'No MP3 files found in selected playlists'}), 404
 
-    def generate_zip():
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_STORED) as zf:
-            for key, files in playlist_files:
-                for f in files:
-                    zf.write(f, f'{key}/{f.name}')
-        buf.seek(0)
-        while True:
-            chunk = buf.read(65536)
-            if not chunk:
-                break
-            yield chunk
+    file_entries = []
+    for key, files in playlist_files:
+        for f in files:
+            file_entries.append((f'{key}/{f.name}', f))
+
+    content_length, _ = _streaming_zip_size(file_entries)
 
     return Response(
-        generate_zip(),
+        _streaming_zip(file_entries),
         mimetype='application/zip',
         headers={
             'Content-Disposition': 'attachment; filename="music-porter-export.zip"',
+            'Content-Length': str(content_length),
         },
     )
 
