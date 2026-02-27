@@ -108,6 +108,20 @@
         </div>
       </div>
 
+      <div class="row g-3 mt-1" id="schedulerRunAtRow" style="display: none;">
+        <div class="col-md-4">
+          <label class="form-label">Run At (local time)</label>
+          <input type="time" class="form-control form-control-sm" id="schedulerRunAt">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">If Missed</label>
+          <select class="form-select form-select-sm" id="schedulerOnMissed">
+            <option value="run">Run Immediately</option>
+            <option value="skip">Skip to Next</option>
+          </select>
+        </div>
+      </div>
+
       <div class="mt-3">
         <label class="form-label">Playlists</label>
         <div id="schedulerPlaylists" class="mt-1"><span class="text-muted">Loading...</span></div>
@@ -403,6 +417,13 @@ function loadSchedulerStatus() {
     if (!intSel.value) intSel.value = '24';
     document.getElementById('schedulerPreset').value = data.preset || '';
 
+    // Run At / On Missed
+    const runAtRow = document.getElementById('schedulerRunAtRow');
+    const showRunAt = parseFloat(intSel.value) >= 24;
+    runAtRow.style.display = showRunAt ? '' : 'none';
+    document.getElementById('schedulerRunAt').value = data.run_at || '';
+    document.getElementById('schedulerOnMissed').value = data.on_missed || 'run';
+
     // Status badge
     const badge = document.getElementById('schedulerStatusBadge');
     if (data.running) {
@@ -435,8 +456,12 @@ function loadSchedulerStatus() {
       } else {
         lastStatus.innerHTML = '';
       }
-      document.getElementById('schedNextRun').textContent = data.next_run_iso
+      let nextRunText = data.next_run_iso
         ? new Date(data.next_run_iso).toLocaleString() : '--';
+      if (data.run_at && data.interval_hours >= 24) {
+        nextRunText += ' (daily at ' + data.run_at + ')';
+      }
+      document.getElementById('schedNextRun').textContent = nextRunText;
       document.getElementById('schedRetryCount').textContent = data.retry_count;
       document.getElementById('schedMaxRetries').textContent = data.max_retries;
     } else {
@@ -481,6 +506,12 @@ function loadSchedulerPlaylists(selectedKeys) {
   }).catch(() => {});
 }
 
+// Toggle run_at row when interval changes
+document.getElementById('schedulerInterval').addEventListener('change', function() {
+  const show = parseFloat(this.value) >= 24;
+  document.getElementById('schedulerRunAtRow').style.display = show ? '' : 'none';
+});
+
 document.getElementById('schedulerForm').addEventListener('submit', function(e) {
   e.preventDefault();
   const allChecked = document.getElementById('schedPlaylistAll').checked;
@@ -491,11 +522,14 @@ document.getElementById('schedulerForm').addEventListener('submit', function(e) 
     });
   }
 
+  const interval = parseFloat(document.getElementById('schedulerInterval').value);
   const data = {
     enabled: document.getElementById('schedulerEnabled').checked,
-    interval_hours: parseFloat(document.getElementById('schedulerInterval').value),
+    interval_hours: interval,
     playlists: playlists,
     preset: document.getElementById('schedulerPreset').value || null,
+    run_at: interval >= 24 ? (document.getElementById('schedulerRunAt').value || null) : null,
+    on_missed: document.getElementById('schedulerOnMissed').value,
   };
 
   fetch('/api/scheduler/config', {

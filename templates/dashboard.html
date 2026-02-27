@@ -395,6 +395,9 @@ function loadDashboard() {
       const next = data.next_run_iso ? new Date(data.next_run_iso) : null;
       const timeStr = next ? next.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : '--';
       let html = '<span class="badge bg-success">Active</span>';
+      if (data.run_at && data.interval_hours >= 24) {
+        html += '<div class="text-muted small mt-1">Daily at ' + data.run_at + '</div>';
+      }
       html += '<div class="text-muted small mt-1">Next: ' + timeStr + '</div>';
       if (data.last_run_status) {
         const cls = data.last_run_status === 'completed' ? 'text-success' : 'text-danger';

@@ -10,6 +10,7 @@ All routes are registered on ``api_bp`` and access shared state through
 
 import json
 import queue
+import re
 import time
 from datetime import date
 from pathlib import Path
@@ -631,7 +632,8 @@ def api_scheduler_status():
 def api_scheduler_config():
     """Update scheduler configuration.
 
-    Body: {enabled, interval_hours, playlists, preset, retry_minutes, max_retries}
+    Body: {enabled, interval_hours, playlists, preset, retry_minutes,
+           max_retries, run_at, on_missed}
     All fields optional — only provided fields are updated.
     """
     ctx = _ctx()
@@ -655,8 +657,19 @@ def api_scheduler_config():
         if preset not in mp.QUALITY_PRESETS:
             return jsonify({'error': f'Invalid preset: {preset}'}), 400
 
+    run_at = data.get('run_at')
+    if run_at is not None and run_at != '':
+        if not re.match(r'^([01]\d|2[0-3]):[0-5]\d$', run_at):
+            return jsonify({'error': 'run_at must be HH:MM (00:00-23:59)'}), 400
+
+    on_missed = data.get('on_missed')
+    if on_missed is not None and on_missed not in ('run', 'skip'):
+        return jsonify({'error': "on_missed must be 'run' or 'skip'"}), 400
+
     # Merge with current config
     current = ctx.scheduler.status()
+    # Normalize empty run_at string to None
+    raw_run_at = data.get('run_at', current.get('run_at'))
     new_settings = {
         'enabled': data.get('enabled', current['enabled']),
         'interval_hours': data.get('interval_hours', current['interval_hours']),
@@ -664,6 +677,8 @@ def api_scheduler_config():
         'preset': data.get('preset', current['preset']) or None,
         'retry_minutes': data.get('retry_minutes', current['retry_minutes']),
         'max_retries': data.get('max_retries', current['max_retries']),
+        'run_at': raw_run_at or None,
+        'on_missed': data.get('on_missed', current.get('on_missed', 'run')),
     }
 
     ctx.scheduler.reconfigure(new_settings)

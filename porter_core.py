@@ -47,7 +47,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.35.1-dev"
+VERSION = "2.35.1-scheduler-persistence"
 
 DEFAULT_DATA_DIR = "data"
 DEFAULT_MUSIC_DIR = "music"
@@ -62,7 +62,7 @@ DEFAULT_USB_DIR = "RZR/Music"
 # Schema version constants — increment and add a migration case when changing
 # the config.yaml structure or DB tables/columns.
 CONFIG_SCHEMA_VERSION = 1
-DB_SCHEMA_VERSION = 2
+DB_SCHEMA_VERSION = 3
 
 # Excluded USB volumes by OS
 if IS_MACOS:
@@ -346,7 +346,7 @@ def _validate_profile(name, data):
 
 _KNOWN_SETTINGS_KEYS = {
     'output_type', 'workers', 'dir_structure', 'filename_format',
-    'api_key',
+    'api_key', 'server_name', 'log_retention_days', 'scheduler',
 }
 
 
@@ -1016,6 +1016,27 @@ def migrate_db_schema(logger=None):
             if logger:
                 logger.info("DB migration 1→2: added eq_presets table")
 
+        # ── Version 2 → 3: scheduled_jobs table ───────────────────────
+        if current < 3:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS scheduled_jobs (
+                    job_name         TEXT PRIMARY KEY,
+                    next_run_time    REAL,
+                    last_run_time    REAL,
+                    last_run_status  TEXT NOT NULL DEFAULT '',
+                    last_run_error   TEXT NOT NULL DEFAULT '',
+                    on_missed        TEXT NOT NULL DEFAULT 'run',
+                    updated_at       REAL NOT NULL DEFAULT 0
+                )
+            """)
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_next
+                ON scheduled_jobs(next_run_time)""")
+            conn.execute("PRAGMA user_version = 3")
+            conn.commit()
+            changes.append("added scheduled_jobs table for persistent scheduling")
+            if logger:
+                logger.info("DB migration 2→3: added scheduled_jobs table")
+
         return [MigrationEvent(
             'schema_migrate',
             f"DB schema migrated from version {from_version} to {DB_SCHEMA_VERSION}",
@@ -1583,6 +1604,110 @@ class TaskHistoryDB:
         else:
             entry['elapsed'] = 0
         return entry
+
+
+class ScheduledJobsDB:
+    """Persistent scheduled job state using SQLite.
+
+    Follows the AuditLogger/TaskHistoryDB pattern: WAL mode, write lock,
+    lockless reads, connection-per-call for thread safety.
+
+    Stores runtime state (next_run_time, last_run_time, on_missed policy)
+    for scheduled jobs so they survive server restarts.
+    """
+
+    def __init__(self, db_path=DEFAULT_DB_FILE):
+        self._db_path = str(db_path)
+        Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._write_lock = threading.Lock()
+        self._init_db()
+
+    def _connect(self):
+        conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_db(self):
+        conn = self._connect()
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS scheduled_jobs (
+                    job_name         TEXT PRIMARY KEY,
+                    next_run_time    REAL,
+                    last_run_time    REAL,
+                    last_run_status  TEXT NOT NULL DEFAULT '',
+                    last_run_error   TEXT NOT NULL DEFAULT '',
+                    on_missed        TEXT NOT NULL DEFAULT 'run',
+                    updated_at       REAL NOT NULL DEFAULT 0
+                )
+            """)
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_next
+                ON scheduled_jobs(next_run_time)""")
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get(self, job_name):
+        """Return job state dict or None (lockless read)."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM scheduled_jobs WHERE job_name = ?",
+                (job_name,),
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def upsert(self, job_name, **fields):
+        """Insert or update a job's state. Only provided fields are updated."""
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                existing = conn.execute(
+                    "SELECT job_name FROM scheduled_jobs WHERE job_name = ?",
+                    (job_name,),
+                ).fetchone()
+
+                fields['updated_at'] = time.time()
+
+                if existing:
+                    sets = []
+                    params = []
+                    for key, val in fields.items():
+                        sets.append(f"{key} = ?")
+                        params.append(val)
+                    params.append(job_name)
+                    conn.execute(
+                        f"UPDATE scheduled_jobs SET {', '.join(sets)} "
+                        f"WHERE job_name = ?",
+                        params,
+                    )
+                else:
+                    fields['job_name'] = job_name
+                    cols = ', '.join(fields.keys())
+                    placeholders = ', '.join('?' for _ in fields)
+                    conn.execute(
+                        f"INSERT INTO scheduled_jobs ({cols}) VALUES ({placeholders})",
+                        list(fields.values()),
+                    )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def delete(self, job_name):
+        """Remove a job's persisted state."""
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "DELETE FROM scheduled_jobs WHERE job_name = ?",
+                    (job_name,),
+                )
+                conn.commit()
+            finally:
+                conn.close()
 
 
 class SyncTracker:
