@@ -294,7 +294,7 @@ Cross-platform sync client (`sync-client/` subdirectory) with both a CLI tool (`
 ### Medium Priority
 
 1. ~~**Web UI** - Browser-based interface for remote management~~ *(implemented in v2.0.0)*
-2. **Automatic USB detection** - Start sync when USB drive is plugged in
+2. ~~**Automatic USB detection** - Start sync when USB drive is plugged in~~ *(implemented in v2.37.0 — sync client auto-detects USB drives and supports per-drive auto-sync)*
 3. ~~**Progress indicators** - Real-time progress bars for long-running operations~~ *(implemented in v1.4.0)*
 4. **Download resume** - Resume interrupted downloads
 5. ~~**Cover art management** - Embed, extract, and update album artwork~~ *(implemented in v1.5.0)*
@@ -305,7 +305,7 @@ Cross-platform sync client (`sync-client/` subdirectory) with both a CLI tool (`
 10. **Export formats** - Support for additional formats (FLAC, AAC, OGG)
 11. **Cover art resize on embed/convert** - Add `--cover-art-size` flag to `embed`, `update`, `convert`, and `pipeline` commands for automatic resizing during processing
 12. **Lock screen artwork** - Load album artwork image into MPNowPlayingInfoCenter for lock screen and Control Center display during iOS playback
-13. **Web file browser** - File-level browsing page with per-file USB sync indicators showing which drives each track has been synced to
+13. ~~**Web file browser** - File-level browsing page with per-file USB sync indicators showing which drives each track has been synced to~~ *(implemented in v2.37.0)*
 14. **Sync key owns paths** - Restructure config so sync keys are first-class entities that own multiple destination paths, replacing the current destination-links-to-key model with a more intuitive key-centric architecture
 
 ### Low Priority / Nice to Have
@@ -329,7 +329,7 @@ Cross-platform sync client (`sync-client/` subdirectory) with both a CLI tool (`
 
 ## Version
 
-Current version: **v2.36.1**
+Current version: **v2.37.0**
 
 ## License
 

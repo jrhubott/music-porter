@@ -1,3 +1,18 @@
+Version 2.37.0 (2026-02-28):
+• Server-only architecture — removed CLI, simplified to server-only entry point with REST API and web dashboard
+• Library restructure — MP3s stored as UUID-named files in flat library/audio/, cover art in library/artwork/, all metadata in TrackDB (SQLite)
+• TagApplicator — profile-specific ID3 tags applied on-the-fly during sync and download, library files stay clean with UUID-only tags
+• Template-based output profiles — configurable ID3 tag templates, filename patterns, directory structures, and artwork sizing per profile
+• Desktop sync client — cross-platform Electron app with USB auto-detection, hotplug monitoring, per-drive auto-sync, and incremental sync via manifest
+• Sync client CLI — mporter-sync command-line tool for headless sync operations
+• Cookie refresh via embedded WebView — sign into Apple Music directly in the sync client, cookies extracted and uploaded to server automatically
+• Playlist file counts and sync status badges in sync client
+• Library audit with duplicate source path detection
+• Fix all-playlists pipeline crash, scheduled pipeline crash, and various conversion/backfill errors
+• iOS app updated for API v2 with dual-URL connection support and simplified USB export
+• iOS app version bumped to 1.5.0
+• Sync client version bumped to 1.2.0
+
 Version 2.36.0 (2026-02-27):
 • iOS direct export — download MP3s to device and export to USB drives directly from the iOS app (SRS-20)
 • iOS background downloads — downloads continue when the app is backgrounded or locked via background URLSession (SRS-21)
