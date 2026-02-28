@@ -19,17 +19,34 @@ export function App() {
   const {
     connection, setConnection, activePage, setActivePage, setDrives, activeProfile, isOffline,
     setPrefetchProgress, setBackgroundPrefetchStatus, backgroundPrefetchStatus,
+    pinnedPlaylists, playlists, cacheStatuses, setCacheStatuses, setCacheTotalSize,
   } = useAppState();
   const ipc = useIPC();
   const [sidebarPrefetch, setSidebarPrefetch] = useState<SyncProgress | null>(null);
   const [cacheUpdated, setCacheUpdated] = useState(false);
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  async function loadCacheStatuses() {
+    try {
+      const status = await ipc.cacheGetStatus();
+      setCacheTotalSize(status.totalSize);
+      const statuses: Record<string, (typeof cacheStatuses)[string]> = {};
+      for (const s of status.playlists) {
+        statuses[s.playlistKey] = s;
+      }
+      setCacheStatuses(statuses);
+    } catch {
+      // Non-critical
+    }
+  }
+
   useEffect(() => {
     // Try auto-connect on startup
     autoConnect();
     // Load drives
     ipc.listDrives().then(setDrives);
+    // Load initial cache statuses
+    loadCacheStatuses();
     // Watch drive changes
     const cleanupDrives = ipc.onDriveChange(() => {
       ipc.listDrives().then(setDrives);
@@ -50,11 +67,17 @@ export function App() {
         } else {
           setSidebarPrefetch(null);
         }
+        // Refresh cache statuses after prefetch completes
+        loadCacheStatuses();
       }
     });
     // Background prefetch status listener (moved from SyncPage)
     const cleanupBgStatus = ipc.onBackgroundPrefetchStatus((status) => {
       setBackgroundPrefetchStatus(status);
+      // Refresh cache statuses when background prefetch finishes
+      if (!status.running && status.lastResult) {
+        loadCacheStatuses();
+      }
     });
     return () => { cleanupDrives(); cleanupPrefetch(); cleanupBgStatus(); };
   }, []);
@@ -147,11 +170,17 @@ export function App() {
               </small>
             </div>
           )}
-          {!sidebarPrefetch && !cacheUpdated && backgroundPrefetchStatus?.lastResult
+          {!sidebarPrefetch && !cacheUpdated && pinnedPlaylists.size > 0
+            && backgroundPrefetchStatus?.lastResult
             && backgroundPrefetchStatus.lastResult.failed === 0
             && backgroundPrefetchStatus.lastResult.capacityCapped === 0
             && (backgroundPrefetchStatus.lastResult.skipped > 0
-              || backgroundPrefetchStatus.lastResult.downloaded > 0) && (
+              || backgroundPrefetchStatus.lastResult.downloaded > 0)
+            && [...pinnedPlaylists].every((key) => {
+              const s = cacheStatuses[key];
+              const serverTotal = playlists.find((p) => p.key === key)?.file_count ?? 0;
+              return s && s.cached >= serverTotal;
+            }) && (
             <div className="connection-badge">
               <span className="dot" />
               <span>
@@ -160,9 +189,15 @@ export function App() {
               </span>
             </div>
           )}
-          {!sidebarPrefetch && !cacheUpdated && backgroundPrefetchStatus?.lastResult
+          {!sidebarPrefetch && !cacheUpdated && pinnedPlaylists.size > 0
+            && backgroundPrefetchStatus?.lastResult
             && (backgroundPrefetchStatus.lastResult.failed > 0
-              || backgroundPrefetchStatus.lastResult.capacityCapped > 0) && (
+              || backgroundPrefetchStatus.lastResult.capacityCapped > 0
+              || [...pinnedPlaylists].some((key) => {
+                const s = cacheStatuses[key];
+                const serverTotal = playlists.find((p) => p.key === key)?.file_count ?? 0;
+                return !s || s.cached < serverTotal;
+              })) && (
             <div className="connection-badge">
               <span className="dot disconnected" />
               <span>
