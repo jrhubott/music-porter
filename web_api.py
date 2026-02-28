@@ -463,8 +463,11 @@ def api_convert_batch():
 def api_playlists_list():
     ctx = _ctx()
     config = ctx.get_config()
+    stats = {s['playlist']: s['track_count']
+             for s in ctx.track_db.get_playlist_stats()} if ctx.track_db else {}
     return jsonify([
-        {'key': p.key, 'url': p.url, 'name': p.name}
+        {'key': p.key, 'url': p.url, 'name': p.name,
+         'file_count': stats.get(p.key, 0)}
         for p in config.playlists
     ])
 

@@ -6,6 +6,9 @@ import {
   DriveManager,
   ServerDiscovery,
   VERSION,
+  readManifest,
+  USB_SYNC_KEY_PREFIX,
+  CLIENT_SYNC_KEY_PREFIX,
 } from '@mporter/core';
 import type {
   ConnectionState,
@@ -187,6 +190,21 @@ export function registerIPCHandlers(): void {
     activeSyncAbort?.abort();
     activeSyncAbort = null;
   });
+
+  ipcMain.handle(
+    'sync:resolveSyncKey',
+    async (_event, destPath: string, usbDriveName?: string): Promise<string | null> => {
+      try {
+        if (usbDriveName) return `${USB_SYNC_KEY_PREFIX}${usbDriveName}`;
+        const manifest = readManifest(destPath);
+        if (manifest?.sync_key) return manifest.sync_key;
+        const basename = destPath.split('/').pop() ?? destPath.split('\\').pop() ?? 'sync';
+        return `${CLIENT_SYNC_KEY_PREFIX}${basename}`;
+      } catch {
+        return null;
+      }
+    },
+  );
 
   // ── Drives ──
 

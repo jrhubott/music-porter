@@ -22,10 +22,10 @@ export function App() {
     // Load drives
     ipc.listDrives().then(setDrives);
     // Watch drive changes
-    const cleanup = ipc.onDriveChange(({ added, removed }) => {
+    const cleanup = ipc.onDriveChange(() => {
       ipc.listDrives().then(setDrives);
     });
-    return cleanup;
+    return () => { cleanup(); };
   }, []);
 
   async function autoConnect() {

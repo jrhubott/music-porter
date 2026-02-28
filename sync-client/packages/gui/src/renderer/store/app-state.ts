@@ -6,6 +6,7 @@ import type {
   ProfileInfo,
   SyncProgress,
   SyncResult,
+  SyncStatusDetail,
 } from '@mporter/core';
 
 interface AppState {
@@ -39,12 +40,16 @@ interface AppState {
   lastSyncResult: SyncResult | null;
   setLastSyncResult: (result: SyncResult | null) => void;
 
+  // Destination sync status
+  destSyncStatus: SyncStatusDetail | null;
+  setDestSyncStatus: (status: SyncStatusDetail | null) => void;
+
   // UI
   activePage: string;
   setActivePage: (page: string) => void;
 }
 
-export const useAppState = create<AppState>((set, get) => ({
+export const useAppState = create<AppState>((set) => ({
   // Connection
   connection: { connected: false },
   setConnection: (connection) => set({ connection }),
@@ -86,6 +91,10 @@ export const useAppState = create<AppState>((set, get) => ({
   setIsSyncing: (isSyncing) => set({ isSyncing }),
   lastSyncResult: null,
   setLastSyncResult: (lastSyncResult) => set({ lastSyncResult }),
+
+  // Destination sync status
+  destSyncStatus: null,
+  setDestSyncStatus: (destSyncStatus) => set({ destSyncStatus }),
 
   // UI
   activePage: 'connect',

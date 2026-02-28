@@ -41,6 +41,8 @@ export function SyncPage() {
     setLastSyncResult,
     drives,
     setDrives,
+    destSyncStatus,
+    setDestSyncStatus,
   } = useAppState();
 
   const [destPath, setDestPath] = useState('');
@@ -54,7 +56,7 @@ export function SyncPage() {
     const cleanup = ipc.onSyncProgress((progress: SyncProgress) => {
       setSyncProgress(progress);
     });
-    return cleanup;
+    return () => { cleanup(); };
   }, []);
 
   async function loadData() {
@@ -108,6 +110,7 @@ export function SyncPage() {
       setEjected(true);
       setSelectedDrive(null);
       setDestPath('');
+      setDestSyncStatus(null);
       const updated = await ipc.listDrives();
       setDrives(updated);
     }
@@ -117,10 +120,25 @@ export function SyncPage() {
   const profile = serverProfiles[activeProfile];
   const usbDir = profile?.usb_dir ?? '';
 
+  async function loadSyncStatus(path: string, driveName?: string) {
+    try {
+      const syncKey = await ipc.resolveSyncKey(path, driveName);
+      if (syncKey) {
+        const status = await ipc.getSyncStatus(syncKey);
+        setDestSyncStatus(status);
+      } else {
+        setDestSyncStatus(null);
+      }
+    } catch {
+      setDestSyncStatus(null);
+    }
+  }
+
   function selectDrive(drive: DriveInfo) {
     setSelectedDrive(drive);
     const targetPath = usbDir ? `${drive.path}/${usbDir}` : drive.path;
     setDestPath(targetPath);
+    loadSyncStatus(targetPath, drive.name);
   }
 
   async function selectFolder() {
@@ -128,6 +146,7 @@ export function SyncPage() {
     if (path) {
       setDestPath(path);
       setSelectedDrive(null);
+      loadSyncStatus(path);
     }
   }
 
@@ -159,6 +178,7 @@ export function SyncPage() {
           setEjected(true);
           setSelectedDrive(null);
           setDestPath('');
+          setDestSyncStatus(null);
           const updated = await ipc.listDrives();
           setDrives(updated);
         }
@@ -237,7 +257,20 @@ export function SyncPage() {
                       />
                       <div>
                         <div className="fw-bold">{p.name}</div>
-                        <small className="text-secondary">{p.key}</small>
+                        <small className="text-secondary">
+                          {p.file_count ?? 0} {p.file_count === 1 ? 'file' : 'files'}
+                          {(() => {
+                            const syncInfo = destSyncStatus?.playlists.find(
+                              (sp) => sp.name === p.key || sp.name === p.name,
+                            );
+                            if (!syncInfo) return null;
+                            if (syncInfo.new_files === 0)
+                              return <span className="text-success ms-2">synced</span>;
+                            if (syncInfo.is_new_playlist)
+                              return <span className="text-warning ms-2">all new</span>;
+                            return <span className="text-info ms-2">{syncInfo.new_files} new</span>;
+                          })()}
+                        </small>
                       </div>
                     </div>
                   </div>
@@ -261,6 +294,7 @@ export function SyncPage() {
               onChange={(e) => {
                 setDestPath(e.target.value);
                 setSelectedDrive(null);
+                setDestSyncStatus(null);
               }}
               readOnly
             />

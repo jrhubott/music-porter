@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, chmodSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, chmodSync, existsSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { getConfigDir } from './platform.js';
 import { ConfigError } from './errors.js';
@@ -118,7 +118,6 @@ export class ConfigStore {
 
   deleteApiKey(): void {
     try {
-      const { unlinkSync } = require('node:fs') as typeof import('node:fs');
       unlinkSync(this.apiKeyPath);
     } catch {
       // File may not exist

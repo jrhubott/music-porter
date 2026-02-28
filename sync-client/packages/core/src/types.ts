@@ -38,6 +38,7 @@ export interface Playlist {
   key: string;
   url: string;
   name: string;
+  file_count?: number;
 }
 
 export interface FileInfo {

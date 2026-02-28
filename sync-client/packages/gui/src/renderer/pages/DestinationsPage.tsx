@@ -16,10 +16,10 @@ export function DestinationsPage() {
 
   useEffect(() => {
     loadData();
-    const cleanup = ipc.onDriveChange(({ added, removed }) => {
+    const cleanup = ipc.onDriveChange(() => {
       refreshDrives();
     });
-    return cleanup;
+    return () => { cleanup(); };
   }, []);
 
   async function loadData() {
