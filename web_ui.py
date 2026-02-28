@@ -587,10 +587,10 @@ class PipelineScheduler:
                 audit_logger=self._ctx.audit_logger,
                 audit_source='scheduler',
             )
-            profile = self._ctx.get_output_profile(config)
             workers = config.get_setting('workers', mp.DEFAULT_WORKERS)
+            quality_preset = preset or config.get_setting(
+                'quality_preset', mp.DEFAULT_QUALITY_PRESET)
             deps = mp.DependencyChecker(logger)
-            quality_preset = preset or profile.quality_preset
             display = self._ctx.make_display_handler(task_id)
             task = self._ctx.task_manager.get(task_id)
 
@@ -598,7 +598,7 @@ class PipelineScheduler:
                 logger, deps, config,
                 quality_preset=quality_preset,
                 workers=workers,
-                output_profile=profile,
+                track_db=self._ctx.track_db,
                 display_handler=display,
                 cancel_event=task.cancel_event,
                 audit_logger=self._ctx.audit_logger,
@@ -727,6 +727,7 @@ class AppContext:
     task_manager: TaskManager
     audit_logger: object  # mp.AuditLogger
     sync_tracker: object  # mp.SyncTracker
+    track_db: object  # mp.TrackDB
     api_key: str
     project_root: Path
     scheduler: 'PipelineScheduler | None' = None
@@ -850,6 +851,7 @@ def create_app(project_root=None, no_auth=False, server_host=None,
         task_manager=TaskManager(task_db=_task_db),
         audit_logger=mp.AuditLogger(_db_path),
         sync_tracker=mp.SyncTracker(_db_path),
+        track_db=mp.TrackDB(_db_path),
         api_key=_api_key,
         project_root=project_root,
     )
@@ -954,14 +956,6 @@ def create_app(project_root=None, no_auth=False, server_host=None,
     @app.route('/convert')
     def convert_page():
         return render_template('convert.html')
-
-    @app.route('/tags')
-    def tags_page():
-        return render_template('tags.html')
-
-    @app.route('/cover-art')
-    def cover_art_page():
-        return render_template('cover_art.html')
 
     @app.route('/sync')
     def sync_page():

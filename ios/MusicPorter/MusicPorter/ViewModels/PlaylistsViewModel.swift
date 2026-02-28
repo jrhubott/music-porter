@@ -14,6 +14,9 @@ final class PlaylistsViewModel {
     var newName = ""
     var showAddSheet = false
 
+    // USB export
+    var defaultUsbDir = "RZR/Music"
+
     // Apple Music state
     var appleMusicPlaylists: [MusicKit.Playlist] = []
     var isLoadingAppleMusic = false
@@ -35,6 +38,11 @@ final class PlaylistsViewModel {
             exportDirs = try await e
         } catch {
             self.error = error.localizedDescription
+        }
+        // Fetch usb_dir from server settings (best-effort)
+        if let settings = try? await api.getSettings(),
+           case .string(let dir) = settings.settings["usb_dir"] {
+            defaultUsbDir = dir
         }
         isLoading = false
     }

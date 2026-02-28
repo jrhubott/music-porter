@@ -1,23 +1,22 @@
-# RideCommandMP3Export
+# Music Porter
 
-A powerful music playlist management and conversion tool that downloads Apple Music playlists, converts them to MP3 format with configurable quality settings, and optionally syncs them to USB drives for motorcycle audio systems.
+A server-based music playlist management and conversion tool that downloads Apple Music playlists, converts them to MP3 format with configurable quality settings, and syncs to USB drives and other destinations. All operations are managed through a web dashboard and REST API.
 
 ## Features
 
+- **Web dashboard** with real-time progress via Server-Sent Events
+- **REST API** (~62 endpoints) for programmatic access
 - **Download playlists** from Apple Music using gamdl
-- **Convert to MP3** with configurable quality presets (lossless, high, medium, low, custom)
-- **Multi-threaded conversion** with configurable parallel workers (`--workers N`)
-- **Progress bars** for all operations (convert, tag, restore, download, USB sync)
-- **Preserve metadata** with TXXX frame protection for original tags
+- **Convert to MP3** with configurable quality presets (lossless, high, medium, low)
+- **Multi-threaded conversion** with configurable parallel workers
+- **DB-centric metadata** — track info stored in SQLite, MP3s carry only a UUID tag
+- **Profile-based tagging** — TagApplicator applies ID3 tags on-the-fly during sync/download
 - **Sync destinations** with USB auto-detection, saved destinations, and custom paths
-- **Pipeline orchestration** for automated multi-stage workflows
-- **Interactive menu** for user-friendly operation (includes profile switching via `P`)
-- **YAML configuration** with global settings and CLI flag overrides
+- **Pipeline orchestration** for automated download → convert workflows
 - **Automatic cookie management** with browser-based refresh and validation
-- **Cover art management** with embed, extract, update, strip, and resize operations
-- **Comprehensive statistics** and detailed logging
-- **Tag management** with update, restore, and reset operations
-- **Dry-run mode** for safe preview of all operations
+- **iOS companion app** (SwiftUI, iOS 17+) with Bonjour discovery
+- **Desktop sync client** (TypeScript, CLI + Electron GUI)
+- **Comprehensive audit trail** and task history
 - **Cross-platform support** for macOS, Linux, and Windows
 
 ## Platform Support
@@ -59,14 +58,13 @@ A powerful music playlist management and conversion tool that downloads Apple Mu
 
 - Python 3.8+
 - ffmpeg (system binary)
-- PyYAML>=6.0 (installed via requirements.txt)
 - Valid Apple Music subscription and cookies.txt file
 
 ### Installation
 
 ```bash
 # Clone repository
-cd RideCommandMP3Export
+cd music-porter
 
 # Create virtual environment
 python3 -m venv .venv
@@ -74,27 +72,21 @@ source .venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
-
-# Configure playlists
-# Edit config.yaml (see Configuration section below)
 ```
 
-### Basic Usage
+### Start the Server
 
 ```bash
-# Interactive menu (easiest way to start)
+# Start server (opens web dashboard at http://localhost:5555)
 ./music-porter
 
-# Full pipeline for a specific playlist
-./music-porter pipeline --playlist "Pop_Workout"
-
-# Process all playlists automatically
-./music-porter pipeline --auto
-
-# Get help
-./music-porter --help
-./music-porter [command] --help
+# With options
+./music-porter server --port 8080
+./music-porter server --show-api-key
+./music-porter --version
 ```
+
+Open your browser to `http://localhost:5555` to access the web dashboard. All operations (pipeline, conversion, sync, settings) are managed from there.
 
 ## Quality Presets
 
@@ -106,297 +98,123 @@ MP3 conversion supports configurable quality presets to balance file size and au
 | `high` | VBR | 2 | ~190-250kbps | High quality, smaller files |
 | `medium` | VBR | 4 | ~165-210kbps | Balanced quality and size |
 | `low` | VBR | 6 | ~115-150kbps | Space-constrained devices |
-| `custom` | VBR | 0-9 | Variable | Advanced users (0=best, 9=worst) |
 
-### Quality Examples
+Quality is configured in the web dashboard Settings page or in `data/config.yaml`.
 
-```bash
-# Default lossless quality (320kbps CBR)
-./music-porter convert music/Pop_Workout --output export/ride-command/Pop_Workout
+## Architecture
 
-# High quality (VBR)
-./music-porter convert music/Pop_Workout --output export/ride-command/Pop_Workout --preset high
+### Library Storage Model
 
-# Custom quality (VBR quality 0 - best)
-./music-porter convert music/Pop_Workout --output export/ride-command/Pop_Workout --preset custom --quality 0
+Library MP3s are stored with UUID-based filenames and carry only a `TXXX:TrackUUID` identifier tag. All human-readable metadata (title, artist, album) lives in a SQLite database (`tracks` table). This DB-centric approach enables:
 
-# Full pipeline with quality preset
-./music-porter pipeline --playlist "Pop_Workout" --preset medium
-```
+- **Profile-based tagging** — TagApplicator applies ID3 tags on-the-fly during sync/download
+- **Template-based output** — filenames and tags are formatted per-profile (e.g., `{artist} - {title}`)
+- **Clean library** — source MP3s are never modified after conversion
 
-## Commands Overview
+### Output Profiles
 
-### Pipeline Commands
+Profiles control how tags and filenames are applied when files leave the library:
 
-**Full Pipeline** - Download → Convert → Tag → USB (optional)
+| Profile | ID3 | Artwork | Album Tag | Artist Tag |
+|---------|-----|---------|-----------|------------|
+| `ride-command` (default) | v2.3 | 100px | playlist name | "Various" |
+| `basic` | v2.4 | original | original | original |
 
-```bash
-./music-porter pipeline --playlist "Pop_Workout"
-./music-porter pipeline --url "https://music.apple.com/..."
-./music-porter pipeline --auto  # Process all playlists
-./music-porter pipeline --playlist 1 --sync-dest nas-backup  # Sync to saved destination
-```
-
-### Individual Commands
-
-**Download** - Download Apple Music playlists
-
-```bash
-./music-porter download --playlist "Pop_Workout"
-./music-porter download --url "https://music.apple.com/..."
-```
-
-**Convert** - Convert M4A to MP3
-
-```bash
-./music-porter convert music/Pop_Workout --output export/ride-command/Pop_Workout
-./music-porter convert music/Pop_Workout --preset high --force
-./music-porter convert music/Pop_Workout --workers 4    # Parallel conversion
-./music-porter convert music/Pop_Workout --workers 1    # Sequential (single-threaded)
-```
-
-**Tag** - Update MP3 tags
-
-```bash
-./music-porter tag export/ride-command/Pop_Workout --album "Pop Workout"
-./music-porter tag export/ride-command/Pop_Workout --album "Pop" --artist "Various"
-```
-
-**Restore** - Restore original tags from TXXX frames
-
-```bash
-./music-porter restore export/ride-command/Pop_Workout --all
-./music-porter restore export/ride-command/Pop_Workout --album --artist
-```
-
-**Reset** - Reset tags from source M4A files (⚠️ overwrites TXXX protection)
-
-```bash
-./music-porter reset music/Pop_Workout export/ride-command/Pop_Workout
-```
-
-**Sync** - Sync to destinations (USB drives, saved paths, custom paths)
-
-```bash
-./music-porter sync                                      # Interactive destination picker
-./music-porter sync --dest nas-backup                    # Sync to saved destination
-./music-porter sync --dest /path/to/folder               # Sync to custom path
-./music-porter sync --list-destinations                  # List saved destinations
-./music-porter sync --add-dest NAME PATH                 # Save a new destination
-./music-porter sync --status                            # Show sync tracking
-```
-
-**Cover Art** - Manage embedded album artwork
-
-```bash
-# Embed cover art from M4A sources into MP3s
-./music-porter cover-art embed export/ride-command/Pop_Workout
-
-# Embed cover art for all configured playlists
-./music-porter cover-art embed --all
-
-# Extract cover art to image files
-./music-porter cover-art extract export/ride-command/Pop_Workout
-
-# Replace cover art from a single image
-./music-porter cover-art update export/ride-command/Pop_Workout --image artwork.jpg
-
-# Strip cover art to reduce file size
-./music-porter cover-art strip export/ride-command/Pop_Workout
-
-# Resize embedded cover art
-./music-porter cover-art resize export/ride-command/Pop_Workout --max-size 600
-
-# Resize cover art for all configured playlists
-./music-porter cover-art resize --all --max-size 600
-```
-
-**Summary** - Display export library statistics
-
-```bash
-./music-porter summary
-./music-porter summary --detailed
-./music-porter summary --quick
-```
-
-### Global Flags
-
-```bash
---verbose, -v     Enable verbose output
---dry-run         Preview changes without modifying files
---workers N       Parallel conversion workers (default: min(cpu_count, 4))
---output-type T   Select output profile (default from config.yaml settings.output_type)
---version         Show version information
-```
-
-> **Note:** CLI flags always override settings from `config.yaml`.
+Profiles are fully customizable in `data/config.yaml` under `output_types`.
 
 ## Documentation
 
-- **[User Guide](MUSIC-PORTER-GUIDE.md)** - Complete usage guide with detailed examples
+- **[User Guide](MUSIC-PORTER-GUIDE.md)** - Complete usage guide with examples
 - **[Cookie Management Guide](COOKIE-MANAGEMENT-GUIDE.md)** - Cookie validation, auto-refresh, and troubleshooting
+- **[iOS Companion Guide](IOS-COMPANION-GUIDE.md)** - iOS app setup, pairing, and usage
 - **[Architecture](CLAUDE.md)** - Developer guide and AI assistant context
 
 ## Configuration
 
 ### config.yaml Format
 
-Configuration uses YAML format with two sections: `settings` (global defaults) and `playlists` (playlist definitions).
+Configuration is stored in `data/config.yaml` (auto-created on first run):
 
 ```yaml
+schema_version: 3
+
 settings:
-  output_type: ride-command    # Default output profile
-  workers: 6                   # Parallel conversion workers
+  output_type: ride-command
+  workers: 6
+  quality_preset: lossless
+  server_name: Music Porter
 
 playlists:
   - key: Pop_Workout
     url: https://music.apple.com/us/playlist/...
     name: Pop Workout
-  - key: Thumbs_Up
-    url: https://music.apple.com/us/playlist/...
-    name: Thumbs Up
-```
 
-Settings in `config.yaml` are overridden by CLI flags (e.g., `--output-type`, `--workers`).
+destinations:
+  - name: nas-backup
+    path: folder:///Volumes/NAS/Music
+```
 
 ### Apple Music Authentication
 
-Requires `cookies.txt` file with valid Apple Music session cookies. The tool automatically manages cookie validation and refresh:
+Requires `data/cookies.txt` file with valid Apple Music session cookies. The server validates cookies at startup and before download operations.
 
-**Automatic Cookie Management (Recommended):**
-- Cookies are checked at startup and before downloads
-- Expired cookies trigger automatic refresh prompt
-- Uses your browser (Chrome, Firefox, Safari, or Edge) to extract fresh cookies
-- No manual cookie export needed!
-
-**Manual Cookie Export (Alternative):**
-1. Log in to music.apple.com in your browser
-2. Export cookies using a browser extension
-3. Save as `cookies.txt` in the project root
+**Cookie Refresh:**
+- Use the web dashboard Settings page to refresh cookies
+- Or manually export cookies from music.apple.com using a browser extension
 
 See [Cookie Management Guide](COOKIE-MANAGEMENT-GUIDE.md) for detailed instructions.
-
-## Cookie Management
-
-The tool includes intelligent cookie management to prevent authentication failures:
-
-### Automatic Features
-
-✅ **Cookie Validation**
-- Checks cookies at startup (shows days remaining)
-- Validates before download operations
-- Clear status messages (valid/expired/missing)
-
-✅ **Automatic Refresh**
-- Interactive prompt when cookies expire: "Attempt automatic cookie refresh? [Y/n]"
-- Uses your browser to extract fresh cookies (Chrome, Firefox, Safari, Edge)
-- Auto-installs selenium if needed (just press Enter!)
-- Creates backup before overwriting (cookies.txt.backup)
-
-✅ **Multi-Browser Support**
-- Automatically detects and uses your OS default browser
-- Falls back to other installed browsers if needed
-- Handles login flow if you're not already logged in
-
-### Quick Examples
-
-```bash
-# Automatic refresh (interactive)
-./music-porter download --playlist 1
-# If cookies expired, press Enter to auto-refresh
-
-# Automatic refresh (command-line)
-./music-porter pipeline --auto --auto-refresh-cookies
-
-# Use custom cookie file
-./music-porter download --playlist 1 --cookies /path/to/cookies.txt
-
-# Skip validation (not recommended)
-./music-porter download --playlist 1 --skip-cookie-validation
-```
-
-**See [Cookie Management Guide](COOKIE-MANAGEMENT-GUIDE.md) for complete documentation including troubleshooting, security details, and manual refresh instructions.**
 
 ## Project Structure
 
 ```text
 .
-├── music-porter                     # Main unified tool (RECOMMENDED)
-├── do-it-all                        # Legacy wrapper (deprecated)
-├── ride-command-mp3-export          # Legacy wrapper (deprecated)
-├── config.yaml                      # Configuration (playlists + settings)
-├── cookies.txt                      # Apple Music authentication
-├── music/                           # Downloaded M4A files (nested structure)
-│   └── Pop_Workout/                 # Artist/Album/Track.m4a
-├── export/                          # Converted MP3 files (profile-scoped)
-│   ├── ride-command/                # Ride Command profile exports
-│   │   └── Pop_Workout/             # "Artist - Title.mp3"
-│   └── basic/                       # Basic profile exports
-│       └── Pop_Workout/             # "Artist - Title.mp3"
-├── logs/                            # Execution logs (daily rotation)
-├── .venv/                           # Python virtual environment
-└── docs/                            # Documentation
+├── music-porter                # Server entry point
+├── porter_core.py              # Business logic
+├── web_ui.py                   # Flask app, page routes
+├── web_api.py                  # REST API blueprint
+├── data/
+│   ├── config.yaml             # Playlists and settings
+│   ├── cookies.txt             # Apple Music authentication
+│   └── music-porter.db         # SQLite (tracks, audit, tasks, sync)
+├── library/                    # All music data (source + output)
+│   └── Pop_Workout/
+│       ├── source/             # Downloaded M4A files (Artist/Album/Track.m4a)
+│       ├── output/
+│       │   └── <uuid>.mp3      # Clean MP3 with TrackUUID tag only
+│       └── artwork/
+│           └── <uuid>.jpg      # Extracted cover art
+├── templates/                  # Jinja2 HTML templates
+├── ios/                        # iOS companion app (SwiftUI)
+├── sync-client/                # Desktop sync client (TypeScript)
+└── logs/                       # Execution logs
 ```
 
-Export directories are scoped by output profile: `export/<profile>/<playlist>/`. This keeps files from different profiles separate and allows switching profiles without overwriting previous exports.
+## Companion Apps
+
+### iOS Companion App
+
+Native SwiftUI app (iOS 17+) for managing Music Porter from your phone. Features Bonjour discovery, playlist management, pipeline operations, audio playback, and USB export.
+
+### Desktop Sync Client
+
+Cross-platform sync client (`sync-client/` subdirectory) with both a CLI tool (`mporter-sync`) and an Electron desktop app. Syncs playlists to USB drives or local folders with profile-specific tags.
 
 ## Troubleshooting
 
-### Common Issues
-
-**Cookies expired / Downloads fail with authentication error**
-- Tool automatically detects expired cookies at startup
-- Use auto-refresh: `./music-porter download --playlist 1` → press Enter when prompted
-- Or use `--auto-refresh-cookies` flag for non-interactive refresh
-- Manual refresh: Export cookies from music.apple.com browser extension
-- See [Cookie Management Guide](COOKIE-MANAGEMENT-GUIDE.md) for detailed troubleshooting
+**Cookies expired / Downloads fail**
+- Use the web dashboard to refresh cookies
+- See [Cookie Management Guide](COOKIE-MANAGEMENT-GUIDE.md)
 
 **FFmpeg not found**
-- Install ffmpeg: `brew install ffmpeg` (macOS) or equivalent
-- Verify installation: `ffmpeg -version`
+- Install: `brew install ffmpeg` (macOS) or equivalent for your platform
 
 **USB drive not detected**
-- Check drive is mounted: `ls /Volumes/`
-- Ensure drive is not in excluded volumes list
-- System drives (Macintosh HD) are automatically excluded
-
-**Tags not updating correctly**
-- Original tags are protected in TXXX frames and never overwritten
-- Use `--restore-*` flags to restore from protected originals
-- Use `reset` command to re-read from source M4A files (⚠️ overwrites protection)
+- Ensure drive is mounted
+- System drives are automatically excluded
 
 **Virtual environment issues**
-- Activate venv: `source .venv/bin/activate`
-- Reinstall dependencies: `pip install -r requirements.txt`
-- Check Python version: `python --version` (requires 3.8+)
-
-For more detailed troubleshooting, see the [User Guide](MUSIC-PORTER-GUIDE.md).
-
-## Architecture Highlights
-
-### Tag Preservation System
-
-The tool uses a "hard gate" protection system for original metadata:
-- Original tags stored in TXXX (user-defined text) ID3 frames
-- Frame names: `OriginalTitle`, `OriginalArtist`, `OriginalAlbum`, `OriginalCoverArtHash`
-- Once written, these frames are **never overwritten**
-- Restoration always possible via `--restore-*` flags
-
-### ID3 Tag Standards
-
-- Default output: ID3v2.3 (older device compatibility)
-- ID3v1 tags stripped by default (clean metadata)
-- Duplicate frames automatically removed
-- Override with `--keep-id3v1`, `--keep-id3v24`, `--keep-duplicates`
-
-### FFmpeg Integration
-
-- Uses ffmpeg-python library for cleaner API
-- Requires system ffmpeg binary (wrapper, not replacement)
-- Lossless: 320kbps CBR with libmp3lame
-- VBR: Quality levels 0-9 (0=best, 9=worst)
-- Multi-threaded: parallel ffmpeg workers via `--workers N` (default: min(cpu_count, 4))
-- Error handling: continues processing on individual failures
+- Activate: `source .venv/bin/activate`
+- Reinstall: `pip install -r requirements.txt`
 
 ## Future Features
 
@@ -446,7 +264,7 @@ The tool uses a "hard gate" protection system for original metadata:
 
 ## Version
 
-Current version: **v2.33.0**
+Current version: **v2.36.1**
 
 ## License
 

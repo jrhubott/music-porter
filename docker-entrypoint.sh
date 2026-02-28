@@ -18,7 +18,7 @@ done
 
 # music-porter subcommands — delegate to the Python script
 case "$1" in
-    server|web|pipeline|download|convert|tag|restore|reset|sync-usb|cover-art|summary)
+    server)
         exec python3 /app/music-porter --no-venv "$@"
         ;;
 esac

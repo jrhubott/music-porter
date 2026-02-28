@@ -153,6 +153,7 @@ export async function runInteractiveMode(): Promise<void> {
   const result = await engine.sync(dest, {
     playlists: selectedPlaylists,
     usbDriveName,
+    profile: activeProfileName || undefined,
     onProgress: (progress: SyncProgress) => {
       if (progress.phase === 'syncing' && progress.file) {
         process.stdout.write(

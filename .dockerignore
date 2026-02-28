@@ -11,8 +11,7 @@ __pycache__/
 *.pyo
 
 # Data directories (mounted as volumes)
-music/
-export/
+library/
 logs/
 gamdl_temp_*/
 

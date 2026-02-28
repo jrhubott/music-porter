@@ -8,14 +8,14 @@
     <form id="convertForm">
       <div class="row g-3">
         <div class="col-md-4">
-          <label class="form-label">Source Directory (music/...)</label>
+          <label class="form-label">Source Directory</label>
           <select class="form-select form-select-sm" id="convertInput">
             <option value="">Loading...</option>
           </select>
         </div>
         <div class="col-md-4">
           <label class="form-label">Output Directory (optional)</label>
-          <input type="text" class="form-control form-control-sm" id="convertOutput" placeholder="Auto: export/<profile>/">
+          <input type="text" class="form-control form-control-sm" id="convertOutput" placeholder="Auto: library/<name>/output/">
         </div>
         <div class="col-md-4">
           <label class="form-label">Quality Preset</label>
@@ -113,8 +113,8 @@ fetch('/api/settings').then(r=>r.json()).then(d => {
 
 fetch('/api/directories/music').then(r=>r.json()).then(dirs => {
   const sel = document.getElementById('convertInput');
-  sel.innerHTML = dirs.map(d => `<option value="music/${d}">music/${d}</option>`).join('');
-  if (dirs.length === 0) sel.innerHTML = '<option value="">No music directories found</option>';
+  sel.innerHTML = dirs.map(d => `<option value="library/${d}/source">library/${d}/source</option>`).join('');
+  if (dirs.length === 0) sel.innerHTML = '<option value="">No source directories found</option>';
   // Auto-load EQ for first playlist
   if (dirs.length > 0) loadEQForPlaylist(dirs[0]);
 });
@@ -134,7 +134,11 @@ function loadEQForPlaylist(playlist) {
 
 document.getElementById('convertInput').addEventListener('change', function() {
   const dir = this.value;
-  if (dir) loadEQForPlaylist(dir.replace('music/', ''));
+  // Extract playlist key from library/<key>/source
+  if (dir) {
+    const parts = dir.split('/');
+    loadEQForPlaylist(parts.length >= 2 ? parts[1] : dir);
+  }
 });
 
 document.getElementById('convertForm').addEventListener('submit', function(e) {

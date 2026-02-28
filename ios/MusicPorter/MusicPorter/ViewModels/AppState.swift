@@ -4,7 +4,7 @@ import Foundation
 @MainActor @Observable
 final class AppState {
     /// The API version this iOS app expects from the server.
-    static let supportedAPIVersion = 1
+    static let supportedAPIVersion = 2
 
     /// Timeout for local URL connection attempts when an external URL is available.
     private static let localTimeoutSeconds = 3

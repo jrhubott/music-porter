@@ -147,18 +147,23 @@ export class APIClient {
 
   // ── Files ──
 
-  async getFiles(playlistKey: string, includeSyncStatus = false): Promise<FileListResponse> {
-    const params = includeSyncStatus ? '?include_sync=true' : '';
+  async getFiles(playlistKey: string, includeSyncStatus = false, profile?: string): Promise<FileListResponse> {
+    const queryParts: string[] = [];
+    if (includeSyncStatus) queryParts.push('include_sync=true');
+    if (profile) queryParts.push(`profile=${encodeURIComponent(profile)}`);
+    const params = queryParts.length > 0 ? `?${queryParts.join('&')}` : '';
     return this.get<FileListResponse>(`/api/files/${playlistKey}${params}`);
   }
 
-  /** Get a readable stream for downloading a file. */
+  /** Get a readable stream for downloading a file. Pass profile for tagged output. */
   async downloadFile(
     playlistKey: string,
     filename: string,
+    profile?: string,
     signal?: AbortSignal,
   ): Promise<{ body: ReadableStream<Uint8Array>; size: number }> {
-    const url = this.buildURL(`/api/files/${playlistKey}/${encodeURIComponent(filename)}`);
+    const profileParam = profile ? `?profile=${encodeURIComponent(profile)}` : '';
+    const url = this.buildURL(`/api/files/${playlistKey}/${encodeURIComponent(filename)}${profileParam}`);
     const response = await fetch(url, {
       headers: this.authHeaders(),
       signal,
@@ -171,9 +176,10 @@ export class APIClient {
     return { body: response.body, size };
   }
 
-  /** Build a direct URL for downloading a file (for external use). */
-  fileDownloadURL(playlistKey: string, filename: string): string {
-    return this.buildURL(`/api/files/${playlistKey}/${encodeURIComponent(filename)}`);
+  /** Build a direct URL for downloading a file (for external use). Pass profile for tagged output. */
+  fileDownloadURL(playlistKey: string, filename: string, profile?: string): string {
+    const profileParam = profile ? `?profile=${encodeURIComponent(profile)}` : '';
+    return this.buildURL(`/api/files/${playlistKey}/${encodeURIComponent(filename)}${profileParam}`);
   }
 
   // ── Sync ──

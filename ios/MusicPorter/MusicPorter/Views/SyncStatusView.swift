@@ -8,7 +8,6 @@ struct SyncStatusView: View {
     @State private var destinations: [SyncDestination] = []
     @State private var usbKeyNames: Set<String> = []
     @State private var vm = OperationViewModel()
-    @State private var profile: String = ""
     @State private var isLoading = false
     @State private var error: String?
     @State private var showDeleteConfirm = false
@@ -295,15 +294,11 @@ struct SyncStatusView: View {
         do {
             async let k = appState.apiClient.getSyncStatus()
             async let d = appState.apiClient.getSyncDestinations()
-            async let st = appState.apiClient.getStatus()
             keys = try await k
             let destResponse = try? await d
             let allDests = destResponse?.destinations ?? []
             destinations = allDests
             usbKeyNames = Set(allDests.filter { $0.type == "usb" }.map { $0.name })
-            if let status = try? await st {
-                profile = status.profile
-            }
         } catch {
             self.error = error.localizedDescription
         }
@@ -370,20 +365,24 @@ struct SyncStatusView: View {
     // MARK: - Sync Actions
 
     private func syncKey(_ keyName: String) async {
+        let activeProfile = appState.activeProfile
         await vm.run(api: appState.apiClient) {
             try await appState.apiClient.syncToDestination(
-                sourceDir: "export/\(profile)",
-                destination: keyName
+                sourceDir: "library",
+                destination: keyName,
+                profile: activeProfile
             )
         }
         await load()
     }
 
     private func syncPlaylist(_ keyName: String, playlist: String) async {
+        let activeProfile = appState.activeProfile
         await vm.run(api: appState.apiClient) {
             try await appState.apiClient.syncToDestination(
-                sourceDir: "export/\(profile)/\(playlist)",
-                destination: keyName
+                sourceDir: "library/\(playlist)",
+                destination: keyName,
+                profile: activeProfile
             )
         }
         await load()

@@ -1,5 +1,5 @@
 /** Sync client version — bumped independently from the server. */
-export const VERSION = '1.0.0';
+export const VERSION = '1.1.0';
 
 /** Manifest filename stored in sync destination root. */
 export const MANIFEST_FILENAME = '.music-porter-sync.json';
@@ -51,3 +51,6 @@ export const USB_SYNC_KEY_PREFIX = 'usbkey-';
 
 /** Sync key prefix for generic client destinations. */
 export const CLIENT_SYNC_KEY_PREFIX = 'client-';
+
+/** Per-file download timeout (ms) — 5 minutes, generous for large files on slow USB. */
+export const FILE_DOWNLOAD_TIMEOUT_MS = 300_000;

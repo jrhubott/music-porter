@@ -275,8 +275,8 @@
     <h6 class="card-title">Profile Comparison</h6>
     <div class="table-responsive">
       <table class="table table-sm table-bordered mb-0">
-        <thead>
-          <tr><th>Property</th><th id="profileCol1">-</th><th id="profileCol2">-</th></tr>
+        <thead id="profileCompareHead">
+          <tr><th>Property</th></tr>
         </thead>
         <tbody id="profileCompare"></tbody>
       </table>
@@ -321,23 +321,39 @@ function loadSettings() {
         .then(r=>r.json()).then(() => { showToast('Profile updated to ' + selected, 'success'); loadSettings(); });
     });
 
-    // Profile comparison table
+    // Profile comparison table — dynamic columns for any number of profiles
     const names = Object.keys(profiles);
-    if (names.length >= 2) {
-      document.getElementById('profileCol1').textContent = names[0];
-      document.getElementById('profileCol2').textContent = names[1];
-      const p1 = profiles[names[0]], p2 = profiles[names[1]];
-      const rows = [
-        ['Quality', p1.quality_preset, p2.quality_preset],
-        ['Artwork', p1.artwork_size > 0 ? p1.artwork_size + 'px' : p1.artwork_size === 0 ? 'original' : 'stripped',
-                    p2.artwork_size > 0 ? p2.artwork_size + 'px' : p2.artwork_size === 0 ? 'original' : 'stripped'],
-        ['ID3 Version', 'v2.' + p1.id3_version, 'v2.' + p2.id3_version],
-        ['Dir Structure', p1.directory_structure, p2.directory_structure],
-        ['Filename Format', p1.filename_format, p2.filename_format],
+    if (names.length >= 1) {
+      // Build header row
+      const headRow = '<th>Property</th>' + names.map(n => `<th>${n}</th>`).join('');
+      document.getElementById('profileCompareHead').innerHTML = `<tr>${headRow}</tr>`;
+
+      // Field definitions: [label, key, formatter]
+      const fmtArtwork = v => v > 0 ? v + 'px' : v === 0 ? 'original' : 'stripped';
+      const fmtVersions = v => Array.isArray(v) ? v.join(', ') : String(v);
+      const fmtDir = v => v || '(flat)';
+      const fmtExtra = v => (v && Object.keys(v).length > 0) ? JSON.stringify(v) : 'none';
+      const fmtGenre = v => v || 'none';
+      const fmtStr = v => v || '';
+
+      const fields = [
+        ['ID3 Title', 'id3_title', fmtStr],
+        ['ID3 Artist', 'id3_artist', fmtStr],
+        ['ID3 Album', 'id3_album', fmtStr],
+        ['ID3 Genre', 'id3_genre', fmtGenre],
+        ['ID3 Extra', 'id3_extra', fmtExtra],
+        ['ID3 Versions', 'id3_versions', fmtVersions],
+        ['Artwork', 'artwork_size', fmtArtwork],
+        ['Filename', 'filename', fmtStr],
+        ['Directory', 'directory', fmtDir],
+        ['USB Dir', 'usb_dir', fmtDir],
       ];
-      document.getElementById('profileCompare').innerHTML = rows.map(r =>
-        `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`
-      ).join('');
+
+      const rows = fields.map(([label, key, fmt]) => {
+        const cells = names.map(n => `<td>${fmt(profiles[n][key])}</td>`).join('');
+        return `<tr><td>${label}</td>${cells}</tr>`;
+      });
+      document.getElementById('profileCompare').innerHTML = rows.join('');
     }
   });
 }
