@@ -63,7 +63,7 @@ export class PrefetchEngine {
     for (const key of options.playlists) {
       if (options.signal?.aborted) break;
       try {
-        const response = await this.client.getFiles(key, false, options.profile);
+        const response = await this.client.getFiles(key, false, options.profile, options.metadataCache);
         playlistFileList.push({ key, files: response.files });
         grandTotal += response.files.length;
       } catch (err) {
