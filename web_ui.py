@@ -633,7 +633,7 @@ class PipelineScheduler:
                 idx = config.playlists.index(pl) + 1
                 orchestrator.run_full_pipeline(
                     playlist=str(idx), auto=True,
-                    copy_to_usb=False, dry_run=False, verbose=False,
+                    dry_run=False, verbose=False,
                     quality_preset=quality_preset,
                 )
                 aggregate.add_playlist_result(orchestrator.stats)

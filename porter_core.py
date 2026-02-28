@@ -7145,6 +7145,9 @@ class PipelineStatistics:
         # Conversion stats
         self.conversion_stats = None
 
+        # Tagging stats
+        self.tagging_stats = None
+
         # Sync stats
         self.sync_success = False
         self.sync_destination = None
@@ -7167,6 +7170,7 @@ class PlaylistResult:
         self.failed_stage = None  # "download", "convert", "sync"
         self.download_stats = None  # DownloadStatistics
         self.conversion_stats = None  # ConversionStatistics
+        self.tagging_stats = None
         self.sync_success = False
         self.duration = 0.0
 
