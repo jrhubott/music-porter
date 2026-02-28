@@ -181,7 +181,12 @@
           progressEl.style.display = 'none';
           const line = document.createElement('div');
           line.className = 'log-line mt-2 fw-bold log-' + (msg.status === 'completed' ? 'OK' : 'ERROR');
-          line.textContent = '--- ' + msg.status.toUpperCase() + ' ---';
+          let statusText = '--- ' + msg.status.toUpperCase() + ' ---';
+          if (msg.error) {
+            statusText += '\n' + msg.error;
+            line.style.whiteSpace = 'pre-wrap';
+          }
+          line.textContent = statusText;
           panel.appendChild(line);
           panel.scrollTop = panel.scrollHeight;
           if (msg.status === 'completed') showToast('Operation completed', 'success');

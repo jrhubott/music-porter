@@ -242,7 +242,12 @@
     <button type="button" class="btn btn-outline-secondary btn-sm" id="btnBackfillMetadata">
       <i class="bi bi-arrow-repeat"></i> Backfill Metadata
     </button>
-    <div id="backfillLogPanel" class="log-panel mt-3 d-none" style="max-height:200px;overflow-y:auto;font-size:.8rem;background:#1a1a2e;padding:.5rem;border-radius:.25rem;"></div>
+    <hr class="my-3">
+    <p class="text-muted small mb-2">Verify DB records match filesystem. Removes orphan records and files, fixes stale paths, cleans up sync records.</p>
+    <button type="button" class="btn btn-outline-warning btn-sm" id="btnAuditLibrary">
+      <i class="bi bi-search"></i> Audit Library
+    </button>
+    <div id="maintenanceLogPanel" class="log-panel mt-3 d-none" style="max-height:200px;overflow-y:auto;font-size:.8rem;background:#1a1a2e;padding:.5rem;border-radius:.25rem;"></div>
   </div>
 </div>
 
@@ -599,13 +604,31 @@ setInterval(loadSchedulerStatus, 30000);
 // ── Library Maintenance ──
 document.getElementById('btnBackfillMetadata').addEventListener('click', function() {
   const btn = this;
+  const auditBtn = document.getElementById('btnAuditLibrary');
   btn.disabled = true;
-  const panel = document.getElementById('backfillLogPanel');
+  auditBtn.disabled = true;
+  const panel = document.getElementById('maintenanceLogPanel');
   panel.classList.remove('d-none');
   panel.innerHTML = '';
 
-  submitOperation('/api/library/backfill-metadata', {}, 'backfillLogPanel', function(msg) {
+  submitOperation('/api/library/backfill-metadata', {}, 'maintenanceLogPanel', function(msg) {
     btn.disabled = false;
+    auditBtn.disabled = false;
+  });
+});
+
+document.getElementById('btnAuditLibrary').addEventListener('click', function() {
+  const btn = this;
+  const backfillBtn = document.getElementById('btnBackfillMetadata');
+  btn.disabled = true;
+  backfillBtn.disabled = true;
+  const panel = document.getElementById('maintenanceLogPanel');
+  panel.classList.remove('d-none');
+  panel.innerHTML = '';
+
+  submitOperation('/api/library/audit', {}, 'maintenanceLogPanel', function(msg) {
+    btn.disabled = false;
+    backfillBtn.disabled = false;
   });
 });
 

@@ -2481,6 +2481,41 @@ class SyncTracker:
             sync_map.setdefault(r['file_path'], []).append(r['sync_key'])
         return sync_map
 
+    def get_all_sync_files(self):
+        """Return all sync_file records as a list of dicts.
+
+        Each dict has: id, sync_key, file_path, playlist, synced_at.
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT id, sync_key, file_path, playlist, synced_at "
+                "FROM sync_files"
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def delete_sync_files_by_ids(self, ids):
+        """Delete sync_file records by their IDs.
+
+        Returns count of deleted records.
+        """
+        if not ids:
+            return 0
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                placeholders = ','.join('?' * len(ids))
+                cursor = conn.execute(
+                    f"DELETE FROM sync_files WHERE id IN ({placeholders})",
+                    list(ids),
+                )
+                conn.commit()
+                return cursor.rowcount
+            finally:
+                conn.close()
+
 
 # Backwards compatibility alias
 USBSyncTracker = SyncTracker
@@ -2650,6 +2685,32 @@ class TrackDB:
                      composer, album_artist, bpm,
                      comment, compilation, grouping,
                      lyrics, copyright_text, now, uuid),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def repair_track(self, uuid, **kwargs):
+        """Update repair-related fields for a track by UUID.
+
+        Accepts keyword arguments for: file_size_bytes, cover_art_path,
+        cover_art_hash, source_m4a_path.  Only provided fields are updated.
+        """
+        allowed = {'file_size_bytes', 'cover_art_path', 'cover_art_hash',
+                    'source_m4a_path'}
+        updates = {k: v for k, v in kwargs.items() if k in allowed}
+        if not updates:
+            return
+        now = time.time()
+        set_clause = ', '.join(f"{col} = ?" for col in updates)
+        set_clause += ', updated_at = ?'
+        values = [*list(updates.values()), now, uuid]
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    f"UPDATE tracks SET {set_clause} WHERE uuid = ?",
+                    values,
                 )
                 conn.commit()
             finally:
@@ -3779,8 +3840,8 @@ def read_m4a_tags(input_file):
 
 
 
-def backfill_track_metadata(track_db, logger=None, display_handler=None,
-                            cancel_event=None):
+def backfill_track_metadata(track_db, project_root=None, logger=None,
+                            display_handler=None, cancel_event=None):
     """Re-read M4A tags for all tracks and update extended metadata columns.
 
     Queries all tracks with a non-null source_m4a_path, re-reads the M4A
@@ -3788,6 +3849,7 @@ def backfill_track_metadata(track_db, logger=None, display_handler=None,
     Skips tracks where the source file doesn't exist on disk.
     """
     logger = logger or Logger()
+    root = Path(project_root) if project_root else Path('.')
     tracks = track_db.get_all_tracks()
     total = len(tracks)
     updated = 0
@@ -3802,12 +3864,19 @@ def backfill_track_metadata(track_db, logger=None, display_handler=None,
             break
 
         source_path = track.get('source_m4a_path')
-        if not source_path or not Path(source_path).exists():
+        if not source_path:
+            skipped += 1
+            continue
+        # Resolve relative paths against project root
+        source_file = Path(source_path)
+        if not source_file.is_absolute():
+            source_file = root / source_file
+        if not source_file.exists():
             skipped += 1
             continue
 
         try:
-            m4a_tags = read_m4a_tags(source_path)
+            m4a_tags = read_m4a_tags(source_file)
             track_db.update_track_metadata(
                 uuid=track['uuid'],
                 title=m4a_tags['title'],
@@ -3840,6 +3909,195 @@ def backfill_track_metadata(track_db, logger=None, display_handler=None,
     logger.info(f"Backfill complete: {updated} updated, {skipped} skipped, {errors} errors")
     return {'updated': updated, 'skipped': skipped, 'errors': errors,
             'total': total}
+
+
+AUDIT_PROGRESS_INTERVAL = 10
+
+
+def audit_library(track_db, project_root=None, logger=None,
+                  display_handler=None, cancel_event=None,
+                  sync_tracker=None):
+    """Verify DB records match filesystem and clean up orphans.
+
+    Three phases:
+    1. Verify DB records against filesystem (remove stale records, fix fields)
+    2. Find orphan files on disk with no DB record (delete them)
+    3. Cross-check sync DB against track DB (remove stale sync records)
+
+    Returns a structured summary dict.
+    """
+    logger = logger or Logger()
+    root = Path(project_root) if project_root else Path('.')
+    audio_dir = root / get_audio_dir()
+    artwork_dir = root / get_artwork_dir()
+
+    stats = {
+        'total_tracks_checked': 0,
+        'records_removed': 0,
+        'orphan_files_removed': 0,
+        'orphan_artwork_removed': 0,
+        'cover_art_cleared': 0,
+        'source_cleared': 0,
+        'paths_normalized': 0,
+        'sizes_updated': 0,
+        'sync_records_removed': 0,
+        'details': [],
+    }
+
+    def _detail(msg):
+        stats['details'].append(msg)
+        logger.info(msg)
+
+    # ── Phase 1: Verify DB records against filesystem ─────────────
+    logger.info("=== Phase 1: Verifying DB records against filesystem ===")
+    tracks = track_db.get_all_tracks()
+    stats['total_tracks_checked'] = len(tracks)
+
+    # Collect artwork paths referenced by tracks (for Phase 2)
+    referenced_artwork = set()
+
+    for i, track in enumerate(tracks):
+        if cancel_event and cancel_event.is_set():
+            logger.warn("Audit cancelled by user")
+            return stats
+
+        uuid = track['uuid']
+        file_path = track.get('file_path', '')
+        mp3_path = root / file_path if file_path else None
+
+        # Check MP3 exists
+        if not mp3_path or not mp3_path.exists():
+            track_db.delete_track(uuid)
+            _detail(f"Removed DB record: uuid={uuid} "
+                    f"(MP3 missing: {file_path})")
+            stats['records_removed'] += 1
+            continue
+
+        # Check cover art exists
+        cover_art = track.get('cover_art_path')
+        if cover_art:
+            art_path = root / cover_art
+            if art_path.exists():
+                referenced_artwork.add(cover_art)
+            else:
+                track_db.repair_track(uuid,
+                                      cover_art_path=None,
+                                      cover_art_hash=None)
+                _detail(f"Cleared stale cover_art_path for {uuid}")
+                stats['cover_art_cleared'] += 1
+
+        # Check source M4A exists
+        source_m4a = track.get('source_m4a_path')
+        if source_m4a:
+            source_path = Path(source_m4a)
+            if source_path.is_absolute():
+                # Normalize absolute path to relative
+                try:
+                    rel = source_path.relative_to(root.resolve())
+                    track_db.repair_track(uuid, source_m4a_path=str(rel))
+                    _detail(f"Normalized path for track {uuid}")
+                    stats['paths_normalized'] += 1
+                    source_path = root / rel
+                except ValueError:
+                    # Can't make relative — clear it
+                    track_db.repair_track(uuid, source_m4a_path=None)
+                    _detail(f"Cleared unreachable source_m4a_path for {uuid}")
+                    stats['source_cleared'] += 1
+                    source_path = None
+            else:
+                source_path = root / source_path
+
+            if source_path and not source_path.exists():
+                track_db.repair_track(uuid, source_m4a_path=None)
+                _detail(f"Cleared missing source_m4a_path for {uuid}")
+                stats['source_cleared'] += 1
+
+        # Fix file_size_bytes if missing or zero
+        file_size = track.get('file_size_bytes')
+        if (not file_size or file_size == 0) and mp3_path.exists():
+            actual_size = mp3_path.stat().st_size
+            track_db.repair_track(uuid, file_size_bytes=actual_size)
+            _detail(f"Updated file_size_bytes for {uuid}: {actual_size}")
+            stats['sizes_updated'] += 1
+
+        if display_handler and (i + 1) % AUDIT_PROGRESS_INTERVAL == 0:
+            display_handler.show_progress(
+                i + 1, len(tracks),
+                f"Phase 1: {i + 1}/{len(tracks)} tracks")
+
+    # ── Phase 2: Find orphan files on disk ────────────────────────
+    if cancel_event and cancel_event.is_set():
+        logger.warn("Audit cancelled by user")
+        return stats
+
+    logger.info("=== Phase 2: Finding orphan files on disk ===")
+
+    # Orphan MP3s
+    if audio_dir.exists():
+        for mp3_file in sorted(audio_dir.glob('*.mp3')):
+            if cancel_event and cancel_event.is_set():
+                logger.warn("Audit cancelled by user")
+                return stats
+            rel_path = str(Path(get_audio_dir()) / mp3_file.name)
+            if not track_db.get_track_by_path(rel_path):
+                mp3_file.unlink()
+                _detail(f"Deleted orphan file: {rel_path}")
+                stats['orphan_files_removed'] += 1
+
+    # Orphan artwork
+    if artwork_dir.exists():
+        for art_file in sorted(artwork_dir.iterdir()):
+            if cancel_event and cancel_event.is_set():
+                logger.warn("Audit cancelled by user")
+                return stats
+            if not art_file.is_file():
+                continue
+            rel_art = str(Path(get_artwork_dir()) / art_file.name)
+            if rel_art not in referenced_artwork:
+                art_file.unlink()
+                _detail(f"Deleted orphan artwork: {rel_art}")
+                stats['orphan_artwork_removed'] += 1
+
+    # ── Phase 3: Cross-check sync DB against track DB ─────────────
+    if sync_tracker:
+        if cancel_event and cancel_event.is_set():
+            logger.warn("Audit cancelled by user")
+            return stats
+
+        logger.info("=== Phase 3: Verifying sync records against track DB ===")
+        all_sync_files = sync_tracker.get_all_sync_files()
+        # Get all playlists that still have tracks
+        db_playlists = set(track_db.get_all_playlists())
+        stale_ids = []
+
+        for sf in all_sync_files:
+            if sf['playlist'] not in db_playlists:
+                stale_ids.append(sf['id'])
+                _detail(
+                    f"Stale sync record: key={sf['sync_key']}, "
+                    f"playlist={sf['playlist']}, file={sf['file_path']} "
+                    f"(playlist no longer in library)")
+
+        if stale_ids:
+            removed = sync_tracker.delete_sync_files_by_ids(stale_ids)
+            stats['sync_records_removed'] = removed
+            logger.info(f"Removed {removed} stale sync records")
+    else:
+        logger.info("=== Phase 3: Skipped (no sync tracker) ===")
+
+    # ── Summary ───────────────────────────────────────────────────
+    logger.info("=== Audit Summary ===")
+    logger.info(f"  Tracks checked:        {stats['total_tracks_checked']}")
+    logger.info(f"  DB records removed:    {stats['records_removed']}")
+    logger.info(f"  Orphan files removed:  {stats['orphan_files_removed']}")
+    logger.info(f"  Orphan artwork removed:{stats['orphan_artwork_removed']}")
+    logger.info(f"  Cover art cleared:     {stats['cover_art_cleared']}")
+    logger.info(f"  Source paths cleared:  {stats['source_cleared']}")
+    logger.info(f"  Paths normalized:      {stats['paths_normalized']}")
+    logger.info(f"  Sizes updated:         {stats['sizes_updated']}")
+    logger.info(f"  Sync records removed:  {stats['sync_records_removed']}")
+
+    return stats
 
 
 def read_m4a_cover_art(input_file):
@@ -4556,6 +4814,13 @@ class Converter:
         display_name = input_file.relative_to(input_path)
         count = self.stats.next_progress()
 
+        # Normalize source_m4a_path to always be relative
+        # (e.g. library/source/gamdl/<key>/Artist/Album/Track.m4a)
+        # regardless of whether input_path is absolute or relative
+        rel_source = str(
+            Path(get_source_dir(playlist_key)) / input_file.relative_to(input_path)
+        )
+
         try:
             # Read M4A tags
             m4a_tags = read_m4a_tags(input_file)
@@ -4568,7 +4833,7 @@ class Converter:
             existing_track = None
             if self.track_db:
                 existing_track = self.track_db.get_track_by_source_m4a(
-                    str(input_file))
+                    rel_source)
 
             if existing_track and not force:
                 self.stats.increment('skipped')
@@ -4723,7 +4988,7 @@ class Converter:
                     cover_art_hash=cover_art_hash,
                     duration_s=duration_s,
                     file_size_bytes=file_size_bytes,
-                    source_m4a_path=str(input_file),
+                    source_m4a_path=rel_source,
                     genre=m4a_tags.get('genre') or None,
                     track_number=m4a_tags.get('track_number'),
                     track_total=m4a_tags.get('track_total'),
@@ -6952,7 +7217,8 @@ class PipelineOrchestrator:
                  prompt_handler=None, display_handler=None,
                  cancel_event=None, audit_logger=None, audit_source='cli',
                  sync_tracker=None, track_db=None,
-                 eq_config_manager=None, eq_config_override=None):
+                 eq_config_manager=None, eq_config_override=None,
+                 project_root=None):
         self.logger = logger or Logger()
         self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
         self.display_handler = display_handler or NullDisplayHandler()
@@ -6969,6 +7235,7 @@ class PipelineOrchestrator:
         self.quality_preset = quality_preset
         self.cookie_path = cookie_path
         self.workers = workers
+        self.project_root = Path(project_root) if project_root else Path('.')
 
     def run_full_pipeline(self, playlist=None, url=None, auto=False,
                          sync_destination=None,
@@ -7031,8 +7298,8 @@ class PipelineOrchestrator:
 
         # ── Stage 2: Convert M4A → clean library MP3 ─────────────────
         self.logger.info("\n=== STAGE 2: Convert M4A → MP3 ===")
-        music_dir = get_source_dir(self.stats.playlist_key)
-        library_dir = get_audio_dir()
+        music_dir = str(self.project_root / get_source_dir(self.stats.playlist_key))
+        library_dir = str(self.project_root / get_audio_dir())
 
         preset = (quality_preset if quality_preset is not None
                   else self.quality_preset)

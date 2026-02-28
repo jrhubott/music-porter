@@ -322,6 +322,42 @@ def api_library_stats():
     })
 
 
+@api_bp.route('/api/library-stats/<playlist_key>/unconverted')
+def api_library_unconverted(playlist_key):
+    """List M4A source files that have no matching TrackDB record."""
+    ctx = _ctx()
+
+    if '/' in playlist_key or '..' in playlist_key:
+        return jsonify({'error': 'Invalid playlist key'}), 400
+
+    source_dir = ctx.project_root / mp.get_source_dir(playlist_key)
+    if not source_dir.exists():
+        return jsonify({'files': []})
+
+    unconverted = []
+    for m4a_file in sorted(source_dir.rglob('*.m4a')):
+        if m4a_file.name.startswith('._'):
+            continue
+        rel_source = str(
+            Path(mp.get_source_dir(playlist_key))
+            / m4a_file.relative_to(source_dir)
+        )
+        existing = ctx.track_db.get_track_by_source_m4a(rel_source)
+        if existing:
+            continue
+        # Extract artist/title from gamdl directory structure
+        rel_parts = m4a_file.relative_to(source_dir).parts
+        artist = rel_parts[0] if len(rel_parts) > 1 else 'Unknown'
+        title = m4a_file.stem
+        unconverted.append({
+            'artist': artist,
+            'title': title,
+            'expected_mp3': f"{artist} - {title}.mp3",
+        })
+
+    return jsonify({'files': unconverted})
+
+
 @api_bp.route('/api/convert/batch', methods=['POST'])
 def api_convert_batch():
     """Convert multiple playlists in a single background task."""
@@ -837,6 +873,7 @@ def api_pipeline_run():
             track_db=ctx.track_db,
             eq_config_manager=eq_mgr,
             eq_config_override=eq_cli_override,
+            project_root=ctx.project_root,
         )
 
         # Resolve sync destination by name
@@ -968,7 +1005,8 @@ def api_library_backfill_metadata():
         display = ctx.make_display_handler(task_id)
         task = ctx.task_manager.get(task_id)
         result = mp.backfill_track_metadata(
-            ctx.track_db, logger=logger, display_handler=display,
+            ctx.track_db, project_root=ctx.project_root,
+            logger=logger, display_handler=display,
             cancel_event=task.cancel_event)
         if ctx.audit_logger:
             ctx.audit_logger.log(
@@ -977,6 +1015,37 @@ def api_library_backfill_metadata():
         return result
 
     task_id = ctx.task_manager.submit('backfill_metadata', desc, _run,
+                                      source=source)
+    if task_id is None:
+        return jsonify({'error': 'Another operation is already running'}), 409
+    return jsonify({'task_id': task_id})
+
+
+@api_bp.route('/api/library/audit', methods=['POST'])
+def api_library_audit():
+    """Verify DB records match filesystem and clean up orphans."""
+    ctx = _ctx()
+    desc = 'Library audit: verify DB/filesystem consistency'
+    source = ctx.detect_source()
+
+    def _run(task_id):
+        logger = ctx.make_logger(task_id)
+        display = ctx.make_display_handler(task_id)
+        task = ctx.task_manager.get(task_id)
+        result = mp.audit_library(
+            ctx.track_db, project_root=ctx.project_root,
+            logger=logger, display_handler=display,
+            cancel_event=task.cancel_event,
+            sync_tracker=ctx.sync_tracker)
+        if ctx.audit_logger:
+            # Don't log the full details list — just the summary counts
+            summary = {k: v for k, v in result.items() if k != 'details'}
+            ctx.audit_logger.log(
+                'library_audit', desc, 'completed',
+                params=summary, source=source)
+        return result
+
+    task_id = ctx.task_manager.submit('library_audit', desc, _run,
                                       source=source)
     if task_id is None:
         return jsonify({'error': 'Another operation is already running'}), 409
