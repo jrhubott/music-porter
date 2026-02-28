@@ -250,12 +250,6 @@ struct LibraryView: View {
             }
             .buttonStyle(.borderless)
 
-            Toggle("Also save to device", isOn: Binding(
-                get: { appState.usbExport.cacheToDevice },
-                set: { appState.usbExport.cacheToDevice = $0 }
-            ))
-            .font(.subheadline)
-
             Text("Files are organized into playlist folders on USB.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
@@ -337,18 +331,6 @@ struct LibraryView: View {
                     ProgressView(value: appState.usbExport.exportProgress)
                         .tint(.orange)
                     HStack {
-                        if let source = appState.usbExport.currentFileSource {
-                            switch source {
-                            case .local:
-                                Image(systemName: "iphone")
-                                    .imageScale(.small)
-                                    .foregroundStyle(.secondary)
-                            case .server:
-                                Image(systemName: "cloud")
-                                    .imageScale(.small)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
                         Text("Exporting...")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -688,40 +670,12 @@ struct LibraryView: View {
             playlistKeys = [name]
         }
 
-        var groups: [PlaylistExportGroup] = []
-
         for key in playlistKeys {
             let localFiles = appState.downloadManager.localFiles(playlist: key)
-            let localNames = Set(localFiles.map(\.lastPathComponent))
-
-            // Build local entries
-            var entries = localFiles.map { url in
-                ExportManifestEntry(playlist: key, filename: url.lastPathComponent, source: .local(url))
-            }
-
-            // Fetch server file list for files not available locally
-            if let serverFiles = try? await appState.apiClient.getFiles(playlist: key) {
-                for track in serverFiles.files where !localNames.contains(track.filename) {
-                    entries.append(ExportManifestEntry(
-                        playlist: key, filename: track.filename,
-                        source: .server(playlist: key, filename: track.filename)))
-                }
-            }
-
-            if !entries.isEmpty {
-                groups.append(PlaylistExportGroup(playlist: key, entries: entries))
-            }
+            guard !localFiles.isEmpty else { continue }
+            _ = await appState.usbExport.exportFiles(
+                urls: localFiles, to: targetDir, subdirectory: key)
         }
-
-        guard !groups.isEmpty else {
-            downloadError = "No files to export"
-            return
-        }
-
-        _ = await appState.usbExport.exportFiles(
-            groups: groups, to: targetDir,
-            cacheToDevice: appState.usbExport.cacheToDevice,
-            profile: appState.activeProfile)
     }
 
     private func deleteLocal(_ name: String) {

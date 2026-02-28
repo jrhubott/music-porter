@@ -23,6 +23,10 @@ final class APIClient {
         return URLSession(configuration: config)
     }()
 
+    // In-memory ETag cache for playlists list (matching sync client pattern)
+    private var playlistsETag: String?
+    private var playlistsCache: [Playlist]?
+
     // MARK: - Connection
 
     func configure(server: ServerConnection, apiKey: String) {
@@ -50,6 +54,8 @@ final class APIClient {
         isConnected = false
         activeBaseURL = nil
         connectionType = nil
+        playlistsETag = nil
+        playlistsCache = nil
         KeychainService.delete()
     }
 
@@ -78,7 +84,16 @@ final class APIClient {
     // MARK: - Playlists
 
     func getPlaylists() async throws -> [Playlist] {
-        try await get("/api/playlists")
+        let result: ETagResult<[Playlist]> = try await getWithETag("/api/playlists", etag: playlistsETag)
+        switch result {
+        case .fresh(let playlists, let etag):
+            playlistsETag = etag
+            playlistsCache = playlists
+            return playlists
+        case .notModified:
+            if let cached = playlistsCache { return cached }
+            return try await get("/api/playlists")
+        }
     }
 
     func addPlaylist(key: String, url: String, name: String) async throws {
@@ -122,6 +137,57 @@ final class APIClient {
 
     func getFiles(playlist: String) async throws -> FileListResponse {
         try await get("/api/files/\(playlist)")
+    }
+
+    /// Fetch a playlist's file list with ETag support via MetadataCache.
+    /// Returns cached data on 304, stores fresh data with its ETag.
+    func getFilesWithETag(
+        playlist: String,
+        profile: String?,
+        metadataCache: MetadataCache
+    ) async throws -> FileListResponse {
+        let cachedETag = await metadataCache.getETag(playlist)
+        var path = "/api/files/\(playlist)"
+        if let profile, !profile.isEmpty { path += "?profile=\(profile)" }
+
+        let result: ETagResult<FileListResponse> = try await getWithETag(path, etag: cachedETag)
+        switch result {
+        case .fresh(let response, let etag):
+            let cachedFiles = response.files.map { CachedFileInfo(from: $0) }
+            await metadataCache.storePlaylistFiles(
+                playlist,
+                files: cachedFiles,
+                etag: etag,
+                name: response.playlist
+            )
+            return response
+        case .notModified:
+            if let cached = await metadataCache.getPlaylistFiles(playlist) {
+                let tracks = cached.files.map { $0.toTrack() }
+                return FileListResponse(
+                    playlist: cached.playlistName ?? playlist,
+                    fileCount: cached.fileCount,
+                    files: tracks
+                )
+            }
+            // Fallback if metadata cache is empty despite 304
+            return try await get(path)
+        }
+    }
+
+    /// Download raw file data for cache storage.
+    func downloadFileData(
+        playlist: String,
+        filename: String,
+        profile: String? = nil
+    ) async throws -> Data {
+        guard let url = fileDownloadURL(playlist: playlist, filename: filename, profile: profile) else {
+            throw APIError.notConfigured
+        }
+        let request = authenticatedRequest(for: url)
+        let (data, response) = try await session.data(for: request)
+        try checkResponse(response, data: data)
+        return data
     }
 
     func fileDownloadURL(playlist: String, filename: String, profile: String? = nil) -> URL? {
@@ -336,6 +402,26 @@ final class APIClient {
         let (data, response) = try await session.data(for: request)
         try checkResponse(response, data: data)
         return try decodeResponse(data, response: response)
+    }
+
+    /// GET with If-None-Match header for ETag-based conditional requests.
+    private func getWithETag<T: Decodable>(_ path: String, etag: String?) async throws -> ETagResult<T> {
+        var request = try makeRequest(path, method: "GET")
+        if let etag {
+            request.setValue(etag, forHTTPHeaderField: "If-None-Match")
+        }
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
+        }
+        let httpNotModifiedStatus = 304
+        if http.statusCode == httpNotModifiedStatus {
+            return .notModified
+        }
+        try checkResponse(response, data: data)
+        let decoded: T = try decodeResponse(data, response: response)
+        let responseETag = http.value(forHTTPHeaderField: "ETag")
+        return .fresh(decoded, etag: responseETag)
     }
 
     private func post<T: Decodable, B: Encodable>(_ path: String, body: B) async throws -> T {
