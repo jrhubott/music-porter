@@ -9,6 +9,17 @@ import {
 } from '@mporter/core';
 import type { BackgroundPrefetchStatus, PrefetchResult, SyncProgress } from '@mporter/core';
 
+const BYTES_PER_KB = 1024;
+const BYTES_PER_MB = 1024 * 1024;
+const BYTES_PER_GB = 1024 * 1024 * 1024;
+
+function formatBytes(bytes: number): string {
+  if (bytes >= BYTES_PER_GB) return `${(bytes / BYTES_PER_GB).toFixed(1)} GB`;
+  if (bytes >= BYTES_PER_MB) return `${(bytes / BYTES_PER_MB).toFixed(1)} MB`;
+  if (bytes >= BYTES_PER_KB) return `${(bytes / BYTES_PER_KB).toFixed(1)} KB`;
+  return `${bytes} B`;
+}
+
 /**
  * Background prefetch service — runs on a timer in the Electron main process.
  * Automatically discovers new playlists, auto-pins them (when enabled), and
@@ -99,11 +110,13 @@ export class BackgroundPrefetchService {
       // Step 2: Prefetch files
       const cacheManager = new CacheManager(getConfigDir(), profile);
       const engine = new PrefetchEngine(this.apiClient, cacheManager);
+      const pinnedSet = new Set(pinned);
 
       const result = await engine.prefetch({
         playlists: pinned,
         profile,
         maxCacheBytes: this.configStore.preferences.maxCacheBytes,
+        pinnedPlaylists: pinnedSet,
         onProgress: (progress: SyncProgress) => {
           this.updateStatus({
             running: true,
@@ -113,8 +126,8 @@ export class BackgroundPrefetchService {
           // Also forward to renderer for real-time display
           this.sendToRenderer('cache:prefetchProgress', progress);
         },
-        onLog: () => {
-          // Suppress background prefetch logs
+        onLog: (_level, message) => {
+          console.log('[prefetch] %s', message);
         },
       });
 
@@ -122,9 +135,23 @@ export class BackgroundPrefetchService {
       this.status.lastResult = result;
       this.running = false;
       this.updateStatus({ running: false, lastRunAt: this.status.lastRunAt, lastResult: result });
+
+      const totalSize = cacheManager.getTotalSize();
+      const maxBytes = this.configStore.preferences.maxCacheBytes;
       console.log(
-        '[prefetch] Complete — downloaded: %d, skipped: %d, failed: %d (%dms)',
-        result.downloaded, result.skipped, result.failed, result.durationMs,
+        '[prefetch] Complete — downloaded: %d, skipped: %d, capped: %d, failed: %d (%dms)',
+        result.downloaded, result.skipped, result.capacityCapped, result.failed, result.durationMs,
+      );
+      const cachedPlaylists = cacheManager.getCachedPlaylists();
+      let totalFiles = 0;
+      for (const key of cachedPlaylists) {
+        totalFiles += cacheManager.getCachedFileInfos(key).length;
+      }
+      console.log(
+        '[prefetch] Cache: %s%s (%d files)',
+        formatBytes(totalSize),
+        maxBytes > 0 ? ` / ${formatBytes(maxBytes)}` : ' (unlimited)',
+        totalFiles,
       );
       return result;
     } catch (err) {

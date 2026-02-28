@@ -98,6 +98,13 @@ body {
   background: rgba(13, 110, 253, 0.1);
 }
 
+/* Sidebar prefetch indicator */
+.sidebar-prefetch {
+  padding: 0.4rem 1rem;
+  border-top: 1px solid #343a40;
+  font-size: 0.75rem;
+}
+
 /* Progress */
 .sync-progress-bar {
   height: 6px;

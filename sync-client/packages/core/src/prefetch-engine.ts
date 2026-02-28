@@ -11,8 +11,10 @@ export interface PrefetchOptions {
   profile?: string;
   /** Number of parallel downloads. */
   concurrency?: number;
-  /** Maximum cache size in bytes — runs eviction at end. */
+  /** Maximum cache size in bytes — runs eviction at end. 0 = unlimited. */
   maxCacheBytes?: number;
+  /** Set of pinned playlist keys — used for eviction priority (unpinned evicted first). */
+  pinnedPlaylists?: Set<string>;
   /** AbortSignal for cancellation. */
   signal?: AbortSignal;
   /** Progress callback. */
@@ -81,6 +83,15 @@ export class PrefetchEngine {
       }
     }
 
+    const hasLimit = options.maxCacheBytes !== undefined && options.maxCacheBytes > 0;
+    const maxCacheBytes = options.maxCacheBytes ?? 0;
+
+    if (hasLimit) {
+      const currentSize = this.cacheManager.getTotalSize();
+      const available = maxCacheBytes - currentSize;
+      log('info', `Cache: ${formatBytes(currentSize)} used / ${formatBytes(maxCacheBytes)} limit (${formatBytes(Math.max(0, available))} available)`);
+    }
+
     log('info', `Prefetch: ${toDownload.length} to download, ${totalSkipped} already cached`);
 
     onProgress({
@@ -92,12 +103,15 @@ export class PrefetchEngine {
       failed: 0,
     });
 
-    // Download with concurrency limit
+    // Download with concurrency limit — stop when cache is full
     let downloaded = 0;
     let failed = 0;
+    let capacityCapped = 0;
     let processed = totalSkipped;
     let aborted = false;
+    let capacityReached = false;
     let index = 0;
+    const downloadedUuids = new Set<string>();
 
     const worker = async () => {
       while (index < toDownload.length) {
@@ -105,11 +119,44 @@ export class PrefetchEngine {
           aborted = true;
           return;
         }
+        if (capacityReached) {
+          return;
+        }
         const item = toDownload[index++]!;
         const success = await this.downloadToCache(item.key, item.file, options.profile, options.signal, log);
         processed++;
         if (success) {
           downloaded++;
+          downloadedUuids.add(item.file.uuid);
+          // Check if cache is now full — try eviction to make room
+          if (hasLimit && this.cacheManager.getTotalSize() >= maxCacheBytes) {
+            // Step 1: evict unpinned files first (cheapest to lose)
+            if (options.pinnedPlaylists && options.pinnedPlaylists.size > 0) {
+              let overage = this.cacheManager.getTotalSize() - maxCacheBytes;
+              const freed = this.cacheManager.evictUnpinnedBytes(overage, options.pinnedPlaylists);
+              if (freed > 0) {
+                log('info', `Evicted ${formatBytes(freed)} of unpinned cache to make room`);
+              }
+            }
+            // Step 2: if still over, evict oldest files (skip this session's downloads)
+            if (this.cacheManager.getTotalSize() >= maxCacheBytes) {
+              const overage = this.cacheManager.getTotalSize() - maxCacheBytes;
+              const freed = this.cacheManager.evictOldestBytes(overage, downloadedUuids);
+              if (freed > 0) {
+                log('info', `Evicted ${formatBytes(freed)} of oldest cache to make room`);
+              }
+            }
+            // After all eviction attempts, check if still over limit
+            if (this.cacheManager.getTotalSize() >= maxCacheBytes) {
+              capacityReached = true;
+              const remaining = toDownload.length - index;
+              if (remaining > 0) {
+                capacityCapped = remaining;
+                processed += remaining;
+                log('info', `Cache limit reached — skipping ${remaining} remaining files`);
+              }
+            }
+          }
         } else {
           failed++;
         }
@@ -132,11 +179,12 @@ export class PrefetchEngine {
     );
     await Promise.all(workers);
 
-    // Evict if over limit
-    if (options.maxCacheBytes !== undefined) {
-      const evicted = this.cacheManager.evictToLimit(options.maxCacheBytes);
-      if (evicted > 0) {
-        log('info', `Evicted ${formatBytes(evicted)} to stay within cache limit`);
+    // Evict if over limit (skip if all downloads were capacity-capped — nothing to evict)
+    let evictedBytes = 0;
+    if (hasLimit && !capacityReached) {
+      evictedBytes = this.cacheManager.evictToLimit(maxCacheBytes, options.pinnedPlaylists);
+      if (evictedBytes > 0) {
+        log('info', `Evicted ${formatBytes(evictedBytes)} to stay within cache limit`);
       }
     }
 
@@ -153,6 +201,7 @@ export class PrefetchEngine {
       downloaded,
       skipped: totalSkipped,
       failed,
+      capacityCapped,
       aborted,
       durationMs: Date.now() - startTime,
     };

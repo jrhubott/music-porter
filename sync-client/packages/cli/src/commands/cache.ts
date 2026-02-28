@@ -180,6 +180,7 @@ export function registerCacheCommand(program: Command): void {
           profile: profile || undefined,
           concurrency,
           maxCacheBytes: configStore.preferences.maxCacheBytes,
+          pinnedPlaylists: new Set(pinned),
           signal: abortController.signal,
           onProgress: (progress: SyncProgress) => {
             if (!barStarted && progress.total > 0) {
@@ -216,6 +217,9 @@ export function registerCacheCommand(program: Command): void {
 
         printField('Downloaded', String(result.downloaded));
         printField('Already cached', String(result.skipped));
+        if (result.capacityCapped > 0) {
+          printField('Capped (limit)', chalk.yellow(String(result.capacityCapped)));
+        }
         if (result.failed > 0) {
           printField('Failed', chalk.red(String(result.failed)));
         }

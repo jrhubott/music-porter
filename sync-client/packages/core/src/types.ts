@@ -238,6 +238,7 @@ export interface PrefetchResult {
   downloaded: number;
   skipped: number;
   failed: number;
+  capacityCapped: number;
   aborted: boolean;
   durationMs: number;
 }

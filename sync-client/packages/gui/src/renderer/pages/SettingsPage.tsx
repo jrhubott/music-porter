@@ -54,7 +54,7 @@ export function SettingsPage() {
     const cleanup = ipc.onBackgroundPrefetchStatus((status: BackgroundPrefetchStatus) => {
       setBgPrefetchStatus(status);
     });
-    return cleanup;
+    return () => { cleanup(); };
   }, []);
 
   async function loadSettings() {
@@ -546,6 +546,21 @@ export function SettingsPage() {
                         style={{ width: `${ps.total > 0 ? (ps.cached / ps.total) * 100 : 0}%` }}
                       />
                     </div>
+                  )}
+                  {ps.cached > 0 && (
+                    <button
+                      className="btn btn-sm btn-outline-danger p-0 d-flex align-items-center justify-content-center"
+                      style={{ width: 20, height: 20, fontSize: '0.65em' }}
+                      title={`Clear cache for ${ps.playlistKey}`}
+                      onClick={async () => {
+                        await ipc.cacheClearPlaylist(ps.playlistKey);
+                        const status = await ipc.cacheGetStatus();
+                        setCacheTotalSize(status.totalSize);
+                        setCachePlaylistStatuses(status.playlists);
+                      }}
+                    >
+                      <i className="bi bi-trash" />
+                    </button>
                   )}
                 </div>
               ))}

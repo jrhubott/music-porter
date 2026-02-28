@@ -370,11 +370,11 @@ export function registerIPCHandlers(): void {
 
   ipcMain.handle('cache:prefetch', async (event): Promise<PrefetchResult> => {
     const cm = getCacheManager();
-    if (!cm) return { downloaded: 0, skipped: 0, failed: 0, aborted: true, durationMs: 0 };
+    if (!cm) return { downloaded: 0, skipped: 0, failed: 0, capacityCapped: 0, aborted: true, durationMs: 0 };
 
     const pinned = configStore.preferences.pinnedPlaylists;
     if (pinned.length === 0) {
-      return { downloaded: 0, skipped: 0, failed: 0, aborted: false, durationMs: 0 };
+      return { downloaded: 0, skipped: 0, failed: 0, capacityCapped: 0, aborted: false, durationMs: 0 };
     }
 
     activePrefetchAbort = new AbortController();
@@ -384,6 +384,7 @@ export function registerIPCHandlers(): void {
       playlists: pinned,
       profile: configStore.profile || undefined,
       maxCacheBytes: configStore.preferences.maxCacheBytes,
+      pinnedPlaylists: new Set(pinned),
       signal: activePrefetchAbort.signal,
       onProgress: (progress: SyncProgress) => {
         event.sender.send('cache:prefetchProgress', progress);
@@ -411,8 +412,13 @@ export function registerIPCHandlers(): void {
 
   ipcMain.handle('cache:setMaxSize', (_event, maxBytes: number): void => {
     configStore.updatePreferences({ maxCacheBytes: maxBytes });
-    const cm = getCacheManager();
-    if (cm) cm.evictToLimit(maxBytes);
+    if (maxBytes > 0) {
+      const cm = getCacheManager();
+      if (cm) {
+        const pinnedSet = new Set(configStore.preferences.pinnedPlaylists);
+        cm.evictToLimit(maxBytes, pinnedSet);
+      }
+    }
   });
 
   // ── Auto-Pin ──
@@ -424,18 +430,14 @@ export function registerIPCHandlers(): void {
   ipcMain.handle('cache:setAutoPinNewPlaylists', async (_event, enabled: boolean): Promise<string[]> => {
     configStore.setAutoPinNewPlaylists(enabled);
     if (enabled) {
-      // Immediately sync pins with server playlists
+      // Exclude all currently-unpinned playlists so they won't be auto-pinned.
+      // Only truly NEW playlists (appearing after this point) will be auto-pinned.
       try {
         const playlists = await apiClient.getPlaylists();
         const serverKeys = playlists.map((p) => p.key);
-        const newlyPinned = configStore.syncPinsWithServer(serverKeys);
-        // Trigger a background prefetch cycle
-        if (bgPrefetchService && newlyPinned.length > 0) {
-          bgPrefetchService.runOnce();
-        }
-        return newlyPinned;
+        configStore.excludeUnpinnedPlaylists(serverKeys);
       } catch {
-        return [];
+        // Non-critical — exclusion list may be incomplete
       }
     }
     return [];

@@ -256,14 +256,20 @@ export class CacheManager {
     return removed;
   }
 
-  /** Evict oldest server files until total size is under maxBytes. Returns bytes freed. */
-  evictToLimit(maxBytes: number): number {
+  /** Evict oldest server files until total size is under maxBytes. Returns bytes freed.
+   *  When pinnedPlaylists is provided, unpinned playlists are evicted first. */
+  evictToLimit(maxBytes: number, pinnedPlaylists?: Set<string>): number {
     let totalSize = this.getTotalSize();
     if (totalSize <= maxBytes) return 0;
 
-    // Sort by server_created_at ascending (oldest server files evicted first).
+    // Sort: unpinned before pinned (when set provided), then oldest first.
     // Fall back to cached_at for entries without server timestamps (backward compat).
     const sorted = Object.values(this.index.entries).sort((a, b) => {
+      if (pinnedPlaylists) {
+        const aPinned = pinnedPlaylists.has(a.playlist) ? 1 : 0;
+        const bPinned = pinnedPlaylists.has(b.playlist) ? 1 : 0;
+        if (aPinned !== bPinned) return aPinned - bPinned;
+      }
       const aTime = a.server_created_at
         ? new Date(a.server_created_at).getTime()
         : new Date(a.cached_at).getTime();
@@ -291,6 +297,95 @@ export class CacheManager {
 
     this.saveIndex();
     this.removeEmptyDirs();
+    return freed;
+  }
+
+  /**
+   * Evict only unpinned files until targetBytes have been freed (or no unpinned
+   * files remain). Returns bytes actually freed. Used mid-prefetch to make room
+   * for pinned content without waiting for the post-download eviction pass.
+   */
+  evictUnpinnedBytes(targetBytes: number, pinnedPlaylists: Set<string>): number {
+    // Only consider entries from unpinned playlists
+    const unpinned = Object.values(this.index.entries).filter(
+      (e) => !pinnedPlaylists.has(e.playlist),
+    );
+    if (unpinned.length === 0) return 0;
+
+    // Sort oldest first (same timestamp logic as evictToLimit)
+    unpinned.sort((a, b) => {
+      const aTime = a.server_created_at
+        ? new Date(a.server_created_at).getTime()
+        : new Date(a.cached_at).getTime();
+      const bTime = b.server_created_at
+        ? new Date(b.server_created_at).getTime()
+        : new Date(b.cached_at).getTime();
+      return aTime - bTime;
+    });
+
+    let freed = 0;
+    for (const entry of unpinned) {
+      if (freed >= targetBytes) break;
+      const filePath = this.entryPath(entry);
+      try {
+        if (existsSync(filePath)) {
+          unlinkSync(filePath);
+          freed += entry.size;
+        }
+      } catch {
+        // Best-effort eviction
+      }
+      delete this.index.entries[entry.uuid];
+    }
+
+    if (freed > 0) {
+      this.saveIndex();
+      this.removeEmptyDirs();
+    }
+    return freed;
+  }
+
+  /**
+   * Evict oldest files regardless of pin status until targetBytes have been
+   * freed. Skips protectedUuids (files downloaded this session) to prevent a
+   * download-evict-redownload cycle. Returns bytes actually freed.
+   */
+  evictOldestBytes(targetBytes: number, protectedUuids: Set<string>): number {
+    const evictable = Object.values(this.index.entries).filter(
+      (e) => !protectedUuids.has(e.uuid),
+    );
+    if (evictable.length === 0) return 0;
+
+    // Sort oldest first
+    evictable.sort((a, b) => {
+      const aTime = a.server_created_at
+        ? new Date(a.server_created_at).getTime()
+        : new Date(a.cached_at).getTime();
+      const bTime = b.server_created_at
+        ? new Date(b.server_created_at).getTime()
+        : new Date(b.cached_at).getTime();
+      return aTime - bTime;
+    });
+
+    let freed = 0;
+    for (const entry of evictable) {
+      if (freed >= targetBytes) break;
+      const filePath = this.entryPath(entry);
+      try {
+        if (existsSync(filePath)) {
+          unlinkSync(filePath);
+          freed += entry.size;
+        }
+      } catch {
+        // Best-effort eviction
+      }
+      delete this.index.entries[entry.uuid];
+    }
+
+    if (freed > 0) {
+      this.saveIndex();
+      this.removeEmptyDirs();
+    }
     return freed;
   }
 

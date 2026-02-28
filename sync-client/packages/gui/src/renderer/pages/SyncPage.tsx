@@ -55,12 +55,9 @@ export function SyncPage() {
     setCacheStatuses,
     cacheTotalSize,
     setCacheTotalSize,
-    prefetchProgress,
-    setPrefetchProgress,
     autoPinNewPlaylists,
     setAutoPinNewPlaylists,
     backgroundPrefetchStatus,
-    setBackgroundPrefetchStatus,
   } = useAppState();
 
   const [destPath, setDestPath] = useState('');
@@ -78,18 +75,15 @@ export function SyncPage() {
     const cleanupSync = ipc.onSyncProgress((progress: SyncProgress) => {
       setSyncProgress(progress);
     });
-    const cleanupPrefetch = ipc.onPrefetchProgress((progress: SyncProgress) => {
-      setPrefetchProgress(progress);
-    });
-    const cleanupBgStatus = ipc.onBackgroundPrefetchStatus((status) => {
-      setBackgroundPrefetchStatus(status);
-      // Refresh cache status when a background prefetch cycle completes
-      if (!status.running && status.lastResult) {
-        loadCacheStatus();
-      }
-    });
-    return () => { cleanupSync(); cleanupPrefetch(); cleanupBgStatus(); };
+    return () => { cleanupSync(); };
   }, []);
+
+  // Refresh cache status when background prefetch completes
+  useEffect(() => {
+    if (backgroundPrefetchStatus && !backgroundPrefetchStatus.running && backgroundPrefetchStatus.lastResult) {
+      loadCacheStatus();
+    }
+  }, [backgroundPrefetchStatus?.running]);
 
   async function loadOfflineData() {
     try {
@@ -366,32 +360,6 @@ export function SyncPage() {
         </div>
       </div>
 
-      {/* Prefetch progress */}
-      {prefetchProgress && (
-        <div className="card bg-dark border-info mb-3">
-          <div className="card-body py-2">
-            <div className="d-flex justify-content-between mb-1">
-              <small className="text-info">
-                Prefetching: {prefetchProgress.processed} / {prefetchProgress.total}
-              </small>
-              <small>{prefetchProgress.total > 0
-                ? Math.round((prefetchProgress.processed / prefetchProgress.total) * 100)
-                : 0}%</small>
-            </div>
-            <div className="progress" style={{ height: 4 }}>
-              <div
-                className="progress-bar bg-info"
-                style={{
-                  width: `${prefetchProgress.total > 0
-                    ? (prefetchProgress.processed / prefetchProgress.total) * 100
-                    : 0}%`,
-                }}
-              />
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Playlist selection */}
       <div className="card bg-dark border-secondary mb-4">
         <div className="card-header d-flex justify-content-between align-items-center">
@@ -448,7 +416,7 @@ export function SyncPage() {
                         <div className="flex-grow-1">
                           <div className="d-flex align-items-center gap-1">
                             <span className="fw-bold">{p.name}</span>
-                            {isPinned && (
+                            {(isPinned || (cacheStatus && cacheStatus.cached > 0)) && (
                               <span className="badge bg-info bg-opacity-25 text-info" style={{ fontSize: '0.65em' }}>
                                 {cacheStatus && cacheStatus.cached === (p.file_count ?? 0)
                                   ? 'cached'

@@ -151,6 +151,27 @@ export class ConfigStore {
   }
 
   /**
+   * Add all unpinned (and not already excluded) server playlists to the exclusion list.
+   * Used when auto-pin is first enabled to avoid pinning existing playlists.
+   */
+  excludeUnpinnedPlaylists(serverKeys: string[]): void {
+    const pinned = this.config.preferences.pinnedPlaylists;
+    const excluded = this.config.preferences.unpinnedPlaylists;
+    let changed = false;
+
+    for (const key of serverKeys) {
+      if (!pinned.includes(key) && !excluded.includes(key)) {
+        excluded.push(key);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      this.save();
+    }
+  }
+
+  /**
    * When auto-pin is on, pin any server playlists not already pinned
    * and not in the user's exclusion list. Returns newly pinned keys.
    */

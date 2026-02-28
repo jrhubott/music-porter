@@ -1,10 +1,11 @@
-import { useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAppState } from './store/app-state.js';
 import { useIPC } from './hooks/useIPC.js';
 import { ConnectPage } from './pages/ConnectPage.js';
 import { SyncPage } from './pages/SyncPage.js';
 import { DestinationsPage } from './pages/DestinationsPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
+import type { SyncProgress } from '@mporter/core';
 
 const NAV_ITEMS = [
   { id: 'sync', label: 'Sync', icon: 'bi-arrow-repeat' },
@@ -12,9 +13,17 @@ const NAV_ITEMS = [
   { id: 'settings', label: 'Settings', icon: 'bi-gear' },
 ];
 
+const CACHE_UPDATED_DISMISS_MS = 5000;
+
 export function App() {
-  const { connection, setConnection, activePage, setActivePage, setDrives, activeProfile, isOffline } = useAppState();
+  const {
+    connection, setConnection, activePage, setActivePage, setDrives, activeProfile, isOffline,
+    setPrefetchProgress, setBackgroundPrefetchStatus, backgroundPrefetchStatus,
+  } = useAppState();
   const ipc = useIPC();
+  const [sidebarPrefetch, setSidebarPrefetch] = useState<SyncProgress | null>(null);
+  const [cacheUpdated, setCacheUpdated] = useState(false);
+  const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     // Try auto-connect on startup
@@ -22,10 +31,32 @@ export function App() {
     // Load drives
     ipc.listDrives().then(setDrives);
     // Watch drive changes
-    const cleanup = ipc.onDriveChange(() => {
+    const cleanupDrives = ipc.onDriveChange(() => {
       ipc.listDrives().then(setDrives);
     });
-    return () => { cleanup(); };
+    // Prefetch progress listener (moved from SyncPage)
+    const cleanupPrefetch = ipc.onPrefetchProgress((progress: SyncProgress) => {
+      setPrefetchProgress(progress);
+      setSidebarPrefetch(progress);
+      if (progress.phase === 'complete' || progress.phase === 'aborted') {
+        // Show "Cache updated" only if actual downloads happened
+        if (progress.copied > 0) {
+          setCacheUpdated(true);
+          if (dismissTimer.current) clearTimeout(dismissTimer.current);
+          dismissTimer.current = setTimeout(() => {
+            setCacheUpdated(false);
+            setSidebarPrefetch(null);
+          }, CACHE_UPDATED_DISMISS_MS);
+        } else {
+          setSidebarPrefetch(null);
+        }
+      }
+    });
+    // Background prefetch status listener (moved from SyncPage)
+    const cleanupBgStatus = ipc.onBackgroundPrefetchStatus((status) => {
+      setBackgroundPrefetchStatus(status);
+    });
+    return () => { cleanupDrives(); cleanupPrefetch(); cleanupBgStatus(); };
   }, []);
 
   async function autoConnect() {
@@ -102,6 +133,52 @@ export function App() {
             )}
           </span>
         </div>
+
+        {/* Sidebar prefetch indicator */}
+        {sidebarPrefetch && sidebarPrefetch.phase === 'syncing' && (sidebarPrefetch.copied > 0 || sidebarPrefetch.total > sidebarPrefetch.skipped) && (
+          <div className="sidebar-prefetch">
+            <div className="d-flex justify-content-between align-items-center mb-1">
+              <small className="text-info">
+                <i className="bi bi-cloud-download me-1" />
+                Caching
+              </small>
+              <small className="text-secondary">
+                {sidebarPrefetch.total > 0
+                  ? Math.round((sidebarPrefetch.processed / sidebarPrefetch.total) * 100)
+                  : 0}%
+              </small>
+            </div>
+            <div className="progress" style={{ height: 3 }}>
+              <div
+                className="progress-bar bg-info"
+                style={{
+                  width: `${sidebarPrefetch.total > 0
+                    ? (sidebarPrefetch.processed / sidebarPrefetch.total) * 100
+                    : 0}%`,
+                }}
+              />
+            </div>
+          </div>
+        )}
+        {cacheUpdated && (
+          <div className="sidebar-prefetch">
+            <small className="text-success">
+              <i className="bi bi-check-circle me-1" />
+              Cache updated
+            </small>
+          </div>
+        )}
+        {!sidebarPrefetch && !cacheUpdated && backgroundPrefetchStatus?.lastResult
+          && backgroundPrefetchStatus.lastResult.downloaded === 0
+          && backgroundPrefetchStatus.lastResult.failed === 0
+          && backgroundPrefetchStatus.lastResult.skipped > 0 && (
+          <div className="sidebar-prefetch">
+            <small className="text-secondary">
+              <i className="bi bi-database-check me-1" />
+              Cache good
+            </small>
+          </div>
+        )}
       </nav>
 
       {/* Content */}
