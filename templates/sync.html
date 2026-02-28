@@ -357,8 +357,8 @@ function loadSources() {
     fetch('/api/status').then(r => r.json()).then(status => {
       const profile = status.profile;
       cachedProfile = profile;
-      let opts = `<option value="library">All playlists</option>`;
-      opts += dirs.map(d => `<option value="library/${d.name}/output">${d.name} (${d.files} files)</option>`).join('');
+      let opts = `<option value="">All playlists</option>`;
+      opts += dirs.map(d => `<option value="${d.name}">${d.name} (${d.files} files)</option>`).join('');
       sel.innerHTML = opts;
     });
   });
@@ -369,10 +369,10 @@ function findDestMeta(keyName) {
   return destsMeta.find(d => d.name !== '__custom__' && (d.name === keyName || d.effective_key === keyName));
 }
 
-function syncToKey(keyName, sourceDir) {
+function syncToKey(keyName, playlistKey) {
   const meta = findDestMeta(keyName);
   if (!meta) { showToast('Destination not found: ' + keyName, 'warning'); return; }
-  const data = { source_dir: sourceDir, destination: meta.name };
+  const data = { source_dir: 'library/audio', playlist_key: playlistKey, destination: meta.name };
 
   document.getElementById('syncStatus').textContent = 'Running';
   document.getElementById('syncStatus').className = 'badge bg-primary badge-running';
@@ -392,11 +392,11 @@ document.getElementById('syncForm').addEventListener('submit', function(e) {
   const meta = destsMeta[idx];
   if (!meta) { showToast('Select a destination', 'warning'); return; }
 
-  const sourceDir = document.getElementById('syncSource').value;
-  if (!sourceDir) { showToast('Select a source directory', 'warning'); return; }
+  const playlistKey = document.getElementById('syncSource').value;
 
   const data = {
-    source_dir: sourceDir,
+    source_dir: 'library/audio',
+    playlist_key: playlistKey,
     destination: meta.name,
     dry_run: document.getElementById('syncDryRun').checked,
     verbose: document.getElementById('syncVerbose').checked,
@@ -525,7 +525,7 @@ function showDetail(keyName) {
         <td class="text-center">${statusBadge}</td>
         <td class="text-center">
           ${csyncHasFSA ? `<button class="btn btn-outline-success btn-sm py-0 px-1 me-1" onclick="clientSyncToKey('${keyName}', ['${p.name}'])" title="Sync playlist via browser"><i class="bi bi-pc-display"></i></button>` : ''}
-          <button class="btn btn-outline-primary btn-sm py-0 px-1 me-1" onclick="syncToKey('${keyName}', 'library/${p.name}/output')" title="${detailSyncTitle}" ${detailSyncDisabled}>
+          <button class="btn btn-outline-primary btn-sm py-0 px-1 me-1" onclick="syncToKey('${keyName}', '${p.name}')" title="${detailSyncTitle}" ${detailSyncDisabled}>
             <i class="bi bi-arrow-repeat"></i>
           </button>
           <button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="deletePlaylist('${keyName}', '${p.name}')" title="Delete playlist tracking">

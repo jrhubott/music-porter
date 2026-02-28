@@ -576,7 +576,7 @@ function renderUnconvertedFiles(playlist, container, files) {
 }
 
 function convertPlaylist(name) {
-  _startConvert('/api/convert/run', {input_dir: 'library/' + name + '/source'});
+  _startConvert('/api/convert/run', {input_dir: 'library/source/gamdl/' + name});
 }
 
 function convertAllUnconverted() {

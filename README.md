@@ -131,6 +131,20 @@ Several profile fields support template variables that are resolved from track m
 | `{title}` | Track title |
 | `{artist}` | Track artist |
 | `{album}` | Album name |
+| `{genre}` | Genre |
+| `{track_number}` | Track number |
+| `{track_total}` | Total tracks on album |
+| `{disc_number}` | Disc number |
+| `{disc_total}` | Total discs |
+| `{year}` | Release year/date |
+| `{composer}` | Composer |
+| `{album_artist}` | Album artist |
+| `{bpm}` | Tempo in BPM |
+| `{comment}` | Comment |
+| `{compilation}` | Compilation flag (1 or empty) |
+| `{grouping}` | Grouping |
+| `{lyrics}` | Lyrics text |
+| `{copyright}` | Copyright notice |
 | `{playlist}` | Playlist display name |
 | `{playlist_key}` | Playlist key (internal identifier from config) |
 
@@ -229,13 +243,11 @@ See [Cookie Management Guide](COOKIE-MANAGEMENT-GUIDE.md) for detailed instructi
 │   ├── config.yaml             # Playlists and settings
 │   ├── cookies.txt             # Apple Music authentication
 │   └── music-porter.db         # SQLite (tracks, audit, tasks, sync)
-├── library/                    # All music data (source + output)
-│   └── Pop_Workout/
-│       ├── source/             # Downloaded M4A files (Artist/Album/Track.m4a)
-│       ├── output/
-│       │   └── <uuid>.mp3      # Clean MP3 with TrackUUID tag only
-│       └── artwork/
-│           └── <uuid>.jpg      # Extracted cover art
+├── library/                    # All music data
+│   ├── source/gamdl/           # Downloaded M4A files (per playlist)
+│   │   └── Pop_Workout/        # Artist/Album/Track.m4a (gamdl structure)
+│   ├── mp3/                    # All MP3s flat (<uuid>.mp3, TrackUUID tag only)
+│   └── artwork/                # All cover art flat (<uuid>.jpg)
 ├── templates/                  # Jinja2 HTML templates
 ├── ios/                        # iOS companion app (SwiftUI)
 ├── sync-client/                # Desktop sync client (TypeScript)

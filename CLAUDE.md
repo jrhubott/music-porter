@@ -64,9 +64,9 @@ Music Porter is a server-based music playlist management and conversion tool. It
 
 The system follows a DB-centric pipeline:
 
-1. **Download** → Downloads Apple Music playlists as M4A files via gamdl into `library/<playlist>/source/`
+1. **Download** → Downloads Apple Music playlists as M4A files via gamdl into `library/source/gamdl/<playlist>/`
 2. **Convert** → Converts M4A to MP3 using ffmpeg (libmp3lame, default: lossless 320kbps CBR). Each MP3 gets only a `TXXX:TrackUUID` tag; all metadata is stored in TrackDB
-3. **Library** → MP3s stored as `<uuid>.mp3` in `library/<playlist>/output/`, cover art extracted to `library/<playlist>/artwork/<uuid>.ext`, metadata in SQLite `tracks` table
+3. **Library** → MP3s stored as `<uuid>.mp3` in `library/audio/` (flat), cover art in `library/artwork/<uuid>.ext`, metadata in SQLite `tracks` table
 4. **Sync** → TagApplicator applies profile-specific tags on-the-fly during download/sync. Output files get human-readable names (`Artist - Title.mp3`) at the destination
 
 ### Entry Point
@@ -86,10 +86,10 @@ Server flags: `--host`, `--port`, `--show-api-key`, `--no-bonjour`, `--behind-pr
 
 Library MP3s are **clean** — they carry only a `TXXX:TrackUUID` identifier tag. All human-readable metadata lives in TrackDB (SQLite):
 
-- **Source M4As on disk:** `library/<playlist>/source/` — nested by Artist/Album (gamdl structure)
-- **Output MP3s on disk:** `library/<playlist>/output/<uuid>.mp3` — UUID-named, no artist/title in filename
-- **Cover art on disk:** `library/<playlist>/artwork/<uuid>.ext` — extracted from M4A source during conversion
-- **Metadata in DB:** `tracks` table with uuid (PK), playlist, file\_path, title, artist, album, cover\_art\_path, cover\_art\_hash, duration\_s, file\_size\_bytes, source\_m4a\_path, created\_at, updated\_at
+- **Source M4As on disk:** `library/source/gamdl/<playlist>/` — nested by Artist/Album (gamdl structure)
+- **Output MP3s on disk:** `library/audio/<uuid>.mp3` — UUID-named, flat, no artist/title in filename
+- **Cover art on disk:** `library/artwork/<uuid>.ext` — flat, extracted from M4A source during conversion
+- **Metadata in DB:** `tracks` table with uuid (PK), playlist, file\_path, title, artist, album, cover\_art\_path, cover\_art\_hash, duration\_s, file\_size\_bytes, source\_m4a\_path, genre, track\_number, track\_total, disc\_number, disc\_total, year, composer, album\_artist, bpm, comment, compilation, grouping, lyrics, copyright, created\_at, updated\_at
 - **Duplicate detection:** TrackDB lookup by `source_m4a_path` (indexed) — no file-exists check needed
 
 ### TagApplicator
@@ -203,7 +203,7 @@ Version defined in `porter_core.py` line 50. Uses semantic versioning (MAJOR.MIN
 
 **Key files:** `music-porter` (entry point), `porter_core.py` (business logic), `web_ui.py` (Flask app factory, classes, page routes), `web_api.py` (REST API blueprint — all `/api/*` routes), `data/config.yaml` (playlists + settings), `data/cookies.txt` (auth), `data/music-porter.db` (SQLite — tracks, audit, tasks, sync, EQ, scheduling).
 
-**Directories:** `library/<playlist>/source/` (M4A downloads, nested by artist/album), `library/<playlist>/output/` (MP3s as `<uuid>.mp3`, flat), `library/<playlist>/artwork/` (cover art as `<uuid>.ext`), `templates/` (Jinja2), `logs/`, `data/` (config, cookies, DB), `SRS/`, `ios/` (companion app — see `ios/CLAUDE.md`), `sync-client/` (desktop sync client — see `sync-client/CLAUDE.md`).
+**Directories:** `library/source/gamdl/<playlist>/` (M4A downloads, nested by artist/album), `library/audio/` (all MP3s as `<uuid>.mp3`, flat), `library/artwork/` (all cover art as `<uuid>.ext`, flat), `templates/` (Jinja2), `logs/`, `data/` (config, cookies, DB), `SRS/`, `ios/` (companion app — see `ios/CLAUDE.md`), `sync-client/` (desktop sync client — see `sync-client/CLAUDE.md`).
 
 ## Web Dashboard & Server
 
@@ -239,7 +239,7 @@ All API routes are defined in `web_api.py` as a Flask Blueprint.
 - **Config:** `GET /api/config/verify`, `POST /api/config/reset`
 - **Scheduler:** `GET /api/scheduler/status`, `POST /api/scheduler/config`, `POST /api/scheduler/run-now`
 - **Directories:** `GET /api/directories/music`, `GET /api/directories/export`
-- **Operations:** `POST /api/pipeline/run`, `/api/convert/run`, `/api/convert/batch`
+- **Operations:** `POST /api/pipeline/run`, `/api/convert/run`, `/api/convert/batch`, `/api/library/backfill-metadata`
 - **Files:** `GET /api/files/<key>` (list with `display_filename`), `/<key>/<filename>` (download with Content-Disposition), `/<key>/<filename>/artwork`, `/<key>/sync-status`, `/<key>/download-all` (ZIP), `POST /api/files/download-zip`
 - **Sync:** `GET /api/sync/destinations`, `POST /api/sync/destinations`, `DELETE /api/sync/destinations/<name>`, `PUT /api/sync/destinations/<name>/link`, `POST /api/sync/destinations/<name>/rename`, `POST /api/sync/run`, `GET /api/sync/status`, `GET /api/sync/status/<key>`
 - **Sync Keys:** `GET /api/sync/keys`, `DELETE /api/sync/keys/<key>`, `DELETE /api/sync/keys/<key>/playlists/<playlist>`, `POST /api/sync/keys/<key>/prune`, `POST /api/sync/keys/<key>/rename`, `POST /api/sync/client-record`
@@ -281,8 +281,8 @@ See `sync-client/CLAUDE.md` for full sync client documentation (architecture, co
 
 ### File Naming
 
-- **Library files:** `<uuid>.mp3` (UUID-named, flat in `library/<playlist>/output/`)
-- **M4A sources:** nested directory structure in `library/<playlist>/source/`
+- **Library files:** `<uuid>.mp3` (UUID-named, flat in `library/audio/`)
+- **M4A sources:** nested directory structure in `library/source/gamdl/<playlist>/`
 - **API responses:** include both `filename` (UUID on disk) and `display_filename` (human-readable `Artist - Title.mp3`)
 - **Downloads/sync:** Content-Disposition header and sync client use `display_filename` for output
 - **ZIP archives:** entries use human-readable names from TrackDB
@@ -326,7 +326,7 @@ Both functions are called at startup before any DB class or ConfigManager is ins
 3. Migrations must be idempotent and sequential (version 0→1→2→…)
 4. **Never modify existing version blocks** — each `if current < N:` block sets the version to exactly N (not `DB_SCHEMA_VERSION`/`CONFIG_SCHEMA_VERSION`). New changes go exclusively in a new `if current < N:` block. Fresh installs run through all migrations sequentially (0→1→2→…N). This applies to both DB and config migrations.
 
-**Current DB schema (version 5) — 7 tables:**
+**Current DB schema (version 6) — 7 tables:**
 
 - `audit_entries`: id, timestamp, operation, description, params, status, duration\_s, source
 - `task_history`: id, operation, description, status, result, error, started\_at, finished\_at, source
@@ -334,7 +334,7 @@ Both functions are called at startup before any DB class or ConfigManager is ins
 - `sync_files`: id, sync\_key, file\_path, playlist, synced\_at (FK → sync\_keys)
 - `eq_presets`: id, profile, playlist, loudnorm, bass\_boost, treble\_boost, compressor, updated\_at (UNIQUE profile+playlist)
 - `scheduled_jobs`: job\_name (PK), next\_run\_time, last\_run\_time, last\_run\_status, last\_run\_error, on\_missed, updated\_at
-- `tracks`: uuid (PK), playlist, file\_path, title, artist, album, cover\_art\_path, cover\_art\_hash, duration\_s, file\_size\_bytes, source\_m4a\_path, created\_at, updated\_at (indexes: playlist, file\_path, source\_m4a\_path)
+- `tracks`: uuid (PK), playlist, file\_path, title, artist, album, cover\_art\_path, cover\_art\_hash, duration\_s, file\_size\_bytes, source\_m4a\_path, genre, track\_number, track\_total, disc\_number, disc\_total, year, composer, album\_artist, bpm, comment, compilation, grouping, lyrics, copyright, created\_at, updated\_at (indexes: playlist, file\_path, source\_m4a\_path)
 
 **Current config schema (version 3) — top-level keys:**
 
@@ -368,27 +368,27 @@ Organized by concern (dataclasses, DB classes, business logic):
 
 - SQLite-backed metadata for every MP3 in the library (`tracks` table)
 - Thread-safe writes via `Lock`, lockless reads via WAL mode
-- Key read methods: `get_track(uuid)`, `get_track_by_path(file_path)`, `get_track_by_source_m4a(source_m4a_path)`, `get_tracks_by_playlist(playlist)`, `get_all_playlists()`, `get_playlist_stats()`, `get_track_count()`
-- Key write methods: `insert_track(...)`, `delete_track(uuid)`, `delete_tracks_by_playlist(playlist)`
+- Key read methods: `get_track(uuid)`, `get_track_by_path(file_path)`, `get_track_by_source_m4a(source_m4a_path)`, `get_tracks_by_playlist(playlist)`, `get_all_playlists()`, `get_playlist_stats()`, `get_track_count()`, `get_all_tracks()`
+- Key write methods: `insert_track(...)`, `update_track_metadata(...)`, `delete_track(uuid)`, `delete_tracks_by_playlist(playlist)`
 
 ### TagApplicator
 
 - Reads track metadata from TrackDB, builds profile-specific ID3 tags
-- Template variables: `{title}`, `{artist}`, `{album}`, `{playlist}`, `{track_number}` — resolved from track metadata
+- Template variables: `{title}`, `{artist}`, `{album}`, `{genre}`, `{track_number}`, `{track_total}`, `{disc_number}`, `{disc_total}`, `{year}`, `{composer}`, `{album_artist}`, `{bpm}`, `{comment}`, `{compilation}`, `{grouping}`, `{lyrics}`, `{copyright}`, `{playlist}`, `{playlist_key}` — resolved from track metadata
 - Supports both streaming (HTTP) and file-based (physical sync) tag application
 - `_build_id3_tags()` constructs the full ID3 tag set with profile-configured frames (TIT2, TPE1, TALB, APIC, etc.)
 
 ### Library Directory
 
-- Paths: `library/<playlist>/source/` for M4A downloads, `library/<playlist>/output/` for MP3s, `library/<playlist>/artwork/` for cover art
-- Helpers: `get_library_dir(playlist_key=None)` returns `"library"` or `"library/<playlist>"`, `get_source_dir(playlist_key)` returns `"library/<playlist>/source"`, `get_output_dir(playlist_key)` returns `"library/<playlist>/output"`
-- Constants: `SOURCE_SUBDIR = "source"`, `OUTPUT_SUBDIR = "output"`
-- Files: `<uuid>.mp3` (flat in output/, no subdirectories)
+- Paths: `library/source/gamdl/<playlist>/` for M4A downloads, `library/audio/` for MP3s (flat), `library/artwork/` for cover art (flat)
+- Helpers: `get_library_dir()` returns `"library"`, `get_source_dir(playlist_key)` returns `"library/source/gamdl/<playlist>"`, `get_audio_dir()` returns `"library/audio"`, `get_artwork_dir()` returns `"library/artwork"`
+- Constants: `SOURCE_SUBDIR = "source"`, `AUDIO_SUBDIR = "audio"`, `ARTWORK_SUBDIR = "artwork"`, `DEFAULT_IMPORTER = "gamdl"`
+- Files: `<uuid>.mp3` (flat in audio/, no subdirectories)
 
 ### Cover Art
 
 - Extracted from M4A source during conversion (in `Converter._extract_cover_art_to_disk()`)
-- Stored as `library/<playlist>/artwork/<uuid>.ext` (jpg or png)
+- Stored as `library/artwork/<uuid>.ext` (jpg or png)
 - SHA-256 hash (truncated to 16 chars) stored in TrackDB `cover_art_hash` column
 - Served via `GET /api/files/<playlist>/<filename>/artwork`
 

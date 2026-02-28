@@ -234,6 +234,18 @@
   </div>
 </div>
 
+<!-- Library Maintenance -->
+<div class="card mt-4">
+  <div class="card-body">
+    <h6 class="card-title"><i class="bi bi-database-gear"></i> Library Maintenance</h6>
+    <p class="text-muted small mb-2">Re-read metadata from source M4A files to populate extended fields (genre, track number, year, etc.).</p>
+    <button type="button" class="btn btn-outline-secondary btn-sm" id="btnBackfillMetadata">
+      <i class="bi bi-arrow-repeat"></i> Backfill Metadata
+    </button>
+    <div id="backfillLogPanel" class="log-panel mt-3 d-none" style="max-height:200px;overflow-y:auto;font-size:.8rem;background:#1a1a2e;padding:.5rem;border-radius:.25rem;"></div>
+  </div>
+</div>
+
 <!-- iOS Pairing (server mode only) -->
 {% if server_mode %}
 <div class="card mt-4">
@@ -583,6 +595,19 @@ document.getElementById('btnRunNow').addEventListener('click', function() {
 
 loadSchedulerStatus();
 setInterval(loadSchedulerStatus, 30000);
+
+// ── Library Maintenance ──
+document.getElementById('btnBackfillMetadata').addEventListener('click', function() {
+  const btn = this;
+  btn.disabled = true;
+  const panel = document.getElementById('backfillLogPanel');
+  panel.classList.remove('d-none');
+  panel.innerHTML = '';
+
+  submitOperation('/api/library/backfill-metadata', {}, 'backfillLogPanel', function(msg) {
+    btn.disabled = false;
+  });
+});
 
 // ── EQ Presets ──
 function getActiveProfile() {

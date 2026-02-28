@@ -52,7 +52,9 @@ VERSION = "2.36.1-dev+2743e1f"
 DEFAULT_DATA_DIR = "data"
 DEFAULT_LIBRARY_DIR = "library"
 SOURCE_SUBDIR = "source"
-OUTPUT_SUBDIR = "output"
+AUDIO_SUBDIR = "audio"
+ARTWORK_SUBDIR = "artwork"
+DEFAULT_IMPORTER = "gamdl"
 DEFAULT_LOG_DIR = "logs"
 DEFAULT_LOG_RETENTION_DAYS = 7
 DEFAULT_CONFIG_FILE = "data/config.yaml"
@@ -66,7 +68,7 @@ TXXX_TRACK_UUID = "TrackUUID"
 # Schema version constants — increment and add a migration case when changing
 # the config.yaml structure or DB tables/columns.
 CONFIG_SCHEMA_VERSION = 3
-DB_SCHEMA_VERSION = 5
+DB_SCHEMA_VERSION = 6
 
 # Excluded USB volumes by OS
 if IS_MACOS:
@@ -180,6 +182,18 @@ M4A_TAG_TITLE = '\xa9nam'
 M4A_TAG_ARTIST = '\xa9ART'
 M4A_TAG_ALBUM = '\xa9alb'
 M4A_TAG_COVER = 'covr'
+M4A_TAG_GENRE = '\xa9gen'
+M4A_TAG_TRACK_NUMBER = 'trkn'
+M4A_TAG_DISC_NUMBER = 'disk'
+M4A_TAG_YEAR = '\xa9day'
+M4A_TAG_COMPOSER = '\xa9wrt'
+M4A_TAG_ALBUM_ARTIST = 'aART'
+M4A_TAG_BPM = 'tmpo'
+M4A_TAG_COMMENT = '\xa9cmt'
+M4A_TAG_COMPILATION = 'cpil'
+M4A_TAG_GROUPING = '\xa9grp'
+M4A_TAG_LYRICS = '\xa9lyr'
+M4A_TAG_COPYRIGHT = 'cprt'
 
 # Cover art constants
 APIC_MIME_JPEG = "image/jpeg"
@@ -529,21 +543,24 @@ def display_name(value):
 
 
 
-def get_library_dir(playlist_key=None):
-    """Build library path: library/ or library/<playlist>/"""
-    if playlist_key:
-        return f"{DEFAULT_LIBRARY_DIR}/{playlist_key}"
+def get_library_dir():
+    """Return library root path: library/"""
     return DEFAULT_LIBRARY_DIR
 
 
-def get_source_dir(playlist_key):
-    """Build source M4A path: library/<playlist>/source/"""
-    return f"{DEFAULT_LIBRARY_DIR}/{playlist_key}/{SOURCE_SUBDIR}"
+def get_source_dir(playlist_key, importer=DEFAULT_IMPORTER):
+    """Build source M4A path: library/source/<importer>/<playlist>/"""
+    return f"{DEFAULT_LIBRARY_DIR}/{SOURCE_SUBDIR}/{importer}/{playlist_key}"
 
 
-def get_output_dir(playlist_key):
-    """Build output MP3 path: library/<playlist>/output/"""
-    return f"{DEFAULT_LIBRARY_DIR}/{playlist_key}/{OUTPUT_SUBDIR}"
+def get_audio_dir():
+    """Build flat audio output path: library/audio/"""
+    return f"{DEFAULT_LIBRARY_DIR}/{AUDIO_SUBDIR}"
+
+
+def get_artwork_dir():
+    """Build flat artwork path: library/artwork/"""
+    return f"{DEFAULT_LIBRARY_DIR}/{ARTWORK_SUBDIR}"
 
 
 class SafeTemplateDict(dict):
@@ -560,7 +577,10 @@ class SafeTemplateDict(dict):
 def apply_template(template, **variables):
     """Apply template variables using str.format_map with safe fallback.
 
-    Supported variables: title, artist, album, playlist, playlist_key.
+    Supported variables: title, artist, album, genre, track_number,
+    track_total, disc_number, disc_total, year, composer, album_artist,
+    bpm, comment, compilation, grouping, lyrics, copyright, playlist,
+    playlist_key.
     Unknown variables are left as literal '{name}' in the output.
     """
     return template.format_map(SafeTemplateDict(variables))
@@ -1103,6 +1123,120 @@ def migrate_db_schema(logger=None):
             changes.append("added index on tracks.source_m4a_path")
             if logger:
                 logger.info("DB migration 4→5: added source_m4a_path index")
+
+        # ── Version 5 → 6: extended metadata columns + library restructure ──
+        if current < 6:
+            # 1. DDL: add 14 new metadata columns to tracks table
+            new_columns = [
+                ("genre", "TEXT"),
+                ("track_number", "INTEGER"),
+                ("track_total", "INTEGER"),
+                ("disc_number", "INTEGER"),
+                ("disc_total", "INTEGER"),
+                ("year", "TEXT"),
+                ("composer", "TEXT"),
+                ("album_artist", "TEXT"),
+                ("bpm", "INTEGER"),
+                ("comment", "TEXT"),
+                ("compilation", "INTEGER"),
+                ("grouping", "TEXT"),
+                ("lyrics", "TEXT"),
+                ("copyright", "TEXT"),
+            ]
+            existing_cols = {
+                r[1] for r in conn.execute(
+                    "PRAGMA table_info(tracks)").fetchall()
+            }
+            for col_name, col_type in new_columns:
+                if col_name not in existing_cols:
+                    conn.execute(
+                        f"ALTER TABLE tracks ADD COLUMN {col_name} {col_type}")
+            conn.commit()
+
+            # 2. File moves: restructure library directories on disk
+            library_root = Path(DEFAULT_LIBRARY_DIR)
+            new_source_root = library_root / SOURCE_SUBDIR / DEFAULT_IMPORTER
+            new_mp3_dir = library_root / AUDIO_SUBDIR
+            new_artwork_dir = library_root / ARTWORK_SUBDIR
+
+            if library_root.exists():
+                new_source_root.mkdir(parents=True, exist_ok=True)
+                new_mp3_dir.mkdir(parents=True, exist_ok=True)
+                new_artwork_dir.mkdir(parents=True, exist_ok=True)
+
+                reserved_dirs = {SOURCE_SUBDIR, AUDIO_SUBDIR, ARTWORK_SUBDIR}
+                for item in sorted(library_root.iterdir()):
+                    if not item.is_dir() or item.name.startswith('.'):
+                        continue
+                    if item.name in reserved_dirs:
+                        continue
+
+                    playlist_name = item.name
+                    old_source = item / "source"
+                    old_output = item / "output"
+                    old_artwork = item / "artwork"
+
+                    # Move source/ → library/source/gamdl/<playlist>/
+                    if old_source.exists():
+                        dest = new_source_root / playlist_name
+                        if not dest.exists():
+                            shutil.move(str(old_source), str(dest))
+
+                    # Move output/*.mp3 → library/audio/
+                    if old_output.exists():
+                        for f in old_output.iterdir():
+                            if f.is_file():
+                                dest_file = new_mp3_dir / f.name
+                                if not dest_file.exists():
+                                    shutil.move(str(f), str(dest_file))
+
+                    # Move artwork/* → library/artwork/
+                    if old_artwork.exists():
+                        for f in old_artwork.iterdir():
+                            if f.is_file():
+                                dest_file = new_artwork_dir / f.name
+                                if not dest_file.exists():
+                                    shutil.move(str(f), str(dest_file))
+
+                    # Remove empty old playlist directory
+                    try:
+                        shutil.rmtree(str(item))
+                    except OSError:
+                        pass  # Non-empty — skip
+
+            # 3. DB path updates
+            # file_path: library/<pl>/output/<uuid>.mp3 → library/audio/<uuid>.mp3
+            conn.execute("""
+                UPDATE tracks
+                SET file_path = 'library/audio/' || SUBSTR(file_path,
+                    INSTR(file_path, '/output/') + 8)
+                WHERE file_path LIKE '%/output/%'
+            """)
+            # cover_art_path: artwork/<uuid>.ext → library/artwork/<uuid>.ext
+            conn.execute("""
+                UPDATE tracks
+                SET cover_art_path = 'library/' || cover_art_path
+                WHERE cover_art_path IS NOT NULL
+                  AND cover_art_path LIKE 'artwork/%'
+            """)
+            # source_m4a_path: .../<pl>/source/... → .../source/gamdl/<pl>/...
+            # Handles both relative (library/<pl>/source/...) and absolute paths
+            conn.execute("""
+                UPDATE tracks
+                SET source_m4a_path = REPLACE(
+                    source_m4a_path,
+                    playlist || '/source/',
+                    'source/gamdl/' || playlist || '/'
+                )
+                WHERE source_m4a_path LIKE '%' || playlist || '/source/%'
+            """)
+            conn.execute("PRAGMA user_version = 6")
+            conn.commit()
+            changes.append(
+                "added extended metadata columns, restructured library layout")
+            if logger:
+                logger.info(
+                    "DB migration 5→6: extended metadata + library restructure")
 
         return [MigrationEvent(
             'schema_migrate',
@@ -2392,6 +2526,20 @@ class TrackDB:
                     duration_s      REAL,
                     file_size_bytes INTEGER,
                     source_m4a_path TEXT,
+                    genre           TEXT,
+                    track_number    INTEGER,
+                    track_total     INTEGER,
+                    disc_number     INTEGER,
+                    disc_total      INTEGER,
+                    year            TEXT,
+                    composer        TEXT,
+                    album_artist    TEXT,
+                    bpm             INTEGER,
+                    comment         TEXT,
+                    compilation     INTEGER,
+                    grouping        TEXT,
+                    lyrics          TEXT,
+                    copyright       TEXT,
                     created_at      REAL NOT NULL,
                     updated_at      REAL NOT NULL
                 )
@@ -2410,7 +2558,12 @@ class TrackDB:
     def insert_track(self, uuid, playlist, file_path, title, artist, album,
                      cover_art_path=None, cover_art_hash=None,
                      duration_s=None, file_size_bytes=None,
-                     source_m4a_path=None):
+                     source_m4a_path=None, genre=None,
+                     track_number=None, track_total=None,
+                     disc_number=None, disc_total=None,
+                     year=None, composer=None, album_artist=None,
+                     bpm=None, comment=None, compilation=None,
+                     grouping=None, lyrics=None, copyright_text=None):
         """Insert or replace a track record."""
         now = time.time()
         with self._write_lock:
@@ -2421,8 +2574,14 @@ class TrackDB:
                        (uuid, playlist, file_path, title, artist, album,
                         cover_art_path, cover_art_hash, duration_s,
                         file_size_bytes, source_m4a_path,
+                        genre, track_number, track_total,
+                        disc_number, disc_total, year, composer,
+                        album_artist, bpm, comment, compilation,
+                        grouping, lyrics, copyright,
                         created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                               ?, ?)
                        ON CONFLICT(uuid) DO UPDATE SET
                         playlist = excluded.playlist,
                         file_path = excluded.file_path,
@@ -2434,10 +2593,63 @@ class TrackDB:
                         duration_s = excluded.duration_s,
                         file_size_bytes = excluded.file_size_bytes,
                         source_m4a_path = excluded.source_m4a_path,
+                        genre = excluded.genre,
+                        track_number = excluded.track_number,
+                        track_total = excluded.track_total,
+                        disc_number = excluded.disc_number,
+                        disc_total = excluded.disc_total,
+                        year = excluded.year,
+                        composer = excluded.composer,
+                        album_artist = excluded.album_artist,
+                        bpm = excluded.bpm,
+                        comment = excluded.comment,
+                        compilation = excluded.compilation,
+                        grouping = excluded.grouping,
+                        lyrics = excluded.lyrics,
+                        copyright = excluded.copyright,
                         updated_at = excluded.updated_at""",
                     (uuid, playlist, file_path, title, artist, album,
                      cover_art_path, cover_art_hash, duration_s,
-                     file_size_bytes, source_m4a_path, now, now),
+                     file_size_bytes, source_m4a_path,
+                     genre, track_number, track_total,
+                     disc_number, disc_total, year, composer,
+                     album_artist, bpm, comment, compilation,
+                     grouping, lyrics, copyright_text, now, now),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def update_track_metadata(self, uuid, genre=None, track_number=None,
+                              track_total=None, disc_number=None,
+                              disc_total=None, year=None, composer=None,
+                              album_artist=None, bpm=None, comment=None,
+                              compilation=None, grouping=None,
+                              lyrics=None, copyright_text=None,
+                              title=None, artist=None, album=None):
+        """Update metadata columns for an existing track by UUID."""
+        now = time.time()
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    """UPDATE tracks SET
+                        title = COALESCE(?, title),
+                        artist = COALESCE(?, artist),
+                        album = COALESCE(?, album),
+                        genre = ?, track_number = ?, track_total = ?,
+                        disc_number = ?, disc_total = ?, year = ?,
+                        composer = ?, album_artist = ?, bpm = ?,
+                        comment = ?, compilation = ?, grouping = ?,
+                        lyrics = ?, copyright = ?,
+                        updated_at = ?
+                       WHERE uuid = ?""",
+                    (title, artist, album,
+                     genre, track_number, track_total,
+                     disc_number, disc_total, year,
+                     composer, album_artist, bpm,
+                     comment, compilation, grouping,
+                     lyrics, copyright_text, now, uuid),
                 )
                 conn.commit()
             finally:
@@ -2553,6 +2765,17 @@ class TrackDB:
         try:
             row = conn.execute("SELECT COUNT(*) AS cnt FROM tracks").fetchone()
             return row['cnt'] if row else 0
+        finally:
+            conn.close()
+
+    def get_all_tracks(self):
+        """Return all tracks, ordered by playlist then title."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM tracks ORDER BY playlist, title"
+            ).fetchall()
+            return [dict(r) for r in rows]
         finally:
             conn.close()
 
@@ -3503,18 +3726,120 @@ def deduplicate_filenames(filenames, scopes=None):
 
 
 def read_m4a_tags(input_file):
-    """
-    Read title, artist, and album tags from an M4A file.
-    Returns (title, artist, album) tuple with 'Unknown *' defaults.
+    """Read metadata tags from an M4A file.
+
+    Returns a dict with keys: title, artist, album, genre, track_number,
+    track_total, disc_number, disc_total, year, composer, album_artist,
+    bpm, comment, compilation, grouping, lyrics, copyright.
     """
     from mutagen.mp4 import MP4
     m4a = MP4(str(input_file))
-    title  = str(m4a.tags.get(M4A_TAG_TITLE, ['Unknown Title'])[0])
-    artist = str(m4a.tags.get(M4A_TAG_ARTIST, ['Unknown Artist'])[0])
-    album  = str(m4a.tags.get(M4A_TAG_ALBUM, ['Unknown Album'])[0])
-    return title, artist, album
+    tags = m4a.tags or {}
+
+    # String tags with defaults
+    title = str(tags.get(M4A_TAG_TITLE, ['Unknown Title'])[0])
+    artist = str(tags.get(M4A_TAG_ARTIST, ['Unknown Artist'])[0])
+    album = str(tags.get(M4A_TAG_ALBUM, ['Unknown Album'])[0])
+
+    # String tags (empty string if missing)
+    genre = str(tags.get(M4A_TAG_GENRE, [''])[0])
+    year = str(tags.get(M4A_TAG_YEAR, [''])[0])
+    composer = str(tags.get(M4A_TAG_COMPOSER, [''])[0])
+    album_artist = str(tags.get(M4A_TAG_ALBUM_ARTIST, [''])[0])
+    comment = str(tags.get(M4A_TAG_COMMENT, [''])[0])
+    grouping = str(tags.get(M4A_TAG_GROUPING, [''])[0])
+    lyrics = str(tags.get(M4A_TAG_LYRICS, [''])[0])
+    copyright_text = str(tags.get(M4A_TAG_COPYRIGHT, [''])[0])
+
+    # Tuple tags: (number, total) — None if 0
+    trkn = tags.get(M4A_TAG_TRACK_NUMBER, [(0, 0)])[0]
+    track_number = trkn[0] if trkn[0] else None
+    track_total = trkn[1] if trkn[1] else None
+
+    disk = tags.get(M4A_TAG_DISC_NUMBER, [(0, 0)])[0]
+    disc_number = disk[0] if disk[0] else None
+    disc_total = disk[1] if disk[1] else None
+
+    # Integer tag
+    bpm = tags.get(M4A_TAG_BPM, [None])[0]
+
+    # Boolean tag
+    compilation = bool(tags.get(M4A_TAG_COMPILATION, [False])[0])
+
+    return {
+        'title': title, 'artist': artist, 'album': album,
+        'genre': genre, 'track_number': track_number,
+        'track_total': track_total, 'disc_number': disc_number,
+        'disc_total': disc_total, 'year': year, 'composer': composer,
+        'album_artist': album_artist, 'bpm': bpm, 'comment': comment,
+        'compilation': compilation, 'grouping': grouping,
+        'lyrics': lyrics, 'copyright': copyright_text,
+    }
 
 
+
+
+def backfill_track_metadata(track_db, logger=None, display_handler=None,
+                            cancel_event=None):
+    """Re-read M4A tags for all tracks and update extended metadata columns.
+
+    Queries all tracks with a non-null source_m4a_path, re-reads the M4A
+    tags, and calls update_track_metadata() to populate the 14 new columns.
+    Skips tracks where the source file doesn't exist on disk.
+    """
+    logger = logger or Logger()
+    tracks = track_db.get_all_tracks()
+    total = len(tracks)
+    updated = 0
+    skipped = 0
+    errors = 0
+
+    logger.info(f"Backfill: scanning {total} tracks for metadata updates")
+
+    for i, track in enumerate(tracks):
+        if cancel_event and cancel_event.is_set():
+            logger.warn("Backfill cancelled by user")
+            break
+
+        source_path = track.get('source_m4a_path')
+        if not source_path or not Path(source_path).exists():
+            skipped += 1
+            continue
+
+        try:
+            m4a_tags = read_m4a_tags(source_path)
+            track_db.update_track_metadata(
+                uuid=track['uuid'],
+                title=m4a_tags['title'],
+                artist=m4a_tags['artist'],
+                album=m4a_tags['album'],
+                genre=m4a_tags.get('genre') or None,
+                track_number=m4a_tags.get('track_number'),
+                track_total=m4a_tags.get('track_total'),
+                disc_number=m4a_tags.get('disc_number'),
+                disc_total=m4a_tags.get('disc_total'),
+                year=m4a_tags.get('year') or None,
+                composer=m4a_tags.get('composer') or None,
+                album_artist=m4a_tags.get('album_artist') or None,
+                bpm=m4a_tags.get('bpm'),
+                comment=m4a_tags.get('comment') or None,
+                compilation=1 if m4a_tags.get('compilation') else None,
+                grouping=m4a_tags.get('grouping') or None,
+                lyrics=m4a_tags.get('lyrics') or None,
+                copyright_text=m4a_tags.get('copyright') or None,
+            )
+            updated += 1
+        except Exception as e:
+            logger.error(f"Failed to backfill {track['uuid']}: {e}")
+            errors += 1
+
+        if display_handler and (i + 1) % 10 == 0:
+            display_handler.update_progress(i + 1, total,
+                                            f"Backfill: {i + 1}/{total}")
+
+    logger.info(f"Backfill complete: {updated} updated, {skipped} skipped, {errors} errors")
+    return {'updated': updated, 'skipped': skipped, 'errors': errors,
+            'total': total}
 
 
 def read_m4a_cover_art(input_file):
@@ -3942,6 +4267,20 @@ class TagApplicator:
             'title': track_meta.get('title', ''),
             'artist': track_meta.get('artist', ''),
             'album': track_meta.get('album', ''),
+            'genre': track_meta.get('genre') or '',
+            'track_number': str(track_meta.get('track_number') or ''),
+            'track_total': str(track_meta.get('track_total') or ''),
+            'disc_number': str(track_meta.get('disc_number') or ''),
+            'disc_total': str(track_meta.get('disc_total') or ''),
+            'year': track_meta.get('year') or '',
+            'composer': track_meta.get('composer') or '',
+            'album_artist': track_meta.get('album_artist') or '',
+            'bpm': str(track_meta.get('bpm') or ''),
+            'comment': track_meta.get('comment') or '',
+            'compilation': '1' if track_meta.get('compilation') else '',
+            'grouping': track_meta.get('grouping') or '',
+            'lyrics': track_meta.get('lyrics') or '',
+            'copyright': track_meta.get('copyright') or '',
             'playlist': playlist_name,
             'playlist_key': track_meta.get('playlist', ''),
         }
@@ -3997,11 +4336,7 @@ class TagApplicator:
         # Cover art
         cover_art_path = track_meta.get('cover_art_path')
         if cover_art_path and profile.artwork_size != -1:
-            full_art_path = (
-                self.project_root
-                / get_library_dir(track_meta.get('playlist', ''))
-                / cover_art_path
-            )
+            full_art_path = self.project_root / cover_art_path
             if full_art_path.exists():
                 art_data = full_art_path.read_bytes()
                 art_mime = (APIC_MIME_PNG if cover_art_path.endswith('.png')
@@ -4190,7 +4525,7 @@ class Converter:
         """Extract cover art from M4A source and save to disk.
 
         Returns (relative_path, sha256_hash) or (None, None) if no art found.
-        The relative_path is relative to the playlist library directory.
+        The relative_path is relative to the project root (e.g. library/artwork/<uuid>.ext).
         """
         import hashlib
 
@@ -4207,7 +4542,7 @@ class Converter:
         art_path.write_bytes(cover_data)
 
         art_hash = hashlib.sha256(cover_data).hexdigest()[:16]
-        return f"artwork/{art_filename}", art_hash
+        return f"{get_artwork_dir()}/{art_filename}", art_hash
 
     def _convert_single_file(self, input_file, input_path, output_path,
                              playlist_key, force, dry_run, verbose,
@@ -4223,7 +4558,10 @@ class Converter:
 
         try:
             # Read M4A tags
-            title, artist, album = read_m4a_tags(input_file)
+            m4a_tags = read_m4a_tags(input_file)
+            title = m4a_tags['title']
+            artist = m4a_tags['artist']
+            album = m4a_tags['album']
             human_label = f"{artist} - {title}"
 
             # Check TrackDB for existing conversion of this source M4A
@@ -4258,7 +4596,9 @@ class Converter:
                     old_path.unlink()
                 # Clean up old cover art
                 if existing_track.get('cover_art_path'):
-                    old_art = output_path / existing_track['cover_art_path']
+                    old_art = Path(existing_track['cover_art_path'])
+                    if not old_art.is_absolute():
+                        old_art = Path('.') / old_art
                     if old_art.exists():
                         old_art.unlink()
                 if self.track_db:
@@ -4345,19 +4685,19 @@ class Converter:
 
             # Write ONLY the TrackUUID identifier tag (no TIT2/TPE1/TALB/APIC)
             try:
-                tags = ID3(str(output_file))
+                id3_tags = ID3(str(output_file))
             except ID3NoHeaderError:
-                tags = ID3()
+                id3_tags = ID3()
 
             # Remove any tags ffmpeg may have copied from the M4A
-            tags.delete(str(output_file))
-            tags = ID3()
-            tags.add(TXXX(encoding=3, desc=TXXX_TRACK_UUID,
+            id3_tags.delete(str(output_file))
+            id3_tags = ID3()
+            id3_tags.add(TXXX(encoding=3, desc=TXXX_TRACK_UUID,
                           text=[track_uuid]))
-            tags.save(str(output_file), v2_version=4, v1=0)
+            id3_tags.save(str(output_file), v2_version=4, v1=0)
 
-            # Extract cover art to disk (artwork/ is sibling of output/)
-            artwork_dir = output_path.parent / "artwork"
+            # Extract cover art to flat artwork directory
+            artwork_dir = Path(get_artwork_dir())
             cover_art_path, cover_art_hash = self._extract_cover_art_to_disk(
                 input_file, artwork_dir, track_uuid)
 
@@ -4375,9 +4715,7 @@ class Converter:
                 self.track_db.insert_track(
                     uuid=track_uuid,
                     playlist=playlist_key,
-                    file_path=str(
-                        get_output_dir(playlist_key)
-                        + "/" + output_filename),
+                    file_path=f"{get_audio_dir()}/{output_filename}",
                     title=title,
                     artist=artist,
                     album=album,
@@ -4386,6 +4724,20 @@ class Converter:
                     duration_s=duration_s,
                     file_size_bytes=file_size_bytes,
                     source_m4a_path=str(input_file),
+                    genre=m4a_tags.get('genre') or None,
+                    track_number=m4a_tags.get('track_number'),
+                    track_total=m4a_tags.get('track_total'),
+                    disc_number=m4a_tags.get('disc_number'),
+                    disc_total=m4a_tags.get('disc_total'),
+                    year=m4a_tags.get('year') or None,
+                    composer=m4a_tags.get('composer') or None,
+                    album_artist=m4a_tags.get('album_artist') or None,
+                    bpm=m4a_tags.get('bpm'),
+                    comment=m4a_tags.get('comment') or None,
+                    compilation=1 if m4a_tags.get('compilation') else None,
+                    grouping=m4a_tags.get('grouping') or None,
+                    lyrics=m4a_tags.get('lyrics') or None,
+                    copyright_text=m4a_tags.get('copyright') or None,
                 )
 
             if verbose:
@@ -5920,14 +6272,9 @@ class SyncManager:
         def _get_track_meta(src_file):
             if not tag_applicator or not tag_applicator.track_db:
                 return None
-            # Build the file_path key as stored in TrackDB
-            # DB stores paths like library/<playlist>/output/<uuid>.mp3
-            try:
-                rel = src_file.relative_to(Path(get_library_dir()))
-                db_path = f"{DEFAULT_LIBRARY_DIR}/{rel}"
-                return tag_applicator.track_db.get_track_by_path(db_path)
-            except ValueError:
-                return None
+            # DB stores paths like library/audio/<uuid>.mp3
+            db_path = f"{get_audio_dir()}/{src_file.name}"
+            return tag_applicator.track_db.get_track_by_path(db_path)
 
         # Pre-compute destination paths for all files, then deduplicate
         track_metas = {}  # src_file -> track_meta (or None)
@@ -6208,39 +6555,40 @@ class SummaryManager:
     def __init__(self, logger=None):
         self.logger = logger or Logger()
 
-    def scan_music_library(self):
-        """Scan library/<playlist>/source/ for M4A stats and conversion status.
+    def scan_music_library(self, track_db=None):
+        """Scan library/source/gamdl/ for M4A stats and conversion status.
 
-        Compares M4A count in source/ against MP3 count in output/ for each
-        playlist to determine unconverted counts.
+        Uses TrackDB for per-playlist MP3 counts when available, otherwise
+        counts MP3s in the flat library/audio/ directory.
 
         Returns:
-            MusicLibraryStats or None if library directory doesn't exist
+            MusicLibraryStats or None if source directory doesn't exist
         """
-        library_path = Path(DEFAULT_LIBRARY_DIR)
-        if not library_path.exists():
+        source_root = Path(DEFAULT_LIBRARY_DIR) / SOURCE_SUBDIR / DEFAULT_IMPORTER
+        if not source_root.exists():
             return None
 
         stats = MusicLibraryStats()
         start_time = time.time()
 
+        # Get per-playlist MP3 counts from TrackDB
+        db_counts = {}
+        if track_db:
+            for ps in track_db.get_playlist_stats():
+                db_counts[ps['playlist']] = ps['track_count']
+
         try:
-            for item in sorted(library_path.iterdir(), key=lambda p: p.name):
+            for item in sorted(source_root.iterdir(), key=lambda p: p.name):
                 if not item.is_dir() or item.name.startswith('.'):
                     continue
 
                 playlist_name = item.name
-                source_dir = item / SOURCE_SUBDIR
-                output_dir = item / OUTPUT_SUBDIR
-
-                if not source_dir.exists():
-                    continue
 
                 m4a_count = 0
                 size_bytes = 0
 
-                # Walk recursively — source/ has nested Artist/Album/Track.m4a structure
-                for root, _dirs, files in os.walk(source_dir):
+                # Walk recursively — source has nested Artist/Album/Track.m4a structure
+                for root, _dirs, files in os.walk(item):
                     for f in files:
                         if f.lower().endswith('.m4a'):
                             m4a_count += 1
@@ -6253,12 +6601,8 @@ class SummaryManager:
                 if m4a_count == 0:
                     continue
 
-                # Simple count-based comparison for conversion status
-                exported_count = 0
-                if output_dir.exists():
-                    exported_count = sum(
-                        1 for f in output_dir.glob('*.mp3')
-                        if not f.name.startswith('._'))
+                # Use DB count if available, otherwise 0
+                exported_count = db_counts.get(playlist_name, 0)
                 unconverted_count = max(0, m4a_count - exported_count)
 
                 stats.playlists.append({
@@ -6295,22 +6639,25 @@ class DataManager:
     """Manages playlist data lifecycle (deletion, cleanup)."""
 
     def __init__(self, logger=None, config=None, prompt_handler=None, output_profile=None,
-                 audit_logger=None, audit_source='cli'):
+                 audit_logger=None, audit_source='cli', track_db=None):
         self.logger = logger or Logger()
         self.config = config or ConfigManager(logger=self.logger)
         self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
         self.output_profile = output_profile or OUTPUT_PROFILES[DEFAULT_OUTPUT_TYPE]
         self.audit_logger = audit_logger
         self._audit_source = audit_source
+        self.track_db = track_db
 
     def delete_playlist_data(self, playlist_key, delete_source=True, delete_library=True,
                              remove_config=False, dry_run=False):
-        """Delete source M4A and/or library MP3 directories for a playlist.
+        """Delete source M4A and/or library MP3/artwork for a playlist.
+
+        Source files are in library/source/gamdl/<playlist>/ (directory).
+        MP3 and artwork files are in flat dirs — identified via TrackDB.
 
         Returns DeleteResult with stats about what was deleted.
         """
         source_dir = Path(get_source_dir(playlist_key))
-        library_dir = Path(get_output_dir(playlist_key))
 
         errors = []
         files_deleted = 0
@@ -6319,22 +6666,35 @@ class DataManager:
         library_deleted = False
         config_removed = False
 
-        # Count files and sizes for each directory
+        # Count source files
         source_files = 0
         source_bytes = 0
-        lib_files = 0
-        lib_bytes = 0
-
         if delete_source and source_dir.exists():
             for f in source_dir.rglob('*'):
                 if f.is_file():
                     source_files += 1
                     source_bytes += f.stat().st_size
-        if delete_library and library_dir.exists():
-            for f in library_dir.rglob('*'):
-                if f.is_file():
+
+        # Count library files (MP3 + artwork) via TrackDB
+        lib_files = 0
+        lib_bytes = 0
+        lib_file_paths = []  # (path, is_mp3_or_art)
+        if delete_library and self.track_db:
+            tracks = self.track_db.get_tracks_by_playlist(playlist_key)
+            for t in tracks:
+                # MP3 file
+                mp3_path = Path(t['file_path'])
+                if mp3_path.exists():
                     lib_files += 1
-                    lib_bytes += f.stat().st_size
+                    lib_bytes += mp3_path.stat().st_size
+                    lib_file_paths.append(mp3_path)
+                # Artwork file
+                if t.get('cover_art_path'):
+                    art_path = Path(t['cover_art_path'])
+                    if art_path.exists():
+                        lib_files += 1
+                        lib_bytes += art_path.stat().st_size
+                        lib_file_paths.append(art_path)
 
         total_files = source_files + lib_files
         total_bytes = source_bytes + lib_bytes
@@ -6358,8 +6718,8 @@ class DataManager:
         if dry_run:
             if delete_source and source_dir.exists():
                 self.logger.info(f"  [DRY-RUN] Would delete: {source_dir}/ ({source_files} files, {_format_bytes(source_bytes)})")
-            if delete_library and library_dir.exists():
-                self.logger.info(f"  [DRY-RUN] Would delete: {library_dir}/ ({lib_files} files, {_format_bytes(lib_bytes)})")
+            if lib_files > 0:
+                self.logger.info(f"  [DRY-RUN] Would delete: {lib_files} library files ({_format_bytes(lib_bytes)})")
             if remove_config:
                 self.logger.info(f"  [DRY-RUN] Would remove config entry for '{playlist_key}'")
             return DeleteResult(
@@ -6384,17 +6744,27 @@ class DataManager:
                 errors.append(f"Failed to delete {source_dir}: {e}")
                 self.logger.error(errors[-1])
 
-        # Delete library directory
-        if delete_library and library_dir.exists():
-            try:
-                shutil.rmtree(library_dir)
+        # Delete library files (MP3 + artwork) individually from flat dirs
+        if delete_library and lib_file_paths:
+            deleted_count = 0
+            deleted_bytes = 0
+            for fpath in lib_file_paths:
+                try:
+                    sz = fpath.stat().st_size
+                    fpath.unlink()
+                    deleted_count += 1
+                    deleted_bytes += sz
+                except OSError as e:
+                    errors.append(f"Failed to delete {fpath}: {e}")
+                    self.logger.error(errors[-1])
+            if deleted_count > 0:
                 library_deleted = True
-                files_deleted += lib_files
-                bytes_freed += lib_bytes
-                self.logger.info(f"  Deleted library: {library_dir}/ ({lib_files} files, {_format_bytes(lib_bytes)})")
-            except OSError as e:
-                errors.append(f"Failed to delete {library_dir}: {e}")
-                self.logger.error(errors[-1])
+                files_deleted += deleted_count
+                bytes_freed += deleted_bytes
+                self.logger.info(f"  Deleted library: {deleted_count} files ({_format_bytes(deleted_bytes)})")
+            # Remove TrackDB entries
+            if self.track_db:
+                self.track_db.delete_tracks_by_playlist(playlist_key)
 
         # Remove config entry
         if remove_config:
@@ -6662,7 +7032,7 @@ class PipelineOrchestrator:
         # ── Stage 2: Convert M4A → clean library MP3 ─────────────────
         self.logger.info("\n=== STAGE 2: Convert M4A → MP3 ===")
         music_dir = get_source_dir(self.stats.playlist_key)
-        library_dir = get_output_dir(self.stats.playlist_key)
+        library_dir = get_audio_dir()
 
         preset = (quality_preset if quality_preset is not None
                   else self.quality_preset)
