@@ -45,6 +45,10 @@ export function SyncPage() {
     setLastSyncResult,
     drives,
     setDrives,
+    selectedDrive,
+    setSelectedDrive,
+    destPath,
+    setDestPath,
     destSyncStatus,
     setDestSyncStatus,
     isOffline,
@@ -60,8 +64,6 @@ export function SyncPage() {
     backgroundPrefetchStatus,
   } = useAppState();
 
-  const [destPath, setDestPath] = useState('');
-  const [selectedDrive, setSelectedDrive] = useState<DriveInfo | null>(null);
   const [autoSyncDrives, setAutoSyncDrives] = useState<string[]>([]);
   const [ejectAfterSync, setEjectAfterSync] = useState(false);
   const [ejected, setEjected] = useState(false);
@@ -432,17 +434,6 @@ export function SyncPage() {
                                 </span>
                               );
                             })()}
-                            {!isOffline && (() => {
-                              const syncInfo = destSyncStatus?.playlists.find(
-                                (sp) => sp.name === p.key || sp.name === p.name,
-                              );
-                              if (!syncInfo) return null;
-                              if (syncInfo.new_files === 0)
-                                return <small className="text-success flex-shrink-0">synced</small>;
-                              if (syncInfo.is_new_playlist)
-                                return <small className="text-warning flex-shrink-0">all new</small>;
-                              return <small className="text-info flex-shrink-0">{syncInfo.new_files} new</small>;
-                            })()}
                           </div>
                         </div>
                         <button
@@ -453,6 +444,17 @@ export function SyncPage() {
                           <i className={`bi ${isPinned ? 'bi-pin-fill' : 'bi-pin'}`} />
                         </button>
                       </div>
+                      {!isOffline && (() => {
+                        const syncInfo = destSyncStatus?.playlists.find(
+                          (sp) => sp.name === p.key || sp.name === p.name,
+                        );
+                        if (!syncInfo) return null;
+                        if (syncInfo.new_files === 0)
+                          return <small className="text-success d-block mt-1">synced</small>;
+                        if (syncInfo.is_new_playlist)
+                          return <small className="text-warning d-block mt-1">all new</small>;
+                        return <small className="text-info d-block mt-1">{syncInfo.new_files} new</small>;
+                      })()}
                     </div>
                   </div>
                 );
@@ -538,6 +540,14 @@ export function SyncPage() {
                       Eject when done
                     </label>
                   </div>
+                  <button
+                    className="btn btn-sm btn-outline-warning"
+                    onClick={ejectSelectedDrive}
+                    disabled={isSyncing}
+                  >
+                    <i className="bi bi-eject-fill me-1" />
+                    Eject
+                  </button>
                 </div>
               )}
             </div>

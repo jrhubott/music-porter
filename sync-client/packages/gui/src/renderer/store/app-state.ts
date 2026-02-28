@@ -46,7 +46,11 @@ interface AppState {
   lastSyncResult: SyncResult | null;
   setLastSyncResult: (result: SyncResult | null) => void;
 
-  // Destination sync status
+  // Destination
+  selectedDrive: DriveInfo | null;
+  setSelectedDrive: (drive: DriveInfo | null) => void;
+  destPath: string;
+  setDestPath: (path: string) => void;
   destSyncStatus: SyncStatusDetail | null;
   setDestSyncStatus: (status: SyncStatusDetail | null) => void;
 
@@ -119,7 +123,11 @@ export const useAppState = create<AppState>((set) => ({
   lastSyncResult: null,
   setLastSyncResult: (lastSyncResult) => set({ lastSyncResult }),
 
-  // Destination sync status
+  // Destination
+  selectedDrive: null,
+  setSelectedDrive: (selectedDrive) => set({ selectedDrive }),
+  destPath: '',
+  setDestPath: (destPath) => set({ destPath }),
   destSyncStatus: null,
   setDestSyncStatus: (destSyncStatus) => set({ destSyncStatus }),
 
