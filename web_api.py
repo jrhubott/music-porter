@@ -809,7 +809,7 @@ def _serialize_aggregate_result(r):
         'successful_playlists': r.successful_playlists,
         'failed_playlists': r.failed_playlists,
         'cumulative': r.cumulative_stats,
-        'sync_destination': r.sync_destination,
+        'sync_destination': r.usb_destination,
         'playlists': [_serialize_playlist_result(pr) for pr in r.playlist_results],
     }
 
