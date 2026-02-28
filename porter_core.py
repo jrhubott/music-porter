@@ -3763,8 +3763,8 @@ def read_m4a_tags(input_file):
     # Integer tag
     bpm = tags.get(M4A_TAG_BPM, [None])[0]
 
-    # Boolean tag
-    compilation = bool(tags.get(M4A_TAG_COMPILATION, [False])[0])
+    # Boolean tag (cpil is stored as a bare bool, not a list)
+    compilation = bool(tags.get(M4A_TAG_COMPILATION, False))
 
     return {
         'title': title, 'artist': artist, 'album': album,
