@@ -97,9 +97,6 @@
 
     // ── Submit operation and start SSE ──
     function submitOperation(url, formData, logContainerId, onComplete) {
-      const logPanel = document.getElementById(logContainerId);
-      if (logPanel) logPanel.innerHTML = '';
-
       fetch(url, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -141,11 +138,13 @@
 
     function startSSE(taskId, containerId, onComplete) {
       const panel = document.getElementById(containerId);
-      if (!panel) return;
+      if (!panel) return null;
       panel.innerHTML = '';
       const progressEl = _ensureProgressBar(panel);
       progressEl.style.display = 'none';
       const source = new EventSource('/api/stream/' + taskId);
+      source._taskId = taskId;
+      window._lastSSE = source;
 
       source.onmessage = function(e) {
         const msg = JSON.parse(e.data);
@@ -202,6 +201,7 @@
       };
 
       updateOpsBadge();
+      return source;
     }
 
     // ── Operations badge updater ──

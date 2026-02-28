@@ -326,11 +326,9 @@ function updateActiveTask(task) {
   // Start SSE if not already connected to this task
   if (!activeSSE || activeSSE._taskId !== task.id) {
     if (activeSSE) activeSSE.close();
-    const panel = document.getElementById('activeTaskLog');
-    panel.innerHTML = '';
-    startSSE(task.id, 'activeTaskLog');
-    // Tag it so we don't reconnect
-    if (window._lastSSE) window._lastSSE._taskId = task.id;
+    activeSSE = startSSE(task.id, 'activeTaskLog', function(msg) {
+      activeSSE = null;
+    });
   }
 }
 
