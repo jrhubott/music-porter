@@ -3834,8 +3834,8 @@ def backfill_track_metadata(track_db, logger=None, display_handler=None,
             errors += 1
 
         if display_handler and (i + 1) % 10 == 0:
-            display_handler.update_progress(i + 1, total,
-                                            f"Backfill: {i + 1}/{total}")
+            display_handler.show_progress(i + 1, total,
+                                          f"Backfill: {i + 1}/{total}")
 
     logger.info(f"Backfill complete: {updated} updated, {skipped} skipped, {errors} errors")
     return {'updated': updated, 'skipped': skipped, 'errors': errors,
