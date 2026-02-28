@@ -3,8 +3,6 @@ export type {
   AboutResponse,
   AppConfig,
   AuthValidateResponse,
-  CacheEntry,
-  CacheIndex,
   ClientRecordResponse,
   ConnectionState,
   ConnectionType,
@@ -16,8 +14,6 @@ export type {
   FileListResponse,
   OkResponse,
   Playlist,
-  PlaylistCacheStatus,
-  PrefetchResult,
   ProfileInfo,
   ServerConfig,
   ServerInfoResponse,
@@ -35,9 +31,34 @@ export type {
   SyncProgress,
   SyncResult,
   SyncStatusDetail,
-  BackgroundPrefetchStatus,
   WindowState,
 } from './types.js';
+
+// Cache module (types, constants, classes)
+export type {
+  CacheEntry,
+  CacheIndex,
+  CachedPlaylistData,
+  MetadataCacheData,
+  PrefetchResult,
+  PlaylistCacheStatus,
+  BackgroundPrefetchStatus,
+} from './cache/index.js';
+export {
+  CACHE_DIRNAME,
+  CACHE_INDEX_FILENAME,
+  DEFAULT_MAX_CACHE_BYTES,
+  BACKGROUND_PREFETCH_INTERVAL_MS,
+  METADATA_CACHE_FILENAME,
+  CacheManager,
+  MetadataCache,
+  PrefetchEngine,
+  loadJsonIndex,
+  saveJsonIndex,
+  removeEmptyDirs,
+  atomicCopyFile,
+} from './cache/index.js';
+export type { PrefetchOptions } from './cache/index.js';
 
 // Constants
 export {
@@ -49,16 +70,12 @@ export {
   AUTH_HEADER_PREFIX,
   BONJOUR_BROWSE_TIMEOUT_MS,
   BONJOUR_SERVICE_TYPE,
-  CACHE_DIRNAME,
-  CACHE_INDEX_FILENAME,
   CLIENT_SYNC_KEY_PREFIX,
   COOKIE_POLL_INTERVAL_MS,
   COOKIE_REFRESH_TIMEOUT_MS,
   COOKIE_WINDOW_HEIGHT,
   COOKIE_WINDOW_WIDTH,
-  BACKGROUND_PREFETCH_INTERVAL_MS,
   DEFAULT_CONCURRENCY,
-  DEFAULT_MAX_CACHE_BYTES,
   DEFAULT_PORT,
   DRIVE_POLL_INTERVAL_MS,
   EXCLUDED_MAC_VOLUMES,
@@ -99,10 +116,7 @@ export type { LogCallback, ProgressCallback } from './progress.js';
 
 // Classes
 export { APIClient } from './api-client.js';
-export { CacheManager } from './cache-manager.js';
 export { ConfigStore } from './config-store.js';
-export { PrefetchEngine } from './prefetch-engine.js';
-export type { PrefetchOptions } from './prefetch-engine.js';
 export { SyncEngine } from './sync-engine.js';
 export type { SyncOptions } from './sync-engine.js';
 export { DriveManager } from './drive-manager.js';

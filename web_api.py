@@ -8,6 +8,7 @@ All routes are registered on ``api_bp`` and access shared state through
 ``AppContext`` stored in ``current_app.config['CTX']``.
 """
 
+import hashlib
 import json
 import queue
 import re
@@ -514,11 +515,25 @@ def api_playlists_list():
     config = ctx.get_config()
     stats = {s['playlist']: s['track_count']
              for s in ctx.track_db.get_playlist_stats()} if ctx.track_db else {}
-    return jsonify([
+
+    # Build ETag from playlist config + file counts
+    etag_parts = [(p.key, p.name, stats.get(p.key, 0)) for p in config.playlists]
+    etag_hash = hashlib.md5(
+        json.dumps(etag_parts, sort_keys=True).encode()
+    ).hexdigest()
+    etag = f'"{etag_hash}"'
+
+    if_none_match = request.headers.get('If-None-Match')
+    if if_none_match == etag:
+        return Response(status=304)
+
+    resp = jsonify([
         {'key': p.key, 'url': p.url, 'name': p.name,
          'file_count': stats.get(p.key, 0)}
         for p in config.playlists
     ])
+    resp.headers['ETag'] = etag
+    return resp
 
 
 @api_bp.route('/api/playlists', methods=['POST'])
@@ -1138,6 +1153,9 @@ def api_files_list(playlist_key):
     - ``?profile=X``: use TagApplicator to build profile-specific
       ``display_filename`` and ``output_subdir`` for each file.
     - ``?include_sync=true``: include per-file sync status.
+
+    Supports ETag-based conditional requests: returns 304 when
+    ``If-None-Match`` matches the current playlist fingerprint.
     """
     ctx = _ctx()
 
@@ -1146,8 +1164,20 @@ def api_files_list(playlist_key):
     if not tracks:
         return jsonify({'error': f'No tracks found for playlist: {playlist_key}'}), 404
 
-    # Profile-aware naming
+    # ETag check — early return before any TagApplicator or serialization work
     profile_name = request.args.get('profile')
+    fingerprint = ctx.track_db.get_playlist_fingerprint(playlist_key)
+    if fingerprint:
+        etag_source = f"{fingerprint}:{profile_name or ''}"
+        etag_hash = hashlib.md5(etag_source.encode()).hexdigest()
+        etag = f'"{etag_hash}"'
+        if_none_match = request.headers.get('If-None-Match')
+        if if_none_match == etag:
+            return Response(status=304)
+    else:
+        etag = None
+
+    # Profile-aware naming
     tag_applicator = None
     profile = None
     playlist_display_name = playlist_key
@@ -1217,7 +1247,10 @@ def api_files_list(playlist_key):
     }
     if profile_name:
         result['name'] = playlist_display_name
-    return jsonify(result)
+    resp = jsonify(result)
+    if etag:
+        resp.headers['ETag'] = etag
+    return resp
 
 
 # TODO: Add a web file browser page (template + route) that shows per-file

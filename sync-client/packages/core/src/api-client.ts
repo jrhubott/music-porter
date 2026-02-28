@@ -26,11 +26,20 @@ import type {
   SyncKeySummary,
   SyncStatusDetail,
 } from './types.js';
+import type { MetadataCache } from './cache/metadata-cache.js';
 
 const HTTP_UNAUTHORIZED = 401;
+const HTTP_NOT_MODIFIED = 304;
 const HTTP_CONFLICT = 409;
 const SUCCESS_RANGE_START = 200;
 const SUCCESS_RANGE_END = 299;
+
+/** Result from an ETag-aware GET request. */
+interface ETagResult<T> {
+  body: T | null;
+  etag: string | null;
+  notModified: boolean;
+}
 
 interface APIClientOptions {
   /** Default request timeout in milliseconds. */
@@ -44,6 +53,9 @@ export class APIClient {
   private apiKey?: string;
   private activeURL?: string;
   private connType?: ConnectionType;
+  /** In-memory ETag for /api/playlists (tiny response, no persistent cache needed). */
+  private playlistsETag: string | null = null;
+  private playlistsCache: Playlist[] | null = null;
 
   constructor(_options?: APIClientOptions) {
     // Options reserved for future use
@@ -136,26 +148,75 @@ export class APIClient {
     }
   }
 
-  /** Disconnect and clear active URL. */
+  /** Disconnect and clear active URL and ETag cache. */
   disconnect(): void {
     this.activeURL = undefined;
     this.connType = undefined;
+    this.clearETagCache();
+  }
+
+  /** Clear in-memory ETag caches (call on reconnect or session reset). */
+  clearETagCache(): void {
+    this.playlistsETag = null;
+    this.playlistsCache = null;
   }
 
   // ── Playlists ──
 
   async getPlaylists(): Promise<Playlist[]> {
-    return this.get<Playlist[]>('/api/playlists');
+    const result = await this.getWithETag<Playlist[]>(
+      '/api/playlists',
+      this.playlistsETag,
+    );
+    if (result.notModified && this.playlistsCache) {
+      return this.playlistsCache;
+    }
+    this.playlistsETag = result.etag;
+    this.playlistsCache = result.body;
+    return result.body!;
   }
 
   // ── Files ──
 
-  async getFiles(playlistKey: string, includeSyncStatus = false, profile?: string): Promise<FileListResponse> {
+  async getFiles(
+    playlistKey: string,
+    includeSyncStatus = false,
+    profile?: string,
+    metadataCache?: MetadataCache,
+  ): Promise<FileListResponse> {
     const queryParts: string[] = [];
     if (includeSyncStatus) queryParts.push('include_sync=true');
     if (profile) queryParts.push(`profile=${encodeURIComponent(profile)}`);
     const params = queryParts.length > 0 ? `?${queryParts.join('&')}` : '';
-    return this.get<FileListResponse>(`/api/files/${playlistKey}${params}`);
+    const path = `/api/files/${playlistKey}${params}`;
+
+    // ETag-aware request when metadataCache is provided
+    if (metadataCache) {
+      const cachedETag = metadataCache.getETag(playlistKey);
+      const result = await this.getWithETag<FileListResponse>(path, cachedETag);
+      if (result.notModified) {
+        const cached = metadataCache.getPlaylistFiles(playlistKey);
+        if (cached) {
+          return {
+            playlist: playlistKey,
+            file_count: cached.fileCount,
+            files: cached.files,
+            name: cached.playlistName,
+          };
+        }
+      }
+      if (result.body) {
+        metadataCache.storePlaylistFiles(
+          playlistKey,
+          result.body.files,
+          result.etag,
+          result.body.name,
+        );
+      }
+      return result.body!;
+    }
+
+    return this.get<FileListResponse>(path);
   }
 
   /** Get a readable stream for downloading a file. Pass profile for tagged output. */
@@ -271,6 +332,34 @@ export class APIClient {
     });
     this.checkResponse(response);
     return (await response.json()) as T;
+  }
+
+  /**
+   * GET with ETag support. Sends If-None-Match when etag is provided.
+   * Returns { body: null, notModified: true } on 304 responses.
+   */
+  private async getWithETag<T>(
+    path: string,
+    etag: string | null,
+    signal?: AbortSignal,
+  ): Promise<ETagResult<T>> {
+    const url = this.buildURL(path);
+    const headers = this.authHeaders();
+    if (etag) {
+      headers['If-None-Match'] = etag;
+    }
+    const response = await fetch(url, {
+      method: 'GET',
+      headers,
+      signal,
+    });
+    if (response.status === HTTP_NOT_MODIFIED) {
+      return { body: null, etag, notModified: true };
+    }
+    this.checkResponse(response);
+    const body = (await response.json()) as T;
+    const responseETag = response.headers.get('ETag');
+    return { body, etag: responseETag, notModified: false };
   }
 
   private async post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
