@@ -1190,6 +1190,7 @@ def api_files_list(playlist_key):
             'uuid': track['uuid'],
             'has_cover_art': bool(track['cover_art_path']),
             'created_at': track['created_at'],
+            'updated_at': track['updated_at'],
         }
         if subdir is not None:
             entry['output_subdir'] = subdir
