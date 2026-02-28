@@ -3473,6 +3473,35 @@ def sanitize_filename(name):
     return "".join(c for c in name if c not in invalid_chars)
 
 
+def deduplicate_filenames(filenames, scopes=None):
+    """Deduplicate a list of filenames, appending (2), (3) for collisions.
+
+    Args:
+        filenames: List of filename strings.
+        scopes: Optional list of scope keys (same length as filenames).
+            Files in different scopes won't collide.
+
+    Returns:
+        List of deduplicated filenames (same length/order as input).
+    """
+    seen = {}
+    result = []
+    for i, filename in enumerate(filenames):
+        scope = scopes[i] if scopes else ''
+        full_key = (scope, filename)
+        if full_key in seen:
+            seen[full_key] += 1
+            stem, ext = (filename.rsplit('.', 1)
+                         if '.' in filename else (filename, ''))
+            suffix = f" ({seen[full_key]})"
+            result.append(
+                f"{stem}{suffix}.{ext}" if ext else f"{stem}{suffix}")
+        else:
+            seen[full_key] = 1
+            result.append(filename)
+    return result
+
+
 def read_m4a_tags(input_file):
     """
     Read title, artist, and album tags from an M4A file.
@@ -5750,22 +5779,6 @@ class SyncManager:
         # File is up-to-date, skip
         return False
 
-    def _extract_sync_info(self, src_file, source_path):
-        """Extract playlist name and file name from a source file path.
-
-        With the consolidated directory layout, source_path is typically
-        library/<playlist>/output/.  We use the parent's name (the playlist
-        key) rather than source_path.name (which would be 'output').
-        """
-        if source_path.is_dir():
-            rel = src_file.relative_to(source_path)
-            parts = rel.parts
-            if len(parts) > 1:
-                return parts[0], str(Path(*parts[1:]))
-            # source_path.name may be 'output' — use parent for playlist key
-            return source_path.parent.name, parts[0]
-        return source_path.parent.name, src_file.name
-
     def select_destination(self, config=None, output_profile=None):
         """Interactive destination picker showing USB drives, saved destinations, and custom path.
 
@@ -5903,22 +5916,6 @@ class SyncManager:
         dest = Path(fs_path)
         self.logger.info(f"Syncing {source_path} to {dest}")
 
-        # Helper to resolve the destination path for a source file
-        def _resolve_dest_path(src_file, track_meta=None):
-            if tag_applicator and profile and track_meta:
-                pname = playlist_name or track_meta.get('playlist', '')
-                fname = tag_applicator.build_output_filename(
-                    track_meta, profile, pname)
-                subdir = tag_applicator.build_output_subdir(
-                    track_meta, profile, pname)
-                if subdir:
-                    return dest / subdir / fname
-                return dest / fname
-            # Fallback: preserve relative path
-            if source_path.is_dir():
-                return dest / src_file.relative_to(source_path)
-            return dest / src_file.name
-
         # Helper to look up track metadata from tag_applicator's TrackDB
         def _get_track_meta(src_file):
             if not tag_applicator or not tag_applicator.track_db:
@@ -5932,11 +5929,47 @@ class SyncManager:
             except ValueError:
                 return None
 
+        # Pre-compute destination paths for all files, then deduplicate
+        track_metas = {}  # src_file -> track_meta (or None)
+        raw_filenames = []
+        raw_subdirs = []
+        for src_file in mp3_files:
+            meta = _get_track_meta(src_file)
+            track_metas[src_file] = meta
+            if tag_applicator and profile and meta:
+                pname = playlist_name or meta.get('playlist', '')
+                fname = tag_applicator.build_output_filename(
+                    meta, profile, pname)
+                subdir = tag_applicator.build_output_subdir(
+                    meta, profile, pname)
+            else:
+                # Fallback: preserve relative path
+                if source_path.is_dir():
+                    rel = src_file.relative_to(source_path)
+                    fname = rel.name
+                    subdir = (str(rel.parent)
+                              if len(rel.parts) > 1 else '')
+                else:
+                    fname = src_file.name
+                    subdir = ''
+            raw_filenames.append(fname)
+            raw_subdirs.append(subdir or '')
+
+        deduped_names = deduplicate_filenames(raw_filenames, raw_subdirs)
+
+        # Build src_file -> deduped dest path map
+        dest_path_map = {}
+        for i, src_file in enumerate(mp3_files):
+            subdir = raw_subdirs[i]
+            if subdir:
+                dest_path_map[src_file] = dest / subdir / deduped_names[i]
+            else:
+                dest_path_map[src_file] = dest / deduped_names[i]
+
         if dry_run:
             self.logger.dry_run(f"Would create directory: {dest}")
             for src_file in mp3_files:
-                track_meta = _get_track_meta(src_file)
-                dst_file = _resolve_dest_path(src_file, track_meta)
+                dst_file = dest_path_map[src_file]
                 if self._should_copy_file(src_file, dst_file):
                     self.logger.dry_run(f"Would copy: {src_file.name}")
                     stats.files_copied += 1
@@ -5986,8 +6019,8 @@ class SyncManager:
                     self.logger.warn("Sync cancelled by user")
                     break
                 try:
-                    track_meta = _get_track_meta(src_file)
-                    dst_file = _resolve_dest_path(src_file, track_meta)
+                    track_meta = track_metas[src_file]
+                    dst_file = dest_path_map[src_file]
 
                     dst_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -6019,10 +6052,11 @@ class SyncManager:
                                 f"Skipped (unchanged): {src_file.name}")
 
                     if self.sync_tracker and not dry_run:
-                        pl_name, fname = self._extract_sync_info(
-                            src_file, source_path)
+                        record_name = dst_file.name
+                        pl_name = (playlist_name
+                                   or source_path.parent.name)
                         self.sync_tracker.record_file(
-                            dest_key, pl_name, fname)
+                            dest_key, pl_name, record_name)
 
                 except Exception as e:
                     stats.files_failed += 1

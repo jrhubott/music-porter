@@ -1049,18 +1049,11 @@ def api_files_list(playlist_key):
 
     # Deduplicate display_filenames — append (2), (3), etc. for collisions.
     # Scoped per output_subdir so cross-directory names don't collide.
-    seen = {}
-    for entry in files:
-        scope_key = entry.get('output_subdir', '')
-        disp = entry['display_filename']
-        full_key = (scope_key, disp)
-        if full_key in seen:
-            seen[full_key] += 1
-            stem, ext = disp.rsplit('.', 1) if '.' in disp else (disp, '')
-            suffix = f" ({seen[full_key]})"
-            entry['display_filename'] = f"{stem}{suffix}.{ext}" if ext else f"{stem}{suffix}"
-        else:
-            seen[full_key] = 1
+    disp_names = [e['display_filename'] for e in files]
+    scopes = [e.get('output_subdir', '') for e in files]
+    deduped = mp.deduplicate_filenames(disp_names, scopes)
+    for entry, name in zip(files, deduped, strict=True):
+        entry['display_filename'] = name
 
     include_sync = request.args.get('include_sync', '').lower() == 'true'
     if include_sync and ctx.sync_tracker:
@@ -1349,7 +1342,9 @@ def api_files_download_all(playlist_key):
         stored = Path(t['file_path']).name
         display_map[stored] = _build_display_filename(t)
 
-    file_entries = [(display_map.get(f.name, f.name), f) for f in mp3_files]
+    raw_names = [display_map.get(f.name, f.name) for f in mp3_files]
+    deduped = mp.deduplicate_filenames(raw_names)
+    file_entries = list(zip(deduped, mp3_files, strict=True))
     content_length, _ = _streaming_zip_size(file_entries)
 
     zip_name = f"{playlist_key}.zip"
@@ -1404,9 +1399,10 @@ def api_files_download_zip():
     file_entries = []
     for key, files in playlist_files:
         dm = display_maps.get(key, {})
-        for f in files:
-            arc_name = f'{key}/{dm.get(f.name, f.name)}'
-            file_entries.append((arc_name, f))
+        raw_names = [dm.get(f.name, f.name) for f in files]
+        deduped = mp.deduplicate_filenames(raw_names)
+        for name, f in zip(deduped, files, strict=True):
+            file_entries.append((f'{key}/{name}', f))
 
     content_length, _ = _streaming_zip_size(file_entries)
 
