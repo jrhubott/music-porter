@@ -22,8 +22,8 @@ struct AboutView: View {
                 LabeledContent("App Version", value: MusicPorterApp.appVersion)
                 if let serverVersion = aboutResponse?.version {
                     LabeledContent("Server Version", value: serverVersion)
-                } else if let server = appState.currentServer {
-                    LabeledContent("Server Version", value: server.version)
+                } else if let server = appState.currentServer, let version = server.version {
+                    LabeledContent("Server Version", value: version)
                 }
             }
 
@@ -90,7 +90,7 @@ struct AboutView: View {
     // MARK: - Parsing
 
     /// Parse release notes text into structured versions, matching the web dashboard logic.
-    static func parseReleaseNotes(_ text: String) -> [ReleaseVersion] {
+    private static func parseReleaseNotes(_ text: String) -> [ReleaseVersion] {
         let lines = text.components(separatedBy: "\n")
         var versions: [ReleaseVersion] = []
         var currentHeader: String?

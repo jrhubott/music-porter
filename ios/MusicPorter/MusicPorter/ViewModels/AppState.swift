@@ -19,6 +19,11 @@ final class AppState {
     let usbExport = USBExportService()
     let audioPlayer = AudioPlayerService()
 
+    // Cache services (initialized on connect, per-profile)
+    var metadataCache: MetadataCache?
+    var audioCacheManager: AudioCacheManager?
+    var prefetchEngine: PrefetchEngine?
+
     // Connection state
     var isConnected: Bool { apiClient.isConnected }
     var currentServer: ServerConnection? { apiClient.server }
@@ -75,7 +80,6 @@ final class AppState {
         apiClient.configure(server: server, apiKey: apiKey)
         downloadManager.configure(apiClient: apiClient)
         audioPlayer.configure(apiClient: apiClient)
-        usbExport.configure(apiClient: apiClient, downloadManager: downloadManager)
         let response = try await resolveConnection(server: server)
         if response.valid {
             apiClient.server?.name = response.serverName
@@ -87,6 +91,7 @@ final class AppState {
             savedServer = apiClient.server ?? server
             checkAPIVersion(response.apiVersion)
             await fetchProfiles()
+            initializeCacheServices()
         } else {
             throw APIError.unauthorized
         }
@@ -179,6 +184,26 @@ final class AppState {
         apiClient.disconnect()
         savedServer = nil
         apiVersionWarning = nil
+        metadataCache = nil
+        audioCacheManager = nil
+        prefetchEngine = nil
+    }
+
+    /// Initialize cache services for the active profile.
+    func initializeCacheServices() {
+        let profile = activeProfile
+        guard !profile.isEmpty else { return }
+        let cache = MetadataCache(profile: profile)
+        let audioCache = AudioCacheManager(profile: profile)
+        metadataCache = cache
+        audioCacheManager = audioCache
+        prefetchEngine = PrefetchEngine(apiClient: apiClient, cacheManager: audioCache)
+    }
+
+    /// Switch to a different profile and reinitialize cache services.
+    func switchProfile(_ newProfile: String) {
+        activeProfile = newProfile
+        initializeCacheServices()
     }
 
     /// Try to reconnect using saved server and keychain API key.

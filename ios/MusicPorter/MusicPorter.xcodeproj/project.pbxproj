@@ -54,6 +54,13 @@
 		A10000030 /* BackgroundDownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000032 /* BackgroundDownloadManager.swift */; };
 		A10000031 /* DownloadStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000033 /* DownloadStateStore.swift */; };
 		A10000034 /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000034 /* AboutView.swift */; };
+		A10000035 /* CacheConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000035 /* CacheConstants.swift */; };
+		A10000036 /* CacheTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000036 /* CacheTypes.swift */; };
+		A10000037 /* CacheUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000037 /* CacheUtils.swift */; };
+		A10000038 /* MetadataCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000038 /* MetadataCache.swift */; };
+		A10000039 /* AudioCacheManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000039 /* AudioCacheManager.swift */; };
+		A1000003A /* PrefetchEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003A /* PrefetchEngine.swift */; };
+		A1000003B /* DeleteServerDataSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003B /* DeleteServerDataSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -106,6 +113,13 @@
 		A20000032 /* BackgroundDownloadManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundDownloadManager.swift; sourceTree = "<group>"; };
 		A20000033 /* DownloadStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadStateStore.swift; sourceTree = "<group>"; };
 		A20000034 /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
+		A20000035 /* CacheConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheConstants.swift; sourceTree = "<group>"; };
+		A20000036 /* CacheTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheTypes.swift; sourceTree = "<group>"; };
+		A20000037 /* CacheUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheUtils.swift; sourceTree = "<group>"; };
+		A20000038 /* MetadataCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataCache.swift; sourceTree = "<group>"; };
+		A20000039 /* AudioCacheManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCacheManager.swift; sourceTree = "<group>"; };
+		A2000003A /* PrefetchEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrefetchEngine.swift; sourceTree = "<group>"; };
+		A2000003B /* DeleteServerDataSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeleteServerDataSheet.swift; sourceTree = "<group>"; };
 		A30000001 /* MusicPorter.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MusicPorter.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -174,8 +188,22 @@
 				A20000029 /* AudioPlayerService.swift */,
 				A20000032 /* BackgroundDownloadManager.swift */,
 				A20000033 /* DownloadStateStore.swift */,
+				A50000011 /* Cache */,
 			);
 			path = Services;
+			sourceTree = "<group>";
+		};
+		A50000011 /* Cache */ = {
+			isa = PBXGroup;
+			children = (
+				A20000035 /* CacheConstants.swift */,
+				A20000036 /* CacheTypes.swift */,
+				A20000037 /* CacheUtils.swift */,
+				A20000038 /* MetadataCache.swift */,
+				A20000039 /* AudioCacheManager.swift */,
+				A2000003A /* PrefetchEngine.swift */,
+			);
+			path = Cache;
 			sourceTree = "<group>";
 		};
 		A50000005 /* ViewModels */ = {
@@ -220,6 +248,7 @@
 				A2000000F /* StatusBadge.swift */,
 				A20000010 /* TrackRow.swift */,
 				A2000002A /* MiniPlayerView.swift */,
+				A2000003B /* DeleteServerDataSheet.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -355,6 +384,13 @@
 				A1000002F /* LibraryView.swift in Sources */,
 				A10000030 /* BackgroundDownloadManager.swift in Sources */,
 				A10000031 /* DownloadStateStore.swift in Sources */,
+				A10000035 /* CacheConstants.swift in Sources */,
+				A10000036 /* CacheTypes.swift in Sources */,
+				A10000037 /* CacheUtils.swift in Sources */,
+				A10000038 /* MetadataCache.swift in Sources */,
+				A10000039 /* AudioCacheManager.swift in Sources */,
+				A1000003A /* PrefetchEngine.swift in Sources */,
+				A1000003B /* DeleteServerDataSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
