@@ -3091,11 +3091,12 @@ class ConfigManager:
     """Manages configuration from config.yaml (YAML format)."""
 
     def __init__(self, conf_path=DEFAULT_CONFIG_FILE, logger=None,
-                 audit_logger=None, audit_source='cli'):
+                 audit_logger=None, audit_source='cli', on_change=None):
         self.conf_path = Path(conf_path)
         self.logger = logger or Logger()
         self.audit_logger = audit_logger
         self._audit_source = audit_source
+        self._on_change = on_change
         self.playlists = []
         self.destinations = []
         self.settings = {}
@@ -3247,6 +3248,9 @@ class ConfigManager:
             f.write("# Music Porter Configuration\n")
             f.write("# CLI flags override these settings when specified.\n\n")
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+
+        if self._on_change:
+            self._on_change()
 
     def get_setting(self, key, default=None):
         """Get a setting value, returning default if not set."""

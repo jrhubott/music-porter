@@ -669,6 +669,7 @@ def api_config_reset():
     # Recreate with defaults
     logger = mp.Logger(verbose=False)
     mp.ConfigManager(logger=logger)
+    ctx.invalidate_config()
 
     return jsonify({
         'ok': True,
