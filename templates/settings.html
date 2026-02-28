@@ -4,18 +4,8 @@
 <h4 class="mb-4">Settings</h4>
 
 <div class="row g-4">
-  <!-- Output Profile -->
-  <div class="col-md-6">
-    <div class="card h-100">
-      <div class="card-body">
-        <h6 class="card-title"><i class="bi bi-sliders"></i> Output Profile</h6>
-        <div id="profileCards" class="mt-3">Loading...</div>
-      </div>
-    </div>
-  </div>
-
   <!-- General Settings -->
-  <div class="col-md-6">
+  <div class="col-md-12">
     <div class="card h-100">
       <div class="card-body">
         <h6 class="card-title"><i class="bi bi-gear"></i> General Settings</h6>
@@ -286,20 +276,6 @@
 </div>
 {% endif %}
 
-<!-- Profile Details -->
-<div class="card mt-4">
-  <div class="card-body">
-    <h6 class="card-title">Profile Comparison</h6>
-    <div class="table-responsive">
-      <table class="table table-sm table-bordered mb-0">
-        <thead id="profileCompareHead">
-          <tr><th>Property</th></tr>
-        </thead>
-        <tbody id="profileCompare"></tbody>
-      </table>
-    </div>
-  </div>
-</div>
 {% endblock content %}
 
 {% block scripts %}
@@ -313,65 +289,6 @@ function loadSettings() {
     document.getElementById('settingWorkers').value = data.settings.workers || 6;
     document.getElementById('settingLogRetention').value = data.settings.log_retention_days || 7;
 
-    // Profile cards
-    const profiles = data.profiles;
-    const activeProfile = data.settings.output_type || 'ride-command';
-    let html = '';
-    for (const [name, p] of Object.entries(profiles)) {
-      const active = name === activeProfile;
-      html += `
-        <div class="form-check mb-2">
-          <input class="form-check-input" type="radio" name="profileRadio" id="profile_${name}" value="${name}" ${active ? 'checked' : ''}>
-          <label class="form-check-label" for="profile_${name}">
-            <strong>${name}</strong> <span class="text-muted">- ${p.description}</span>
-            ${active ? '<span class="badge bg-success ms-2">Active</span>' : ''}
-          </label>
-        </div>`;
-    }
-    html += '<button type="button" class="btn btn-outline-primary btn-sm mt-2" id="saveProfile">Apply Profile</button>';
-    document.getElementById('profileCards').innerHTML = html;
-
-    document.getElementById('saveProfile').addEventListener('click', function() {
-      const selected = document.querySelector('input[name="profileRadio"]:checked').value;
-      fetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({output_type: selected})})
-        .then(r=>r.json()).then(() => { showToast('Profile updated to ' + selected, 'success'); loadSettings(); });
-    });
-
-    // Profile comparison table — dynamic columns for any number of profiles
-    const names = Object.keys(profiles);
-    if (names.length >= 1) {
-      // Build header row
-      const headRow = '<th>Property</th>' + names.map(n => `<th>${n}</th>`).join('');
-      document.getElementById('profileCompareHead').innerHTML = `<tr>${headRow}</tr>`;
-
-      // Field definitions: [label, key, formatter]
-      const fmtArtwork = v => v > 0 ? v + 'px' : v === 0 ? 'original' : 'stripped';
-      const fmtVersions = v => Array.isArray(v) ? v.join(', ') : String(v);
-      const fmtDir = v => v || '(flat)';
-      const fmtExtra = v => (v && Object.keys(v).length > 0) ? JSON.stringify(v) : 'none';
-      const fmtGenre = v => v || 'none';
-      const fmtStr = v => v || '';
-
-      const fields = [
-        ['ID3 Title', 'id3_title', fmtStr],
-        ['ID3 Artist', 'id3_artist', fmtStr],
-        ['ID3 Album', 'id3_album', fmtStr],
-        ['ID3 Genre', 'id3_genre', fmtGenre],
-        ['ID3 Extra', 'id3_extra', fmtExtra],
-        ['ID3 Versions', 'id3_versions', fmtVersions],
-        ['Artwork', 'artwork_size', fmtArtwork],
-        ['Filename', 'filename', fmtStr],
-        ['Directory', 'directory', fmtDir],
-        ['USB Dir', 'usb_dir', fmtDir],
-      ];
-
-      const rows = fields.map(([label, key, fmt]) => {
-        const cells = names.map(n => `<td>${fmt(profiles[n][key])}</td>`).join('');
-        return `<tr><td>${label}</td>${cells}</tr>`;
-      });
-      document.getElementById('profileCompare').innerHTML = rows.join('');
-    }
   });
 }
 

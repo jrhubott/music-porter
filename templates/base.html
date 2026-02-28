@@ -47,9 +47,8 @@
     </div>
     <nav class="nav flex-column mt-2">
       <a class="nav-link {% if request.path == '/' %}active{% endif %}" href="/"><i class="bi bi-speedometer2"></i>Dashboard</a>
-      <a class="nav-link {% if request.path == '/playlists' %}active{% endif %}" href="/playlists"><i class="bi bi-list-ul"></i>Playlists</a>
-      <a class="nav-link {% if request.path == '/pipeline' %}active{% endif %}" href="/pipeline"><i class="bi bi-arrow-repeat"></i>Pipeline</a>
-      <a class="nav-link {% if request.path == '/convert' %}active{% endif %}" href="/convert"><i class="bi bi-file-earmark-music"></i>Convert</a>
+      <a class="nav-link {% if request.path == '/sources' %}active{% endif %}" href="/sources"><i class="bi bi-list-ul"></i>Sources</a>
+      <a class="nav-link {% if request.path == '/process' %}active{% endif %}" href="/process"><i class="bi bi-arrow-repeat"></i>Process</a>
       <a class="nav-link {% if request.path == '/sync' %}active{% endif %}" href="/sync"><i class="bi bi-arrow-left-right"></i>Sync</a>
       <a class="nav-link {% if request.path == '/settings' %}active{% endif %}" href="/settings"><i class="bi bi-gear"></i>Settings</a>
       <hr class="my-2 border-secondary mx-3">
@@ -60,7 +59,7 @@
     <div class="mt-auto p-3 border-top border-secondary">
       <div class="d-flex align-items-center justify-content-between">
         <small class="text-muted">Profile</small>
-        <a href="/settings" class="badge bg-info text-decoration-none" id="sidebarProfile">...</a>
+        <a href="/sync" class="badge bg-info text-decoration-none" id="sidebarProfile">...</a>
       </div>
       {% if server_mode %}
       <div class="mt-2">

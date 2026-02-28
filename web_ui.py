@@ -945,17 +945,25 @@ def create_app(project_root=None, no_auth=False, server_host=None,
     def dashboard():
         return render_template('dashboard.html')
 
+    @app.route('/sources')
+    def sources_page():
+        return render_template('sources.html')
+
     @app.route('/playlists')
     def playlists_page():
-        return render_template('playlists.html')
+        return redirect(url_for('sources_page'))
+
+    @app.route('/process')
+    def process_page():
+        return render_template('process.html')
 
     @app.route('/pipeline')
     def pipeline_page():
-        return render_template('pipeline.html')
+        return redirect('/process#pipeline')
 
     @app.route('/convert')
     def convert_page():
-        return render_template('convert.html')
+        return redirect('/process#convert')
 
     @app.route('/sync')
     def sync_page():
