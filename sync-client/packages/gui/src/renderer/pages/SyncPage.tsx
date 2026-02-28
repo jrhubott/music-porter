@@ -1,15 +1,20 @@
 import { useState, useEffect } from 'react';
 import { useIPC } from '../hooks/useIPC.js';
 import { useAppState } from '../store/app-state.js';
-import type { DriveInfo, SyncProgress } from '@mporter/core';
+import type { DriveInfo, Playlist, SyncProgress } from '@mporter/core';
 
+const BYTES_PER_KB = 1024;
 const BYTES_PER_MB = 1024 * 1024;
+const BYTES_PER_GB = 1024 * 1024 * 1024;
 const MS_PER_SECOND = 1000;
 const SECONDS_PER_MINUTE = 60;
+const CACHE_NEAR_FULL_THRESHOLD = 0.9;
 
 function formatBytes(bytes: number): string {
-  if (bytes < BYTES_PER_MB) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / BYTES_PER_MB).toFixed(1)} MB`;
+  if (bytes >= BYTES_PER_GB) return `${(bytes / BYTES_PER_GB).toFixed(1)} GB`;
+  if (bytes >= BYTES_PER_MB) return `${(bytes / BYTES_PER_MB).toFixed(1)} MB`;
+  if (bytes >= BYTES_PER_KB) return `${Math.round(bytes / BYTES_PER_KB)} KB`;
+  return `${bytes} B`;
 }
 
 function formatDuration(ms: number): string {
@@ -41,36 +46,93 @@ export function SyncPage() {
     setLastSyncResult,
     drives,
     setDrives,
+    selectedDrive,
+    setSelectedDrive,
+    destPath,
+    setDestPath,
     destSyncStatus,
     setDestSyncStatus,
+    isOffline,
+    pinnedPlaylists,
+    togglePin,
+    setPinnedPlaylists,
+    cacheStatuses,
+    setCacheStatuses,
+    cacheTotalSize,
+    setCacheTotalSize,
+    cacheMaxBytes,
+    setCacheMaxBytes,
+    autoPinNewPlaylists,
+    setAutoPinNewPlaylists,
+    backgroundPrefetchStatus,
   } = useAppState();
 
-  const [destPath, setDestPath] = useState('');
-  const [selectedDrive, setSelectedDrive] = useState<DriveInfo | null>(null);
   const [autoSyncDrives, setAutoSyncDrives] = useState<string[]>([]);
   const [ejectAfterSync, setEjectAfterSync] = useState(false);
   const [ejected, setEjected] = useState(false);
 
   useEffect(() => {
-    loadData();
-    const cleanup = ipc.onSyncProgress((progress: SyncProgress) => {
+    if (isOffline) {
+      loadOfflineData();
+    } else {
+      loadData();
+    }
+    const cleanupSync = ipc.onSyncProgress((progress: SyncProgress) => {
       setSyncProgress(progress);
     });
-    return () => { cleanup(); };
+    return () => { cleanupSync(); };
   }, []);
+
+  // Refresh cache status when background prefetch completes
+  useEffect(() => {
+    if (backgroundPrefetchStatus && !backgroundPrefetchStatus.running && backgroundPrefetchStatus.lastResult) {
+      loadCacheStatus();
+    }
+  }, [backgroundPrefetchStatus?.running]);
+
+  async function loadOfflineData() {
+    try {
+      const [cached, pinned] = await Promise.all([
+        ipc.cacheGetCachedPlaylists(),
+        ipc.cacheGetPinnedPlaylists(),
+      ]);
+      setPinnedPlaylists(new Set(pinned));
+      // Build pseudo-playlist list from cache
+      const offlinePlaylists: Playlist[] = cached.map((c) => ({
+        key: c.key,
+        url: '',
+        name: c.key,
+        file_count: c.fileCount,
+      }));
+      setPlaylists(offlinePlaylists);
+    } catch {
+      // Handle error
+    }
+  }
 
   async function loadData() {
     try {
-      const [playlistData, settingsData, prefs, savedProfile] = await Promise.all([
+      const [playlistData, settingsData, prefs, savedProfile, pinned, autoPin] = await Promise.all([
         ipc.getPlaylists(),
         ipc.getSettings(),
         ipc.getPreferences(),
         ipc.getProfile(),
+        ipc.cacheGetPinnedPlaylists(),
+        ipc.cacheGetAutoPinNewPlaylists(),
       ]);
       setPlaylists(playlistData);
       setServerProfiles(settingsData.profiles);
       setAutoSyncDrives(prefs.autoSyncDrives);
       setEjectAfterSync(prefs.ejectAfterSync);
+      setAutoPinNewPlaylists(autoPin);
+
+      // Sync pins with server when auto-pin is enabled
+      const playlistKeys = playlistData.map((p) => p.key);
+      const newlyPinned = await ipc.cacheSyncPins(playlistKeys);
+      const allPinned = newlyPinned.length > 0
+        ? [...new Set([...pinned, ...newlyPinned])]
+        : pinned;
+      setPinnedPlaylists(new Set(allPinned));
 
       // Restore active profile: saved > server default > first available
       if (!activeProfile) {
@@ -81,11 +143,58 @@ export function SyncPage() {
           ?? '';
         if (resolved) {
           setActiveProfile(resolved);
+          // Persist so background prefetch and other main-process consumers can see it
+          if (!savedProfile) {
+            await ipc.setProfile(resolved);
+          }
         }
       }
+
+      // Load cache status
+      loadCacheStatus();
     } catch {
       // Handle error
     }
+  }
+
+  async function loadCacheStatus() {
+    try {
+      const status = await ipc.cacheGetStatus();
+      setCacheTotalSize(status.totalSize);
+      setCacheMaxBytes(status.maxCacheBytes);
+      const statuses: Record<string, typeof cacheStatuses[string]> = {};
+      for (const s of status.playlists) {
+        statuses[s.playlistKey] = s;
+      }
+      setCacheStatuses(statuses);
+    } catch {
+      // Non-critical
+    }
+  }
+
+  async function handleTogglePin(key: string) {
+    togglePin(key);
+    if (pinnedPlaylists.has(key)) {
+      await ipc.cacheUnpin(key);
+    } else {
+      await ipc.cachePin(key);
+    }
+  }
+
+  async function handleToggleAutoPin() {
+    const newValue = !autoPinNewPlaylists;
+    setAutoPinNewPlaylists(newValue);
+    const newlyPinned = await ipc.cacheSetAutoPinNewPlaylists(newValue);
+    if (newlyPinned.length > 0) {
+      // Update pinned playlists state
+      setPinnedPlaylists(new Set([...pinnedPlaylists, ...newlyPinned]));
+      loadCacheStatus();
+    }
+  }
+
+  async function handlePrefetchNow() {
+    // Trigger the background prefetch service (handles auto-pin sync, stale detection, etc.)
+    await ipc.cacheTriggerPrefetch();
   }
 
   async function toggleAutoSync(driveName: string) {
@@ -165,6 +274,7 @@ export function SyncPage() {
         usbDriveName: syncDrive?.name,
         profile: activeProfile || undefined,
         force,
+        offlineOnly: isOffline,
       });
       setLastSyncResult(result);
 
@@ -203,6 +313,14 @@ export function SyncPage() {
 
   return (
     <div>
+      {/* Offline banner */}
+      {isOffline && (
+        <div className="alert alert-warning py-2 mb-3">
+          <i className="bi bi-cloud-slash me-2" />
+          <strong>Offline Mode</strong> — Syncing from local cache only. Connect to server for full functionality.
+        </div>
+      )}
+
       {/* Header with profile badge and refresh */}
       <div className="d-flex justify-content-between align-items-center mb-4">
         <div className="d-flex align-items-center gap-3">
@@ -214,18 +332,77 @@ export function SyncPage() {
               {usbDir && <span className="ms-1 opacity-75">({usbDir})</span>}
             </span>
           )}
+          {cacheTotalSize > 0 && !isOffline && (() => {
+            const cacheIncomplete = pinnedPlaylists.size > 0 && [...pinnedPlaylists].some((key) => {
+              const status = cacheStatuses[key];
+              const serverCount = playlists.find((p) => p.key === key)?.file_count ?? 0;
+              return !status || status.cached < serverCount;
+            });
+            const cacheNearFull = cacheMaxBytes > 0
+              && cacheTotalSize / cacheMaxBytes >= CACHE_NEAR_FULL_THRESHOLD;
+            const badgeColor = cacheIncomplete
+              ? 'text-danger'
+              : cacheNearFull
+                ? 'text-warning'
+                : 'text-info';
+            const bgColor = cacheIncomplete
+              ? 'bg-danger'
+              : cacheNearFull
+                ? 'bg-warning'
+                : 'bg-info';
+            return (
+              <span className={`badge ${bgColor} bg-opacity-25 ${badgeColor}`}>
+                <i className="bi bi-database me-1" />
+                {formatBytes(cacheTotalSize)} cached
+              </span>
+            );
+          })()}
         </div>
-        <button className="btn btn-sm btn-outline-secondary" onClick={loadData}>
-          <i className="bi bi-arrow-clockwise me-1" />
-          Refresh
-        </button>
+        <div className="d-flex gap-2 align-items-center">
+          {!isOffline && pinnedPlaylists.size > 0 && (
+            <button
+              className="btn btn-sm btn-outline-info"
+              onClick={handlePrefetchNow}
+              disabled={backgroundPrefetchStatus?.running || isSyncing}
+            >
+              {backgroundPrefetchStatus?.running ? (
+                <>
+                  <span className="spinner-border spinner-border-sm me-1" />
+                  Prefetching...
+                </>
+              ) : (
+                <>
+                  <i className="bi bi-cloud-download me-1" />
+                  Prefetch Now
+                </>
+              )}
+            </button>
+          )}
+          <button className="btn btn-sm btn-outline-secondary" onClick={isOffline ? loadOfflineData : loadData}>
+            <i className="bi bi-arrow-clockwise me-1" />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Playlist selection */}
       <div className="card bg-dark border-secondary mb-4">
         <div className="card-header d-flex justify-content-between align-items-center">
           <span>Playlists</span>
-          <div className="d-flex gap-2">
+          <div className="d-flex gap-2 align-items-center">
+            {!isOffline && (
+              <div className="form-check form-switch mb-0">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  checked={autoPinNewPlaylists}
+                  onChange={handleToggleAutoPin}
+                />
+                <label className="form-check-label small">
+                  Auto-Pin New
+                </label>
+              </div>
+            )}
             {selectedPlaylists.size > 0 ? (
               <button className="btn btn-sm btn-outline-secondary" onClick={clearSelection}>
                 Clear ({selectedPlaylists.size})
@@ -244,41 +421,67 @@ export function SyncPage() {
             </div>
           ) : (
             <div className="row g-2">
-              {playlists.map((p) => (
-                <div key={p.key} className="col-md-6 col-lg-4">
-                  <div
-                    className={`playlist-card ${selectedPlaylists.has(p.key) ? 'selected' : ''}`}
-                    onClick={() => togglePlaylist(p.key)}
-                  >
-                    <div className="d-flex align-items-center gap-2">
-                      <input
-                        type="checkbox"
-                        className="form-check-input"
-                        checked={selectedPlaylists.has(p.key)}
-                        onChange={() => togglePlaylist(p.key)}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                      <div>
-                        <div className="fw-bold">{p.name}</div>
-                        <small className="text-secondary">
-                          {p.file_count ?? 0} {p.file_count === 1 ? 'file' : 'files'}
-                          {(() => {
-                            const syncInfo = destSyncStatus?.playlists.find(
-                              (sp) => sp.name === p.key || sp.name === p.name,
-                            );
-                            if (!syncInfo) return null;
-                            if (syncInfo.new_files === 0)
-                              return <span className="text-success ms-2">synced</span>;
-                            if (syncInfo.is_new_playlist)
-                              return <span className="text-warning ms-2">all new</span>;
-                            return <span className="text-info ms-2">{syncInfo.new_files} new</span>;
-                          })()}
-                        </small>
+              {playlists.map((p) => {
+                const cacheStatus = cacheStatuses[p.key];
+                const isPinned = pinnedPlaylists.has(p.key);
+                return (
+                  <div key={p.key} className="col-md-6 col-lg-4">
+                    <div
+                      className={`playlist-card ${selectedPlaylists.has(p.key) ? 'selected' : ''}`}
+                      onClick={() => togglePlaylist(p.key)}
+                    >
+                      <div className="d-flex align-items-center gap-2">
+                        <input
+                          type="checkbox"
+                          className="form-check-input flex-shrink-0"
+                          checked={selectedPlaylists.has(p.key)}
+                          onChange={() => togglePlaylist(p.key)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        <div className="flex-grow-1" style={{ minWidth: 0 }}>
+                          <div className="text-truncate fw-bold">{p.name}</div>
+                          <div className="d-flex align-items-center gap-2 mt-1">
+                            <small className="text-secondary flex-shrink-0">
+                              {p.file_count ?? 0} {p.file_count === 1 ? 'file' : 'files'}
+                            </small>
+                            {(isPinned || (cacheStatus && cacheStatus.cached > 0)) && (() => {
+                              const allCached = cacheStatus && cacheStatus.cached === (p.file_count ?? 0);
+                              return (
+                                <span
+                                  className={`badge bg-info bg-opacity-25 flex-shrink-0 ${allCached ? 'text-info' : 'text-warning'}`}
+                                  style={{ fontSize: '0.65em' }}
+                                >
+                                  {allCached
+                                    ? 'cached'
+                                    : `${cacheStatus?.cached ?? 0}`}
+                                </span>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                        <button
+                          className={`btn btn-sm flex-shrink-0 ${isPinned ? 'btn-info' : 'btn-outline-secondary'}`}
+                          onClick={(e) => { e.stopPropagation(); handleTogglePin(p.key); }}
+                          title={isPinned ? 'Unpin playlist' : 'Pin for offline caching'}
+                        >
+                          <i className={`bi ${isPinned ? 'bi-pin-fill' : 'bi-pin'}`} />
+                        </button>
                       </div>
+                      {!isOffline && (() => {
+                        const syncInfo = destSyncStatus?.playlists.find(
+                          (sp) => sp.name === p.key || sp.name === p.name,
+                        );
+                        if (!syncInfo) return null;
+                        if (syncInfo.new_files === 0)
+                          return <small className="text-success d-block mt-1">synced</small>;
+                        if (syncInfo.is_new_playlist)
+                          return <small className="text-warning d-block mt-1">all new</small>;
+                        return <small className="text-info d-block mt-1">{syncInfo.new_files} new</small>;
+                      })()}
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -360,6 +563,14 @@ export function SyncPage() {
                       Eject when done
                     </label>
                   </div>
+                  <button
+                    className="btn btn-sm btn-outline-warning"
+                    onClick={ejectSelectedDrive}
+                    disabled={isSyncing}
+                  >
+                    <i className="bi bi-eject-fill me-1" />
+                    Eject
+                  </button>
                 </div>
               )}
             </div>

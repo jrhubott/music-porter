@@ -1,3 +1,14 @@
+Version 2.37.1 (2026-02-28):
+• Local audio cache — pin playlists for offline sync with background prefetch, smart eviction, and stale file detection
+• Fix prefetch eviction cycling — pre-filter downloads by cache capacity so files that would be immediately evicted are never downloaded
+• Cache badge indicators — red when incomplete (pinned playlists missing files), yellow when near full (<10% remaining)
+• Cache size change triggers prefetch — adjusting the max cache size immediately starts a prefetch to fill or trim the cache
+• Improve Sync page layout — lift destination state to Zustand, improve playlist card consistency
+• Persist window size and position across restarts
+• ConfigManager caching with auto-invalidation via on_change callback
+• Add created_at and updated_at timestamps to file list API response
+• Sync client version bumped to 1.3.0
+
 Version 2.37.0 (2026-02-28):
 • Server-only architecture — removed CLI, simplified to server-only entry point with REST API and web dashboard
 • Library restructure — MP3s stored as UUID-named files in flat library/audio/, cover art in library/artwork/, all metadata in TrackDB (SQLite)

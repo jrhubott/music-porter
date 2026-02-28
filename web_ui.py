@@ -751,6 +751,7 @@ class AppContext:
     api_key: str
     project_root: Path
     scheduler: 'PipelineScheduler | None' = None
+    _config_cache: object = field(default=None, repr=False)  # cached ConfigManager
 
     # ── Request-scoped helpers ─────────────────────────────────
 
@@ -785,10 +786,17 @@ class AppContext:
         return WebDisplayHandler(task.log_queue, task.cancel_event)
 
     def get_config(self):
-        """Create a fresh ConfigManager with audit logging."""
-        logger = mp.Logger(verbose=False)
-        return mp.ConfigManager(logger=logger, audit_logger=self.audit_logger,
-                                audit_source='web')
+        """Return cached ConfigManager, loading from disk on first access."""
+        if self._config_cache is None:
+            logger = mp.Logger(verbose=False)
+            self._config_cache = mp.ConfigManager(
+                logger=logger, audit_logger=self.audit_logger,
+                audit_source='web', on_change=self.invalidate_config)
+        return self._config_cache
+
+    def invalidate_config(self):
+        """Clear cached config so the next get_config() re-reads from disk."""
+        self._config_cache = None
 
     def get_output_profile(self, config):
         """Return the active OutputProfile, refreshed from config.yaml."""
@@ -875,6 +883,8 @@ def create_app(project_root=None, no_auth=False, server_host=None,
         api_key=_api_key,
         project_root=project_root,
     )
+    _boot_config._on_change = ctx.invalidate_config
+    ctx._config_cache = _boot_config
     app.config['CTX'] = ctx
 
     # Flush deferred migration events into the audit trail

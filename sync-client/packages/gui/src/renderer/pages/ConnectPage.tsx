@@ -5,7 +5,7 @@ import { useAppState } from '../store/app-state.js';
 
 export function ConnectPage() {
   const ipc = useIPC();
-  const { setConnection, setActivePage } = useAppState();
+  const { setConnection, setActivePage, setIsOffline } = useAppState();
   const [servers, setServers] = useState<DiscoveredServer[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [localURL, setLocalURL] = useState('');
@@ -13,11 +13,27 @@ export function ConnectPage() {
   const [apiKey, setApiKey] = useState('');
   const [error, setError] = useState('');
   const [isConnecting, setIsConnecting] = useState(false);
+  const [hasCacheData, setHasCacheData] = useState(false);
 
   useEffect(() => {
     discover();
     loadSavedConfig();
+    checkCacheData();
   }, []);
+
+  async function checkCacheData() {
+    try {
+      const hasData = await ipc.cacheHasData();
+      setHasCacheData(hasData);
+    } catch {
+      // Cache check non-critical
+    }
+  }
+
+  async function continueOffline() {
+    setIsOffline(true);
+    setActivePage('sync');
+  }
 
   async function loadSavedConfig() {
     const config = await ipc.getServerConfig();
@@ -167,6 +183,17 @@ export function ConnectPage() {
           'Connect'
         )}
       </button>
+
+      {hasCacheData && (
+        <button
+          className="btn btn-outline-secondary w-100 mt-3"
+          onClick={continueOffline}
+        >
+          <i className="bi bi-cloud-slash me-2" />
+          Continue Offline
+          <div className="small opacity-75 mt-1">Sync from local cache without server connection</div>
+        </button>
+      )}
     </div>
   );
 }

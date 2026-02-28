@@ -1,5 +1,5 @@
 /** Sync client version — bumped independently from the server. */
-export const VERSION = '1.2.0';
+export const VERSION = '1.3.0';
 
 /** Manifest filename stored in sync destination root. */
 export const MANIFEST_FILENAME = '.music-porter-sync.json';
@@ -86,3 +86,17 @@ export const APPLE_DOMAIN_SUFFIX = 'apple.com';
 
 /** Fallback expiry (seconds) for session cookies that lack an explicit expiration. */
 export const SESSION_COOKIE_FALLBACK_S = 86400 * 365;
+
+// ── Local Cache ──
+
+/** Subdirectory under config dir for cached audio files. */
+export const CACHE_DIRNAME = 'cache';
+
+/** Per-profile cache index filename. */
+export const CACHE_INDEX_FILENAME = 'cache-index.json';
+
+/** Default maximum cache size in bytes (10 GB). */
+export const DEFAULT_MAX_CACHE_BYTES = 10 * 1024 * 1024 * 1024;
+
+/** Background prefetch interval (ms) — 5 minutes between cycles. */
+export const BACKGROUND_PREFETCH_INTERVAL_MS = 5 * 60 * 1000;
