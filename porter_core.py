@@ -65,7 +65,7 @@ TXXX_TRACK_UUID = "TrackUUID"
 
 # Schema version constants — increment and add a migration case when changing
 # the config.yaml structure or DB tables/columns.
-CONFIG_SCHEMA_VERSION = 2
+CONFIG_SCHEMA_VERSION = 3
 DB_SCHEMA_VERSION = 5
 
 # Excluded USB volumes by OS
@@ -197,12 +197,13 @@ APPLE_COOKIE_DOMAIN = 'apple.com'
 class OutputProfile:
     name: str
     description: str
-    title_format: str         # TIT2 template — e.g. "{artist} - {title}"
-    artist_format: str        # TPE1 template — e.g. "Various" or "{artist}"
-    album_format: str         # TALB template — e.g. "{playlist}" or "{album}"
-    extra_tags: dict           # Frame ID → template value, e.g. {"TCON": "Workout"}
-    filename_format: str      # Output filename template — e.g. "{artist} - {title}"
-    directory_format: str     # Output subdirectory template — "" (flat), "{artist}"
+    id3_title: str            # TIT2 template — e.g. "{artist} - {title}"
+    id3_artist: str           # TPE1 template — e.g. "Various" or "{artist}"
+    id3_album: str            # TALB template — e.g. "{playlist}" or "{album}"
+    id3_genre: str            # TCON template — e.g. "Playlist" or "" (omit)
+    id3_extra: dict           # Frame ID → template value, e.g. {"COMM": "note"}
+    filename: str             # Output filename template — e.g. "{artist} - {title}"
+    directory: str            # Output subdirectory template — "" (flat), "{artist}"
     id3_versions: list        # ID3 versions to include — e.g. ["v2.3"] or ["v2.4", "v1"]
     artwork_size: int         # >0=resize to max px, 0=original, -1=strip
     usb_dir: str = ""         # Subdirectory within USB volumes (e.g. "RZR/Music")
@@ -213,24 +214,26 @@ class OutputProfile:
 DEFAULT_OUTPUT_PROFILES: dict = {
     "ride-command": {
         "description": "Polaris Ride Command infotainment system",
-        "title_format": "{artist} - {title}",
-        "artist_format": "Various",
-        "album_format": "{playlist}",
-        "extra_tags": {"TCON": "Playlist"},
-        "filename_format": "{artist} - {title}",
-        "directory_format": "",
+        "id3_title": "{artist} - {title}",
+        "id3_artist": "Various",
+        "id3_album": "{playlist}",
+        "id3_genre": "Playlist",
+        "id3_extra": {},
+        "filename": "{artist} - {title}",
+        "directory": "",
         "id3_versions": ["v2.3"],
         "artwork_size": 100,
         "usb_dir": "RZR/Music",
     },
     "basic": {
         "description": "Standard MP3 with original tags and artwork",
-        "title_format": "{title}",
-        "artist_format": "{artist}",
-        "album_format": "{album}",
-        "extra_tags": {},
-        "filename_format": "{artist} - {title}",
-        "directory_format": "{artist}/{album}",
+        "id3_title": "{title}",
+        "id3_artist": "{artist}",
+        "id3_album": "{album}",
+        "id3_genre": "",
+        "id3_extra": {},
+        "filename": "{artist} - {title}",
+        "directory": "{artist}/{album}",
         "id3_versions": ["v2.4"],
         "artwork_size": 0,
         "usb_dir": "",
@@ -248,8 +251,8 @@ VALID_PROFILE_NAME_RE = re.compile(r'^[a-z0-9]+(-[a-z0-9]+)*$')
 
 # Required fields for each profile entry in config.yaml
 _PROFILE_REQUIRED_FIELDS = (
-    "description", "title_format", "artist_format", "album_format",
-    "extra_tags", "filename_format", "directory_format", "id3_versions",
+    "description", "id3_title", "id3_artist", "id3_album", "id3_genre",
+    "id3_extra", "filename", "directory", "id3_versions",
     "artwork_size",
 )
 
@@ -278,34 +281,40 @@ def _validate_profile(name, data):
             f"Profile '{name}': 'description' must be a non-empty string")
 
     # Template string fields — must be non-empty strings
-    for field in ("title_format", "artist_format", "album_format"):
-        val = data[field]
+    for field_name in ("id3_title", "id3_artist", "id3_album"):
+        val = data[field_name]
         if not isinstance(val, str) or not val.strip():
             raise ValueError(
-                f"Profile '{name}': '{field}' must be a non-empty string")
+                f"Profile '{name}': '{field_name}' must be a non-empty string")
 
-    # extra_tags — must be a dict with string keys and string values
-    et = data["extra_tags"]
+    # id3_genre — must be a string (empty string = omit genre tag)
+    ig = data["id3_genre"]
+    if not isinstance(ig, str):
+        raise ValueError(
+            f"Profile '{name}': 'id3_genre' must be a string, got {ig!r}")
+
+    # id3_extra — must be a dict with string keys and string values
+    et = data["id3_extra"]
     if not isinstance(et, dict):
         raise ValueError(
-            f"Profile '{name}': 'extra_tags' must be a mapping, got {type(et).__name__}")
+            f"Profile '{name}': 'id3_extra' must be a mapping, got {type(et).__name__}")
     for frame_id, val in et.items():
         if not isinstance(frame_id, str) or not isinstance(val, str):
             raise ValueError(
-                f"Profile '{name}': 'extra_tags' keys and values must be strings, "
+                f"Profile '{name}': 'id3_extra' keys and values must be strings, "
                 f"got {frame_id!r}: {val!r}")
 
-    # filename_format — must be a non-empty template string
-    ff = data["filename_format"]
+    # filename — must be a non-empty template string
+    ff = data["filename"]
     if not isinstance(ff, str) or not ff.strip():
         raise ValueError(
-            f"Profile '{name}': 'filename_format' must be a non-empty string")
+            f"Profile '{name}': 'filename' must be a non-empty string")
 
-    # directory_format — empty string means flat output
-    df = data["directory_format"]
+    # directory — empty string means flat output
+    df = data["directory"]
     if not isinstance(df, str):
         raise ValueError(
-            f"Profile '{name}': 'directory_format' must be a string, got {df!r}")
+            f"Profile '{name}': 'directory' must be a string, got {df!r}")
 
     # id3_versions — must be a non-empty list of valid version tokens
     iv = data["id3_versions"]
@@ -1192,7 +1201,7 @@ def migrate_config_schema(logger=None):
     if current < 2:
         ot = data.get('output_types')
         if isinstance(ot, dict):
-            for pname, pf in ot.items():
+            for _pname, pf in ot.items():
                 if not isinstance(pf, dict):
                     continue
 
@@ -1263,6 +1272,45 @@ def migrate_config_schema(logger=None):
                     "Config migration 1→2: migrated profiles to templates")
 
         data['schema_version'] = 2
+        dirty = True
+
+    # ── Version 2 → 3: rename ID3 content fields with id3_ prefix ────
+    if current < 3:
+        ot = data.get('output_types')
+        if isinstance(ot, dict):
+            # Field renames: old_name → new_name
+            _field_renames = {
+                'title_format': 'id3_title',
+                'artist_format': 'id3_artist',
+                'album_format': 'id3_album',
+                'extra_tags': 'id3_extra',
+                'filename_format': 'filename',
+                'directory_format': 'directory',
+            }
+            for _pname, pf in ot.items():
+                if not isinstance(pf, dict):
+                    continue
+
+                # Rename fields
+                for old_key, new_key in _field_renames.items():
+                    if old_key in pf and new_key not in pf:
+                        pf[new_key] = pf.pop(old_key)
+
+                # Extract TCON from id3_extra into id3_genre
+                if 'id3_genre' not in pf:
+                    extra = pf.get('id3_extra', {})
+                    if isinstance(extra, dict) and 'TCON' in extra:
+                        pf['id3_genre'] = extra.pop('TCON')
+                    else:
+                        pf['id3_genre'] = ''
+
+            dirty = True
+            changes.append("renamed profile fields with id3_ prefix")
+            if logger:
+                logger.info(
+                    "Config migration 2→3: renamed profile fields")
+
+        data['schema_version'] = 3
         dirty = True
 
     if dirty:
@@ -2464,14 +2512,19 @@ class TrackDB:
     def get_playlist_stats(self):
         """Return per-playlist aggregate stats.
 
-        Returns list of dicts with keys: playlist, track_count, total_size_bytes.
+        Returns list of dicts with keys: playlist, track_count,
+        total_size_bytes, cover_with, cover_without.
         """
         conn = self._connect()
         try:
             rows = conn.execute("""
                 SELECT playlist,
                        COUNT(*) AS track_count,
-                       COALESCE(SUM(file_size_bytes), 0) AS total_size_bytes
+                       COALESCE(SUM(file_size_bytes), 0) AS total_size_bytes,
+                       SUM(CASE WHEN cover_art_path IS NOT NULL
+                           THEN 1 ELSE 0 END) AS cover_with,
+                       SUM(CASE WHEN cover_art_path IS NULL
+                           THEN 1 ELSE 0 END) AS cover_without
                 FROM tracks
                 GROUP BY playlist
                 ORDER BY playlist
@@ -2822,12 +2875,13 @@ class ConfigManager:
             self.output_profiles[name] = OutputProfile(
                 name=name,
                 description=fields["description"],
-                title_format=fields["title_format"],
-                artist_format=fields["artist_format"],
-                album_format=fields["album_format"],
-                extra_tags=dict(fields.get("extra_tags", {})),
-                filename_format=fields["filename_format"],
-                directory_format=fields["directory_format"],
+                id3_title=fields["id3_title"],
+                id3_artist=fields["id3_artist"],
+                id3_album=fields["id3_album"],
+                id3_genre=fields["id3_genre"],
+                id3_extra=dict(fields.get("id3_extra", {})),
+                filename=fields["filename"],
+                directory=fields["directory"],
                 id3_versions=list(fields["id3_versions"]),
                 artwork_size=fields["artwork_size"],
                 usb_dir=fields.get("usb_dir", ""),
@@ -3815,7 +3869,7 @@ class TagApplicator:
 
     Library MP3s contain only a TXXX:TrackUUID identifier.  This class
     reads track metadata from TrackDB and applies profile-driven tags
-    (title, artist, album, extra_tags, cover art) either:
+    (title, artist, album, genre, id3_extra, cover art) either:
     - As a streaming response (build_tagged_stream) for HTTP serving
     - As a file copy (apply_tags_to_file) for physical sync
     """
@@ -3854,7 +3908,7 @@ class TagApplicator:
 
         Returns (tags, v2_version, include_v1) tuple.
         """
-        from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB, TXXX
+        from mutagen.id3 import APIC, ID3, TALB, TIT2, TPE1, TXXX
 
         tvars = self._resolve_template_vars(track_meta, playlist_name)
 
@@ -3862,15 +3916,21 @@ class TagApplicator:
 
         # Primary tag templates
         tags["TIT2"] = TIT2(encoding=3,
-                            text=apply_template(profile.title_format, **tvars))
+                            text=apply_template(profile.id3_title, **tvars))
         tags["TPE1"] = TPE1(encoding=3,
-                            text=apply_template(profile.artist_format, **tvars))
+                            text=apply_template(profile.id3_artist, **tvars))
         tags["TALB"] = TALB(encoding=3,
-                            text=apply_template(profile.album_format, **tvars))
+                            text=apply_template(profile.id3_album, **tvars))
+
+        # Genre tag (TCON) — only add if non-empty
+        if profile.id3_genre:
+            from mutagen.id3 import TCON
+            tags["TCON"] = TCON(encoding=3,
+                                text=apply_template(profile.id3_genre, **tvars))
 
         # Extra tags (arbitrary ID3 frames from profile)
-        primary_frames = {'TIT2', 'TPE1', 'TALB'}
-        for frame_id, value_template in profile.extra_tags.items():
+        primary_frames = {'TIT2', 'TPE1', 'TALB', 'TCON'}
+        for frame_id, value_template in profile.id3_extra.items():
             if frame_id in primary_frames:
                 continue  # Primary fields take precedence
             value = apply_template(value_template, **tvars)
@@ -4009,20 +4069,20 @@ class TagApplicator:
                     out.write(chunk)
 
     def build_output_filename(self, track_meta, profile, playlist_name):
-        """Build destination filename using the profile's filename_format."""
+        """Build destination filename using the profile's filename template."""
         tvars = self._resolve_template_vars(track_meta, playlist_name)
-        name = apply_template(profile.filename_format, **tvars)
+        name = apply_template(profile.filename, **tvars)
         return sanitize_filename(name) + '.mp3'
 
     def build_output_subdir(self, track_meta, profile, playlist_name):
-        """Build destination subdirectory using the profile's directory_format.
+        """Build destination subdirectory using the profile's directory template.
 
         Returns empty string for flat output.
         """
-        if not profile.directory_format:
+        if not profile.directory:
             return ''
         tvars = self._resolve_template_vars(track_meta, playlist_name)
-        subdir = apply_template(profile.directory_format, **tvars)
+        subdir = apply_template(profile.directory, **tvars)
         # Sanitize each path component
         parts = subdir.split('/')
         return '/'.join(sanitize_filename(p) for p in parts if p)

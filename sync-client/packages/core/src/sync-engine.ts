@@ -108,7 +108,7 @@ export class SyncEngine {
     for (const key of playlistKeys) {
       if (options.signal?.aborted) break;
       try {
-        const response = await this.client.getFiles(key);
+        const response = await this.client.getFiles(key, false, options.profile);
         playlistFileList.push({ key, files: response.files });
         grandTotal += response.files.length;
       } catch (err) {
@@ -131,11 +131,6 @@ export class SyncEngine {
         break;
       }
 
-      const playlistDir = join(destDir, key);
-      if (!options.dryRun && !existsSync(playlistDir)) {
-        mkdirSync(playlistDir, { recursive: true });
-      }
-
       const manifestFiles = getManifestFiles(manifest, key);
       const syncedFiles: Record<string, number> = {};
       const filesToDownload: FileInfo[] = [];
@@ -149,13 +144,16 @@ export class SyncEngine {
 
         // Use display_filename for disk/manifest keys (human-readable on disk)
         const diskName = file.display_filename || file.filename;
+        // Build subdirectory: prefer server-provided output_subdir, fall back to playlist key
+        const subdir = file.output_subdir ?? key;
+        const manifestKey = subdir ? `${subdir}/${diskName}` : diskName;
 
-        const manifestSize = manifestFiles[diskName];
+        const manifestSize = manifestFiles[manifestKey];
         if (manifestSize !== undefined && manifestSize === file.size) {
           // Skip — manifest says this file is current
           totalSkipped++;
           processed++;
-          syncedFiles[diskName] = file.size;
+          syncedFiles[manifestKey] = file.size;
           onProgress({
             phase: 'syncing',
             playlist: key,
@@ -170,14 +168,15 @@ export class SyncEngine {
         }
 
         // Check disk
-        const filePath = join(playlistDir, diskName);
+        const fileDir = subdir ? join(destDir, subdir) : destDir;
+        const filePath = join(fileDir, diskName);
         if (existsSync(filePath)) {
           try {
             const stat = statSync(filePath);
             if (stat.size === file.size) {
               totalSkipped++;
               processed++;
-              syncedFiles[diskName] = file.size;
+              syncedFiles[manifestKey] = file.size;
               onProgress({
                 phase: 'syncing',
                 playlist: key,
@@ -212,17 +211,19 @@ export class SyncEngine {
         const results = await this.downloadBatch(
           key,
           filesToDownload,
-          playlistDir,
+          destDir,
           syncKey,
           concurrency,
           options.profile,
           options.signal,
           (file, success) => {
             const dn = file.display_filename || file.filename;
+            const subdir = file.output_subdir ?? key;
+            const manifestKey = subdir ? `${subdir}/${dn}` : dn;
             processed++;
             if (success) {
               totalCopied++;
-              syncedFiles[dn] = file.size;
+              syncedFiles[manifestKey] = file.size;
             } else {
               totalFailed++;
             }
@@ -247,9 +248,10 @@ export class SyncEngine {
         // Dry run — count as would-be copies
         for (const file of filesToDownload) {
           const dn = file.display_filename || file.filename;
+          const subdir = file.output_subdir ?? key;
           processed++;
           totalCopied++;
-          log('info', `[dry-run] Would download: ${key}/${dn}`);
+          log('info', `[dry-run] Would download: ${subdir ? subdir + '/' : ''}${dn}`);
           onProgress({
             phase: 'syncing',
             playlist: key,
@@ -343,7 +345,13 @@ export class SyncEngine {
   ): Promise<boolean> {
     // Use display_filename for disk (human-readable), filename (UUID) for API
     const diskName = file.display_filename || file.filename;
-    const filePath = join(destDir, diskName);
+    // Build subdirectory: prefer server-provided output_subdir, fall back to playlist key
+    const subdir = file.output_subdir ?? playlistKey;
+    const fileDir = subdir ? join(destDir, subdir) : destDir;
+    if (!existsSync(fileDir)) {
+      mkdirSync(fileDir, { recursive: true });
+    }
+    const filePath = join(fileDir, diskName);
     const tmpPath = filePath + TEMP_SUFFIX;
 
     try {

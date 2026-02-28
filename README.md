@@ -136,7 +136,7 @@ Profiles are fully customizable in `data/config.yaml` under `output_types`.
 Configuration is stored in `data/config.yaml` (auto-created on first run):
 
 ```yaml
-schema_version: 2
+schema_version: 3
 
 settings:
   output_type: ride-command

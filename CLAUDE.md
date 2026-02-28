@@ -98,19 +98,19 @@ Applies profile-specific ID3 tags on-the-fly during sync and download. Library M
 
 - `build_tagged_stream()` — Returns (id3\_bytes, audio\_offset, total\_size) for HTTP streaming. The server prepends profile-tagged ID3 header to the raw audio data
 - `apply_tags_to_file()` — Writes a fully-tagged copy to an output path (for physical sync)
-- `build_output_filename()` — Builds human-readable filename from profile's `filename_format` template (e.g., `{artist} - {title}`)
-- `build_output_subdir()` — Builds subdirectory from profile's `directory_format` template
+- `build_output_filename()` — Builds human-readable filename from profile's `filename` template (e.g., `{artist} - {title}`)
+- `build_output_subdir()` — Builds subdirectory from profile's `directory` template
 
 ### Output Type Profiles
 
 Profiles are defined in `config.yaml` under `output_types`. Applied at sync/download time by TagApplicator, not at conversion time.
 
-| Profile | ID3 | Artwork | Album Tag | Artist Tag | Filename |
-|---------|-----|---------|-----------|------------|----------|
-| `ride-command` (default) | v2.3 | 100px | playlist name | "Various" | `{artist} - {title}` |
-| `basic` | v2.4 | original | original | original | `{artist} - {title}` |
+| Profile | ID3 | Artwork | Album Tag | Artist Tag | Genre | Filename |
+|---------|-----|---------|-----------|------------|-------|----------|
+| `ride-command` (default) | v2.3 | 100px | playlist name | "Various" | "Playlist" | `{artist} - {title}` |
+| `basic` | v2.4 | original | original | original | (none) | `{artist} - {title}` |
 
-Profile fields: `artwork_size` (px, 0=original, -1=strip), `id3_versions` (list), `album_format`, `artist_format`, `title_format`, `filename_format`, `directory_format`, `extra_tags`, `usb_dir`.
+Profile fields: `id3_title`, `id3_artist`, `id3_album`, `id3_genre`, `id3_extra` (ID3 tag templates), `id3_versions` (list), `artwork_size` (px, 0=original, -1=strip), `filename`, `directory` (output path templates), `usb_dir`.
 
 ### MP3 Quality Presets
 
@@ -336,11 +336,11 @@ Both functions are called at startup before any DB class or ConfigManager is ins
 - `scheduled_jobs`: job\_name (PK), next\_run\_time, last\_run\_time, last\_run\_status, last\_run\_error, on\_missed, updated\_at
 - `tracks`: uuid (PK), playlist, file\_path, title, artist, album, cover\_art\_path, cover\_art\_hash, duration\_s, file\_size\_bytes, source\_m4a\_path, created\_at, updated\_at (indexes: playlist, file\_path, source\_m4a\_path)
 
-**Current config schema (version 2) — top-level keys:**
+**Current config schema (version 3) — top-level keys:**
 
 - `schema_version` (integer)
 - `settings` (output\_type, workers, server\_name, quality\_preset)
-- `output_types` (profile name → template-based profile fields)
+- `output_types` (profile name → id3\_title, id3\_artist, id3\_album, id3\_genre, id3\_extra, id3\_versions, artwork\_size, filename, directory, usb\_dir)
 - `playlists` (list of key, url, name)
 - `destinations` (list of name, path with scheme, optional sync\_key)
 

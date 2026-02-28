@@ -147,8 +147,11 @@ export class APIClient {
 
   // ── Files ──
 
-  async getFiles(playlistKey: string, includeSyncStatus = false): Promise<FileListResponse> {
-    const params = includeSyncStatus ? '?include_sync=true' : '';
+  async getFiles(playlistKey: string, includeSyncStatus = false, profile?: string): Promise<FileListResponse> {
+    const queryParts: string[] = [];
+    if (includeSyncStatus) queryParts.push('include_sync=true');
+    if (profile) queryParts.push(`profile=${encodeURIComponent(profile)}`);
+    const params = queryParts.length > 0 ? `?${queryParts.join('&')}` : '';
     return this.get<FileListResponse>(`/api/files/${playlistKey}${params}`);
   }
 

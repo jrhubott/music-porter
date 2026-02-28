@@ -217,13 +217,22 @@ def api_summary():
 
     total_files = 0
     total_size = 0
+    total_cover_with = 0
+    total_cover_without = 0
     today = date.today()
     freshness_counts = {"current": 0, "recent": 0, "stale": 0, "outdated": 0}
 
     playlists_json = []
     for ps in playlist_stats:
-        total_files += ps['track_count']
-        total_size += ps['total_size']
+        track_count = ps['track_count']
+        size_bytes = ps['total_size_bytes']
+        cover_with = ps['cover_with']
+        cover_without = ps['cover_without']
+
+        total_files += track_count
+        total_size += size_bytes
+        total_cover_with += cover_with
+        total_cover_without += cover_without
 
         # Get last modified from library output directory
         output_path = Path(mp.get_output_dir(ps['playlist']))
@@ -237,16 +246,20 @@ def api_summary():
         freshness = _get_freshness_level(last_modified, today)
         freshness_counts[freshness] += 1
 
-        avg_size_mb = (ps['total_size'] / ps['track_count'] / (1024 * 1024)
-                       if ps['track_count'] > 0 else 0)
+        avg_size_mb = (size_bytes / track_count / (1024 * 1024)
+                       if track_count > 0 else 0)
 
         playlists_json.append({
             'name': ps['playlist'],
-            'file_count': ps['track_count'],
-            'size_bytes': ps['total_size'],
+            'file_count': track_count,
+            'size_bytes': size_bytes,
             'avg_size_mb': round(avg_size_mb, 1),
             'last_modified': last_modified.isoformat() if last_modified else None,
             'freshness': freshness,
+            'tags_checked': track_count,
+            'tags_protected': track_count,
+            'cover_with': cover_with,
+            'cover_without': cover_without,
         })
 
     scan_duration = round(time.time() - start_time, 2)
@@ -257,6 +270,17 @@ def api_summary():
         'total_size_bytes': total_size,
         'scan_duration': scan_duration,
         'freshness': freshness_counts,
+        'tag_integrity': {
+            'protected': total_files,
+            'checked': total_files,
+            'missing': 0,
+        },
+        'cover_art': {
+            'with_art': total_cover_with,
+            'without_art': total_cover_without,
+            'original': total_cover_with,
+            'resized': 0,
+        },
         'playlists': playlists_json,
     })
 
@@ -300,7 +324,6 @@ def api_convert_batch():
     dry_run = data.get('dry_run', False)
     verbose = data.get('verbose', False)
     preset = data.get('preset', 'lossless')
-    no_cover_art = data.get('no_cover_art', False)
     eq_data = data.get('eq', {})
     no_eq = data.get('no_eq', False)
 
@@ -475,12 +498,13 @@ def api_settings_get():
     profiles = {
         name: {
             'description': p.description,
-            'title_format': p.title_format,
-            'artist_format': p.artist_format,
-            'album_format': p.album_format,
-            'extra_tags': p.extra_tags,
-            'filename_format': p.filename_format,
-            'directory_format': p.directory_format,
+            'id3_title': p.id3_title,
+            'id3_artist': p.id3_artist,
+            'id3_album': p.id3_album,
+            'id3_genre': p.id3_genre,
+            'id3_extra': p.id3_extra,
+            'filename': p.filename,
+            'directory': p.directory,
             'id3_versions': p.id3_versions,
             'artwork_size': p.artwork_size,
             'usb_dir': p.usb_dir,
@@ -765,8 +789,6 @@ def api_pipeline_run():
     verbose = data.get('verbose', False)
     preset = data.get('preset')
     sync_dest_name = data.get('sync_destination')
-    dir_structure = data.get('dir_structure')
-    filename_format = data.get('filename_format')
     eq_data = data.get('eq', {})
     no_eq = data.get('no_eq', False)
 
@@ -871,9 +893,6 @@ def api_convert_run():
     dry_run = data.get('dry_run', False)
     verbose = data.get('verbose', False)
     preset = data.get('preset', 'lossless')
-    no_cover_art = data.get('no_cover_art', False)
-    dir_structure = data.get('dir_structure')
-    filename_format = data.get('filename_format')
     eq_data = data.get('eq', {})
     no_eq = data.get('no_eq', False)
 
@@ -939,7 +958,13 @@ def api_convert_run():
 
 @api_bp.route('/api/files/<playlist_key>')
 def api_files_list(playlist_key):
-    """List MP3 files in a playlist with metadata from TrackDB."""
+    """List MP3 files in a playlist with metadata from TrackDB.
+
+    Optional query params:
+    - ``?profile=X``: use TagApplicator to build profile-specific
+      ``display_filename`` and ``output_subdir`` for each file.
+    - ``?include_sync=true``: include per-file sync status.
+    """
     ctx = _ctx()
     output_dir = ctx.project_root / mp.get_output_dir(playlist_key)
     safe = ctx.safe_dir(output_dir)
@@ -950,14 +975,40 @@ def api_files_list(playlist_key):
     tracks = ctx.track_db.get_tracks_by_playlist(playlist_key)
     track_by_path = {t['file_path']: t for t in tracks}
 
+    # Profile-aware naming
+    profile_name = request.args.get('profile')
+    tag_applicator = None
+    profile = None
+    playlist_display_name = playlist_key
+    if profile_name:
+        profile = mp.OUTPUT_PROFILES.get(profile_name)
+        if profile:
+            tag_applicator = mp.TagApplicator(ctx.track_db,
+                                              project_root=ctx.project_root)
+            # Resolve human-readable playlist name from config
+            config = ctx.get_config()
+            pl_cfg = config.get_playlist_by_key(playlist_key)
+            if pl_cfg:
+                playlist_display_name = pl_cfg.name
+
     files = []
     for f in sorted(Path(safe).glob('*.mp3')):
         rel_path = str(f.relative_to(ctx.project_root))
         track = track_by_path.get(rel_path)
         if track:
+            # Profile-aware display_filename and output_subdir
+            if tag_applicator and profile:
+                disp = tag_applicator.build_output_filename(
+                    track, profile, playlist_display_name)
+                subdir = tag_applicator.build_output_subdir(
+                    track, profile, playlist_display_name)
+            else:
+                disp = _build_display_filename(track)
+                subdir = None
+
             entry = {
                 'filename': f.name,
-                'display_filename': _build_display_filename(track),
+                'display_filename': disp,
                 'size': track['file_size_bytes'] or f.stat().st_size,
                 'duration': round(track['duration_s'], 1) if track['duration_s'] else 0,
                 'title': track['title'],
@@ -966,6 +1017,8 @@ def api_files_list(playlist_key):
                 'uuid': track['uuid'],
                 'has_cover_art': bool(track['cover_art_path']),
             }
+            if subdir is not None:
+                entry['output_subdir'] = subdir
         else:
             entry = {
                 'filename': f.name,
@@ -978,6 +1031,8 @@ def api_files_list(playlist_key):
                 'uuid': '',
                 'has_cover_art': False,
             }
+            if tag_applicator:
+                entry['output_subdir'] = ''
         files.append(entry)
 
     include_sync = request.args.get('include_sync', '').lower() == 'true'
@@ -986,11 +1041,14 @@ def api_files_list(playlist_key):
         for entry in files:
             entry['synced_to'] = sync_map.get(entry['filename'], [])
 
-    return jsonify({
+    result = {
         'playlist': playlist_key,
         'file_count': len(files),
         'files': files,
-    })
+    }
+    if profile_name:
+        result['name'] = playlist_display_name
+    return jsonify(result)
 
 
 # TODO: Add a web file browser page (template + route) that shows per-file
@@ -1110,8 +1168,9 @@ def api_files_artwork(playlist_key, filename):
     size_param = request.args.get('size', type=int)
     if size_param and size_param > 0:
         try:
-            from PIL import Image
             import io
+
+            from PIL import Image
             img = Image.open(str(art_path))
             img.thumbnail((size_param, size_param))
             buf = io.BytesIO()

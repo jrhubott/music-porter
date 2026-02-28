@@ -521,24 +521,25 @@ struct SettingsResponse: Codable {
 
 struct ProfileInfo: Codable {
     let description: String
-    let titleFormat: String
-    let artistFormat: String
-    let albumFormat: String
-    let extraTags: [String: String]
-    let filenameFormat: String
-    let directoryFormat: String
+    let id3Title: String
+    let id3Artist: String
+    let id3Album: String
+    let id3Genre: String
+    let id3Extra: [String: String]
+    let filename: String
+    let directory: String
     let id3Versions: [String]
     let artworkSize: Int
     let usbDir: String
 
     enum CodingKeys: String, CodingKey {
         case description
-        case titleFormat = "title_format"
-        case artistFormat = "artist_format"
-        case albumFormat = "album_format"
-        case extraTags = "extra_tags"
-        case filenameFormat = "filename_format"
-        case directoryFormat = "directory_format"
+        case id3Title = "id3_title"
+        case id3Artist = "id3_artist"
+        case id3Album = "id3_album"
+        case id3Genre = "id3_genre"
+        case id3Extra = "id3_extra"
+        case filename, directory
         case id3Versions = "id3_versions"
         case artworkSize = "artwork_size"
         case usbDir = "usb_dir"
