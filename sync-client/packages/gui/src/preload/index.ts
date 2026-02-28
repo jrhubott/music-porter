@@ -6,6 +6,8 @@ import type {
   DriveInfo,
   FileListResponse,
   Playlist,
+  PlaylistCacheStatus,
+  PrefetchResult,
   ServerConfig,
   SettingsResponse,
   SyncDestinationsResponse,
@@ -48,6 +50,7 @@ const electronAPI = {
     usbDriveName?: string;
     profile?: string;
     force?: boolean;
+    offlineOnly?: boolean;
   }): Promise<SyncResult> => ipcRenderer.invoke('sync:start', opts),
   cancelSync: (): Promise<void> => ipcRenderer.invoke('sync:cancel'),
   resolveSyncKey: (destPath: string, usbDriveName?: string): Promise<string | null> =>
@@ -75,6 +78,23 @@ const electronAPI = {
   getProfile: (): Promise<string | undefined> => ipcRenderer.invoke('prefs:getProfile'),
   setProfile: (name: string): Promise<void> => ipcRenderer.invoke('prefs:setProfile', name),
 
+  // Cache
+  cachePin: (playlist: string): Promise<void> => ipcRenderer.invoke('cache:pin', playlist),
+  cacheUnpin: (playlist: string): Promise<void> => ipcRenderer.invoke('cache:unpin', playlist),
+  cacheGetPinnedPlaylists: (): Promise<string[]> => ipcRenderer.invoke('cache:getPinnedPlaylists'),
+  cacheGetStatus: (): Promise<{ totalSize: number; playlists: PlaylistCacheStatus[] }> =>
+    ipcRenderer.invoke('cache:getStatus'),
+  cacheHasData: (): Promise<boolean> => ipcRenderer.invoke('cache:hasData'),
+  cacheGetCachedPlaylists: (): Promise<{ key: string; fileCount: number }[]> =>
+    ipcRenderer.invoke('cache:getCachedPlaylists'),
+  cachePrefetch: (): Promise<PrefetchResult> => ipcRenderer.invoke('cache:prefetch'),
+  cacheCancelPrefetch: (): Promise<void> => ipcRenderer.invoke('cache:cancelPrefetch'),
+  cacheClearPlaylist: (playlist: string): Promise<void> =>
+    ipcRenderer.invoke('cache:clearPlaylist', playlist),
+  cacheClearAll: (): Promise<void> => ipcRenderer.invoke('cache:clearAll'),
+  cacheSetMaxSize: (maxBytes: number): Promise<void> =>
+    ipcRenderer.invoke('cache:setMaxSize', maxBytes),
+
   // Events (main -> renderer)
   onSyncProgress: (callback: (progress: SyncProgress) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, progress: SyncProgress) =>
@@ -89,6 +109,12 @@ const electronAPI = {
     ) => callback(data);
     ipcRenderer.on('drives:change', handler);
     return () => ipcRenderer.removeListener('drives:change', handler);
+  },
+  onPrefetchProgress: (callback: (progress: SyncProgress) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, progress: SyncProgress) =>
+      callback(progress);
+    ipcRenderer.on('cache:prefetchProgress', handler);
+    return () => ipcRenderer.removeListener('cache:prefetchProgress', handler);
   },
   onAutoSync: (callback: (data: { drive: DriveInfo }) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: { drive: DriveInfo }) =>

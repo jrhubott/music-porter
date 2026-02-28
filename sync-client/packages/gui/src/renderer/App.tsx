@@ -13,7 +13,7 @@ const NAV_ITEMS = [
 ];
 
 export function App() {
-  const { connection, setConnection, activePage, setActivePage, setDrives, activeProfile } = useAppState();
+  const { connection, setConnection, activePage, setActivePage, setDrives, activeProfile, isOffline } = useAppState();
   const ipc = useIPC();
 
   useEffect(() => {
@@ -40,8 +40,8 @@ export function App() {
     }
   }
 
-  // Show connect page if not connected
-  if (!connection.connected) {
+  // Show connect page if not connected and not in offline mode
+  if (!connection.connected && !isOffline) {
     return (
       <div className="d-flex align-items-center justify-content-center" style={{ height: '100vh' }}>
         <ConnectPage />
@@ -82,9 +82,14 @@ export function App() {
 
         {/* Connection status */}
         <div className="connection-badge">
-          <span className="dot" />
+          <span className={`dot${isOffline ? ' dot-warning' : ''}`} />
           <span>
-            {connection.type === 'external' ? (
+            {isOffline ? (
+              <>
+                <i className="bi bi-cloud-slash me-1" />
+                Offline
+              </>
+            ) : connection.type === 'external' ? (
               <>
                 <i className="bi bi-globe me-1" />
                 External

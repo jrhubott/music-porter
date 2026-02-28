@@ -4,6 +4,7 @@ import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { CLIENT_SYNC_KEY_PREFIX, DEFAULT_CONCURRENCY, FILE_DOWNLOAD_TIMEOUT_MS, TEMP_SUFFIX, USB_SYNC_KEY_PREFIX } from './constants.js';
 import type { APIClient } from './api-client.js';
+import type { CacheManager } from './cache-manager.js';
 import type { FileInfo, SyncManifest, SyncResult } from './types.js';
 import type { LogCallback, ProgressCallback } from './progress.js';
 import {
@@ -35,6 +36,10 @@ export interface SyncOptions {
   onProgress?: ProgressCallback;
   /** Log callback. */
   onLog?: LogCallback;
+  /** Optional local cache for read/write-through. */
+  cacheManager?: CacheManager;
+  /** When true, sync exclusively from local cache (no server calls). */
+  offlineOnly?: boolean;
 }
 
 /**
@@ -59,10 +64,19 @@ export class SyncEngine {
    * Run a full sync to a destination directory.
    */
   async sync(destDir: string, options: SyncOptions = {}): Promise<SyncResult> {
+    if (options.offlineOnly && options.cacheManager) {
+      return this.syncOffline(destDir, options);
+    }
+    return this.syncOnline(destDir, options);
+  }
+
+  /** Online sync — fetches file lists from server, uses cache for read/write-through. */
+  private async syncOnline(destDir: string, options: SyncOptions): Promise<SyncResult> {
     const startTime = Date.now();
     const concurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
     const log = options.onLog ?? (() => {});
     const onProgress = options.onProgress ?? (() => {});
+    const cache = options.cacheManager;
 
     if (!existsSync(destDir)) {
       mkdirSync(destDir, { recursive: true });
@@ -202,6 +216,26 @@ export class SyncEngine {
               // Can't stat — will download
             }
           }
+
+          // Cache hit check — copy from local cache instead of downloading
+          if (cache && cache.copyToDestination(file.uuid, file.size, filePath)) {
+            totalCopied++;
+            processed++;
+            syncedFiles[manifestKey] = file.size;
+            log('info', `Cache hit: ${diskName}`);
+            onProgress({
+              phase: 'syncing',
+              playlist: key,
+              file: diskName,
+              subdir,
+              processed,
+              total: grandTotal,
+              copied: totalCopied,
+              skipped: totalSkipped,
+              failed: totalFailed,
+            });
+            continue;
+          }
         }
 
         filesToDownload.push(file);
@@ -218,6 +252,7 @@ export class SyncEngine {
           concurrency,
           options.profile,
           options.signal,
+          cache,
           (file, success) => {
             const dn = file.display_filename || file.filename;
             const fileSubdir = file.output_subdir ?? key;
@@ -307,6 +342,151 @@ export class SyncEngine {
     };
   }
 
+  /** Offline sync — copies files from local cache to destination without server contact. */
+  private async syncOffline(destDir: string, options: SyncOptions): Promise<SyncResult> {
+    const startTime = Date.now();
+    const cache = options.cacheManager!;
+    const log = options.onLog ?? (() => {});
+    const onProgress = options.onProgress ?? (() => {});
+
+    if (!existsSync(destDir)) {
+      mkdirSync(destDir, { recursive: true });
+    }
+
+    // Read existing manifest
+    const manifest = readManifest(destDir);
+    const syncKey = this.resolveSyncKey(options.syncKey, manifest, destDir, options.usbDriveName);
+    log('info', `Offline sync — key: ${syncKey}`);
+
+    // Use cached playlists as the source of truth
+    const requestedPlaylists = options.playlists ?? [];
+    const cachedPlaylists = cache.getCachedPlaylists();
+    const playlistKeys = requestedPlaylists.length > 0
+      ? requestedPlaylists.filter((k) => cachedPlaylists.includes(k))
+      : cachedPlaylists;
+
+    // Write initial manifest
+    const newManifest = manifest ?? createManifest(syncKey, 'offline');
+    newManifest.sync_key = syncKey;
+    writeManifest(destDir, newManifest);
+
+    // Build file list from cache
+    let grandTotal = 0;
+    const playlistFileList: { key: string; entries: { uuid: string; display_filename: string; size: number }[] }[] = [];
+    for (const key of playlistKeys) {
+      const entries = cache.getCachedFileInfos(key);
+      playlistFileList.push({ key, entries });
+      grandTotal += entries.length;
+    }
+
+    log('info', `Offline: ${grandTotal} cached files across ${playlistFileList.length} playlists`);
+
+    onProgress({
+      phase: 'discovering',
+      processed: 0,
+      total: grandTotal,
+      copied: 0,
+      skipped: 0,
+      failed: 0,
+    });
+
+    let totalCopied = 0;
+    let totalSkipped = 0;
+    let totalFailed = 0;
+    let processed = 0;
+    let aborted = false;
+
+    for (const { key, entries } of playlistFileList) {
+      if (options.signal?.aborted) {
+        aborted = true;
+        break;
+      }
+
+      const manifestFiles = getManifestFiles(manifest, key);
+      const syncedFiles: Record<string, number> = {};
+
+      for (const entry of entries) {
+        if (options.signal?.aborted) {
+          aborted = true;
+          break;
+        }
+
+        const diskName = entry.display_filename;
+        // Offline mode uses playlist key as subdir (no server to provide output_subdir)
+        const subdir = key;
+        const manifestKey = `${subdir}/${diskName}`;
+        const fileDir = join(destDir, subdir);
+        const filePath = join(fileDir, diskName);
+
+        // Skip if already on disk with matching size
+        const manifestSize = manifestFiles[manifestKey];
+        if (manifestSize !== undefined && manifestSize === entry.size && existsSync(filePath)) {
+          totalSkipped++;
+          processed++;
+          syncedFiles[manifestKey] = entry.size;
+          onProgress({
+            phase: 'syncing',
+            playlist: key,
+            file: diskName,
+            subdir,
+            processed,
+            total: grandTotal,
+            copied: totalCopied,
+            skipped: totalSkipped,
+            failed: totalFailed,
+          });
+          continue;
+        }
+
+        // Copy from cache
+        if (cache.copyToDestination(entry.uuid, entry.size, filePath)) {
+          totalCopied++;
+          syncedFiles[manifestKey] = entry.size;
+        } else {
+          totalFailed++;
+          log('warn', `Failed to copy cached file: ${diskName}`);
+        }
+        processed++;
+        onProgress({
+          phase: 'syncing',
+          playlist: key,
+          file: diskName,
+          subdir,
+          processed,
+          total: grandTotal,
+          copied: totalCopied,
+          skipped: totalSkipped,
+          failed: totalFailed,
+        });
+      }
+
+      // Update manifest (skip server recordSync — offline)
+      updateManifestPlaylist(newManifest, key, syncedFiles);
+      writeManifest(destDir, newManifest);
+
+      if (aborted) break;
+    }
+
+    const phase = aborted ? 'aborted' : 'complete';
+    onProgress({
+      phase,
+      processed,
+      total: grandTotal,
+      copied: totalCopied,
+      skipped: totalSkipped,
+      failed: totalFailed,
+    });
+
+    return {
+      syncKey,
+      copied: totalCopied,
+      skipped: totalSkipped,
+      failed: totalFailed,
+      aborted,
+      durationMs: Date.now() - startTime,
+    };
+  }
+
   /** Download a batch of files with concurrency limit. */
   private async downloadBatch(
     playlistKey: string,
@@ -315,6 +495,7 @@ export class SyncEngine {
     concurrency: number,
     profile: string | undefined,
     signal: AbortSignal | undefined,
+    cache: CacheManager | undefined,
     onFile: (file: FileInfo, success: boolean) => void,
     log: LogCallback,
   ): Promise<{ aborted: boolean }> {
@@ -328,7 +509,7 @@ export class SyncEngine {
           return;
         }
         const file = files[index++]!;
-        const success = await this.downloadFile(playlistKey, file, destDir, profile, signal, log);
+        const success = await this.downloadFile(playlistKey, file, destDir, profile, signal, cache, log);
         onFile(file, success);
       }
     };
@@ -345,6 +526,7 @@ export class SyncEngine {
     destDir: string,
     profile: string | undefined,
     signal: AbortSignal | undefined,
+    cache: CacheManager | undefined,
     log: LogCallback,
   ): Promise<boolean> {
     // Use display_filename for disk (human-readable), filename (UUID) for API
@@ -368,6 +550,16 @@ export class SyncEngine {
       const writeStream = createWriteStream(tmpPath);
       await pipeline(nodeStream, writeStream);
       renameSync(tmpPath, filePath);
+
+      // Write-through: copy downloaded file into cache (non-fatal on failure)
+      if (cache) {
+        try {
+          cache.storeFromFile(file, playlistKey, filePath);
+        } catch {
+          // Cache write failures are non-fatal
+        }
+      }
+
       return true;
     } catch (err) {
       // Clean up partial download

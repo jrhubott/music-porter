@@ -3,7 +3,7 @@ import { join, dirname } from 'node:path';
 import { getConfigDir } from './platform.js';
 import { ConfigError } from './errors.js';
 import type { AppConfig, ServerConfig, SyncPreferences } from './types.js';
-import { DEFAULT_CONCURRENCY } from './constants.js';
+import { DEFAULT_CONCURRENCY, DEFAULT_MAX_CACHE_BYTES } from './constants.js';
 
 const CONFIG_FILENAME = 'config.json';
 const API_KEY_FILENAME = 'api-key';
@@ -14,6 +14,8 @@ const DEFAULT_PREFERENCES: SyncPreferences = {
   autoSyncDrives: [],
   ejectAfterSync: false,
   notifications: true,
+  pinnedPlaylists: [],
+  maxCacheBytes: DEFAULT_MAX_CACHE_BYTES,
 };
 
 /** Legacy preferences shape for migration from autoSyncOnUSB. */
@@ -93,6 +95,29 @@ export class ConfigStore {
 
   isAutoSyncDrive(name: string): boolean {
     return this.config.preferences.autoSyncDrives.includes(name);
+  }
+
+  // ── Playlist Pin Helpers ──
+
+  pinPlaylist(key: string): void {
+    const pinned = this.config.preferences.pinnedPlaylists;
+    if (!pinned.includes(key)) {
+      pinned.push(key);
+      this.save();
+    }
+  }
+
+  unpinPlaylist(key: string): void {
+    const pinned = this.config.preferences.pinnedPlaylists;
+    const index = pinned.indexOf(key);
+    if (index !== -1) {
+      pinned.splice(index, 1);
+      this.save();
+    }
+  }
+
+  isPinned(key: string): boolean {
+    return this.config.preferences.pinnedPlaylists.includes(key);
   }
 
   // ── API Key (separate file with restricted permissions) ──

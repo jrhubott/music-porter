@@ -1,5 +1,6 @@
-import { app, BrowserWindow, nativeTheme } from 'electron';
+import { app, BrowserWindow, nativeImage, nativeTheme } from 'electron';
 import { join, dirname } from 'node:path';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { registerIPCHandlers } from './ipc-handlers.js';
 import { createTray } from './tray.js';
@@ -17,9 +18,25 @@ const WINDOW_HEIGHT = 750;
 const MIN_WIDTH = 800;
 const MIN_HEIGHT = 600;
 
+function getAppIcon(): Electron.NativeImage | undefined {
+  // In production, icon is next to the app binary via electron-builder's buildResources.
+  // In development, resolve from the source build/ dir.
+  const candidates = [
+    join(__dirname, '..', '..', 'build', 'icon.png'),
+    join(__dirname, '..', '..', '..', 'build', 'icon.png'),
+  ];
+  for (const iconPath of candidates) {
+    if (existsSync(iconPath)) {
+      return nativeImage.createFromPath(iconPath);
+    }
+  }
+  return undefined;
+}
+
 function createWindow(): void {
   nativeTheme.themeSource = 'dark';
 
+  const icon = getAppIcon();
   mainWindow = new BrowserWindow({
     width: WINDOW_WIDTH,
     height: WINDOW_HEIGHT,
@@ -27,6 +44,7 @@ function createWindow(): void {
     minHeight: MIN_HEIGHT,
     title: 'Music Porter Sync',
     backgroundColor: '#212529',
+    ...(icon ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '..', 'preload', 'index.js'),
       contextIsolation: true,

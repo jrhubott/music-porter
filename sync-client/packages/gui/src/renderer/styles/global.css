@@ -75,6 +75,10 @@ body {
   background: #dc3545;
 }
 
+.connection-badge .dot.dot-warning {
+  background: #ffc107;
+}
+
 /* Playlist card */
 .playlist-card {
   background: #2b3035;

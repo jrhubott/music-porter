@@ -215,6 +215,36 @@ export interface CookieUploadResponse {
   days_remaining: number | null;
 }
 
+// ── Cache ──
+
+export interface CacheEntry {
+  uuid: string;
+  playlist: string;
+  display_filename: string;
+  size: number;
+  cached_at: string;
+}
+
+export interface CacheIndex {
+  profile: string;
+  entries: Record<string, CacheEntry>;
+}
+
+export interface PrefetchResult {
+  downloaded: number;
+  skipped: number;
+  failed: number;
+  aborted: boolean;
+  durationMs: number;
+}
+
+export interface PlaylistCacheStatus {
+  playlistKey: string;
+  total: number;
+  cached: number;
+  pinned: boolean;
+}
+
 // ── Config ──
 
 export interface SyncPreferences {
@@ -222,6 +252,8 @@ export interface SyncPreferences {
   autoSyncDrives: string[];
   ejectAfterSync: boolean;
   notifications: boolean;
+  pinnedPlaylists: string[];
+  maxCacheBytes: number;
 }
 
 export interface AppConfig {

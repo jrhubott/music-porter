@@ -1,11 +1,14 @@
 import { ipcMain, dialog, safeStorage, BrowserWindow } from 'electron';
 import {
   APIClient,
+  CacheManager,
   ConfigStore,
+  PrefetchEngine,
   SyncEngine,
   DriveManager,
   ServerDiscovery,
   VERSION,
+  getConfigDir,
   readManifest,
   USB_SYNC_KEY_PREFIX,
   CLIENT_SYNC_KEY_PREFIX,
@@ -16,6 +19,8 @@ import type {
   CookieUploadResponse,
   DiscoveredServer,
   DriveInfo,
+  PlaylistCacheStatus,
+  PrefetchResult,
   ServerConfig,
   SyncPreferences,
   SyncProgress,
@@ -36,6 +41,14 @@ const configStore = new ConfigStore();
 const apiClient = new APIClient();
 const driveManager = new DriveManager();
 let activeSyncAbort: AbortController | null = null;
+let activePrefetchAbort: AbortController | null = null;
+
+/** Get a CacheManager for the current profile, or null if no profile set. */
+function getCacheManager(): CacheManager | null {
+  const profile = configStore.profile;
+  if (!profile) return null;
+  return new CacheManager(getConfigDir(), profile);
+}
 
 /** Register all IPC handlers for renderer communication. */
 export function registerIPCHandlers(): void {
@@ -175,10 +188,12 @@ export function registerIPCHandlers(): void {
         usbDriveName?: string;
         profile?: string;
         force?: boolean;
+        offlineOnly?: boolean;
       },
     ): Promise<SyncResult> => {
       activeSyncAbort = new AbortController();
       const engine = new SyncEngine(apiClient);
+      const cacheManager = getCacheManager() ?? undefined;
 
       return engine.sync(opts.dest, {
         playlists: opts.playlists,
@@ -188,6 +203,8 @@ export function registerIPCHandlers(): void {
         force: opts.force,
         concurrency: opts.concurrency,
         signal: activeSyncAbort.signal,
+        cacheManager,
+        offlineOnly: opts.offlineOnly,
         onProgress: (progress: SyncProgress) => {
           event.sender.send('sync:progress', progress);
         },
@@ -288,6 +305,102 @@ export function registerIPCHandlers(): void {
       days_remaining: uploadResult.days_remaining,
       error: uploadResult.valid ? undefined : uploadResult.reason,
     };
+  });
+
+  // ── Cache ──
+
+  ipcMain.handle('cache:pin', (_event, playlist: string): void => {
+    configStore.pinPlaylist(playlist);
+  });
+
+  ipcMain.handle('cache:unpin', (_event, playlist: string): void => {
+    configStore.unpinPlaylist(playlist);
+  });
+
+  ipcMain.handle('cache:getPinnedPlaylists', (): string[] => {
+    return configStore.preferences.pinnedPlaylists;
+  });
+
+  ipcMain.handle('cache:getStatus', (): { totalSize: number; playlists: PlaylistCacheStatus[] } => {
+    const cm = getCacheManager();
+    if (!cm) return { totalSize: 0, playlists: [] };
+
+    const pinned = configStore.preferences.pinnedPlaylists;
+    const cachedPlaylists = cm.getCachedPlaylists();
+    const allKeys = [...new Set([...pinned, ...cachedPlaylists])];
+
+    const playlists = allKeys.map((key) => {
+      const entries = cm.getCachedFileInfos(key);
+      return {
+        playlistKey: key,
+        total: 0, // Unknown without server — will be enriched by renderer
+        cached: entries.length,
+        pinned: pinned.includes(key),
+      };
+    });
+
+    return { totalSize: cm.getTotalSize(), playlists };
+  });
+
+  ipcMain.handle('cache:hasData', (): boolean => {
+    const cm = getCacheManager();
+    return cm ? cm.hasData() : false;
+  });
+
+  ipcMain.handle('cache:getCachedPlaylists', (): { key: string; fileCount: number }[] => {
+    const cm = getCacheManager();
+    if (!cm) return [];
+    return cm.getCachedPlaylists().map((key) => ({
+      key,
+      fileCount: cm.getCachedFileInfos(key).length,
+    }));
+  });
+
+  ipcMain.handle('cache:prefetch', async (event): Promise<PrefetchResult> => {
+    const cm = getCacheManager();
+    if (!cm) return { downloaded: 0, skipped: 0, failed: 0, aborted: true, durationMs: 0 };
+
+    const pinned = configStore.preferences.pinnedPlaylists;
+    if (pinned.length === 0) {
+      return { downloaded: 0, skipped: 0, failed: 0, aborted: false, durationMs: 0 };
+    }
+
+    activePrefetchAbort = new AbortController();
+    const engine = new PrefetchEngine(apiClient, cm);
+
+    return engine.prefetch({
+      playlists: pinned,
+      profile: configStore.profile || undefined,
+      maxCacheBytes: configStore.preferences.maxCacheBytes,
+      signal: activePrefetchAbort.signal,
+      onProgress: (progress: SyncProgress) => {
+        event.sender.send('cache:prefetchProgress', progress);
+      },
+      onLog: (level, message) => {
+        event.sender.send('cache:prefetchLog', { level, message });
+      },
+    });
+  });
+
+  ipcMain.handle('cache:cancelPrefetch', (): void => {
+    activePrefetchAbort?.abort();
+    activePrefetchAbort = null;
+  });
+
+  ipcMain.handle('cache:clearPlaylist', (_event, playlist: string): void => {
+    const cm = getCacheManager();
+    if (cm) cm.clearPlaylist(playlist);
+  });
+
+  ipcMain.handle('cache:clearAll', (): void => {
+    const cm = getCacheManager();
+    if (cm) cm.clearAll();
+  });
+
+  ipcMain.handle('cache:setMaxSize', (_event, maxBytes: number): void => {
+    configStore.updatePreferences({ maxCacheBytes: maxBytes });
+    const cm = getCacheManager();
+    if (cm) cm.evictToLimit(maxBytes);
   });
 
   // ── App Info ──

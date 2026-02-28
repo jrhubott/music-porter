@@ -5,6 +5,22 @@ import { useAppState } from '../store/app-state.js';
 
 const MIN_CONCURRENCY = 1;
 const MAX_CONCURRENCY = 8;
+const BYTES_PER_GB = 1024 * 1024 * 1024;
+const BYTES_PER_MB = 1024 * 1024;
+
+const CACHE_SIZE_OPTIONS = [
+  { label: '5 GB', value: 5 * BYTES_PER_GB },
+  { label: '10 GB', value: 10 * BYTES_PER_GB },
+  { label: '20 GB', value: 20 * BYTES_PER_GB },
+  { label: '50 GB', value: 50 * BYTES_PER_GB },
+  { label: 'Unlimited', value: 0 },
+];
+
+function formatCacheSize(bytes: number): string {
+  if (bytes >= BYTES_PER_GB) return `${(bytes / BYTES_PER_GB).toFixed(1)} GB`;
+  if (bytes >= BYTES_PER_MB) return `${(bytes / BYTES_PER_MB).toFixed(1)} MB`;
+  return `${bytes} B`;
+}
 
 export function SettingsPage() {
   const ipc = useIPC();
@@ -16,6 +32,8 @@ export function SettingsPage() {
     setServerProfiles,
     activeProfile,
     setActiveProfile,
+    isOffline,
+    setIsOffline,
   } = useAppState();
   const [config, setConfig] = useState<ServerConfig | null>(null);
   const [prefs, setPrefs] = useState<SyncPreferences | null>(null);
@@ -23,6 +41,10 @@ export function SettingsPage() {
   const [cookieStatus, setCookieStatus] = useState<CookieStatus | null>(null);
   const [cookieRefreshing, setCookieRefreshing] = useState(false);
   const [cookieAlert, setCookieAlert] = useState<{ type: 'success' | 'danger'; message: string } | null>(null);
+  const [cacheTotalSize, setCacheTotalSize] = useState(0);
+  const [cacheClearing, setCacheClearing] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
+  const [reconnectError, setReconnectError] = useState('');
 
   useEffect(() => {
     loadSettings();
@@ -38,25 +60,35 @@ export function SettingsPage() {
     setPrefs(p);
     setVersion(ver);
 
-    // Fetch server profiles, saved profile, and cookie status
+    // Load cache size (always available, even offline)
     try {
-      const [settings, savedProfile, cookies] = await Promise.all([
-        ipc.getSettings(),
-        ipc.getProfile(),
-        ipc.getCookieStatus(),
-      ]);
-      setServerProfiles(settings.profiles);
-      setCookieStatus(cookies);
-      if (!activeProfile) {
-        const profileNames = Object.keys(settings.profiles);
-        const resolved = savedProfile
-          ?? (settings.settings['output_type'] as string | undefined)
-          ?? profileNames[0]
-          ?? '';
-        if (resolved) setActiveProfile(resolved);
-      }
+      const status = await ipc.cacheGetStatus();
+      setCacheTotalSize(status.totalSize);
     } catch {
       // Non-critical
+    }
+
+    // Fetch server profiles, saved profile, and cookie status (only when online)
+    if (!isOffline) {
+      try {
+        const [settings, savedProfile, cookies] = await Promise.all([
+          ipc.getSettings(),
+          ipc.getProfile(),
+          ipc.getCookieStatus(),
+        ]);
+        setServerProfiles(settings.profiles);
+        setCookieStatus(cookies);
+        if (!activeProfile) {
+          const profileNames = Object.keys(settings.profiles);
+          const resolved = savedProfile
+            ?? (settings.settings['output_type'] as string | undefined)
+            ?? profileNames[0]
+            ?? '';
+          if (resolved) setActiveProfile(resolved);
+        }
+      } catch {
+        // Non-critical
+      }
     }
   }
 
@@ -115,6 +147,54 @@ export function SettingsPage() {
     }
   }
 
+  async function goOffline() {
+    setIsOffline(true);
+    setConnection({ connected: false });
+  }
+
+  async function reconnect() {
+    setReconnecting(true);
+    setReconnectError('');
+    try {
+      const state = await ipc.connect();
+      if (state.connected) {
+        setConnection(state);
+        setIsOffline(false);
+        loadSettings();
+      } else {
+        setReconnectError('Connection failed. Server may be unreachable.');
+      }
+    } catch (err) {
+      setReconnectError(err instanceof Error ? err.message : 'Connection failed');
+    }
+    setReconnecting(false);
+  }
+
+  async function handleClearCache() {
+    setCacheClearing(true);
+    try {
+      await ipc.cacheClearAll();
+      setCacheTotalSize(0);
+    } catch {
+      // Non-critical
+    }
+    setCacheClearing(false);
+  }
+
+  async function handleSetMaxCacheSize(value: number) {
+    if (!prefs) return;
+    const updated = { ...prefs, maxCacheBytes: value };
+    setPrefs(updated);
+    await ipc.cacheSetMaxSize(value);
+    // Reload cache size (eviction may have reduced it)
+    try {
+      const status = await ipc.cacheGetStatus();
+      setCacheTotalSize(status.totalSize);
+    } catch {
+      // Non-critical
+    }
+  }
+
   const profileNames = Object.keys(serverProfiles).sort();
 
   return (
@@ -166,13 +246,47 @@ export function SettingsPage() {
               )}
             </>
           )}
-          <button className="btn btn-outline-danger btn-sm" onClick={disconnect}>
-            Disconnect
-          </button>
+          <div className="d-flex gap-2">
+            {isOffline ? (
+              <>
+                <button
+                  className="btn btn-outline-primary btn-sm"
+                  onClick={reconnect}
+                  disabled={reconnecting}
+                >
+                  {reconnecting ? (
+                    <>
+                      <span className="spinner-border spinner-border-sm me-1" />
+                      Reconnecting...
+                    </>
+                  ) : (
+                    <>
+                      <i className="bi bi-wifi me-1" />
+                      Reconnect
+                    </>
+                  )}
+                </button>
+                {reconnectError && (
+                  <span className="text-danger small align-self-center">{reconnectError}</span>
+                )}
+              </>
+            ) : (
+              <>
+                <button className="btn btn-outline-secondary btn-sm" onClick={goOffline}>
+                  <i className="bi bi-cloud-slash me-1" />
+                  Go Offline
+                </button>
+                <button className="btn btn-outline-danger btn-sm" onClick={disconnect}>
+                  Disconnect
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Apple Music Authentication */}
+      {/* Apple Music Authentication — hide when offline */}
+      {!isOffline && (
       <div className="card bg-dark border-secondary mb-4">
         <div className="card-header">Apple Music Authentication</div>
         <div className="card-body">
@@ -225,6 +339,7 @@ export function SettingsPage() {
           </button>
         </div>
       </div>
+      )}
 
       {/* Output Profile */}
       {profileNames.length > 0 && (
@@ -303,6 +418,49 @@ export function SettingsPage() {
           </div>
         </div>
       )}
+
+      {/* Local Cache */}
+      <div className="card bg-dark border-secondary mb-4">
+        <div className="card-header">Local Cache</div>
+        <div className="card-body">
+          <div className="d-flex justify-content-between align-items-center mb-3">
+            <div>
+              <small className="text-secondary">Cache Size</small>
+              <div>{formatCacheSize(cacheTotalSize)}</div>
+            </div>
+            <button
+              className="btn btn-outline-danger btn-sm"
+              onClick={handleClearCache}
+              disabled={cacheClearing || cacheTotalSize === 0}
+            >
+              {cacheClearing ? (
+                <span className="spinner-border spinner-border-sm" />
+              ) : (
+                <>
+                  <i className="bi bi-trash me-1" />
+                  Clear Cache
+                </>
+              )}
+            </button>
+          </div>
+          {prefs && (
+            <div>
+              <label className="form-label">Max Cache Size</label>
+              <select
+                className="form-select bg-dark text-light border-secondary"
+                value={prefs.maxCacheBytes}
+                onChange={(e) => handleSetMaxCacheSize(parseInt(e.target.value, 10))}
+              >
+                {CACHE_SIZE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* About */}
       <div className="card bg-dark border-secondary">

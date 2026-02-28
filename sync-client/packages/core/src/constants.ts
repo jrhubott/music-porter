@@ -86,3 +86,14 @@ export const APPLE_DOMAIN_SUFFIX = 'apple.com';
 
 /** Fallback expiry (seconds) for session cookies that lack an explicit expiration. */
 export const SESSION_COOKIE_FALLBACK_S = 86400 * 365;
+
+// ── Local Cache ──
+
+/** Subdirectory under config dir for cached audio files. */
+export const CACHE_DIRNAME = 'cache';
+
+/** Per-profile cache index filename. */
+export const CACHE_INDEX_FILENAME = 'cache-index.json';
+
+/** Default maximum cache size in bytes (10 GB). */
+export const DEFAULT_MAX_CACHE_BYTES = 10 * 1024 * 1024 * 1024;
