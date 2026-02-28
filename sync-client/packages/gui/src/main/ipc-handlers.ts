@@ -312,6 +312,10 @@ export function registerIPCHandlers(): void {
     configStore.updatePreferences(updates);
   });
 
+  ipcMain.handle('prefs:addRecentDestination', (_event, path: string): void => {
+    configStore.addRecentDestination(path);
+  });
+
   ipcMain.handle('prefs:getProfile', (): string | undefined => {
     return configStore.profile;
   });

@@ -78,6 +78,8 @@ const electronAPI = {
   getPreferences: (): Promise<SyncPreferences> => ipcRenderer.invoke('prefs:get'),
   updatePreferences: (updates: Partial<SyncPreferences>): Promise<void> =>
     ipcRenderer.invoke('prefs:update', updates),
+  addRecentDestination: (path: string): Promise<void> =>
+    ipcRenderer.invoke('prefs:addRecentDestination', path),
   getProfile: (): Promise<string | undefined> => ipcRenderer.invoke('prefs:getProfile'),
   setProfile: (name: string): Promise<void> => ipcRenderer.invoke('prefs:setProfile', name),
 

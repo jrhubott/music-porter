@@ -70,6 +70,7 @@ export function SyncPage() {
   const [autoSyncDrives, setAutoSyncDrives] = useState<string[]>([]);
   const [ejectAfterSync, setEjectAfterSync] = useState(false);
   const [ejected, setEjected] = useState(false);
+  const [recentDestinations, setRecentDestinations] = useState<string[]>([]);
 
   useEffect(() => {
     if (isOffline) {
@@ -125,6 +126,7 @@ export function SyncPage() {
       setAutoSyncDrives(prefs.autoSyncDrives);
       setEjectAfterSync(prefs.ejectAfterSync);
       setAutoPinNewPlaylists(autoPin);
+      setRecentDestinations(prefs.recentDestinations ?? []);
 
       // Sync pins with server when auto-pin is enabled
       const playlistKeys = playlistData.map((p) => p.key);
@@ -256,6 +258,9 @@ export function SyncPage() {
       setDestPath(path);
       setSelectedDrive(null);
       loadSyncStatus(path);
+      await ipc.addRecentDestination(path);
+      const prefs = await ipc.getPreferences();
+      setRecentDestinations(prefs.recentDestinations ?? []);
     }
   }
 
@@ -277,6 +282,13 @@ export function SyncPage() {
         offlineOnly: isOffline,
       });
       setLastSyncResult(result);
+
+      // Record non-USB destination to recent list on successful sync
+      if (!syncDrive && !result.aborted) {
+        await ipc.addRecentDestination(destPath);
+        const prefs = await ipc.getPreferences();
+        setRecentDestinations(prefs.recentDestinations ?? []);
+      }
 
       // Auto-eject on successful USB sync when auto-sync or eject-after-sync is enabled
       const syncSucceeded = !result.aborted && result.failed === 0;
@@ -492,18 +504,33 @@ export function SyncPage() {
         <div className="card-header">Destination</div>
         <div className="card-body">
           <div className="d-flex gap-2">
-            <input
-              type="text"
-              className="form-control bg-dark text-light border-secondary"
-              placeholder="Select a folder or USB drive..."
-              value={destPath}
-              onChange={(e) => {
-                setDestPath(e.target.value);
-                setSelectedDrive(null);
-                setDestSyncStatus(null);
-              }}
-              readOnly
-            />
+            {recentDestinations.length > 0 ? (
+              <select
+                className="form-select bg-dark text-light border-secondary"
+                value={destPath}
+                onChange={(e) => {
+                  const path = e.target.value;
+                  if (path) {
+                    setDestPath(path);
+                    setSelectedDrive(null);
+                    loadSyncStatus(path);
+                  }
+                }}
+              >
+                <option value="">Select a destination...</option>
+                {recentDestinations.map((path) => (
+                  <option key={path} value={path}>{path}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                className="form-control bg-dark text-light border-secondary"
+                placeholder="Select a folder or USB drive..."
+                value={destPath}
+                readOnly
+              />
+            )}
             <button className="btn btn-outline-secondary" onClick={selectFolder}>
               Browse
             </button>

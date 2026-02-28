@@ -101,6 +101,9 @@ export const HEALTH_CHECK_TIMEOUT_MS = 5_000;
 /** Number of consecutive health-check failures before declaring the connection lost. */
 export const HEALTH_CHECK_FAILURE_THRESHOLD = 2;
 
+/** Maximum number of recent folder destinations to remember. */
+export const MAX_RECENT_DESTINATIONS = 5;
+
 // ── Local Cache (re-exported from cache module for backward compatibility) ──
 
 export {

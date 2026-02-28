@@ -253,6 +253,7 @@ export interface SyncPreferences {
   maxCacheBytes: number;
   autoPinNewPlaylists: boolean;
   unpinnedPlaylists: string[];
+  recentDestinations: string[];
 }
 
 export interface AppConfig {
