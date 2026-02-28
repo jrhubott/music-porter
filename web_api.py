@@ -401,10 +401,14 @@ def api_convert_batch():
         total_failed = 0
         eq_mgr = mp.EQConfigManager()
 
+        total_pl = len(playlists)
         for i, key in enumerate(playlists):
             if task.cancel_event.is_set():
                 break
-            logger.info(f"[{i+1}/{len(playlists)}] Converting {key}...")
+            display.show_overall_progress(
+                i + 1, total_pl,
+                f"Playlist {i + 1} of {total_pl}: {key}")
+            logger.info(f"[{i+1}/{total_pl}] Converting {key}...")
             input_dir = str(ctx.project_root / mp.get_source_dir(key))
             out = mp.get_audio_dir()
 
@@ -432,6 +436,11 @@ def api_convert_batch():
                 total_success += 1
             else:
                 total_failed += 1
+
+        if playlists:
+            display.show_overall_progress(
+                total_pl, total_pl,
+                f"All {total_pl} playlists complete")
 
         return {
             'success': total_failed == 0,
@@ -886,9 +895,13 @@ def api_pipeline_run():
         if auto:
             logger.info("Auto mode: processing all playlists")
             aggregate = mp.AggregateStatistics()
+            total_pl = len(config.playlists)
             for i, pl in enumerate(config.playlists):
+                display.show_overall_progress(
+                    i + 1, total_pl,
+                    f"Playlist {i + 1} of {total_pl}: {pl.name}")
                 logger.info(f"\n{'=' * 60}")
-                logger.info(f"Processing {i+1}/{len(config.playlists)}: {pl.name}")
+                logger.info(f"Processing {i+1}/{total_pl}: {pl.name}")
                 logger.info(f"{'=' * 60}")
                 orchestrator.run_full_pipeline(
                     playlist=str(i + 1), auto=True,
@@ -897,6 +910,10 @@ def api_pipeline_run():
                     quality_preset=quality_preset,
                 )
                 aggregate.add_playlist_result(orchestrator.stats)
+            if config.playlists:
+                display.show_overall_progress(
+                    total_pl, total_pl,
+                    f"All {total_pl} playlists complete")
             aggregate.end_time = time.time()
             agg_result = aggregate.to_result()
             result_dict = _serialize_aggregate_result(agg_result)
@@ -1025,7 +1042,10 @@ def api_library_backfill_metadata():
 def api_library_audit():
     """Verify DB records match filesystem and clean up orphans."""
     ctx = _ctx()
-    desc = 'Library audit: verify DB/filesystem consistency'
+    data = request.get_json(force=True) if request.data else {}
+    allow_updates = data.get('allow_updates', False)
+    mode = 'with updates' if allow_updates else 'report only'
+    desc = f'Library audit ({mode})'
     source = ctx.detect_source()
 
     def _run(task_id):
@@ -1036,7 +1056,8 @@ def api_library_audit():
             ctx.track_db, project_root=ctx.project_root,
             logger=logger, display_handler=display,
             cancel_event=task.cancel_event,
-            sync_tracker=ctx.sync_tracker)
+            sync_tracker=ctx.sync_tracker,
+            allow_updates=allow_updates)
         if ctx.audit_logger:
             # Don't log the full details list — just the summary counts
             summary = {k: v for k, v in result.items() if k != 'details'}

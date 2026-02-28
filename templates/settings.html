@@ -233,7 +233,17 @@
       <i class="bi bi-arrow-repeat"></i> Backfill Metadata
     </button>
     <hr class="my-3">
-    <p class="text-muted small mb-2">Verify DB records match filesystem. Removes orphan records and files, fixes stale paths, cleans up sync records.</p>
+    <p class="text-muted small mb-2">Verify DB records match filesystem. Reports orphan records and files, stale paths, and sync records. Enable "Allow Updates" to actually apply fixes.</p>
+    <div class="form-check mb-2">
+      <input class="form-check-input" type="checkbox" id="chkAuditAllowUpdates">
+      <label class="form-check-label small" for="chkAuditAllowUpdates">
+        Allow Updates
+      </label>
+      <div class="text-warning small mt-1">
+        <i class="bi bi-exclamation-triangle"></i>
+        When enabled, the database may be modified and orphan files deleted.
+      </div>
+    </div>
     <button type="button" class="btn btn-outline-warning btn-sm" id="btnAuditLibrary">
       <i class="bi bi-search"></i> Audit Library
     </button>
@@ -543,7 +553,8 @@ document.getElementById('btnAuditLibrary').addEventListener('click', function() 
   panel.classList.remove('d-none');
   panel.innerHTML = '';
 
-  submitOperation('/api/library/audit', {}, 'maintenanceLogPanel', function(msg) {
+  const allowUpdates = document.getElementById('chkAuditAllowUpdates').checked;
+  submitOperation('/api/library/audit', {allow_updates: allowUpdates}, 'maintenanceLogPanel', function(msg) {
     btn.disabled = false;
     backfillBtn.disabled = false;
   });

@@ -171,6 +171,19 @@ class WebDisplayHandler:
     def show_status(self, message, level="info"):
         self._queue.put({'level': level.upper(), 'message': message})
 
+    def show_overall_progress(self, current, total, stage):
+        """Emit overall progress (playlist X of Y) for multi-playlist ops."""
+        if self._cancel_event and self._cancel_event.is_set():
+            return
+        pct = int(current * 100 / total) if total > 0 else 0
+        self._queue.put({
+            'type': 'overall_progress',
+            'current': current,
+            'total': total,
+            'percent': pct,
+            'stage': stage,
+        })
+
     def show_banner(self, title, subtitle=None):
         pass  # Web UI has its own page headers
 
@@ -626,6 +639,9 @@ class PipelineScheduler:
             for i, pl in enumerate(to_run):
                 if task.cancel_event.is_set():
                     break
+                display.show_overall_progress(
+                    i + 1, len(to_run),
+                    f"Playlist {i + 1} of {len(to_run)}: {pl.name}")
                 logger.info(f"\n{'=' * 60}")
                 logger.info(
                     f"Processing {i + 1}/{len(to_run)}: {pl.name}")
@@ -638,6 +654,10 @@ class PipelineScheduler:
                 )
                 aggregate.add_playlist_result(orchestrator.stats)
 
+            if to_run:
+                display.show_overall_progress(
+                    len(to_run), len(to_run),
+                    f"All {len(to_run)} playlists complete")
             aggregate.end_time = time.time()
             agg_result = aggregate.to_result()
             return {

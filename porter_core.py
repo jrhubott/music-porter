@@ -3916,7 +3916,7 @@ AUDIT_PROGRESS_INTERVAL = 10
 
 def audit_library(track_db, project_root=None, logger=None,
                   display_handler=None, cancel_event=None,
-                  sync_tracker=None):
+                  sync_tracker=None, allow_updates=False):
     """Verify DB records match filesystem and clean up orphans.
 
     Four phases:
@@ -3924,6 +3924,10 @@ def audit_library(track_db, project_root=None, logger=None,
     2. Deduplicate tracks sharing the same source M4A (before clearing missing sources)
     3. Clear missing source paths, find orphan files on disk
     4. Cross-check sync DB against track DB (remove stale sync records)
+
+    When allow_updates=False (default), no destructive actions are performed —
+    only reports what would happen. Pass allow_updates=True to actually modify
+    the database and delete orphan files.
 
     Returns a structured summary dict.
     """
@@ -3969,9 +3973,13 @@ def audit_library(track_db, project_root=None, logger=None,
 
         # Check MP3 exists
         if not mp3_path or not mp3_path.exists():
-            track_db.delete_track(uuid)
-            _detail(f"Removed DB record: uuid={uuid} "
-                    f"(MP3 missing: {file_path})")
+            if allow_updates:
+                track_db.delete_track(uuid)
+            else:
+                logger.dry_run(f"Would remove DB record: uuid={uuid} "
+                               f"(MP3 missing: {file_path})")
+            _detail(f"{'Removed' if allow_updates else 'Would remove'} "
+                    f"DB record: uuid={uuid} (MP3 missing: {file_path})")
             stats['records_removed'] += 1
             continue
 
@@ -3982,10 +3990,15 @@ def audit_library(track_db, project_root=None, logger=None,
             if art_path.exists():
                 referenced_artwork.add(cover_art)
             else:
-                track_db.repair_track(uuid,
-                                      cover_art_path=None,
-                                      cover_art_hash=None)
-                _detail(f"Cleared stale cover_art_path for {uuid}")
+                if allow_updates:
+                    track_db.repair_track(uuid,
+                                          cover_art_path=None,
+                                          cover_art_hash=None)
+                else:
+                    logger.dry_run(
+                        f"Would clear stale cover_art_path for {uuid}")
+                _detail(f"{'Cleared' if allow_updates else 'Would clear'} "
+                        f"stale cover_art_path for {uuid}")
                 stats['cover_art_cleared'] += 1
 
         # Normalize absolute source_m4a_path to relative (but don't clear
@@ -3996,20 +4009,41 @@ def audit_library(track_db, project_root=None, logger=None,
             if source_path.is_absolute():
                 try:
                     rel = source_path.relative_to(root.resolve())
-                    track_db.repair_track(uuid, source_m4a_path=str(rel))
-                    _detail(f"Normalized path for track {uuid}")
+                    if allow_updates:
+                        track_db.repair_track(uuid,
+                                              source_m4a_path=str(rel))
+                    else:
+                        logger.dry_run(
+                            f"Would normalize path for track {uuid}")
+                    _detail(
+                        f"{'Normalized' if allow_updates else 'Would normalize'}"
+                        f" path for track {uuid}")
                     stats['paths_normalized'] += 1
                 except ValueError:
-                    track_db.repair_track(uuid, source_m4a_path=None)
-                    _detail(f"Cleared unreachable source_m4a_path for {uuid}")
+                    if allow_updates:
+                        track_db.repair_track(uuid, source_m4a_path=None)
+                    else:
+                        logger.dry_run(
+                            f"Would clear unreachable source_m4a_path "
+                            f"for {uuid}")
+                    _detail(
+                        f"{'Cleared' if allow_updates else 'Would clear'} "
+                        f"unreachable source_m4a_path for {uuid}")
                     stats['source_cleared'] += 1
 
         # Fix file_size_bytes if missing or zero
         file_size = track.get('file_size_bytes')
         if (not file_size or file_size == 0) and mp3_path.exists():
             actual_size = mp3_path.stat().st_size
-            track_db.repair_track(uuid, file_size_bytes=actual_size)
-            _detail(f"Updated file_size_bytes for {uuid}: {actual_size}")
+            if allow_updates:
+                track_db.repair_track(uuid, file_size_bytes=actual_size)
+            else:
+                logger.dry_run(
+                    f"Would update file_size_bytes for {uuid}: "
+                    f"{actual_size}")
+            _detail(
+                f"{'Updated' if allow_updates else 'Would update'} "
+                f"file_size_bytes for {uuid}: {actual_size}")
             stats['sizes_updated'] += 1
 
         if display_handler and (i + 1) % AUDIT_PROGRESS_INTERVAL == 0:
@@ -4044,22 +4078,28 @@ def audit_library(track_db, project_root=None, logger=None,
                 logger.warn("Audit cancelled by user")
                 return stats
             dup_uuid = dup['uuid']
-            # Delete the duplicate MP3
-            dup_mp3 = root / dup.get('file_path', '')
-            if dup_mp3.is_file():
-                dup_mp3.unlink()
-            # Delete the duplicate artwork
-            dup_art = dup.get('cover_art_path')
-            if dup_art:
-                dup_art_path = root / dup_art
-                if dup_art_path.is_file():
-                    dup_art_path.unlink()
-            # Remove from referenced_artwork so Phase 4 can clean up
-            if dup_art and dup_art in referenced_artwork:
-                referenced_artwork.discard(dup_art)
-            track_db.delete_track(dup_uuid)
+            if allow_updates:
+                # Delete the duplicate MP3
+                dup_mp3 = root / dup.get('file_path', '')
+                if dup_mp3.is_file():
+                    dup_mp3.unlink()
+                # Delete the duplicate artwork
+                dup_art = dup.get('cover_art_path')
+                if dup_art:
+                    dup_art_path = root / dup_art
+                    if dup_art_path.is_file():
+                        dup_art_path.unlink()
+                # Remove from referenced_artwork so Phase 4 can clean up
+                if dup_art and dup_art in referenced_artwork:
+                    referenced_artwork.discard(dup_art)
+                track_db.delete_track(dup_uuid)
+            else:
+                logger.dry_run(
+                    f"Would remove duplicate: uuid={dup_uuid} "
+                    f"(kept {keeper['uuid']}, source={src_path})")
             _detail(
-                f"Removed duplicate: uuid={dup_uuid} "
+                f"{'Removed' if allow_updates else 'Would remove'} "
+                f"duplicate: uuid={dup_uuid} "
                 f"(kept {keeper['uuid']}, source={src_path})")
             stats['duplicates_removed'] += 1
 
@@ -4082,8 +4122,16 @@ def audit_library(track_db, project_root=None, logger=None,
         if not source_path.is_absolute():
             source_path = root / source_path
         if not source_path.exists():
-            track_db.repair_track(track['uuid'], source_m4a_path=None)
-            _detail(f"Cleared missing source_m4a_path for {track['uuid']}")
+            if allow_updates:
+                track_db.repair_track(track['uuid'],
+                                      source_m4a_path=None)
+            else:
+                logger.dry_run(
+                    f"Would clear missing source_m4a_path "
+                    f"for {track['uuid']}")
+            _detail(
+                f"{'Cleared' if allow_updates else 'Would clear'} "
+                f"missing source_m4a_path for {track['uuid']}")
             stats['source_cleared'] += 1
 
     logger.info("=== Phase 3b: Finding orphan files on disk ===")
@@ -4096,8 +4144,14 @@ def audit_library(track_db, project_root=None, logger=None,
                 return stats
             rel_path = str(Path(get_audio_dir()) / mp3_file.name)
             if not track_db.get_track_by_path(rel_path):
-                mp3_file.unlink()
-                _detail(f"Deleted orphan file: {rel_path}")
+                if allow_updates:
+                    mp3_file.unlink()
+                else:
+                    logger.dry_run(
+                        f"Would delete orphan file: {rel_path}")
+                _detail(
+                    f"{'Deleted' if allow_updates else 'Would delete'} "
+                    f"orphan file: {rel_path}")
                 stats['orphan_files_removed'] += 1
 
     # Orphan artwork
@@ -4110,8 +4164,14 @@ def audit_library(track_db, project_root=None, logger=None,
                 continue
             rel_art = str(Path(get_artwork_dir()) / art_file.name)
             if rel_art not in referenced_artwork:
-                art_file.unlink()
-                _detail(f"Deleted orphan artwork: {rel_art}")
+                if allow_updates:
+                    art_file.unlink()
+                else:
+                    logger.dry_run(
+                        f"Would delete orphan artwork: {rel_art}")
+                _detail(
+                    f"{'Deleted' if allow_updates else 'Would delete'} "
+                    f"orphan artwork: {rel_art}")
                 stats['orphan_artwork_removed'] += 1
 
     # ── Phase 4: Cross-check sync DB against track DB ─────────────
@@ -4135,24 +4195,32 @@ def audit_library(track_db, project_root=None, logger=None,
                     f"(playlist no longer in library)")
 
         if stale_ids:
-            removed = sync_tracker.delete_sync_files_by_ids(stale_ids)
-            stats['sync_records_removed'] = removed
-            logger.info(f"Removed {removed} stale sync records")
+            if allow_updates:
+                removed = sync_tracker.delete_sync_files_by_ids(stale_ids)
+                stats['sync_records_removed'] = removed
+                logger.info(f"Removed {removed} stale sync records")
+            else:
+                stats['sync_records_removed'] = len(stale_ids)
+                logger.dry_run(
+                    f"Would remove {len(stale_ids)} stale sync records")
     else:
         logger.info("Phase 4: Skipped (no sync tracker)")
 
     # ── Summary ───────────────────────────────────────────────────
-    logger.info("=== Audit Summary ===")
+    stats['allow_updates'] = allow_updates
+    mode_label = "Audit Summary" if allow_updates else "Audit Summary (report only)"
+    logger.info(f"=== {mode_label} ===")
+    verb = "" if allow_updates else "would be "
     logger.info(f"  Tracks checked:        {stats['total_tracks_checked']}")
-    logger.info(f"  DB records removed:    {stats['records_removed']}")
-    logger.info(f"  Orphan files removed:  {stats['orphan_files_removed']}")
-    logger.info(f"  Orphan artwork removed:{stats['orphan_artwork_removed']}")
-    logger.info(f"  Cover art cleared:     {stats['cover_art_cleared']}")
-    logger.info(f"  Source paths cleared:  {stats['source_cleared']}")
-    logger.info(f"  Paths normalized:      {stats['paths_normalized']}")
-    logger.info(f"  Sizes updated:         {stats['sizes_updated']}")
-    logger.info(f"  Duplicates removed:    {stats['duplicates_removed']}")
-    logger.info(f"  Sync records removed:  {stats['sync_records_removed']}")
+    logger.info(f"  DB records {verb}removed:    {stats['records_removed']}")
+    logger.info(f"  Orphan files {verb}removed:  {stats['orphan_files_removed']}")
+    logger.info(f"  Orphan artwork {verb}removed:{stats['orphan_artwork_removed']}")
+    logger.info(f"  Cover art {verb}cleared:     {stats['cover_art_cleared']}")
+    logger.info(f"  Source paths {verb}cleared:  {stats['source_cleared']}")
+    logger.info(f"  Paths {verb}normalized:      {stats['paths_normalized']}")
+    logger.info(f"  Sizes {verb}updated:         {stats['sizes_updated']}")
+    logger.info(f"  Duplicates {verb}removed:    {stats['duplicates_removed']}")
+    logger.info(f"  Sync records {verb}removed:  {stats['sync_records_removed']}")
 
     return stats
 
