@@ -3920,9 +3920,9 @@ def audit_library(track_db, project_root=None, logger=None,
     """Verify DB records match filesystem and clean up orphans.
 
     Four phases:
-    1. Verify DB records against filesystem (remove stale records, fix fields)
-    2. Find orphan files on disk with no DB record (delete them)
-    3. Deduplicate tracks sharing the same source M4A
+    1. Verify DB records against filesystem (remove stale records, normalize paths)
+    2. Deduplicate tracks sharing the same source M4A (before clearing missing sources)
+    3. Clear missing source paths, find orphan files on disk
     4. Cross-check sync DB against track DB (remove stale sync records)
 
     Returns a structured summary dict.
@@ -3950,12 +3950,12 @@ def audit_library(track_db, project_root=None, logger=None,
         stats['details'].append(msg)
         logger.info(msg)
 
-    # ── Phase 1: Verify DB records against filesystem ─────────────
+    # ── Phase 1: Verify DB records, normalize paths ─────────────────
     logger.info("=== Phase 1: Verifying DB records against filesystem ===")
     tracks = track_db.get_all_tracks()
     stats['total_tracks_checked'] = len(tracks)
 
-    # Collect artwork paths referenced by tracks (for Phase 2)
+    # Collect artwork paths referenced by surviving tracks (for Phase 4)
     referenced_artwork = set()
 
     for i, track in enumerate(tracks):
@@ -3988,31 +3988,21 @@ def audit_library(track_db, project_root=None, logger=None,
                 _detail(f"Cleared stale cover_art_path for {uuid}")
                 stats['cover_art_cleared'] += 1
 
-        # Check source M4A exists
+        # Normalize absolute source_m4a_path to relative (but don't clear
+        # missing paths yet — dedup needs them intact in Phase 2)
         source_m4a = track.get('source_m4a_path')
         if source_m4a:
             source_path = Path(source_m4a)
             if source_path.is_absolute():
-                # Normalize absolute path to relative
                 try:
                     rel = source_path.relative_to(root.resolve())
                     track_db.repair_track(uuid, source_m4a_path=str(rel))
                     _detail(f"Normalized path for track {uuid}")
                     stats['paths_normalized'] += 1
-                    source_path = root / rel
                 except ValueError:
-                    # Can't make relative — clear it
                     track_db.repair_track(uuid, source_m4a_path=None)
                     _detail(f"Cleared unreachable source_m4a_path for {uuid}")
                     stats['source_cleared'] += 1
-                    source_path = None
-            else:
-                source_path = root / source_path
-
-            if source_path and not source_path.exists():
-                track_db.repair_track(uuid, source_m4a_path=None)
-                _detail(f"Cleared missing source_m4a_path for {uuid}")
-                stats['source_cleared'] += 1
 
         # Fix file_size_bytes if missing or zero
         file_size = track.get('file_size_bytes')
@@ -4027,45 +4017,14 @@ def audit_library(track_db, project_root=None, logger=None,
                 i + 1, len(tracks),
                 f"Phase 1: {i + 1}/{len(tracks)} tracks")
 
-    # ── Phase 2: Find orphan files on disk ────────────────────────
+    # ── Phase 2: Deduplicate tracks sharing the same source M4A ──
+    # Run BEFORE clearing missing source paths so duplicates are still
+    # detectable even when the source file has been deleted.
     if cancel_event and cancel_event.is_set():
         logger.warn("Audit cancelled by user")
         return stats
 
-    logger.info("=== Phase 2: Finding orphan files on disk ===")
-
-    # Orphan MP3s
-    if audio_dir.exists():
-        for mp3_file in sorted(audio_dir.glob('*.mp3')):
-            if cancel_event and cancel_event.is_set():
-                logger.warn("Audit cancelled by user")
-                return stats
-            rel_path = str(Path(get_audio_dir()) / mp3_file.name)
-            if not track_db.get_track_by_path(rel_path):
-                mp3_file.unlink()
-                _detail(f"Deleted orphan file: {rel_path}")
-                stats['orphan_files_removed'] += 1
-
-    # Orphan artwork
-    if artwork_dir.exists():
-        for art_file in sorted(artwork_dir.iterdir()):
-            if cancel_event and cancel_event.is_set():
-                logger.warn("Audit cancelled by user")
-                return stats
-            if not art_file.is_file():
-                continue
-            rel_art = str(Path(get_artwork_dir()) / art_file.name)
-            if rel_art not in referenced_artwork:
-                art_file.unlink()
-                _detail(f"Deleted orphan artwork: {rel_art}")
-                stats['orphan_artwork_removed'] += 1
-
-    # ── Phase 3: Deduplicate tracks sharing the same source M4A ──
-    if cancel_event and cancel_event.is_set():
-        logger.warn("Audit cancelled by user")
-        return stats
-
-    logger.info("=== Phase 3: Detecting duplicate source_m4a_path entries ===")
+    logger.info("=== Phase 2: Detecting duplicate source_m4a_path entries ===")
     # Re-fetch tracks (Phase 1 may have deleted some)
     tracks = track_db.get_all_tracks()
     source_map = {}  # source_m4a_path → list of track dicts
@@ -4095,11 +4054,65 @@ def audit_library(track_db, project_root=None, logger=None,
                 dup_art_path = root / dup_art
                 if dup_art_path.is_file():
                     dup_art_path.unlink()
+            # Remove from referenced_artwork so Phase 4 can clean up
+            if dup_art and dup_art in referenced_artwork:
+                referenced_artwork.discard(dup_art)
             track_db.delete_track(dup_uuid)
             _detail(
                 f"Removed duplicate: uuid={dup_uuid} "
                 f"(kept {keeper['uuid']}, source={src_path})")
             stats['duplicates_removed'] += 1
+
+    # ── Phase 3: Clear missing source paths, find orphan files ────
+    if cancel_event and cancel_event.is_set():
+        logger.warn("Audit cancelled by user")
+        return stats
+
+    logger.info("=== Phase 3: Clearing stale source paths ===")
+    # Re-fetch after dedup
+    tracks = track_db.get_all_tracks()
+    for track in tracks:
+        if cancel_event and cancel_event.is_set():
+            logger.warn("Audit cancelled by user")
+            return stats
+        source_m4a = track.get('source_m4a_path')
+        if not source_m4a:
+            continue
+        source_path = Path(source_m4a)
+        if not source_path.is_absolute():
+            source_path = root / source_path
+        if not source_path.exists():
+            track_db.repair_track(track['uuid'], source_m4a_path=None)
+            _detail(f"Cleared missing source_m4a_path for {track['uuid']}")
+            stats['source_cleared'] += 1
+
+    logger.info("=== Phase 3b: Finding orphan files on disk ===")
+
+    # Orphan MP3s
+    if audio_dir.exists():
+        for mp3_file in sorted(audio_dir.glob('*.mp3')):
+            if cancel_event and cancel_event.is_set():
+                logger.warn("Audit cancelled by user")
+                return stats
+            rel_path = str(Path(get_audio_dir()) / mp3_file.name)
+            if not track_db.get_track_by_path(rel_path):
+                mp3_file.unlink()
+                _detail(f"Deleted orphan file: {rel_path}")
+                stats['orphan_files_removed'] += 1
+
+    # Orphan artwork
+    if artwork_dir.exists():
+        for art_file in sorted(artwork_dir.iterdir()):
+            if cancel_event and cancel_event.is_set():
+                logger.warn("Audit cancelled by user")
+                return stats
+            if not art_file.is_file():
+                continue
+            rel_art = str(Path(get_artwork_dir()) / art_file.name)
+            if rel_art not in referenced_artwork:
+                art_file.unlink()
+                _detail(f"Deleted orphan artwork: {rel_art}")
+                stats['orphan_artwork_removed'] += 1
 
     # ── Phase 4: Cross-check sync DB against track DB ─────────────
     if sync_tracker:
@@ -4126,7 +4139,7 @@ def audit_library(track_db, project_root=None, logger=None,
             stats['sync_records_removed'] = removed
             logger.info(f"Removed {removed} stale sync records")
     else:
-        logger.info("=== Phase 4: Skipped (no sync tracker) ===")
+        logger.info("Phase 4: Skipped (no sync tracker)")
 
     # ── Summary ───────────────────────────────────────────────────
     logger.info("=== Audit Summary ===")
