@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
+  BackgroundPrefetchStatus,
   ConnectionState,
   CookieStatus,
   DiscoveredServer,
@@ -94,6 +95,16 @@ const electronAPI = {
   cacheClearAll: (): Promise<void> => ipcRenderer.invoke('cache:clearAll'),
   cacheSetMaxSize: (maxBytes: number): Promise<void> =>
     ipcRenderer.invoke('cache:setMaxSize', maxBytes),
+  cacheGetAutoPinNewPlaylists: (): Promise<boolean> =>
+    ipcRenderer.invoke('cache:getAutoPinNewPlaylists'),
+  cacheSetAutoPinNewPlaylists: (enabled: boolean): Promise<string[]> =>
+    ipcRenderer.invoke('cache:setAutoPinNewPlaylists', enabled),
+  cacheSyncPins: (playlistKeys: string[]): Promise<string[]> =>
+    ipcRenderer.invoke('cache:syncPins', playlistKeys),
+  cacheGetBackgroundPrefetchStatus: (): Promise<BackgroundPrefetchStatus> =>
+    ipcRenderer.invoke('cache:getBackgroundPrefetchStatus'),
+  cacheTriggerPrefetch: (): Promise<void> =>
+    ipcRenderer.invoke('cache:triggerPrefetch'),
 
   // Events (main -> renderer)
   onSyncProgress: (callback: (progress: SyncProgress) => void) => {
@@ -121,6 +132,12 @@ const electronAPI = {
       callback(data);
     ipcRenderer.on('drives:autoSync', handler);
     return () => ipcRenderer.removeListener('drives:autoSync', handler);
+  },
+  onBackgroundPrefetchStatus: (callback: (status: BackgroundPrefetchStatus) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, status: BackgroundPrefetchStatus) =>
+      callback(status);
+    ipcRenderer.on('cache:backgroundPrefetchStatus', handler);
+    return () => ipcRenderer.removeListener('cache:backgroundPrefetchStatus', handler);
   },
 
   // App info

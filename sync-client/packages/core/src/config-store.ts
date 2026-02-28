@@ -16,6 +16,8 @@ const DEFAULT_PREFERENCES: SyncPreferences = {
   notifications: true,
   pinnedPlaylists: [],
   maxCacheBytes: DEFAULT_MAX_CACHE_BYTES,
+  autoPinNewPlaylists: false,
+  unpinnedPlaylists: [],
 };
 
 /** Legacy preferences shape for migration from autoSyncOnUSB. */
@@ -103,8 +105,14 @@ export class ConfigStore {
     const pinned = this.config.preferences.pinnedPlaylists;
     if (!pinned.includes(key)) {
       pinned.push(key);
-      this.save();
     }
+    // Remove from exclusion list when explicitly pinned
+    const excluded = this.config.preferences.unpinnedPlaylists;
+    const exIdx = excluded.indexOf(key);
+    if (exIdx !== -1) {
+      excluded.splice(exIdx, 1);
+    }
+    this.save();
   }
 
   unpinPlaylist(key: string): void {
@@ -112,12 +120,58 @@ export class ConfigStore {
     const index = pinned.indexOf(key);
     if (index !== -1) {
       pinned.splice(index, 1);
-      this.save();
     }
+    // Add to exclusion list when auto-pin is on so it won't be re-pinned
+    if (this.config.preferences.autoPinNewPlaylists) {
+      const excluded = this.config.preferences.unpinnedPlaylists;
+      if (!excluded.includes(key)) {
+        excluded.push(key);
+      }
+    }
+    this.save();
   }
 
   isPinned(key: string): boolean {
     return this.config.preferences.pinnedPlaylists.includes(key);
+  }
+
+  // ── Auto-Pin Helpers ──
+
+  get autoPinNewPlaylists(): boolean {
+    return this.config.preferences.autoPinNewPlaylists;
+  }
+
+  setAutoPinNewPlaylists(enabled: boolean): void {
+    this.config.preferences.autoPinNewPlaylists = enabled;
+    if (!enabled) {
+      // Clear exclusion list on disable (fresh slate if re-enabled)
+      this.config.preferences.unpinnedPlaylists = [];
+    }
+    this.save();
+  }
+
+  /**
+   * When auto-pin is on, pin any server playlists not already pinned
+   * and not in the user's exclusion list. Returns newly pinned keys.
+   */
+  syncPinsWithServer(serverKeys: string[]): string[] {
+    if (!this.config.preferences.autoPinNewPlaylists) return [];
+
+    const pinned = this.config.preferences.pinnedPlaylists;
+    const excluded = this.config.preferences.unpinnedPlaylists;
+    const newlyPinned: string[] = [];
+
+    for (const key of serverKeys) {
+      if (!pinned.includes(key) && !excluded.includes(key)) {
+        pinned.push(key);
+        newlyPinned.push(key);
+      }
+    }
+
+    if (newlyPinned.length > 0) {
+      this.save();
+    }
+    return newlyPinned;
   }
 
   // ── API Key (separate file with restricted permissions) ──

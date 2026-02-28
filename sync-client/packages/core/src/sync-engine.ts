@@ -218,7 +218,7 @@ export class SyncEngine {
           }
 
           // Cache hit check — copy from local cache instead of downloading
-          if (cache && cache.copyToDestination(file.uuid, file.size, filePath)) {
+          if (cache && cache.copyToDestination(file.uuid, filePath)) {
             totalCopied++;
             processed++;
             syncedFiles[manifestKey] = file.size;
@@ -439,7 +439,7 @@ export class SyncEngine {
         }
 
         // Copy from cache
-        if (cache.copyToDestination(entry.uuid, entry.size, filePath)) {
+        if (cache.copyToDestination(entry.uuid, filePath)) {
           totalCopied++;
           syncedFiles[manifestKey] = entry.size;
         } else {

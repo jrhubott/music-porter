@@ -262,7 +262,7 @@ Native SwiftUI app (iOS 17+) for managing Music Porter from your phone. Features
 
 ### Desktop Sync Client
 
-Cross-platform sync client (`sync-client/` subdirectory) with both a CLI tool (`mporter-sync`) and an Electron desktop app. Syncs playlists to USB drives or local folders with profile-specific tags.
+Cross-platform sync client (`sync-client/` subdirectory) with both a CLI tool (`mporter-sync`) and an Electron desktop app. Syncs playlists to USB drives or local folders with profile-specific tags. Includes a local audio cache with playlist pinning, background prefetch, and offline sync support.
 
 ## Troubleshooting
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import type { SyncPreferences, ServerConfig, CookieStatus } from '@mporter/core';
+import type { SyncPreferences, ServerConfig, CookieStatus, BackgroundPrefetchStatus, PlaylistCacheStatus } from '@mporter/core';
 import { useIPC } from '../hooks/useIPC.js';
 import { useAppState } from '../store/app-state.js';
 
@@ -45,9 +45,16 @@ export function SettingsPage() {
   const [cacheClearing, setCacheClearing] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
   const [reconnectError, setReconnectError] = useState('');
+  const [bgPrefetchStatus, setBgPrefetchStatus] = useState<BackgroundPrefetchStatus | null>(null);
+  const [cachePlaylistStatuses, setCachePlaylistStatuses] = useState<PlaylistCacheStatus[]>([]);
+  const [autoPinEnabled, setAutoPinEnabled] = useState(false);
 
   useEffect(() => {
     loadSettings();
+    const cleanup = ipc.onBackgroundPrefetchStatus((status: BackgroundPrefetchStatus) => {
+      setBgPrefetchStatus(status);
+    });
+    return cleanup;
   }, []);
 
   async function loadSettings() {
@@ -60,10 +67,17 @@ export function SettingsPage() {
     setPrefs(p);
     setVersion(ver);
 
-    // Load cache size (always available, even offline)
+    // Load cache size and playlist breakdown (always available, even offline)
     try {
-      const status = await ipc.cacheGetStatus();
-      setCacheTotalSize(status.totalSize);
+      const [cacheStatus, bgStatus, autoPin] = await Promise.all([
+        ipc.cacheGetStatus(),
+        ipc.cacheGetBackgroundPrefetchStatus(),
+        ipc.cacheGetAutoPinNewPlaylists(),
+      ]);
+      setCacheTotalSize(cacheStatus.totalSize);
+      setCachePlaylistStatuses(cacheStatus.playlists);
+      setBgPrefetchStatus(bgStatus);
+      setAutoPinEnabled(autoPin);
     } catch {
       // Non-critical
     }
@@ -179,6 +193,12 @@ export function SettingsPage() {
       // Non-critical
     }
     setCacheClearing(false);
+  }
+
+  async function handleToggleAutoPin() {
+    const newValue = !autoPinEnabled;
+    setAutoPinEnabled(newValue);
+    await ipc.cacheSetAutoPinNewPlaylists(newValue);
   }
 
   async function handleSetMaxCacheSize(value: number) {
@@ -428,21 +448,124 @@ export function SettingsPage() {
               <small className="text-secondary">Cache Size</small>
               <div>{formatCacheSize(cacheTotalSize)}</div>
             </div>
-            <button
-              className="btn btn-outline-danger btn-sm"
-              onClick={handleClearCache}
-              disabled={cacheClearing || cacheTotalSize === 0}
-            >
-              {cacheClearing ? (
-                <span className="spinner-border spinner-border-sm" />
-              ) : (
-                <>
-                  <i className="bi bi-trash me-1" />
-                  Clear Cache
-                </>
-              )}
-            </button>
+            <div className="d-flex gap-2">
+              <button
+                className="btn btn-outline-info btn-sm"
+                onClick={() => ipc.cacheTriggerPrefetch()}
+                disabled={bgPrefetchStatus?.running || false}
+              >
+                {bgPrefetchStatus?.running ? (
+                  <>
+                    <span className="spinner-border spinner-border-sm me-1" />
+                    Prefetching...
+                  </>
+                ) : (
+                  <>
+                    <i className="bi bi-cloud-download me-1" />
+                    Prefetch Now
+                  </>
+                )}
+              </button>
+              <button
+                className="btn btn-outline-danger btn-sm"
+                onClick={handleClearCache}
+                disabled={cacheClearing || cacheTotalSize === 0}
+              >
+                {cacheClearing ? (
+                  <span className="spinner-border spinner-border-sm" />
+                ) : (
+                  <>
+                    <i className="bi bi-trash me-1" />
+                    Clear Cache
+                  </>
+                )}
+              </button>
+            </div>
           </div>
+
+          {/* Background prefetch status */}
+          {bgPrefetchStatus && (
+            <div className="mb-3 p-2 border border-secondary rounded">
+              <div className="d-flex justify-content-between align-items-center mb-1">
+                <small className="fw-bold">Background Prefetch</small>
+                <span className={`badge ${bgPrefetchStatus.running ? 'bg-info' : 'bg-secondary'}`}>
+                  {bgPrefetchStatus.running ? 'Active' : 'Idle'}
+                </span>
+              </div>
+              {bgPrefetchStatus.running && bgPrefetchStatus.progress && (
+                <div className="mb-1">
+                  <div className="d-flex justify-content-between">
+                    <small className="text-info">
+                      {bgPrefetchStatus.playlist && `Caching ${bgPrefetchStatus.playlist}: `}
+                      {bgPrefetchStatus.progress.current} / {bgPrefetchStatus.progress.total}
+                    </small>
+                    <small>
+                      {bgPrefetchStatus.progress.total > 0
+                        ? Math.round((bgPrefetchStatus.progress.current / bgPrefetchStatus.progress.total) * 100)
+                        : 0}%
+                    </small>
+                  </div>
+                  <div className="progress mt-1" style={{ height: 3 }}>
+                    <div
+                      className="progress-bar bg-info"
+                      style={{
+                        width: `${bgPrefetchStatus.progress.total > 0
+                          ? (bgPrefetchStatus.progress.current / bgPrefetchStatus.progress.total) * 100
+                          : 0}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+              {bgPrefetchStatus.lastRunAt && (
+                <small className="text-secondary">
+                  Last run: {new Date(bgPrefetchStatus.lastRunAt).toLocaleTimeString()}
+                  {bgPrefetchStatus.lastResult && (
+                    <span className="ms-2">
+                      ({bgPrefetchStatus.lastResult.downloaded} downloaded, {bgPrefetchStatus.lastResult.skipped} cached)
+                    </span>
+                  )}
+                </small>
+              )}
+            </div>
+          )}
+
+          {/* Per-playlist cache breakdown */}
+          {cachePlaylistStatuses.length > 0 && (
+            <div className="mb-3">
+              <small className="text-secondary fw-bold d-block mb-1">Per-Playlist Cache</small>
+              {cachePlaylistStatuses.map((ps) => (
+                <div key={ps.playlistKey} className="d-flex align-items-center gap-2 mb-1">
+                  <i className={`bi ${ps.pinned ? 'bi-pin-fill text-info' : 'bi-pin text-secondary'}`} style={{ fontSize: '0.75em' }} />
+                  <span className="small flex-grow-1 text-truncate">{ps.playlistKey}</span>
+                  <small className="text-secondary text-nowrap">{ps.cached}{ps.total > 0 ? `/${ps.total}` : ''}</small>
+                  {ps.total > 0 && (
+                    <div className="progress flex-shrink-0" style={{ width: 60, height: 3 }}>
+                      <div
+                        className={`progress-bar ${ps.cached >= ps.total ? 'bg-success' : 'bg-info'}`}
+                        style={{ width: `${ps.total > 0 ? (ps.cached / ps.total) * 100 : 0}%` }}
+                      />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Auto-pin toggle */}
+          <div className="form-check form-switch mb-3">
+            <input
+              className="form-check-input"
+              type="checkbox"
+              checked={autoPinEnabled}
+              onChange={handleToggleAutoPin}
+            />
+            <label className="form-check-label">
+              Auto-Pin New Playlists
+            </label>
+            <div className="text-secondary small">Automatically pin new playlists for caching as they appear on the server</div>
+          </div>
+
           {prefs && (
             <div>
               <label className="form-label">Max Cache Size</label>

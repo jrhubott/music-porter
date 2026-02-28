@@ -53,6 +53,8 @@ export interface FileInfo {
   uuid: string;
   has_cover_art: boolean;
   synced_to?: string[];
+  created_at?: number;
+  updated_at?: number;
 }
 
 export interface FileListResponse {
@@ -223,6 +225,8 @@ export interface CacheEntry {
   display_filename: string;
   size: number;
   cached_at: string;
+  server_created_at?: string;
+  server_updated_at?: string;
 }
 
 export interface CacheIndex {
@@ -245,6 +249,16 @@ export interface PlaylistCacheStatus {
   pinned: boolean;
 }
 
+// ── Background Prefetch ──
+
+export interface BackgroundPrefetchStatus {
+  running: boolean;
+  playlist?: string;
+  progress?: { current: number; total: number };
+  lastRunAt?: string;
+  lastResult?: PrefetchResult;
+}
+
 // ── Config ──
 
 export interface SyncPreferences {
@@ -254,6 +268,8 @@ export interface SyncPreferences {
   notifications: boolean;
   pinnedPlaylists: string[];
   maxCacheBytes: number;
+  autoPinNewPlaylists: boolean;
+  unpinnedPlaylists: string[];
 }
 
 export interface AppConfig {

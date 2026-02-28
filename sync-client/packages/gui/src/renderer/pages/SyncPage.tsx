@@ -55,10 +55,12 @@ export function SyncPage() {
     setCacheStatuses,
     cacheTotalSize,
     setCacheTotalSize,
-    isPrefetching,
-    setIsPrefetching,
     prefetchProgress,
     setPrefetchProgress,
+    autoPinNewPlaylists,
+    setAutoPinNewPlaylists,
+    backgroundPrefetchStatus,
+    setBackgroundPrefetchStatus,
   } = useAppState();
 
   const [destPath, setDestPath] = useState('');
@@ -79,7 +81,14 @@ export function SyncPage() {
     const cleanupPrefetch = ipc.onPrefetchProgress((progress: SyncProgress) => {
       setPrefetchProgress(progress);
     });
-    return () => { cleanupSync(); cleanupPrefetch(); };
+    const cleanupBgStatus = ipc.onBackgroundPrefetchStatus((status) => {
+      setBackgroundPrefetchStatus(status);
+      // Refresh cache status when a background prefetch cycle completes
+      if (!status.running && status.lastResult) {
+        loadCacheStatus();
+      }
+    });
+    return () => { cleanupSync(); cleanupPrefetch(); cleanupBgStatus(); };
   }, []);
 
   async function loadOfflineData() {
@@ -104,18 +113,27 @@ export function SyncPage() {
 
   async function loadData() {
     try {
-      const [playlistData, settingsData, prefs, savedProfile, pinned] = await Promise.all([
+      const [playlistData, settingsData, prefs, savedProfile, pinned, autoPin] = await Promise.all([
         ipc.getPlaylists(),
         ipc.getSettings(),
         ipc.getPreferences(),
         ipc.getProfile(),
         ipc.cacheGetPinnedPlaylists(),
+        ipc.cacheGetAutoPinNewPlaylists(),
       ]);
       setPlaylists(playlistData);
       setServerProfiles(settingsData.profiles);
       setAutoSyncDrives(prefs.autoSyncDrives);
       setEjectAfterSync(prefs.ejectAfterSync);
-      setPinnedPlaylists(new Set(pinned));
+      setAutoPinNewPlaylists(autoPin);
+
+      // Sync pins with server when auto-pin is enabled
+      const playlistKeys = playlistData.map((p) => p.key);
+      const newlyPinned = await ipc.cacheSyncPins(playlistKeys);
+      const allPinned = newlyPinned.length > 0
+        ? [...new Set([...pinned, ...newlyPinned])]
+        : pinned;
+      setPinnedPlaylists(new Set(allPinned));
 
       // Restore active profile: saved > server default > first available
       if (!activeProfile) {
@@ -126,6 +144,10 @@ export function SyncPage() {
           ?? '';
         if (resolved) {
           setActiveProfile(resolved);
+          // Persist so background prefetch and other main-process consumers can see it
+          if (!savedProfile) {
+            await ipc.setProfile(resolved);
+          }
         }
       }
 
@@ -159,21 +181,20 @@ export function SyncPage() {
     }
   }
 
-  async function handlePrefetch() {
-    setIsPrefetching(true);
-    setPrefetchProgress(null);
-    try {
-      await ipc.cachePrefetch();
-    } catch {
-      // Error handled
+  async function handleToggleAutoPin() {
+    const newValue = !autoPinNewPlaylists;
+    setAutoPinNewPlaylists(newValue);
+    const newlyPinned = await ipc.cacheSetAutoPinNewPlaylists(newValue);
+    if (newlyPinned.length > 0) {
+      // Update pinned playlists state
+      setPinnedPlaylists(new Set([...pinnedPlaylists, ...newlyPinned]));
+      loadCacheStatus();
     }
-    setIsPrefetching(false);
-    setPrefetchProgress(null);
-    loadCacheStatus();
   }
 
-  async function cancelPrefetch() {
-    await ipc.cacheCancelPrefetch();
+  async function handlePrefetchNow() {
+    // Trigger the background prefetch service (handles auto-pin sync, stale detection, etc.)
+    await ipc.cacheTriggerPrefetch();
   }
 
   async function toggleAutoSync(driveName: string) {
@@ -318,14 +339,14 @@ export function SyncPage() {
             </span>
           )}
         </div>
-        <div className="d-flex gap-2">
+        <div className="d-flex gap-2 align-items-center">
           {!isOffline && pinnedPlaylists.size > 0 && (
             <button
               className="btn btn-sm btn-outline-info"
-              onClick={handlePrefetch}
-              disabled={isPrefetching || isSyncing}
+              onClick={handlePrefetchNow}
+              disabled={backgroundPrefetchStatus?.running || isSyncing}
             >
-              {isPrefetching ? (
+              {backgroundPrefetchStatus?.running ? (
                 <>
                   <span className="spinner-border spinner-border-sm me-1" />
                   Prefetching...
@@ -333,14 +354,9 @@ export function SyncPage() {
               ) : (
                 <>
                   <i className="bi bi-cloud-download me-1" />
-                  Prefetch Pinned
+                  Prefetch Now
                 </>
               )}
-            </button>
-          )}
-          {isPrefetching && (
-            <button className="btn btn-sm btn-outline-danger" onClick={cancelPrefetch}>
-              Cancel
             </button>
           )}
           <button className="btn btn-sm btn-outline-secondary" onClick={isOffline ? loadOfflineData : loadData}>
@@ -380,7 +396,20 @@ export function SyncPage() {
       <div className="card bg-dark border-secondary mb-4">
         <div className="card-header d-flex justify-content-between align-items-center">
           <span>Playlists</span>
-          <div className="d-flex gap-2">
+          <div className="d-flex gap-2 align-items-center">
+            {!isOffline && (
+              <div className="form-check form-switch mb-0">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  checked={autoPinNewPlaylists}
+                  onChange={handleToggleAutoPin}
+                />
+                <label className="form-check-label small">
+                  Auto-Pin New
+                </label>
+              </div>
+            )}
             {selectedPlaylists.size > 0 ? (
               <button className="btn btn-sm btn-outline-secondary" onClick={clearSelection}>
                 Clear ({selectedPlaylists.size})
@@ -419,9 +448,11 @@ export function SyncPage() {
                         <div className="flex-grow-1">
                           <div className="d-flex align-items-center gap-1">
                             <span className="fw-bold">{p.name}</span>
-                            {cacheStatus && cacheStatus.cached > 0 && (
+                            {isPinned && (
                               <span className="badge bg-info bg-opacity-25 text-info" style={{ fontSize: '0.65em' }}>
-                                {cacheStatus.cached === (p.file_count ?? 0) ? 'cached' : `${cacheStatus.cached}/${p.file_count ?? '?'} cached`}
+                                {cacheStatus && cacheStatus.cached === (p.file_count ?? 0)
+                                  ? 'cached'
+                                  : `${cacheStatus?.cached ?? 0}/${p.file_count ?? '?'} cached`}
                               </span>
                             )}
                           </div>

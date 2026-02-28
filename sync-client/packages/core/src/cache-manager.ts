@@ -38,10 +38,10 @@ export class CacheManager {
 
   // ── Cache Hit ──
 
-  /** Returns cached file path if the file is cached with matching size, null otherwise. */
-  isCached(uuid: string, size: number): string | null {
+  /** Returns cached file path if the file is cached, null otherwise. */
+  isCached(uuid: string): string | null {
     const entry = this.index.entries[uuid];
-    if (!entry || entry.size !== size) return null;
+    if (!entry) return null;
     const filePath = this.entryPath(entry);
     if (!existsSync(filePath)) {
       delete this.index.entries[uuid];
@@ -54,7 +54,13 @@ export class CacheManager {
   // ── Store ──
 
   /** Write a ReadableStream to cache and update the index. */
-  async storeStream(file: FileInfo, playlistKey: string, body: ReadableStream): Promise<void> {
+  async storeStream(
+    file: FileInfo,
+    playlistKey: string,
+    body: ReadableStream,
+    serverCreatedAt?: number,
+    serverUpdatedAt?: number,
+  ): Promise<void> {
     const displayName = file.display_filename || file.filename;
     const fileDir = join(this.cacheDir, playlistKey);
     if (!existsSync(fileDir)) {
@@ -70,13 +76,20 @@ export class CacheManager {
       renameSync(tmpPath, filePath);
 
       const stat = statSync(filePath);
-      this.index.entries[file.uuid] = {
+      const entry: CacheEntry = {
         uuid: file.uuid,
         playlist: playlistKey,
         display_filename: displayName,
         size: stat.size,
         cached_at: new Date().toISOString(),
       };
+      if (serverCreatedAt !== undefined) {
+        entry.server_created_at = new Date(serverCreatedAt * 1000).toISOString();
+      }
+      if (serverUpdatedAt !== undefined) {
+        entry.server_updated_at = new Date(serverUpdatedAt * 1000).toISOString();
+      }
+      this.index.entries[file.uuid] = entry;
       this.saveIndex();
     } catch {
       try {
@@ -89,7 +102,13 @@ export class CacheManager {
   }
 
   /** Copy an existing file into cache and update the index. */
-  storeFromFile(file: FileInfo, playlistKey: string, sourcePath: string): void {
+  storeFromFile(
+    file: FileInfo,
+    playlistKey: string,
+    sourcePath: string,
+    serverCreatedAt?: number,
+    serverUpdatedAt?: number,
+  ): void {
     const displayName = file.display_filename || file.filename;
     const fileDir = join(this.cacheDir, playlistKey);
     if (!existsSync(fileDir)) {
@@ -103,13 +122,20 @@ export class CacheManager {
       renameSync(tmpPath, filePath);
 
       const stat = statSync(filePath);
-      this.index.entries[file.uuid] = {
+      const entry: CacheEntry = {
         uuid: file.uuid,
         playlist: playlistKey,
         display_filename: displayName,
         size: stat.size,
         cached_at: new Date().toISOString(),
       };
+      if (serverCreatedAt !== undefined) {
+        entry.server_created_at = new Date(serverCreatedAt * 1000).toISOString();
+      }
+      if (serverUpdatedAt !== undefined) {
+        entry.server_updated_at = new Date(serverUpdatedAt * 1000).toISOString();
+      }
+      this.index.entries[file.uuid] = entry;
       this.saveIndex();
     } catch {
       try {
@@ -123,8 +149,8 @@ export class CacheManager {
   // ── Copy Out ──
 
   /** Copy a cached file to a destination path. Returns true on success. */
-  copyToDestination(uuid: string, size: number, destPath: string): boolean {
-    const cachedPath = this.isCached(uuid, size);
+  copyToDestination(uuid: string, destPath: string): boolean {
+    const cachedPath = this.isCached(uuid);
     if (!cachedPath) return false;
 
     try {
@@ -198,6 +224,22 @@ export class CacheManager {
     return { playlistKey: key, total: totalFiles, cached, pinned };
   }
 
+  // ── Staleness ──
+
+  /**
+   * Returns true if the cached file is stale — i.e. the server's updated_at
+   * is newer than what we have cached. This means the file was re-converted
+   * or metadata changed and needs re-downloading.
+   */
+  isStale(uuid: string, serverUpdatedAt?: number): boolean {
+    if (serverUpdatedAt === undefined) return false;
+    const entry = this.index.entries[uuid];
+    if (!entry || !entry.server_updated_at) return false;
+    const cachedUpdatedAt = new Date(entry.server_updated_at).getTime();
+    const serverTime = Math.floor(serverUpdatedAt * 1000);
+    return serverTime > cachedUpdatedAt;
+  }
+
   // ── Eviction ──
 
   /** Remove index entries whose files are missing from disk. Returns count removed. */
@@ -214,15 +256,22 @@ export class CacheManager {
     return removed;
   }
 
-  /** Evict oldest files until total size is under maxBytes. Returns bytes freed. */
+  /** Evict oldest server files until total size is under maxBytes. Returns bytes freed. */
   evictToLimit(maxBytes: number): number {
     let totalSize = this.getTotalSize();
     if (totalSize <= maxBytes) return 0;
 
-    // Sort entries by cached_at ascending (oldest first)
-    const sorted = Object.values(this.index.entries).sort(
-      (a, b) => new Date(a.cached_at).getTime() - new Date(b.cached_at).getTime(),
-    );
+    // Sort by server_created_at ascending (oldest server files evicted first).
+    // Fall back to cached_at for entries without server timestamps (backward compat).
+    const sorted = Object.values(this.index.entries).sort((a, b) => {
+      const aTime = a.server_created_at
+        ? new Date(a.server_created_at).getTime()
+        : new Date(a.cached_at).getTime();
+      const bTime = b.server_created_at
+        ? new Date(b.server_created_at).getTime()
+        : new Date(b.cached_at).getTime();
+      return aTime - bTime;
+    });
 
     let freed = 0;
     for (const entry of sorted) {

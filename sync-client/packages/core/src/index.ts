@@ -34,6 +34,7 @@ export type {
   SyncProgress,
   SyncResult,
   SyncStatusDetail,
+  BackgroundPrefetchStatus,
 } from './types.js';
 
 // Constants
@@ -53,6 +54,7 @@ export {
   COOKIE_REFRESH_TIMEOUT_MS,
   COOKIE_WINDOW_HEIGHT,
   COOKIE_WINDOW_WIDTH,
+  BACKGROUND_PREFETCH_INTERVAL_MS,
   DEFAULT_CONCURRENCY,
   DEFAULT_MAX_CACHE_BYTES,
   DEFAULT_PORT,

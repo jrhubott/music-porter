@@ -65,13 +65,15 @@ export class PrefetchEngine {
       }
     }
 
-    // Filter out already-cached files
+    // Filter out already-cached files (include stale files for re-download)
     const toDownload: { key: string; file: FileInfo }[] = [];
     let totalSkipped = 0;
 
     for (const { key, files } of playlistFileList) {
       for (const file of files) {
-        if (this.cacheManager.isCached(file.uuid, file.size)) {
+        const cached = this.cacheManager.isCached(file.uuid);
+        const stale = cached && this.cacheManager.isStale(file.uuid, file.updated_at);
+        if (cached && !stale) {
           totalSkipped++;
         } else {
           toDownload.push({ key, file });
@@ -169,7 +171,7 @@ export class PrefetchEngine {
         ? AbortSignal.any([signal, timeoutSignal])
         : timeoutSignal;
       const { body } = await this.client.downloadFile(playlistKey, file.filename, profile, combinedSignal);
-      await this.cacheManager.storeStream(file, playlistKey, body);
+      await this.cacheManager.storeStream(file, playlistKey, body, file.created_at, file.updated_at);
       return true;
     } catch (err) {
       if (signal?.aborted) return false;

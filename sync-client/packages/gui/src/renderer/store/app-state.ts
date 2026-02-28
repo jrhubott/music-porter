@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type {
+  BackgroundPrefetchStatus,
   ConnectionState,
   DriveInfo,
   PlaylistCacheStatus,
@@ -61,6 +62,10 @@ interface AppState {
   setIsPrefetching: (prefetching: boolean) => void;
   prefetchProgress: SyncProgress | null;
   setPrefetchProgress: (progress: SyncProgress | null) => void;
+  autoPinNewPlaylists: boolean;
+  setAutoPinNewPlaylists: (enabled: boolean) => void;
+  backgroundPrefetchStatus: BackgroundPrefetchStatus | null;
+  setBackgroundPrefetchStatus: (status: BackgroundPrefetchStatus | null) => void;
 
   // UI
   activePage: string;
@@ -139,6 +144,10 @@ export const useAppState = create<AppState>((set) => ({
   setIsPrefetching: (isPrefetching) => set({ isPrefetching }),
   prefetchProgress: null,
   setPrefetchProgress: (prefetchProgress) => set({ prefetchProgress }),
+  autoPinNewPlaylists: false,
+  setAutoPinNewPlaylists: (autoPinNewPlaylists) => set({ autoPinNewPlaylists }),
+  backgroundPrefetchStatus: null,
+  setBackgroundPrefetchStatus: (backgroundPrefetchStatus) => set({ backgroundPrefetchStatus }),
 
   // UI
   activePage: 'connect',

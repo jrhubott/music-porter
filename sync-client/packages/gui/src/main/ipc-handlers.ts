@@ -14,6 +14,7 @@ import {
   CLIENT_SYNC_KEY_PREFIX,
 } from '@mporter/core';
 import type {
+  BackgroundPrefetchStatus,
   ConnectionState,
   CookieStatus,
   CookieUploadResponse,
@@ -27,6 +28,7 @@ import type {
   SyncResult,
 } from '@mporter/core';
 import { openCookieRefreshWindow } from './cookie-refresh.js';
+import type { BackgroundPrefetchService } from './background-prefetch.js';
 
 /** Result returned to renderer from the cookies:refresh handler. */
 interface CookieRefreshIPCResult {
@@ -37,11 +39,17 @@ interface CookieRefreshIPCResult {
   error?: string;
 }
 
-const configStore = new ConfigStore();
-const apiClient = new APIClient();
+export const configStore = new ConfigStore();
+export const apiClient = new APIClient();
 const driveManager = new DriveManager();
 let activeSyncAbort: AbortController | null = null;
 let activePrefetchAbort: AbortController | null = null;
+let bgPrefetchService: BackgroundPrefetchService | null = null;
+
+/** Set the background prefetch service reference for IPC handlers. */
+export function setBackgroundPrefetchService(service: BackgroundPrefetchService): void {
+  bgPrefetchService = service;
+}
 
 /** Get a CacheManager for the current profile, or null if no profile set. */
 function getCacheManager(): CacheManager | null {
@@ -97,6 +105,10 @@ export function registerIPCHandlers(): void {
       const state = apiClient.connectionState;
       state.serverName = response.server_name;
       state.serverVersion = response.version;
+
+      // Notify background prefetch that connection is ready
+      bgPrefetchService?.notifyConnected();
+
       return state;
     } catch {
       return { connected: false };
@@ -401,6 +413,47 @@ export function registerIPCHandlers(): void {
     configStore.updatePreferences({ maxCacheBytes: maxBytes });
     const cm = getCacheManager();
     if (cm) cm.evictToLimit(maxBytes);
+  });
+
+  // ── Auto-Pin ──
+
+  ipcMain.handle('cache:getAutoPinNewPlaylists', (): boolean => {
+    return configStore.autoPinNewPlaylists;
+  });
+
+  ipcMain.handle('cache:setAutoPinNewPlaylists', async (_event, enabled: boolean): Promise<string[]> => {
+    configStore.setAutoPinNewPlaylists(enabled);
+    if (enabled) {
+      // Immediately sync pins with server playlists
+      try {
+        const playlists = await apiClient.getPlaylists();
+        const serverKeys = playlists.map((p) => p.key);
+        const newlyPinned = configStore.syncPinsWithServer(serverKeys);
+        // Trigger a background prefetch cycle
+        if (bgPrefetchService && newlyPinned.length > 0) {
+          bgPrefetchService.runOnce();
+        }
+        return newlyPinned;
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  });
+
+  ipcMain.handle('cache:syncPins', async (_event, playlistKeys: string[]): Promise<string[]> => {
+    return configStore.syncPinsWithServer(playlistKeys);
+  });
+
+  ipcMain.handle('cache:getBackgroundPrefetchStatus', (): BackgroundPrefetchStatus => {
+    if (bgPrefetchService) return bgPrefetchService.getStatus();
+    return { running: false };
+  });
+
+  ipcMain.handle('cache:triggerPrefetch', async (): Promise<void> => {
+    if (bgPrefetchService) {
+      await bgPrefetchService.runOnce();
+    }
   });
 
   // ── App Info ──

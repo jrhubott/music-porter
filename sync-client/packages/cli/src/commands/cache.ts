@@ -101,6 +101,23 @@ export function registerCacheCommand(program: Command): void {
       console.log();
     });
 
+  // ── cache auto-pin ──
+  cache
+    .command('auto-pin <state>')
+    .description('Enable or disable auto-pin for new playlists (on/off)')
+    .action((state: string) => {
+      const normalized = state.toLowerCase();
+      if (normalized !== 'on' && normalized !== 'off') {
+        printError('Usage: cache auto-pin <on|off>');
+        process.exitCode = EXIT_ERROR;
+        return;
+      }
+      const configStore = new ConfigStore();
+      const enabled = normalized === 'on';
+      configStore.setAutoPinNewPlaylists(enabled);
+      printSuccess(`Auto-pin new playlists: ${enabled ? 'enabled' : 'disabled'}`);
+    });
+
   // ── cache prefetch ──
   cache
     .command('prefetch')
@@ -112,6 +129,21 @@ export function registerCacheCommand(program: Command): void {
 
       const configStore = new ConfigStore();
       const cm = createCacheManager(configStore);
+
+      // Auto-sync pins with server when auto-pin is enabled
+      if (configStore.autoPinNewPlaylists) {
+        try {
+          const playlists = await client.getPlaylists();
+          const serverKeys = playlists.map((p) => p.key);
+          const newlyPinned = configStore.syncPinsWithServer(serverKeys);
+          if (newlyPinned.length > 0) {
+            console.log(chalk.green(`Auto-pinned ${newlyPinned.length} new playlist(s): ${newlyPinned.join(', ')}`));
+          }
+        } catch (err) {
+          console.log(chalk.yellow(`Warning: Could not sync pins with server: ${err}`));
+        }
+      }
+
       const pinned = configStore.preferences.pinnedPlaylists;
 
       if (pinned.length === 0) {

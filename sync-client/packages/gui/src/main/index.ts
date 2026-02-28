@@ -2,14 +2,15 @@ import { app, BrowserWindow, nativeImage, nativeTheme } from 'electron';
 import { join, dirname } from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { registerIPCHandlers } from './ipc-handlers.js';
+import { registerIPCHandlers, configStore, apiClient, setBackgroundPrefetchService } from './ipc-handlers.js';
 import { createTray } from './tray.js';
 import { startDriveWatcher } from './drive-watcher.js';
+import { BackgroundPrefetchService } from './background-prefetch.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const DEBUG = process.argv.includes('--debug');
+const DEBUG = process.argv.includes('--devtools');
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -68,17 +69,36 @@ function createWindow(): void {
   });
 }
 
+let bgPrefetch: BackgroundPrefetchService | null = null;
+
 app.whenReady().then(() => {
   registerIPCHandlers();
   createWindow();
   createTray(mainWindow!);
   startDriveWatcher(mainWindow!);
 
+  // macOS: Set the dock icon at runtime (BrowserWindow.icon is ignored on macOS)
+  if (process.platform === 'darwin') {
+    const dockIcon = getAppIcon();
+    if (dockIcon) {
+      app.dock.setIcon(dockIcon);
+    }
+  }
+
+  // Start background prefetch service
+  bgPrefetch = new BackgroundPrefetchService(apiClient, configStore);
+  setBackgroundPrefetchService(bgPrefetch);
+  bgPrefetch.start(mainWindow!);
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
     }
   });
+});
+
+app.on('before-quit', () => {
+  bgPrefetch?.stop();
 });
 
 app.on('window-all-closed', () => {
