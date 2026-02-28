@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import type { SyncPreferences, ServerConfig } from '@mporter/core';
+import type { SyncPreferences, ServerConfig, CookieStatus } from '@mporter/core';
 import { useIPC } from '../hooks/useIPC.js';
 import { useAppState } from '../store/app-state.js';
 
@@ -20,6 +20,9 @@ export function SettingsPage() {
   const [config, setConfig] = useState<ServerConfig | null>(null);
   const [prefs, setPrefs] = useState<SyncPreferences | null>(null);
   const [version, setVersion] = useState('');
+  const [cookieStatus, setCookieStatus] = useState<CookieStatus | null>(null);
+  const [cookieRefreshing, setCookieRefreshing] = useState(false);
+  const [cookieAlert, setCookieAlert] = useState<{ type: 'success' | 'danger'; message: string } | null>(null);
 
   useEffect(() => {
     loadSettings();
@@ -35,13 +38,15 @@ export function SettingsPage() {
     setPrefs(p);
     setVersion(ver);
 
-    // Fetch server profiles and restore saved profile
+    // Fetch server profiles, saved profile, and cookie status
     try {
-      const [settings, savedProfile] = await Promise.all([
+      const [settings, savedProfile, cookies] = await Promise.all([
         ipc.getSettings(),
         ipc.getProfile(),
+        ipc.getCookieStatus(),
       ]);
       setServerProfiles(settings.profiles);
+      setCookieStatus(cookies);
       if (!activeProfile) {
         const profileNames = Object.keys(settings.profiles);
         const resolved = savedProfile
@@ -81,6 +86,33 @@ export function SettingsPage() {
     };
     setPrefs(updated);
     await ipc.updatePreferences({ autoSyncDrives: updated.autoSyncDrives });
+  }
+
+  async function handleCookieRefresh() {
+    setCookieRefreshing(true);
+    setCookieAlert(null);
+    try {
+      const result = await ipc.refreshCookies();
+      if (result.success && result.valid) {
+        const daysMsg = result.days_remaining != null
+          ? ` (${result.days_remaining} days remaining)`
+          : '';
+        setCookieAlert({ type: 'success', message: `Cookies refreshed successfully${daysMsg}` });
+        setCookieStatus({
+          valid: true,
+          exists: true,
+          reason: result.reason ?? 'Valid',
+          days_remaining: result.days_remaining ?? null,
+        });
+      } else {
+        setCookieAlert({ type: 'danger', message: result.error ?? 'Cookie refresh failed' });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setCookieAlert({ type: 'danger', message });
+    } finally {
+      setCookieRefreshing(false);
+    }
   }
 
   const profileNames = Object.keys(serverProfiles).sort();
@@ -136,6 +168,60 @@ export function SettingsPage() {
           )}
           <button className="btn btn-outline-danger btn-sm" onClick={disconnect}>
             Disconnect
+          </button>
+        </div>
+      </div>
+
+      {/* Apple Music Authentication */}
+      <div className="card bg-dark border-secondary mb-4">
+        <div className="card-header">Apple Music Authentication</div>
+        <div className="card-body">
+          {cookieStatus ? (
+            <div className="d-flex align-items-center gap-2 mb-3">
+              {cookieStatus.valid ? (
+                <>
+                  <i className="bi bi-check-circle-fill text-success" />
+                  <span>Cookies valid</span>
+                  {cookieStatus.days_remaining != null && (
+                    <span className="text-secondary small">
+                      ({cookieStatus.days_remaining} days remaining)
+                    </span>
+                  )}
+                </>
+              ) : (
+                <>
+                  <i className="bi bi-exclamation-triangle-fill text-warning" />
+                  <span className="text-warning">
+                    {cookieStatus.exists ? 'Cookies expired or invalid' : 'No cookies configured'}
+                  </span>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="text-secondary small mb-3">Loading cookie status...</div>
+          )}
+
+          {cookieAlert && (
+            <div className={`alert alert-${cookieAlert.type} py-2 mb-3`} role="alert">
+              {cookieAlert.message}
+            </div>
+          )}
+
+          <button
+            className="btn btn-outline-primary btn-sm"
+            onClick={handleCookieRefresh}
+            disabled={cookieRefreshing}
+          >
+            {cookieRefreshing ? (
+              <>
+                <span className="spinner-border spinner-border-sm me-2" role="status" />
+                Waiting for login...
+              </>
+            ) : cookieStatus?.valid ? (
+              'Refresh Cookies'
+            ) : (
+              'Sign In to Apple Music'
+            )}
           </button>
         </div>
       </div>

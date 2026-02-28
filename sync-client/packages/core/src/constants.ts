@@ -54,3 +54,35 @@ export const CLIENT_SYNC_KEY_PREFIX = 'client-';
 
 /** Per-file download timeout (ms) — 5 minutes, generous for large files on slow USB. */
 export const FILE_DOWNLOAD_TIMEOUT_MS = 300_000;
+
+// ── Cookie Refresh ──
+
+/** Apple Music login URL for embedded browser. */
+export const APPLE_MUSIC_URL = 'https://music.apple.com';
+
+/** Cookie domain for Apple Music authentication cookies. */
+export const APPLE_COOKIE_DOMAIN = '.music.apple.com';
+
+/** Name of the authentication cookie that proves a valid Apple Music session. */
+export const APPLE_AUTH_COOKIE_NAME = 'media-user-token';
+
+/** How often (ms) to poll for the auth cookie in the login window. */
+export const COOKIE_POLL_INTERVAL_MS = 1000;
+
+/** Maximum time (ms) to wait for the user to complete login before timeout. */
+export const COOKIE_REFRESH_TIMEOUT_MS = 300_000;
+
+/** Width (px) of the cookie refresh BrowserWindow. */
+export const COOKIE_WINDOW_WIDTH = 1000;
+
+/** Height (px) of the cookie refresh BrowserWindow. */
+export const COOKIE_WINDOW_HEIGHT = 700;
+
+/** Netscape cookie file header line. */
+export const NETSCAPE_COOKIE_HEADER = '# Netscape HTTP Cookie File';
+
+/** Domain suffix used to filter only Apple-related cookies. */
+export const APPLE_DOMAIN_SUFFIX = 'apple.com';
+
+/** Fallback expiry (seconds) for session cookies that lack an explicit expiration. */
+export const SESSION_COOKIE_FALLBACK_S = 86400 * 365;

@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
   ConnectionState,
+  CookieStatus,
   DiscoveredServer,
   DriveInfo,
   FileListResponse,
@@ -56,6 +57,16 @@ const electronAPI = {
   listDrives: (): Promise<DriveInfo[]> => ipcRenderer.invoke('drives:list'),
   ejectDrive: (path: string): Promise<boolean> => ipcRenderer.invoke('drives:eject', path),
   selectFolder: (): Promise<string | null> => ipcRenderer.invoke('drives:selectFolder'),
+
+  // Cookies
+  getCookieStatus: (): Promise<CookieStatus> => ipcRenderer.invoke('cookies:getStatus'),
+  refreshCookies: (): Promise<{
+    success: boolean;
+    valid?: boolean;
+    reason?: string;
+    days_remaining?: number | null;
+    error?: string;
+  }> => ipcRenderer.invoke('cookies:refresh'),
 
   // Preferences
   getPreferences: (): Promise<SyncPreferences> => ipcRenderer.invoke('prefs:get'),
