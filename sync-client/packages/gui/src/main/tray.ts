@@ -1,11 +1,31 @@
 import { app, Tray, Menu, nativeImage, BrowserWindow } from 'electron';
+import { join, dirname } from 'node:path';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const TRAY_ICON_SIZE = 16;
 
 let tray: Tray | null = null;
 
+function loadTrayIcon(): Electron.NativeImage {
+  const candidates = [
+    join(__dirname, '..', '..', 'build', 'icon.png'),
+    join(__dirname, '..', '..', '..', 'build', 'icon.png'),
+  ];
+  for (const iconPath of candidates) {
+    if (existsSync(iconPath)) {
+      return nativeImage.createFromPath(iconPath).resize({ width: TRAY_ICON_SIZE, height: TRAY_ICON_SIZE });
+    }
+  }
+  return nativeImage.createEmpty();
+}
+
 /** Create the system tray icon and menu. */
 export function createTray(mainWindow: BrowserWindow): void {
-  // Use a small icon (will be replaced with a real icon in production)
-  const icon = nativeImage.createEmpty();
+  const icon = loadTrayIcon();
   tray = new Tray(icon);
 
   const contextMenu = Menu.buildFromTemplate([

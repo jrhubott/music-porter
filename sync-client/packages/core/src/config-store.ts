@@ -2,8 +2,8 @@ import { readFileSync, writeFileSync, mkdirSync, chmodSync, existsSync, unlinkSy
 import { join, dirname } from 'node:path';
 import { getConfigDir } from './platform.js';
 import { ConfigError } from './errors.js';
-import type { AppConfig, ServerConfig, SyncPreferences } from './types.js';
-import { DEFAULT_CONCURRENCY } from './constants.js';
+import type { AppConfig, ServerConfig, SyncPreferences, WindowState } from './types.js';
+import { DEFAULT_CONCURRENCY, DEFAULT_MAX_CACHE_BYTES } from './constants.js';
 
 const CONFIG_FILENAME = 'config.json';
 const API_KEY_FILENAME = 'api-key';
@@ -14,6 +14,10 @@ const DEFAULT_PREFERENCES: SyncPreferences = {
   autoSyncDrives: [],
   ejectAfterSync: false,
   notifications: true,
+  pinnedPlaylists: [],
+  maxCacheBytes: DEFAULT_MAX_CACHE_BYTES,
+  autoPinNewPlaylists: false,
+  unpinnedPlaylists: [],
 };
 
 /** Legacy preferences shape for migration from autoSyncOnUSB. */
@@ -95,6 +99,113 @@ export class ConfigStore {
     return this.config.preferences.autoSyncDrives.includes(name);
   }
 
+  // ── Playlist Pin Helpers ──
+
+  pinPlaylist(key: string): void {
+    const pinned = this.config.preferences.pinnedPlaylists;
+    if (!pinned.includes(key)) {
+      pinned.push(key);
+    }
+    // Remove from exclusion list when explicitly pinned
+    const excluded = this.config.preferences.unpinnedPlaylists;
+    const exIdx = excluded.indexOf(key);
+    if (exIdx !== -1) {
+      excluded.splice(exIdx, 1);
+    }
+    this.save();
+  }
+
+  unpinPlaylist(key: string): void {
+    const pinned = this.config.preferences.pinnedPlaylists;
+    const index = pinned.indexOf(key);
+    if (index !== -1) {
+      pinned.splice(index, 1);
+    }
+    // Add to exclusion list when auto-pin is on so it won't be re-pinned
+    if (this.config.preferences.autoPinNewPlaylists) {
+      const excluded = this.config.preferences.unpinnedPlaylists;
+      if (!excluded.includes(key)) {
+        excluded.push(key);
+      }
+    }
+    this.save();
+  }
+
+  isPinned(key: string): boolean {
+    return this.config.preferences.pinnedPlaylists.includes(key);
+  }
+
+  // ── Auto-Pin Helpers ──
+
+  get autoPinNewPlaylists(): boolean {
+    return this.config.preferences.autoPinNewPlaylists;
+  }
+
+  setAutoPinNewPlaylists(enabled: boolean): void {
+    this.config.preferences.autoPinNewPlaylists = enabled;
+    if (!enabled) {
+      // Clear exclusion list on disable (fresh slate if re-enabled)
+      this.config.preferences.unpinnedPlaylists = [];
+    }
+    this.save();
+  }
+
+  /**
+   * Add all unpinned (and not already excluded) server playlists to the exclusion list.
+   * Used when auto-pin is first enabled to avoid pinning existing playlists.
+   */
+  excludeUnpinnedPlaylists(serverKeys: string[]): void {
+    const pinned = this.config.preferences.pinnedPlaylists;
+    const excluded = this.config.preferences.unpinnedPlaylists;
+    let changed = false;
+
+    for (const key of serverKeys) {
+      if (!pinned.includes(key) && !excluded.includes(key)) {
+        excluded.push(key);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      this.save();
+    }
+  }
+
+  /**
+   * When auto-pin is on, pin any server playlists not already pinned
+   * and not in the user's exclusion list. Returns newly pinned keys.
+   */
+  syncPinsWithServer(serverKeys: string[]): string[] {
+    if (!this.config.preferences.autoPinNewPlaylists) return [];
+
+    const pinned = this.config.preferences.pinnedPlaylists;
+    const excluded = this.config.preferences.unpinnedPlaylists;
+    const newlyPinned: string[] = [];
+
+    for (const key of serverKeys) {
+      if (!pinned.includes(key) && !excluded.includes(key)) {
+        pinned.push(key);
+        newlyPinned.push(key);
+      }
+    }
+
+    if (newlyPinned.length > 0) {
+      this.save();
+    }
+    return newlyPinned;
+  }
+
+  // ── Window State ──
+
+  get windowState(): WindowState | undefined {
+    return this.config.windowState;
+  }
+
+  set windowState(state: WindowState | undefined) {
+    this.config.windowState = state;
+    this.save();
+  }
+
   // ── API Key (separate file with restricted permissions) ──
 
   getApiKey(): string | null {
@@ -146,6 +257,7 @@ export class ConfigStore {
         server: parsed.server ?? null,
         preferences: prefs,
         profile: parsed.profile,
+        windowState: parsed.windowState,
       };
     } catch (err) {
       throw new ConfigError(`Failed to load config: ${err}`);

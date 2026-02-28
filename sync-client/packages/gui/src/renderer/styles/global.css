@@ -52,6 +52,11 @@ body {
   padding: 1.5rem;
 }
 
+/* Sidebar bottom status area — pushed to bottom of sidebar flex column */
+.sidebar-status {
+  margin-top: auto;
+}
+
 /* Connection status badge */
 .connection-badge {
   display: flex;
@@ -61,7 +66,6 @@ body {
   font-size: 0.8rem;
   color: #6c757d;
   border-top: 1px solid #343a40;
-  margin-top: auto;
 }
 
 .connection-badge .dot {
@@ -75,6 +79,10 @@ body {
   background: #dc3545;
 }
 
+.connection-badge .dot.dot-warning {
+  background: #ffc107;
+}
+
 /* Playlist card */
 .playlist-card {
   background: #2b3035;
@@ -83,6 +91,7 @@ body {
   padding: 1rem;
   cursor: pointer;
   transition: border-color 0.15s;
+  height: 100%;
 }
 
 .playlist-card:hover {
@@ -92,6 +101,13 @@ body {
 .playlist-card.selected {
   border-color: #0d6efd;
   background: rgba(13, 110, 253, 0.1);
+}
+
+/* Sidebar prefetch indicator */
+.sidebar-prefetch {
+  padding: 0.4rem 1rem;
+  border-top: 1px solid #343a40;
+  font-size: 0.75rem;
 }
 
 /* Progress */

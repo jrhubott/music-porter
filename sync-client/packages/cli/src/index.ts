@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import { VERSION } from '@mporter/core';
+import { registerCacheCommand } from './commands/cache.js';
 import { registerServerCommand } from './commands/server.js';
 import { registerDiscoverCommand } from './commands/discover.js';
 import { registerListCommand } from './commands/list.js';
@@ -17,6 +18,7 @@ program
   .version(VERSION);
 
 // Register all subcommands
+registerCacheCommand(program);
 registerServerCommand(program);
 registerDiscoverCommand(program);
 registerListCommand(program);

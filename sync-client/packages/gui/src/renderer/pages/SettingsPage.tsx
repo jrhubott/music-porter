@@ -1,10 +1,26 @@
 import { useState, useEffect } from 'react';
-import type { SyncPreferences, ServerConfig, CookieStatus } from '@mporter/core';
+import type { SyncPreferences, ServerConfig, CookieStatus, BackgroundPrefetchStatus, PlaylistCacheStatus } from '@mporter/core';
 import { useIPC } from '../hooks/useIPC.js';
 import { useAppState } from '../store/app-state.js';
 
 const MIN_CONCURRENCY = 1;
 const MAX_CONCURRENCY = 8;
+const BYTES_PER_GB = 1024 * 1024 * 1024;
+const BYTES_PER_MB = 1024 * 1024;
+
+const CACHE_SIZE_OPTIONS = [
+  { label: '5 GB', value: 5 * BYTES_PER_GB },
+  { label: '10 GB', value: 10 * BYTES_PER_GB },
+  { label: '20 GB', value: 20 * BYTES_PER_GB },
+  { label: '50 GB', value: 50 * BYTES_PER_GB },
+  { label: 'Unlimited', value: 0 },
+];
+
+function formatCacheSize(bytes: number): string {
+  if (bytes >= BYTES_PER_GB) return `${(bytes / BYTES_PER_GB).toFixed(1)} GB`;
+  if (bytes >= BYTES_PER_MB) return `${(bytes / BYTES_PER_MB).toFixed(1)} MB`;
+  return `${bytes} B`;
+}
 
 export function SettingsPage() {
   const ipc = useIPC();
@@ -16,6 +32,8 @@ export function SettingsPage() {
     setServerProfiles,
     activeProfile,
     setActiveProfile,
+    isOffline,
+    setIsOffline,
   } = useAppState();
   const [config, setConfig] = useState<ServerConfig | null>(null);
   const [prefs, setPrefs] = useState<SyncPreferences | null>(null);
@@ -23,9 +41,20 @@ export function SettingsPage() {
   const [cookieStatus, setCookieStatus] = useState<CookieStatus | null>(null);
   const [cookieRefreshing, setCookieRefreshing] = useState(false);
   const [cookieAlert, setCookieAlert] = useState<{ type: 'success' | 'danger'; message: string } | null>(null);
+  const [cacheTotalSize, setCacheTotalSize] = useState(0);
+  const [cacheClearing, setCacheClearing] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
+  const [reconnectError, setReconnectError] = useState('');
+  const [bgPrefetchStatus, setBgPrefetchStatus] = useState<BackgroundPrefetchStatus | null>(null);
+  const [cachePlaylistStatuses, setCachePlaylistStatuses] = useState<PlaylistCacheStatus[]>([]);
+  const [autoPinEnabled, setAutoPinEnabled] = useState(false);
 
   useEffect(() => {
     loadSettings();
+    const cleanup = ipc.onBackgroundPrefetchStatus((status: BackgroundPrefetchStatus) => {
+      setBgPrefetchStatus(status);
+    });
+    return () => { cleanup(); };
   }, []);
 
   async function loadSettings() {
@@ -38,25 +67,42 @@ export function SettingsPage() {
     setPrefs(p);
     setVersion(ver);
 
-    // Fetch server profiles, saved profile, and cookie status
+    // Load cache size and playlist breakdown (always available, even offline)
     try {
-      const [settings, savedProfile, cookies] = await Promise.all([
-        ipc.getSettings(),
-        ipc.getProfile(),
-        ipc.getCookieStatus(),
+      const [cacheStatus, bgStatus, autoPin] = await Promise.all([
+        ipc.cacheGetStatus(),
+        ipc.cacheGetBackgroundPrefetchStatus(),
+        ipc.cacheGetAutoPinNewPlaylists(),
       ]);
-      setServerProfiles(settings.profiles);
-      setCookieStatus(cookies);
-      if (!activeProfile) {
-        const profileNames = Object.keys(settings.profiles);
-        const resolved = savedProfile
-          ?? (settings.settings['output_type'] as string | undefined)
-          ?? profileNames[0]
-          ?? '';
-        if (resolved) setActiveProfile(resolved);
-      }
+      setCacheTotalSize(cacheStatus.totalSize);
+      setCachePlaylistStatuses(cacheStatus.playlists);
+      setBgPrefetchStatus(bgStatus);
+      setAutoPinEnabled(autoPin);
     } catch {
       // Non-critical
+    }
+
+    // Fetch server profiles, saved profile, and cookie status (only when online)
+    if (!isOffline) {
+      try {
+        const [settings, savedProfile, cookies] = await Promise.all([
+          ipc.getSettings(),
+          ipc.getProfile(),
+          ipc.getCookieStatus(),
+        ]);
+        setServerProfiles(settings.profiles);
+        setCookieStatus(cookies);
+        if (!activeProfile) {
+          const profileNames = Object.keys(settings.profiles);
+          const resolved = savedProfile
+            ?? (settings.settings['output_type'] as string | undefined)
+            ?? profileNames[0]
+            ?? '';
+          if (resolved) setActiveProfile(resolved);
+        }
+      } catch {
+        // Non-critical
+      }
     }
   }
 
@@ -115,6 +161,60 @@ export function SettingsPage() {
     }
   }
 
+  async function goOffline() {
+    setIsOffline(true);
+    setConnection({ connected: false });
+  }
+
+  async function reconnect() {
+    setReconnecting(true);
+    setReconnectError('');
+    try {
+      const state = await ipc.connect();
+      if (state.connected) {
+        setConnection(state);
+        setIsOffline(false);
+        loadSettings();
+      } else {
+        setReconnectError('Connection failed. Server may be unreachable.');
+      }
+    } catch (err) {
+      setReconnectError(err instanceof Error ? err.message : 'Connection failed');
+    }
+    setReconnecting(false);
+  }
+
+  async function handleClearCache() {
+    setCacheClearing(true);
+    try {
+      await ipc.cacheClearAll();
+      setCacheTotalSize(0);
+    } catch {
+      // Non-critical
+    }
+    setCacheClearing(false);
+  }
+
+  async function handleToggleAutoPin() {
+    const newValue = !autoPinEnabled;
+    setAutoPinEnabled(newValue);
+    await ipc.cacheSetAutoPinNewPlaylists(newValue);
+  }
+
+  async function handleSetMaxCacheSize(value: number) {
+    if (!prefs) return;
+    const updated = { ...prefs, maxCacheBytes: value };
+    setPrefs(updated);
+    await ipc.cacheSetMaxSize(value);
+    // Reload cache size (eviction may have reduced it)
+    try {
+      const status = await ipc.cacheGetStatus();
+      setCacheTotalSize(status.totalSize);
+    } catch {
+      // Non-critical
+    }
+  }
+
   const profileNames = Object.keys(serverProfiles).sort();
 
   return (
@@ -166,13 +266,47 @@ export function SettingsPage() {
               )}
             </>
           )}
-          <button className="btn btn-outline-danger btn-sm" onClick={disconnect}>
-            Disconnect
-          </button>
+          <div className="d-flex gap-2">
+            {isOffline ? (
+              <>
+                <button
+                  className="btn btn-outline-primary btn-sm"
+                  onClick={reconnect}
+                  disabled={reconnecting}
+                >
+                  {reconnecting ? (
+                    <>
+                      <span className="spinner-border spinner-border-sm me-1" />
+                      Reconnecting...
+                    </>
+                  ) : (
+                    <>
+                      <i className="bi bi-wifi me-1" />
+                      Reconnect
+                    </>
+                  )}
+                </button>
+                {reconnectError && (
+                  <span className="text-danger small align-self-center">{reconnectError}</span>
+                )}
+              </>
+            ) : (
+              <>
+                <button className="btn btn-outline-secondary btn-sm" onClick={goOffline}>
+                  <i className="bi bi-cloud-slash me-1" />
+                  Go Offline
+                </button>
+                <button className="btn btn-outline-danger btn-sm" onClick={disconnect}>
+                  Disconnect
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Apple Music Authentication */}
+      {/* Apple Music Authentication — hide when offline */}
+      {!isOffline && (
       <div className="card bg-dark border-secondary mb-4">
         <div className="card-header">Apple Music Authentication</div>
         <div className="card-body">
@@ -225,6 +359,7 @@ export function SettingsPage() {
           </button>
         </div>
       </div>
+      )}
 
       {/* Output Profile */}
       {profileNames.length > 0 && (
@@ -303,6 +438,167 @@ export function SettingsPage() {
           </div>
         </div>
       )}
+
+      {/* Local Cache */}
+      <div className="card bg-dark border-secondary mb-4">
+        <div className="card-header">Local Cache</div>
+        <div className="card-body">
+          <div className="d-flex justify-content-between align-items-center mb-3">
+            <div>
+              <small className="text-secondary">Cache Size</small>
+              <div>{formatCacheSize(cacheTotalSize)}</div>
+            </div>
+            <div className="d-flex gap-2">
+              <button
+                className="btn btn-outline-info btn-sm"
+                onClick={() => ipc.cacheTriggerPrefetch()}
+                disabled={bgPrefetchStatus?.running || false}
+              >
+                {bgPrefetchStatus?.running ? (
+                  <>
+                    <span className="spinner-border spinner-border-sm me-1" />
+                    Prefetching...
+                  </>
+                ) : (
+                  <>
+                    <i className="bi bi-cloud-download me-1" />
+                    Prefetch Now
+                  </>
+                )}
+              </button>
+              <button
+                className="btn btn-outline-danger btn-sm"
+                onClick={handleClearCache}
+                disabled={cacheClearing || cacheTotalSize === 0}
+              >
+                {cacheClearing ? (
+                  <span className="spinner-border spinner-border-sm" />
+                ) : (
+                  <>
+                    <i className="bi bi-trash me-1" />
+                    Clear Cache
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Background prefetch status */}
+          {bgPrefetchStatus && (
+            <div className="mb-3 p-2 border border-secondary rounded">
+              <div className="d-flex justify-content-between align-items-center mb-1">
+                <small className="fw-bold">Background Prefetch</small>
+                <span className={`badge ${bgPrefetchStatus.running ? 'bg-info' : 'bg-secondary'}`}>
+                  {bgPrefetchStatus.running ? 'Active' : 'Idle'}
+                </span>
+              </div>
+              {bgPrefetchStatus.running && bgPrefetchStatus.progress && (
+                <div className="mb-1">
+                  <div className="d-flex justify-content-between">
+                    <small className="text-info">
+                      {bgPrefetchStatus.playlist && `Caching ${bgPrefetchStatus.playlist}: `}
+                      {bgPrefetchStatus.progress.current} / {bgPrefetchStatus.progress.total}
+                    </small>
+                    <small>
+                      {bgPrefetchStatus.progress.total > 0
+                        ? Math.round((bgPrefetchStatus.progress.current / bgPrefetchStatus.progress.total) * 100)
+                        : 0}%
+                    </small>
+                  </div>
+                  <div className="progress mt-1" style={{ height: 3 }}>
+                    <div
+                      className="progress-bar bg-info"
+                      style={{
+                        width: `${bgPrefetchStatus.progress.total > 0
+                          ? (bgPrefetchStatus.progress.current / bgPrefetchStatus.progress.total) * 100
+                          : 0}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+              {bgPrefetchStatus.lastRunAt && (
+                <small className="text-secondary">
+                  Last run: {new Date(bgPrefetchStatus.lastRunAt).toLocaleTimeString()}
+                  {bgPrefetchStatus.lastResult && (
+                    <span className="ms-2">
+                      ({bgPrefetchStatus.lastResult.downloaded} downloaded, {bgPrefetchStatus.lastResult.skipped} cached)
+                    </span>
+                  )}
+                </small>
+              )}
+            </div>
+          )}
+
+          {/* Per-playlist cache breakdown */}
+          {cachePlaylistStatuses.length > 0 && (
+            <div className="mb-3">
+              <small className="text-secondary fw-bold d-block mb-1">Per-Playlist Cache</small>
+              {cachePlaylistStatuses.map((ps) => (
+                <div key={ps.playlistKey} className="d-flex align-items-center gap-2 mb-1">
+                  <i className={`bi ${ps.pinned ? 'bi-pin-fill text-info' : 'bi-pin text-secondary'}`} style={{ fontSize: '0.75em' }} />
+                  <span className="small flex-grow-1 text-truncate">{ps.playlistKey}</span>
+                  <small className="text-secondary text-nowrap">{ps.cached}{ps.total > 0 ? `/${ps.total}` : ''}</small>
+                  {ps.total > 0 && (
+                    <div className="progress flex-shrink-0" style={{ width: 60, height: 3 }}>
+                      <div
+                        className={`progress-bar ${ps.cached >= ps.total ? 'bg-success' : 'bg-info'}`}
+                        style={{ width: `${ps.total > 0 ? (ps.cached / ps.total) * 100 : 0}%` }}
+                      />
+                    </div>
+                  )}
+                  {ps.cached > 0 && (
+                    <button
+                      className="btn btn-sm btn-outline-danger p-0 d-flex align-items-center justify-content-center"
+                      style={{ width: 20, height: 20, fontSize: '0.65em' }}
+                      title={`Clear cache for ${ps.playlistKey}`}
+                      onClick={async () => {
+                        await ipc.cacheClearPlaylist(ps.playlistKey);
+                        const status = await ipc.cacheGetStatus();
+                        setCacheTotalSize(status.totalSize);
+                        setCachePlaylistStatuses(status.playlists);
+                      }}
+                    >
+                      <i className="bi bi-trash" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Auto-pin toggle */}
+          <div className="form-check form-switch mb-3">
+            <input
+              className="form-check-input"
+              type="checkbox"
+              checked={autoPinEnabled}
+              onChange={handleToggleAutoPin}
+            />
+            <label className="form-check-label">
+              Auto-Pin New Playlists
+            </label>
+            <div className="text-secondary small">Automatically pin new playlists for caching as they appear on the server</div>
+          </div>
+
+          {prefs && (
+            <div>
+              <label className="form-label">Max Cache Size</label>
+              <select
+                className="form-select bg-dark text-light border-secondary"
+                value={prefs.maxCacheBytes}
+                onChange={(e) => handleSetMaxCacheSize(parseInt(e.target.value, 10))}
+              >
+                {CACHE_SIZE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* About */}
       <div className="card bg-dark border-secondary">

@@ -1,5 +1,7 @@
 data/*
 design/
+export/
+music/
 __pycache__/
 gamdl_temp_*/
 library/

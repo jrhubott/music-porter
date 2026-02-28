@@ -1,27 +1,34 @@
 import { ipcMain, dialog, safeStorage, BrowserWindow } from 'electron';
 import {
   APIClient,
+  CacheManager,
   ConfigStore,
+  PrefetchEngine,
   SyncEngine,
   DriveManager,
   ServerDiscovery,
   VERSION,
+  getConfigDir,
   readManifest,
   USB_SYNC_KEY_PREFIX,
   CLIENT_SYNC_KEY_PREFIX,
 } from '@mporter/core';
 import type {
+  BackgroundPrefetchStatus,
   ConnectionState,
   CookieStatus,
   CookieUploadResponse,
   DiscoveredServer,
   DriveInfo,
+  PlaylistCacheStatus,
+  PrefetchResult,
   ServerConfig,
   SyncPreferences,
   SyncProgress,
   SyncResult,
 } from '@mporter/core';
 import { openCookieRefreshWindow } from './cookie-refresh.js';
+import type { BackgroundPrefetchService } from './background-prefetch.js';
 
 /** Result returned to renderer from the cookies:refresh handler. */
 interface CookieRefreshIPCResult {
@@ -32,10 +39,24 @@ interface CookieRefreshIPCResult {
   error?: string;
 }
 
-const configStore = new ConfigStore();
-const apiClient = new APIClient();
+export const configStore = new ConfigStore();
+export const apiClient = new APIClient();
 const driveManager = new DriveManager();
 let activeSyncAbort: AbortController | null = null;
+let activePrefetchAbort: AbortController | null = null;
+let bgPrefetchService: BackgroundPrefetchService | null = null;
+
+/** Set the background prefetch service reference for IPC handlers. */
+export function setBackgroundPrefetchService(service: BackgroundPrefetchService): void {
+  bgPrefetchService = service;
+}
+
+/** Get a CacheManager for the current profile, or null if no profile set. */
+function getCacheManager(): CacheManager | null {
+  const profile = configStore.profile;
+  if (!profile) return null;
+  return new CacheManager(getConfigDir(), profile);
+}
 
 /** Register all IPC handlers for renderer communication. */
 export function registerIPCHandlers(): void {
@@ -84,6 +105,10 @@ export function registerIPCHandlers(): void {
       const state = apiClient.connectionState;
       state.serverName = response.server_name;
       state.serverVersion = response.version;
+
+      // Notify background prefetch that connection is ready
+      bgPrefetchService?.notifyConnected();
+
       return state;
     } catch {
       return { connected: false };
@@ -175,10 +200,12 @@ export function registerIPCHandlers(): void {
         usbDriveName?: string;
         profile?: string;
         force?: boolean;
+        offlineOnly?: boolean;
       },
     ): Promise<SyncResult> => {
       activeSyncAbort = new AbortController();
       const engine = new SyncEngine(apiClient);
+      const cacheManager = getCacheManager() ?? undefined;
 
       return engine.sync(opts.dest, {
         playlists: opts.playlists,
@@ -188,6 +215,8 @@ export function registerIPCHandlers(): void {
         force: opts.force,
         concurrency: opts.concurrency,
         signal: activeSyncAbort.signal,
+        cacheManager,
+        offlineOnly: opts.offlineOnly,
         onProgress: (progress: SyncProgress) => {
           event.sender.send('sync:progress', progress);
         },
@@ -288,6 +317,145 @@ export function registerIPCHandlers(): void {
       days_remaining: uploadResult.days_remaining,
       error: uploadResult.valid ? undefined : uploadResult.reason,
     };
+  });
+
+  // ── Cache ──
+
+  ipcMain.handle('cache:pin', (_event, playlist: string): void => {
+    configStore.pinPlaylist(playlist);
+  });
+
+  ipcMain.handle('cache:unpin', (_event, playlist: string): void => {
+    configStore.unpinPlaylist(playlist);
+  });
+
+  ipcMain.handle('cache:getPinnedPlaylists', (): string[] => {
+    return configStore.preferences.pinnedPlaylists;
+  });
+
+  ipcMain.handle('cache:getStatus', (): { totalSize: number; playlists: PlaylistCacheStatus[] } => {
+    const cm = getCacheManager();
+    if (!cm) return { totalSize: 0, playlists: [] };
+
+    const pinned = configStore.preferences.pinnedPlaylists;
+    const cachedPlaylists = cm.getCachedPlaylists();
+    const allKeys = [...new Set([...pinned, ...cachedPlaylists])];
+
+    const playlists = allKeys.map((key) => {
+      const entries = cm.getCachedFileInfos(key);
+      return {
+        playlistKey: key,
+        total: 0, // Unknown without server — will be enriched by renderer
+        cached: entries.length,
+        pinned: pinned.includes(key),
+      };
+    });
+
+    return { totalSize: cm.getTotalSize(), playlists };
+  });
+
+  ipcMain.handle('cache:hasData', (): boolean => {
+    const cm = getCacheManager();
+    return cm ? cm.hasData() : false;
+  });
+
+  ipcMain.handle('cache:getCachedPlaylists', (): { key: string; fileCount: number }[] => {
+    const cm = getCacheManager();
+    if (!cm) return [];
+    return cm.getCachedPlaylists().map((key) => ({
+      key,
+      fileCount: cm.getCachedFileInfos(key).length,
+    }));
+  });
+
+  ipcMain.handle('cache:prefetch', async (event): Promise<PrefetchResult> => {
+    const cm = getCacheManager();
+    if (!cm) return { downloaded: 0, skipped: 0, failed: 0, capacityCapped: 0, aborted: true, durationMs: 0 };
+
+    const pinned = configStore.preferences.pinnedPlaylists;
+    if (pinned.length === 0) {
+      return { downloaded: 0, skipped: 0, failed: 0, capacityCapped: 0, aborted: false, durationMs: 0 };
+    }
+
+    activePrefetchAbort = new AbortController();
+    const engine = new PrefetchEngine(apiClient, cm);
+
+    return engine.prefetch({
+      playlists: pinned,
+      profile: configStore.profile || undefined,
+      maxCacheBytes: configStore.preferences.maxCacheBytes,
+      pinnedPlaylists: new Set(pinned),
+      signal: activePrefetchAbort.signal,
+      onProgress: (progress: SyncProgress) => {
+        event.sender.send('cache:prefetchProgress', progress);
+      },
+      onLog: (level, message) => {
+        event.sender.send('cache:prefetchLog', { level, message });
+      },
+    });
+  });
+
+  ipcMain.handle('cache:cancelPrefetch', (): void => {
+    activePrefetchAbort?.abort();
+    activePrefetchAbort = null;
+  });
+
+  ipcMain.handle('cache:clearPlaylist', (_event, playlist: string): void => {
+    const cm = getCacheManager();
+    if (cm) cm.clearPlaylist(playlist);
+  });
+
+  ipcMain.handle('cache:clearAll', (): void => {
+    const cm = getCacheManager();
+    if (cm) cm.clearAll();
+  });
+
+  ipcMain.handle('cache:setMaxSize', (_event, maxBytes: number): void => {
+    configStore.updatePreferences({ maxCacheBytes: maxBytes });
+    if (maxBytes > 0) {
+      const cm = getCacheManager();
+      if (cm) {
+        const pinnedSet = new Set(configStore.preferences.pinnedPlaylists);
+        cm.evictToLimit(maxBytes, pinnedSet);
+      }
+    }
+  });
+
+  // ── Auto-Pin ──
+
+  ipcMain.handle('cache:getAutoPinNewPlaylists', (): boolean => {
+    return configStore.autoPinNewPlaylists;
+  });
+
+  ipcMain.handle('cache:setAutoPinNewPlaylists', async (_event, enabled: boolean): Promise<string[]> => {
+    configStore.setAutoPinNewPlaylists(enabled);
+    if (enabled) {
+      // Exclude all currently-unpinned playlists so they won't be auto-pinned.
+      // Only truly NEW playlists (appearing after this point) will be auto-pinned.
+      try {
+        const playlists = await apiClient.getPlaylists();
+        const serverKeys = playlists.map((p) => p.key);
+        configStore.excludeUnpinnedPlaylists(serverKeys);
+      } catch {
+        // Non-critical — exclusion list may be incomplete
+      }
+    }
+    return [];
+  });
+
+  ipcMain.handle('cache:syncPins', async (_event, playlistKeys: string[]): Promise<string[]> => {
+    return configStore.syncPinsWithServer(playlistKeys);
+  });
+
+  ipcMain.handle('cache:getBackgroundPrefetchStatus', (): BackgroundPrefetchStatus => {
+    if (bgPrefetchService) return bgPrefetchService.getStatus();
+    return { running: false };
+  });
+
+  ipcMain.handle('cache:triggerPrefetch', async (): Promise<void> => {
+    if (bgPrefetchService) {
+      await bgPrefetchService.runOnce();
+    }
   });
 
   // ── App Info ──

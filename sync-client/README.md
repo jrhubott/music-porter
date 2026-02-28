@@ -154,6 +154,68 @@ Both the CLI and GUI store configuration in a `config.json` file at the platform
 
 The API key is stored separately from the config file for security: the GUI uses Electron's `safeStorage` encryption, while the CLI writes it to a dedicated `api-key` file with `0600` permissions (owner read/write only).
 
+## Local Audio Cache
+
+The sync client includes a local audio cache that stores downloaded files on disk for faster syncing and offline use.
+
+### How It Works
+
+When you sync playlists, downloaded files are automatically written through to the local cache. On subsequent syncs, files already in cache are used instead of re-downloading from the server. This means:
+
+- **First sync** downloads from the server and caches locally
+- **Repeat syncs** to the same or different destinations are near-instant
+- **Offline syncs** work entirely from cached files when the server is unreachable
+
+### Cache Storage
+
+Files are stored per-profile and per-playlist in the config directory:
+
+| Platform | Cache Path |
+|----------|------------|
+| macOS | `~/Library/Application Support/mporter-sync/cache/<profile>/<playlist>/` |
+| Linux | `~/.config/mporter-sync/cache/<profile>/<playlist>/` |
+| Windows | `%APPDATA%/mporter-sync/cache/<profile>/<playlist>/` |
+
+Each cached file uses its human-readable display filename (e.g., `Artist - Title.mp3`). A `cache-index.json` file in each profile directory tracks all cached entries with metadata.
+
+### Pinning and Prefetch
+
+Playlists can be **pinned** to mark them for background caching. Pinned playlists are automatically prefetched (downloaded to cache) so they're ready for offline use or instant sync.
+
+- **Pin/unpin** individual playlists in the GUI (SyncPage) or CLI (`cache pin`/`cache unpin`)
+- **Auto-pin** new playlists with the "Auto-Pin New Playlists" setting — all current and future server playlists are automatically pinned, while still allowing manual unpin of specific playlists
+- **Background prefetch** (GUI) — when pinned playlists exist and the server is reachable, the app periodically checks for new files and caches them automatically
+- **Manual prefetch** (CLI) — run `mporter-sync cache prefetch` to download all pinned playlist files to cache
+
+### Cache Eviction
+
+When the cache exceeds the configured maximum size, files are evicted based on their **server creation time** — the oldest files on the server are removed first. This ensures the newest content is always available in cache for offline use.
+
+If a file is re-converted or updated on the server, the cache detects the change via the server's `updated_at` timestamp and re-downloads the file on the next prefetch cycle.
+
+The default cache limit is 10 GB. Configure it in the GUI (Settings > Local Cache > Max Cache Size) or CLI.
+
+### Offline Mode
+
+When the server is unreachable, the sync client can operate in offline mode using only cached files:
+
+- **GUI** — click "Continue Offline" on the Connect page (appears when cache has data), or "Go Offline" in Settings
+- **CLI** — use `mporter-sync sync --offline` to sync from cache only
+
+Offline sync copies cached files to the destination without contacting the server.
+
+### CLI Cache Commands
+
+| Command | Description |
+|---------|-------------|
+| `mporter-sync cache status` | Show cache size, pinned playlists, and per-playlist status |
+| `mporter-sync cache pin <playlist>` | Pin a playlist for prefetch |
+| `mporter-sync cache unpin <playlist>` | Unpin a playlist |
+| `mporter-sync cache list` | List cached files |
+| `mporter-sync cache prefetch` | Download all pinned playlist files to cache |
+| `mporter-sync cache clear` | Clear the entire cache |
+| `mporter-sync cache auto-pin <on\|off>` | Enable/disable automatic pinning of new playlists |
+
 ## Helper Scripts
 
 Shell scripts in the `sync-client/` directory for common workflows. All scripts can be run from any directory.
