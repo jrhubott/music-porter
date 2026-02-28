@@ -205,6 +205,55 @@ def api_cookies_refresh():
     return jsonify({'task_id': task_id})
 
 
+@api_bp.route('/api/cookies/upload', methods=['POST'])
+def api_cookies_upload():
+    """Accept Netscape-format cookies from a remote client and validate them."""
+    import shutil
+
+    ctx = _ctx()
+    data = request.get_json(silent=True) or {}
+    cookie_text = data.get('cookies', '').strip()
+
+    if not cookie_text:
+        return jsonify({'error': 'Missing or empty "cookies" field'}), 400
+
+    cookie_path = Path(mp.DEFAULT_COOKIES)
+
+    # Backup existing cookies before overwriting
+    if cookie_path.exists():
+        backup_path = Path(str(cookie_path) + '.backup')
+        shutil.copy2(cookie_path, backup_path)
+
+    # Write the uploaded cookie text
+    cookie_path.parent.mkdir(parents=True, exist_ok=True)
+    cookie_path.write_text(cookie_text, encoding='utf-8')
+
+    # Clean non-Apple cookies and validate
+    cookie_mgr = mp.CookieManager(mp.DEFAULT_COOKIES, mp.Logger(verbose=False))
+    cookie_mgr.clean_cookies()
+    status = cookie_mgr.validate()
+
+    days_remaining = (round(status.days_until_expiration)
+                      if status.days_until_expiration else None)
+
+    # Audit trail
+    if ctx.audit_logger:
+        ctx.audit_logger.log(
+            operation='cookie_upload',
+            description=f'Cookies uploaded via sync client — '
+                        f'{"valid" if status.valid else "invalid"}: {status.reason}',
+            params={'valid': status.valid, 'days_remaining': days_remaining},
+            status='success' if status.valid else 'warning',
+            source=ctx.detect_source(),
+        )
+
+    return jsonify({
+        'valid': status.valid,
+        'reason': status.reason,
+        'days_remaining': days_remaining,
+    })
+
+
 # ══════════════════════════════════════════════════════════════════
 # API: Library Summary
 # ══════════════════════════════════════════════════════════════════

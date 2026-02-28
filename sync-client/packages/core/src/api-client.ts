@@ -15,6 +15,8 @@ import type {
   ClientRecordResponse,
   ConnectionState,
   ConnectionType,
+  CookieStatus,
+  CookieUploadResponse,
   FileListResponse,
   Playlist,
   ServerInfoResponse,
@@ -207,6 +209,19 @@ export class APIClient {
 
   async getSyncDestinations(): Promise<SyncDestinationsResponse> {
     return this.get<SyncDestinationsResponse>('/api/sync/destinations');
+  }
+
+  // ── Cookies ──
+
+  /** Fetch cookie validity from the server status endpoint. */
+  async getCookieStatus(): Promise<CookieStatus> {
+    const status = await this.get<{ cookies: CookieStatus }>('/api/status');
+    return status.cookies;
+  }
+
+  /** Upload Netscape-format cookie text to the server. */
+  async uploadCookies(cookieText: string): Promise<CookieUploadResponse> {
+    return this.post<CookieUploadResponse>('/api/cookies/upload', { cookies: cookieText });
   }
 
   // ── Settings ──

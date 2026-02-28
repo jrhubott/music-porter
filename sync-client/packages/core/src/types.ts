@@ -200,6 +200,21 @@ export interface SettingsResponse {
   quality_presets: string[];
 }
 
+// ── Cookies ──
+
+export interface CookieStatus {
+  valid: boolean;
+  exists: boolean;
+  reason: string;
+  days_remaining: number | null;
+}
+
+export interface CookieUploadResponse {
+  valid: boolean;
+  reason: string;
+  days_remaining: number | null;
+}
+
 // ── Config ──
 
 export interface SyncPreferences {

@@ -1,4 +1,4 @@
-import { ipcMain, dialog, safeStorage } from 'electron';
+import { ipcMain, dialog, safeStorage, BrowserWindow } from 'electron';
 import {
   APIClient,
   ConfigStore,
@@ -12,6 +12,8 @@ import {
 } from '@mporter/core';
 import type {
   ConnectionState,
+  CookieStatus,
+  CookieUploadResponse,
   DiscoveredServer,
   DriveInfo,
   ServerConfig,
@@ -19,6 +21,16 @@ import type {
   SyncProgress,
   SyncResult,
 } from '@mporter/core';
+import { openCookieRefreshWindow } from './cookie-refresh.js';
+
+/** Result returned to renderer from the cookies:refresh handler. */
+interface CookieRefreshIPCResult {
+  success: boolean;
+  valid?: boolean;
+  reason?: string;
+  days_remaining?: number | null;
+  error?: string;
+}
 
 const configStore = new ConfigStore();
 const apiClient = new APIClient();
@@ -241,6 +253,41 @@ export function registerIPCHandlers(): void {
 
   ipcMain.handle('prefs:setProfile', (_event, name: string): void => {
     configStore.profile = name;
+  });
+
+  // ── Cookies ──
+
+  ipcMain.handle('cookies:getStatus', async (): Promise<CookieStatus> => {
+    return apiClient.getCookieStatus();
+  });
+
+  ipcMain.handle('cookies:refresh', async (event): Promise<CookieRefreshIPCResult> => {
+    const parentWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!parentWindow) {
+      return { success: false, error: 'No parent window' };
+    }
+
+    const result = await openCookieRefreshWindow(parentWindow);
+    if (!result.success || !result.cookieText) {
+      return { success: false, error: result.error ?? 'Login failed' };
+    }
+
+    // Upload extracted cookies to the server
+    let uploadResult: CookieUploadResponse;
+    try {
+      uploadResult = await apiClient.uploadCookies(result.cookieText);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { success: false, error: `Upload failed: ${message}` };
+    }
+
+    return {
+      success: uploadResult.valid,
+      valid: uploadResult.valid,
+      reason: uploadResult.reason,
+      days_remaining: uploadResult.days_remaining,
+      error: uploadResult.valid ? undefined : uploadResult.reason,
+    };
   });
 
   // ── App Info ──
