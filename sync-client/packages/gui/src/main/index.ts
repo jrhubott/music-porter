@@ -2,7 +2,8 @@ import { app, BrowserWindow, nativeImage, nativeTheme, screen } from 'electron';
 import { join, dirname } from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { registerIPCHandlers, configStore, apiClient, setBackgroundPrefetchService } from './ipc-handlers.js';
+import { registerIPCHandlers, configStore, apiClient, setBackgroundPrefetchService, setConnectionMonitor, performConnect } from './ipc-handlers.js';
+import { ConnectionMonitor } from './connection-monitor.js';
 import { createTray } from './tray.js';
 import { startDriveWatcher } from './drive-watcher.js';
 import { BackgroundPrefetchService } from './background-prefetch.js';
@@ -11,6 +12,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const DEBUG = process.argv.includes('--devtools');
+
+/** Display name shown in macOS dock, menu bar, and window title. */
+const APP_DISPLAY_NAME = 'Music Porter Sync';
+
+// Set app name early so macOS dock/menu bar show the correct name during development
+app.name = APP_DISPLAY_NAME;
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -56,7 +63,7 @@ function createWindow(): void {
     ...(useSaved ? { x: saved.x, y: saved.y } : {}),
     minWidth: MIN_WIDTH,
     minHeight: MIN_HEIGHT,
-    title: 'Music Porter Sync',
+    title: APP_DISPLAY_NAME,
     backgroundColor: '#212529',
     ...(icon ? { icon } : {}),
     webPreferences: {
@@ -94,6 +101,7 @@ function createWindow(): void {
 }
 
 let bgPrefetch: BackgroundPrefetchService | null = null;
+let connMonitor: ConnectionMonitor | null = null;
 
 app.whenReady().then(() => {
   registerIPCHandlers();
@@ -114,6 +122,11 @@ app.whenReady().then(() => {
   setBackgroundPrefetchService(bgPrefetch);
   bgPrefetch.start(mainWindow!);
 
+  // Start connection monitor
+  connMonitor = new ConnectionMonitor(apiClient);
+  setConnectionMonitor(connMonitor);
+  connMonitor.start(mainWindow!, performConnect);
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
@@ -123,6 +136,7 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   bgPrefetch?.stop();
+  connMonitor?.stop();
 });
 
 app.on('window-all-closed', () => {

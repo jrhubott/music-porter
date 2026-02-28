@@ -75,6 +75,7 @@ export function SettingsPage() {
   const [bgPrefetchStatus, setBgPrefetchStatus] = useState<BackgroundPrefetchStatus | null>(null);
   const [cachePlaylistStatuses, setCachePlaylistStatuses] = useState<PlaylistCacheStatus[]>([]);
   const [autoPinEnabled, setAutoPinEnabled] = useState(false);
+  const [availableDiskSpace, setAvailableDiskSpace] = useState<number | null>(null);
   const [releaseNotes, setReleaseNotes] = useState<AboutResponse | null>(null);
   const [notesLoading, setNotesLoading] = useState(false);
 
@@ -98,15 +99,17 @@ export function SettingsPage() {
 
     // Load cache size and playlist breakdown (always available, even offline)
     try {
-      const [cacheStatus, bgStatus, autoPin] = await Promise.all([
+      const [cacheStatus, bgStatus, autoPin, diskSpace] = await Promise.all([
         ipc.cacheGetStatus(),
         ipc.cacheGetBackgroundPrefetchStatus(),
         ipc.cacheGetAutoPinNewPlaylists(),
+        ipc.getDiskSpace(),
       ]);
       setCacheTotalSize(cacheStatus.totalSize);
       setCachePlaylistStatuses(cacheStatus.playlists);
       setBgPrefetchStatus(bgStatus);
       setAutoPinEnabled(autoPin);
+      setAvailableDiskSpace(diskSpace);
     } catch {
       // Non-critical
     }
@@ -203,6 +206,7 @@ export function SettingsPage() {
   async function goOffline() {
     setIsOffline(true);
     setConnection({ connected: false });
+    await ipc.goOffline();
   }
 
   async function reconnect() {
@@ -634,6 +638,11 @@ export function SettingsPage() {
                   </option>
                 ))}
               </select>
+              {availableDiskSpace != null && (
+                <small className="text-secondary mt-1 d-block">
+                  {formatCacheSize(availableDiskSpace)} available on disk
+                </small>
+              )}
             </div>
           )}
         </div>

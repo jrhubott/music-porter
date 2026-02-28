@@ -87,6 +87,20 @@ export const APPLE_DOMAIN_SUFFIX = 'apple.com';
 /** Fallback expiry (seconds) for session cookies that lack an explicit expiration. */
 export const SESSION_COOKIE_FALLBACK_S = 86400 * 365;
 
+// ── Connection Health Check ──
+
+/** How often (ms) to ping the server when connected, to detect unexpected disconnection. */
+export const CONNECTION_HEALTH_CHECK_INTERVAL_MS = 30_000;
+
+/** How often (ms) to attempt reconnection when the server was lost unexpectedly. */
+export const CONNECTION_RECONNECT_INTERVAL_MS = 15_000;
+
+/** Timeout (ms) for a single health-check ping. */
+export const HEALTH_CHECK_TIMEOUT_MS = 5_000;
+
+/** Number of consecutive health-check failures before declaring the connection lost. */
+export const HEALTH_CHECK_FAILURE_THRESHOLD = 2;
+
 // ── Local Cache (re-exported from cache module for backward compatibility) ──
 
 export {

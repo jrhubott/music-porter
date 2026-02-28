@@ -108,7 +108,23 @@ const electronAPI = {
   cacheTriggerPrefetch: (): Promise<void> =>
     ipcRenderer.invoke('cache:triggerPrefetch'),
 
+  // Connection monitor
+  goOffline: (): Promise<void> => ipcRenderer.invoke('server:goOffline'),
+
+  // System
+  getDiskSpace: (): Promise<number | null> => ipcRenderer.invoke('system:getDiskSpace'),
+
   // Events (main -> renderer)
+  onConnectionStatusChange: (
+    callback: (data: { offline: boolean; connection?: ConnectionState }) => void,
+  ) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      data: { offline: boolean; connection?: ConnectionState },
+    ) => callback(data);
+    ipcRenderer.on('connection:statusChange', handler);
+    return () => ipcRenderer.removeListener('connection:statusChange', handler);
+  },
   onSyncProgress: (callback: (progress: SyncProgress) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, progress: SyncProgress) =>
       callback(progress);

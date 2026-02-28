@@ -1,5 +1,6 @@
 import {
   AUTH_HEADER_PREFIX,
+  HEALTH_CHECK_TIMEOUT_MS,
   LOCAL_TIMEOUT_MS,
   STANDARD_TIMEOUT_MS,
 } from './constants.js';
@@ -302,6 +303,26 @@ export class APIClient {
 
   async getAbout(): Promise<AboutResponse> {
     return this.get<AboutResponse>('/api/about');
+  }
+
+  // ── Health Check ──
+
+  /**
+   * Lightweight health check — returns true if the server responds, false on any error.
+   * Uses a short timeout to avoid blocking.
+   */
+  async ping(timeoutMs: number = HEALTH_CHECK_TIMEOUT_MS): Promise<boolean> {
+    if (!this.activeURL) return false;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      await this.get<unknown>('/api/status', controller.signal);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   // ── HTTP Helpers ──

@@ -1,4 +1,5 @@
 import { ipcMain, dialog, safeStorage, BrowserWindow } from 'electron';
+import { statfsSync } from 'node:fs';
 import {
   APIClient,
   CacheManager,
@@ -30,6 +31,7 @@ import type {
 } from '@mporter/core';
 import { openCookieRefreshWindow } from './cookie-refresh.js';
 import type { BackgroundPrefetchService } from './background-prefetch.js';
+import type { ConnectionMonitor } from './connection-monitor.js';
 
 /** Result returned to renderer from the cookies:refresh handler. */
 interface CookieRefreshIPCResult {
@@ -46,10 +48,16 @@ const driveManager = new DriveManager();
 let activeSyncAbort: AbortController | null = null;
 let activePrefetchAbort: AbortController | null = null;
 let bgPrefetchService: BackgroundPrefetchService | null = null;
+let connectionMonitor: ConnectionMonitor | null = null;
 
 /** Set the background prefetch service reference for IPC handlers. */
 export function setBackgroundPrefetchService(service: BackgroundPrefetchService): void {
   bgPrefetchService = service;
+}
+
+/** Set the connection monitor reference for IPC handlers. */
+export function setConnectionMonitor(monitor: ConnectionMonitor): void {
+  connectionMonitor = monitor;
 }
 
 /** Get a CacheManager for the current profile, or null if no profile set. */
@@ -66,6 +74,57 @@ function getMetadataCache(): MetadataCache | null {
   return new MetadataCache(getConfigDir(), profile);
 }
 
+/**
+ * Perform the full connect sequence: configure API client, resolve connection,
+ * fetch external URL, update stored config, and notify services.
+ * Extracted so it can be called from both IPC handler and ConnectionMonitor.
+ */
+export async function performConnect(): Promise<ConnectionState> {
+  const server = configStore.serverConfig;
+  if (!server) return { connected: false };
+
+  const apiKey = getApiKey();
+  apiClient.configure(server.localURL, server.externalURL, apiKey ?? undefined);
+
+  try {
+    const response = await apiClient.resolveConnection();
+    // Update stored server name
+    let configChanged = false;
+    if (server.name !== response.server_name) {
+      server.name = response.server_name;
+      configChanged = true;
+    }
+
+    // Fetch external URL from server-info (same as iOS fetchExternalURL)
+    try {
+      const info = await apiClient.getServerInfo();
+      if (info.external_url && server.externalURL !== info.external_url) {
+        server.externalURL = info.external_url;
+        apiClient.configure(server.localURL, server.externalURL, apiKey ?? undefined);
+        configChanged = true;
+      }
+    } catch {
+      // Non-critical — external URL is optional
+    }
+
+    if (configChanged) {
+      configStore.serverConfig = server;
+    }
+
+    const state = apiClient.connectionState;
+    state.serverName = response.server_name;
+    state.serverVersion = response.version;
+
+    // Notify services that connection is ready
+    bgPrefetchService?.notifyConnected();
+    connectionMonitor?.notifyConnected();
+
+    return state;
+  } catch {
+    return { connected: false };
+  }
+}
+
 /** Register all IPC handlers for renderer communication. */
 export function registerIPCHandlers(): void {
   // ── Server Connection ──
@@ -76,51 +135,14 @@ export function registerIPCHandlers(): void {
 
   ipcMain.handle('server:updateConfig', (_event, config: ServerConfig): void => {
     configStore.serverConfig = config;
+    // If clearing server config (disconnect), stop connection monitoring
+    if (!config.name && !config.localURL) {
+      connectionMonitor?.notifyDisconnected();
+    }
   });
 
   ipcMain.handle('server:connect', async (): Promise<ConnectionState> => {
-    const server = configStore.serverConfig;
-    if (!server) return { connected: false };
-
-    const apiKey = getApiKey();
-    apiClient.configure(server.localURL, server.externalURL, apiKey ?? undefined);
-
-    try {
-      const response = await apiClient.resolveConnection();
-      // Update stored server name
-      let configChanged = false;
-      if (server.name !== response.server_name) {
-        server.name = response.server_name;
-        configChanged = true;
-      }
-
-      // Fetch external URL from server-info (same as iOS fetchExternalURL)
-      try {
-        const info = await apiClient.getServerInfo();
-        if (info.external_url && server.externalURL !== info.external_url) {
-          server.externalURL = info.external_url;
-          apiClient.configure(server.localURL, server.externalURL, apiKey ?? undefined);
-          configChanged = true;
-        }
-      } catch {
-        // Non-critical — external URL is optional
-      }
-
-      if (configChanged) {
-        configStore.serverConfig = server;
-      }
-
-      const state = apiClient.connectionState;
-      state.serverName = response.server_name;
-      state.serverVersion = response.version;
-
-      // Notify background prefetch that connection is ready
-      bgPrefetchService?.notifyConnected();
-
-      return state;
-    } catch {
-      return { connected: false };
-    }
+    return performConnect();
   });
 
   ipcMain.handle('server:getConnectionStatus', (): ConnectionState => {
@@ -475,6 +497,23 @@ export function registerIPCHandlers(): void {
   ipcMain.handle('cache:triggerPrefetch', async (): Promise<void> => {
     if (bgPrefetchService) {
       await bgPrefetchService.runOnce();
+    }
+  });
+
+  // ── Connection Monitor ──
+
+  ipcMain.handle('server:goOffline', (): void => {
+    connectionMonitor?.notifyManualOffline();
+  });
+
+  // ── System ──
+
+  ipcMain.handle('system:getDiskSpace', (): number | null => {
+    try {
+      const stat = statfsSync(getConfigDir());
+      return stat.bfree * stat.bsize;
+    } catch {
+      return null;
     }
   });
 
