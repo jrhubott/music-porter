@@ -6042,6 +6042,12 @@ class SyncManager:
                         else:
                             self.logger.file_info(
                                 f"Copied: {src_file.name}")
+                        if self.sync_tracker and not dry_run:
+                            record_name = dst_file.name
+                            pl_name = (playlist_name
+                                       or source_path.parent.name)
+                            self.sync_tracker.record_file(
+                                dest_key, pl_name, record_name)
                     else:
                         stats.files_skipped += 1
                         if self.logger.verbose:
@@ -6050,13 +6056,6 @@ class SyncManager:
                         else:
                             self.logger.file_info(
                                 f"Skipped (unchanged): {src_file.name}")
-
-                    if self.sync_tracker and not dry_run:
-                        record_name = dst_file.name
-                        pl_name = (playlist_name
-                                   or source_path.parent.name)
-                        self.sync_tracker.record_file(
-                            dest_key, pl_name, record_name)
 
                 except Exception as e:
                     stats.files_failed += 1

@@ -1129,12 +1129,19 @@ def api_files_download(playlist_key, filename):
     tag_applicator = mp.TagApplicator(ctx.track_db,
                                       project_root=str(ctx.project_root))
 
+    # Resolve human-readable playlist name from config
+    playlist_display_name = playlist_key
+    config = ctx.get_config()
+    pl_cfg = config.get_playlist_by_key(playlist_key)
+    if pl_cfg:
+        playlist_display_name = pl_cfg.name
+
     # Use profile-formatted filename for Content-Disposition
     profile_download_name = tag_applicator.build_output_filename(
-        track_meta, profile, playlist_key)
+        track_meta, profile, playlist_display_name)
 
     id3_bytes, audio_offset, total_size = tag_applicator.build_tagged_stream(
-        str(file_path), track_meta, profile, playlist_key)
+        str(file_path), track_meta, profile, playlist_display_name)
 
     def _generate():
         yield id3_bytes
@@ -1602,9 +1609,11 @@ def api_sync_run():
         tag_applicator = mp.TagApplicator(ctx.track_db,
                                           project_root=str(ctx.project_root))
 
-        # Derive playlist name from source_dir (library/<key>/output)
+        # Derive playlist display name from source_dir (library/<key>/output)
         source_parts = Path(source_dir).parts
-        playlist_name = source_parts[-2] if len(source_parts) >= 2 else source_parts[-1]
+        playlist_key_from_path = source_parts[-2] if len(source_parts) >= 2 else source_parts[-1]
+        pl_cfg = config.get_playlist_by_key(playlist_key_from_path)
+        playlist_name = pl_cfg.name if pl_cfg else playlist_key_from_path
 
         sync_mgr = mp.SyncManager(logger, display_handler=display,
                                   cancel_event=task.cancel_event,

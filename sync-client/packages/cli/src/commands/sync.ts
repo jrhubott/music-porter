@@ -24,6 +24,7 @@ export function registerSyncCommand(program: Command): void {
     .option('--profile <name>', 'Output profile to use (determines USB directory)')
     .option('--concurrency <n>', 'Number of parallel downloads', String(DEFAULT_CONCURRENCY))
     .option('--dry-run', 'Preview sync without downloading')
+    .option('--force', 'Force re-download all files (ignore manifest and disk cache)')
     .action(async (opts: {
       playlist?: string;
       dest?: string;
@@ -31,6 +32,7 @@ export function registerSyncCommand(program: Command): void {
       profile?: string;
       concurrency?: string;
       dryRun?: boolean;
+      force?: boolean;
     }) => {
       const client = await createConnectedClient();
       if (!client) return;
@@ -113,6 +115,7 @@ export function registerSyncCommand(program: Command): void {
           concurrency,
           signal: abortController.signal,
           dryRun: opts.dryRun,
+          force: opts.force,
           onProgress: (progress: SyncProgress) => {
             if (progress.phase === 'discovering') {
               // Don't start bar yet

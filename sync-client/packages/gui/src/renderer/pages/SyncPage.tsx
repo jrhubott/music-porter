@@ -131,7 +131,7 @@ export function SyncPage() {
     }
   }
 
-  async function startSync() {
+  async function startSync(force = false) {
     if (!destPath) return;
     setIsSyncing(true);
     setLastSyncResult(null);
@@ -145,6 +145,7 @@ export function SyncPage() {
         playlists: selectedPlaylists.size > 0 ? [...selectedPlaylists] : undefined,
         usbDriveName: syncDrive?.name,
         profile: activeProfile || undefined,
+        force,
       });
       setLastSyncResult(result);
 
@@ -347,10 +348,21 @@ export function SyncPage() {
             Cancel
           </button>
         ) : (
-          <button className="btn btn-primary" onClick={startSync} disabled={!destPath}>
-            <i className="bi bi-arrow-repeat me-1" />
-            Start Sync{selectedPlaylists.size > 0 ? ` (${selectedPlaylists.size})` : ' All'}
-          </button>
+          <>
+            <button className="btn btn-primary" onClick={() => startSync()} disabled={!destPath}>
+              <i className="bi bi-arrow-repeat me-1" />
+              Start Sync{selectedPlaylists.size > 0 ? ` (${selectedPlaylists.size})` : ' All'}
+            </button>
+            <button
+              className="btn btn-outline-warning"
+              onClick={() => startSync(true)}
+              disabled={!destPath}
+              title="Re-download all files regardless of sync status"
+            >
+              <i className="bi bi-arrow-clockwise me-1" />
+              Force Re-sync{selectedPlaylists.size > 0 ? ` (${selectedPlaylists.size})` : ' All'}
+            </button>
+          </>
         )}
       </div>
 

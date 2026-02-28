@@ -29,6 +29,8 @@ export interface SyncOptions {
   signal?: AbortSignal;
   /** Preview only — don't download files. */
   dryRun?: boolean;
+  /** Force re-download all files (ignore manifest and disk cache). */
+  force?: boolean;
   /** Progress callback. */
   onProgress?: ProgressCallback;
   /** Log callback. */
@@ -117,6 +119,9 @@ export class SyncEngine {
     }
 
     log('info', `Found ${grandTotal} files across ${playlistFileList.length} playlists`);
+    if (options.force) {
+      log('info', 'Force mode: all files will be re-downloaded');
+    }
 
     // Phase 6: Sync each playlist
     let totalCopied = 0;
@@ -147,52 +152,55 @@ export class SyncEngine {
         // Build subdirectory: prefer server-provided output_subdir, fall back to playlist key
         const subdir = file.output_subdir ?? key;
         const manifestKey = subdir ? `${subdir}/${diskName}` : diskName;
-
-        const manifestSize = manifestFiles[manifestKey];
-        if (manifestSize !== undefined && manifestSize === file.size) {
-          // Skip — manifest says this file is current
-          totalSkipped++;
-          processed++;
-          syncedFiles[manifestKey] = file.size;
-          onProgress({
-            phase: 'syncing',
-            playlist: key,
-            file: diskName,
-            subdir,
-            processed,
-            total: grandTotal,
-            copied: totalCopied,
-            skipped: totalSkipped,
-            failed: totalFailed,
-          });
-          continue;
-        }
-
-        // Check disk
         const fileDir = subdir ? join(destDir, subdir) : destDir;
         const filePath = join(fileDir, diskName);
-        if (existsSync(filePath)) {
-          try {
-            const stat = statSync(filePath);
-            if (stat.size === file.size) {
-              totalSkipped++;
-              processed++;
-              syncedFiles[manifestKey] = file.size;
-              onProgress({
-                phase: 'syncing',
-                playlist: key,
-                file: diskName,
-                subdir,
-                processed,
-                total: grandTotal,
-                copied: totalCopied,
-                skipped: totalSkipped,
-                failed: totalFailed,
-              });
-              continue;
+
+        if (!options.force) {
+          const manifestSize = manifestFiles[manifestKey];
+          if (manifestSize !== undefined && manifestSize === file.size
+              && existsSync(filePath)) {
+            // Skip — manifest says this file is current and file exists on disk
+            totalSkipped++;
+            processed++;
+            syncedFiles[manifestKey] = file.size;
+            onProgress({
+              phase: 'syncing',
+              playlist: key,
+              file: diskName,
+              subdir,
+              processed,
+              total: grandTotal,
+              copied: totalCopied,
+              skipped: totalSkipped,
+              failed: totalFailed,
+            });
+            continue;
+          }
+
+          // Check disk
+          if (existsSync(filePath)) {
+            try {
+              const stat = statSync(filePath);
+              if (stat.size === file.size) {
+                totalSkipped++;
+                processed++;
+                syncedFiles[manifestKey] = file.size;
+                onProgress({
+                  phase: 'syncing',
+                  playlist: key,
+                  file: diskName,
+                  subdir,
+                  processed,
+                  total: grandTotal,
+                  copied: totalCopied,
+                  skipped: totalSkipped,
+                  failed: totalFailed,
+                });
+                continue;
+              }
+            } catch {
+              // Can't stat — will download
             }
-          } catch {
-            // Can't stat — will download
           }
         }
 

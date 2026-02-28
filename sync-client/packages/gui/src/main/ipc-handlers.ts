@@ -159,6 +159,7 @@ export function registerIPCHandlers(): void {
         concurrency?: number;
         usbDriveName?: string;
         profile?: string;
+        force?: boolean;
       },
     ): Promise<SyncResult> => {
       activeSyncAbort = new AbortController();
@@ -169,6 +170,7 @@ export function registerIPCHandlers(): void {
         syncKey: opts.syncKey,
         usbDriveName: opts.usbDriveName,
         profile: opts.profile,
+        force: opts.force,
         concurrency: opts.concurrency,
         signal: activeSyncAbort.signal,
         onProgress: (progress: SyncProgress) => {
