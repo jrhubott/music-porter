@@ -111,74 +111,90 @@ export function App() {
           ))}
         </ul>
 
-        {/* Connection status */}
-        <div className="connection-badge">
-          <span className={`dot${isOffline ? ' dot-warning' : ''}`} />
-          <span>
-            {isOffline ? (
-              <>
-                <i className="bi bi-cloud-slash me-1" />
-                Offline
-              </>
-            ) : connection.type === 'external' ? (
-              <>
-                <i className="bi bi-globe me-1" />
-                External
-              </>
-            ) : (
-              <>
-                <i className="bi bi-house me-1" />
-                Local
-              </>
-            )}
-          </span>
-        </div>
+        {/* Bottom status area */}
+        <div className="sidebar-status">
+          {/* Sidebar prefetch indicator */}
+          {sidebarPrefetch && sidebarPrefetch.phase === 'syncing' && (sidebarPrefetch.copied > 0 || sidebarPrefetch.total > sidebarPrefetch.skipped) && (
+            <div className="sidebar-prefetch">
+              <div className="d-flex justify-content-between align-items-center mb-1">
+                <small className="text-info">
+                  <i className="bi bi-cloud-download me-1" />
+                  Caching
+                </small>
+                <small className="text-secondary">
+                  {sidebarPrefetch.total > 0
+                    ? Math.round((sidebarPrefetch.processed / sidebarPrefetch.total) * 100)
+                    : 0}%
+                </small>
+              </div>
+              <div className="progress" style={{ height: 3 }}>
+                <div
+                  className="progress-bar bg-info"
+                  style={{
+                    width: `${sidebarPrefetch.total > 0
+                      ? (sidebarPrefetch.processed / sidebarPrefetch.total) * 100
+                      : 0}%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
+          {cacheUpdated && (
+            <div className="sidebar-prefetch">
+              <small className="text-success">
+                <i className="bi bi-check-circle me-1" />
+                Cache updated
+              </small>
+            </div>
+          )}
+          {!sidebarPrefetch && !cacheUpdated && backgroundPrefetchStatus?.lastResult
+            && backgroundPrefetchStatus.lastResult.failed === 0
+            && backgroundPrefetchStatus.lastResult.capacityCapped === 0
+            && (backgroundPrefetchStatus.lastResult.skipped > 0
+              || backgroundPrefetchStatus.lastResult.downloaded > 0) && (
+            <div className="connection-badge">
+              <span className="dot" />
+              <span>
+                <i className="bi bi-database-check me-1" />
+                Cache good
+              </span>
+            </div>
+          )}
+          {!sidebarPrefetch && !cacheUpdated && backgroundPrefetchStatus?.lastResult
+            && (backgroundPrefetchStatus.lastResult.failed > 0
+              || backgroundPrefetchStatus.lastResult.capacityCapped > 0) && (
+            <div className="connection-badge">
+              <span className="dot disconnected" />
+              <span>
+                <i className="bi bi-database-exclamation me-1" />
+                Cache incomplete
+              </span>
+            </div>
+          )}
 
-        {/* Sidebar prefetch indicator */}
-        {sidebarPrefetch && sidebarPrefetch.phase === 'syncing' && (sidebarPrefetch.copied > 0 || sidebarPrefetch.total > sidebarPrefetch.skipped) && (
-          <div className="sidebar-prefetch">
-            <div className="d-flex justify-content-between align-items-center mb-1">
-              <small className="text-info">
-                <i className="bi bi-cloud-download me-1" />
-                Caching
-              </small>
-              <small className="text-secondary">
-                {sidebarPrefetch.total > 0
-                  ? Math.round((sidebarPrefetch.processed / sidebarPrefetch.total) * 100)
-                  : 0}%
-              </small>
-            </div>
-            <div className="progress" style={{ height: 3 }}>
-              <div
-                className="progress-bar bg-info"
-                style={{
-                  width: `${sidebarPrefetch.total > 0
-                    ? (sidebarPrefetch.processed / sidebarPrefetch.total) * 100
-                    : 0}%`,
-                }}
-              />
-            </div>
+          {/* Connection status */}
+          <div className="connection-badge">
+            <span className={`dot${isOffline ? ' dot-warning' : ''}`} />
+            <span>
+              {isOffline ? (
+                <>
+                  <i className="bi bi-cloud-slash me-1" />
+                  Offline
+                </>
+              ) : connection.type === 'external' ? (
+                <>
+                  <i className="bi bi-globe me-1" />
+                  External
+                </>
+              ) : (
+                <>
+                  <i className="bi bi-house me-1" />
+                  Local
+                </>
+              )}
+            </span>
           </div>
-        )}
-        {cacheUpdated && (
-          <div className="sidebar-prefetch">
-            <small className="text-success">
-              <i className="bi bi-check-circle me-1" />
-              Cache updated
-            </small>
-          </div>
-        )}
-        {!sidebarPrefetch && !cacheUpdated && backgroundPrefetchStatus?.lastResult
-          && backgroundPrefetchStatus.lastResult.downloaded === 0
-          && backgroundPrefetchStatus.lastResult.failed === 0
-          && backgroundPrefetchStatus.lastResult.skipped > 0 && (
-          <div className="sidebar-prefetch">
-            <small className="text-secondary">
-              <i className="bi bi-database-check me-1" />
-              Cache good
-            </small>
-          </div>
-        )}
+        </div>
       </nav>
 
       {/* Content */}
