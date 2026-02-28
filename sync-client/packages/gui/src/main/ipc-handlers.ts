@@ -3,6 +3,7 @@ import {
   APIClient,
   CacheManager,
   ConfigStore,
+  MetadataCache,
   PrefetchEngine,
   SyncEngine,
   DriveManager,
@@ -56,6 +57,13 @@ function getCacheManager(): CacheManager | null {
   const profile = configStore.profile;
   if (!profile) return null;
   return new CacheManager(getConfigDir(), profile);
+}
+
+/** Get a MetadataCache for the current profile, or null if no profile set. */
+function getMetadataCache(): MetadataCache | null {
+  const profile = configStore.profile;
+  if (!profile) return null;
+  return new MetadataCache(getConfigDir(), profile);
 }
 
 /** Register all IPC handlers for renderer communication. */
@@ -210,6 +218,7 @@ export function registerIPCHandlers(): void {
       activeSyncAbort = new AbortController();
       const engine = new SyncEngine(apiClient);
       const cacheManager = getCacheManager() ?? undefined;
+      const metadataCache = getMetadataCache() ?? undefined;
 
       return engine.sync(opts.dest, {
         playlists: opts.playlists,
@@ -220,6 +229,7 @@ export function registerIPCHandlers(): void {
         concurrency: opts.concurrency,
         signal: activeSyncAbort.signal,
         cacheManager,
+        metadataCache,
         offlineOnly: opts.offlineOnly,
         onProgress: (progress: SyncProgress) => {
           event.sender.send('sync:progress', progress);
@@ -383,6 +393,7 @@ export function registerIPCHandlers(): void {
 
     activePrefetchAbort = new AbortController();
     const engine = new PrefetchEngine(apiClient, cm);
+    const mc = getMetadataCache() ?? undefined;
 
     return engine.prefetch({
       playlists: pinned,
@@ -390,6 +401,7 @@ export function registerIPCHandlers(): void {
       maxCacheBytes: configStore.preferences.maxCacheBytes,
       pinnedPlaylists: new Set(pinned),
       signal: activePrefetchAbort.signal,
+      metadataCache: mc,
       onProgress: (progress: SyncProgress) => {
         event.sender.send('cache:prefetchProgress', progress);
       },

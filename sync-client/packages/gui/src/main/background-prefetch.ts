@@ -3,6 +3,7 @@ import {
   APIClient,
   CacheManager,
   ConfigStore,
+  MetadataCache,
   PrefetchEngine,
   BACKGROUND_PREFETCH_INTERVAL_MS,
   getConfigDir,
@@ -109,6 +110,7 @@ export class BackgroundPrefetchService {
 
       // Step 2: Prefetch files
       const cacheManager = new CacheManager(getConfigDir(), profile);
+      const metadataCache = new MetadataCache(getConfigDir(), profile);
       const engine = new PrefetchEngine(this.apiClient, cacheManager);
       const pinnedSet = new Set(pinned);
 
@@ -117,6 +119,7 @@ export class BackgroundPrefetchService {
         profile,
         maxCacheBytes: this.configStore.preferences.maxCacheBytes,
         pinnedPlaylists: pinnedSet,
+        metadataCache,
         onProgress: (progress: SyncProgress) => {
           this.updateStatus({
             running: true,

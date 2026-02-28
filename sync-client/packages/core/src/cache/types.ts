@@ -31,6 +31,24 @@ export interface PlaylistCacheStatus {
   pinned: boolean;
 }
 
+// ── Metadata Cache ──
+
+import type { FileInfo } from '../types.js';
+
+export interface MetadataCacheData {
+  profile: string;
+  version: number;
+  playlists: Record<string, CachedPlaylistData>;
+}
+
+export interface CachedPlaylistData {
+  files: FileInfo[];
+  etag: string | null;
+  playlistName?: string;
+  fileCount: number;
+  cachedAt: string;
+}
+
 // ── Background Prefetch ──
 
 export interface BackgroundPrefetchStatus {

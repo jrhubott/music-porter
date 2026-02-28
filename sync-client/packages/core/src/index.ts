@@ -38,6 +38,8 @@ export type {
 export type {
   CacheEntry,
   CacheIndex,
+  CachedPlaylistData,
+  MetadataCacheData,
   PrefetchResult,
   PlaylistCacheStatus,
   BackgroundPrefetchStatus,
@@ -47,7 +49,9 @@ export {
   CACHE_INDEX_FILENAME,
   DEFAULT_MAX_CACHE_BYTES,
   BACKGROUND_PREFETCH_INTERVAL_MS,
+  METADATA_CACHE_FILENAME,
   CacheManager,
+  MetadataCache,
   PrefetchEngine,
   loadJsonIndex,
   saveJsonIndex,

@@ -1,6 +1,7 @@
 import { DEFAULT_CONCURRENCY, FILE_DOWNLOAD_TIMEOUT_MS } from '../constants.js';
 import type { APIClient } from '../api-client.js';
 import type { CacheManager } from './cache-manager.js';
+import type { MetadataCache } from './metadata-cache.js';
 import type { FileInfo } from '../types.js';
 import type { PrefetchResult } from './types.js';
 import type { LogCallback, ProgressCallback } from '../progress.js';
@@ -22,6 +23,8 @@ export interface PrefetchOptions {
   onProgress?: ProgressCallback;
   /** Log callback. */
   onLog?: LogCallback;
+  /** Optional metadata cache for ETag-based conditional requests. */
+  metadataCache?: MetadataCache;
 }
 
 /**

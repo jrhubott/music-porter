@@ -6,6 +6,7 @@ import {
   CacheManager,
   ConfigStore,
   DriveManager,
+  MetadataCache,
   SyncEngine,
   getConfigDir,
   EXIT_ERROR,
@@ -199,9 +200,12 @@ export function registerSyncCommand(program: Command): void {
 
       const engine = new SyncEngine(client);
 
-      // Instantiate cache manager if we have a resolved profile
+      // Instantiate cache manager and metadata cache if we have a resolved profile
       const cacheManager = resolvedProfileName
         ? new CacheManager(getConfigDir(), resolvedProfileName)
+        : undefined;
+      const metadataCache = resolvedProfileName
+        ? new MetadataCache(getConfigDir(), resolvedProfileName)
         : undefined;
 
       if (opts.dryRun) {
@@ -225,6 +229,7 @@ export function registerSyncCommand(program: Command): void {
           dryRun: opts.dryRun,
           force: opts.force,
           cacheManager,
+          metadataCache,
           onProgress: (progress: SyncProgress) => {
             if (progress.phase === 'discovering') {
               // Don't start bar yet

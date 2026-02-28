@@ -9,3 +9,6 @@ export const DEFAULT_MAX_CACHE_BYTES = 10 * 1024 * 1024 * 1024;
 
 /** Background prefetch interval (ms) — 5 minutes between cycles. */
 export const BACKGROUND_PREFETCH_INTERVAL_MS = 5 * 60 * 1000;
+
+/** Per-profile metadata cache filename. */
+export const METADATA_CACHE_FILENAME = 'metadata-cache.json';
