@@ -12,6 +12,7 @@ const FILE_PERMISSIONS = 0o600;
 const DEFAULT_PREFERENCES: SyncPreferences = {
   concurrency: DEFAULT_CONCURRENCY,
   autoSyncDrives: [],
+  ejectAfterSync: false,
   notifications: true,
 };
 

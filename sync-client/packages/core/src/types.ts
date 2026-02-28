@@ -204,6 +204,7 @@ export interface SettingsResponse {
 export interface SyncPreferences {
   concurrency: number;
   autoSyncDrives: string[];
+  ejectAfterSync: boolean;
   notifications: boolean;
 }
 

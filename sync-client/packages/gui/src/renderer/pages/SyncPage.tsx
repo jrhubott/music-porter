@@ -40,11 +40,14 @@ export function SyncPage() {
     lastSyncResult,
     setLastSyncResult,
     drives,
+    setDrives,
   } = useAppState();
 
   const [destPath, setDestPath] = useState('');
   const [selectedDrive, setSelectedDrive] = useState<DriveInfo | null>(null);
   const [autoSyncDrives, setAutoSyncDrives] = useState<string[]>([]);
+  const [ejectAfterSync, setEjectAfterSync] = useState(false);
+  const [ejected, setEjected] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -65,6 +68,7 @@ export function SyncPage() {
       setPlaylists(playlistData);
       setServerProfiles(settingsData.profiles);
       setAutoSyncDrives(prefs.autoSyncDrives);
+      setEjectAfterSync(prefs.ejectAfterSync);
 
       // Restore active profile: saved > server default > first available
       if (!activeProfile) {
@@ -91,6 +95,24 @@ export function SyncPage() {
     await ipc.updatePreferences({ autoSyncDrives: updated });
   }
 
+  async function toggleEjectAfterSync() {
+    const updated = !ejectAfterSync;
+    setEjectAfterSync(updated);
+    await ipc.updatePreferences({ ejectAfterSync: updated });
+  }
+
+  async function ejectSelectedDrive() {
+    if (!selectedDrive) return;
+    const success = await ipc.ejectDrive(selectedDrive.path);
+    if (success) {
+      setEjected(true);
+      setSelectedDrive(null);
+      setDestPath('');
+      const updated = await ipc.listDrives();
+      setDrives(updated);
+    }
+  }
+
   // Resolve USB directory from active profile
   const profile = serverProfiles[activeProfile];
   const usbDir = profile?.usb_dir ?? '';
@@ -114,15 +136,32 @@ export function SyncPage() {
     setIsSyncing(true);
     setLastSyncResult(null);
     setSyncProgress(null);
+    setEjected(false);
 
+    const syncDrive = selectedDrive;
     try {
       const result = await ipc.startSync({
         dest: destPath,
         playlists: selectedPlaylists.size > 0 ? [...selectedPlaylists] : undefined,
-        usbDriveName: selectedDrive?.name,
+        usbDriveName: syncDrive?.name,
         profile: activeProfile || undefined,
       });
       setLastSyncResult(result);
+
+      // Auto-eject on successful USB sync when auto-sync or eject-after-sync is enabled
+      const syncSucceeded = !result.aborted && result.failed === 0;
+      const shouldAutoEject = syncDrive && syncSucceeded
+        && (autoSyncDrives.includes(syncDrive.name) || ejectAfterSync);
+      if (shouldAutoEject) {
+        const success = await ipc.ejectDrive(syncDrive.path);
+        if (success) {
+          setEjected(true);
+          setSelectedDrive(null);
+          setDestPath('');
+          const updated = await ipc.listDrives();
+          setDrives(updated);
+        }
+      }
     } catch {
       // Error handled via progress
     }
@@ -272,6 +311,17 @@ export function SyncPage() {
                       Auto-sync
                     </label>
                   </div>
+                  <div className="form-check form-switch mb-0">
+                    <input
+                      className="form-check-input"
+                      type="checkbox"
+                      checked={ejectAfterSync}
+                      onChange={toggleEjectAfterSync}
+                    />
+                    <label className="form-check-label small">
+                      Eject when done
+                    </label>
+                  </div>
                 </div>
               )}
             </div>
@@ -351,6 +401,18 @@ export function SyncPage() {
           {lastSyncResult.failed > 0 && <div>Failed: {lastSyncResult.failed}</div>}
           <div>Duration: {formatDuration(lastSyncResult.durationMs)}</div>
           <div>Sync Key: {lastSyncResult.syncKey}</div>
+          {ejected && (
+            <div className="mt-2 text-success">
+              <i className="bi bi-eject-fill me-1" />
+              Drive ejected
+            </div>
+          )}
+          {selectedDrive && !ejected && (
+            <button className="btn btn-sm btn-outline-warning mt-2" onClick={ejectSelectedDrive}>
+              <i className="bi bi-eject me-1" />
+              Eject {selectedDrive.name}
+            </button>
+          )}
         </div>
       )}
     </div>
