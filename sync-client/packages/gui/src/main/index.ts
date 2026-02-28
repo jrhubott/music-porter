@@ -1,4 +1,4 @@
-import { app, BrowserWindow, nativeImage, nativeTheme } from 'electron';
+import { app, BrowserWindow, nativeImage, nativeTheme, screen } from 'electron';
 import { join, dirname } from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -34,13 +34,26 @@ function getAppIcon(): Electron.NativeImage | undefined {
   return undefined;
 }
 
+/** Check whether saved window bounds overlap a visible display. */
+function isOnScreen(x: number, y: number, width: number, height: number): boolean {
+  const rect = { x, y, width, height };
+  const display = screen.getDisplayMatching(rect);
+  const { x: dx, y: dy, width: dw, height: dh } = display.workArea;
+  // At least some portion of the window must be within the display work area
+  return x + width > dx && x < dx + dw && y + height > dy && y < dy + dh;
+}
+
 function createWindow(): void {
   nativeTheme.themeSource = 'dark';
 
+  const saved = configStore.windowState;
+  const useSaved = saved && isOnScreen(saved.x, saved.y, saved.width, saved.height);
+
   const icon = getAppIcon();
   mainWindow = new BrowserWindow({
-    width: WINDOW_WIDTH,
-    height: WINDOW_HEIGHT,
+    width: useSaved ? saved.width : WINDOW_WIDTH,
+    height: useSaved ? saved.height : WINDOW_HEIGHT,
+    ...(useSaved ? { x: saved.x, y: saved.y } : {}),
     minWidth: MIN_WIDTH,
     minHeight: MIN_HEIGHT,
     title: 'Music Porter Sync',
@@ -54,6 +67,10 @@ function createWindow(): void {
     },
   });
 
+  if (useSaved && saved.isMaximized) {
+    mainWindow.maximize();
+  }
+
   if (process.env['VITE_DEV_SERVER_URL']) {
     mainWindow.loadURL(process.env['VITE_DEV_SERVER_URL']);
   } else {
@@ -63,6 +80,13 @@ function createWindow(): void {
   if (DEBUG) {
     mainWindow.webContents.openDevTools();
   }
+
+  mainWindow.on('close', () => {
+    if (!mainWindow) return;
+    const isMaximized = mainWindow.isMaximized();
+    const { x, y, width, height } = mainWindow.getNormalBounds();
+    configStore.windowState = { x, y, width, height, isMaximized };
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;

@@ -260,6 +260,16 @@ export interface BackgroundPrefetchStatus {
   lastResult?: PrefetchResult;
 }
 
+// ── Window State ──
+
+export interface WindowState {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  isMaximized: boolean;
+}
+
 // ── Config ──
 
 export interface SyncPreferences {
@@ -277,4 +287,5 @@ export interface AppConfig {
   server: ServerConfig | null;
   preferences: SyncPreferences;
   profile?: string;
+  windowState?: WindowState;
 }

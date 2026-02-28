@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync, chmodSync, existsSync, unlinkSy
 import { join, dirname } from 'node:path';
 import { getConfigDir } from './platform.js';
 import { ConfigError } from './errors.js';
-import type { AppConfig, ServerConfig, SyncPreferences } from './types.js';
+import type { AppConfig, ServerConfig, SyncPreferences, WindowState } from './types.js';
 import { DEFAULT_CONCURRENCY, DEFAULT_MAX_CACHE_BYTES } from './constants.js';
 
 const CONFIG_FILENAME = 'config.json';
@@ -195,6 +195,17 @@ export class ConfigStore {
     return newlyPinned;
   }
 
+  // ── Window State ──
+
+  get windowState(): WindowState | undefined {
+    return this.config.windowState;
+  }
+
+  set windowState(state: WindowState | undefined) {
+    this.config.windowState = state;
+    this.save();
+  }
+
   // ── API Key (separate file with restricted permissions) ──
 
   getApiKey(): string | null {
@@ -246,6 +257,7 @@ export class ConfigStore {
         server: parsed.server ?? null,
         preferences: prefs,
         profile: parsed.profile,
+        windowState: parsed.windowState,
       };
     } catch (err) {
       throw new ConfigError(`Failed to load config: ${err}`);

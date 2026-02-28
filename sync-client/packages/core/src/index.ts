@@ -35,6 +35,7 @@ export type {
   SyncResult,
   SyncStatusDetail,
   BackgroundPrefetchStatus,
+  WindowState,
 } from './types.js';
 
 // Constants
