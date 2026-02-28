@@ -19,12 +19,8 @@ struct PlaylistsView: View {
     @State private var exportScope: ExportScope = .all
     @State private var downloadTask: Task<Void, Never>?
     @State private var downloadError: String?
-
-    // Delete server data state
-    @State private var serverDeleteKey: String?
-    @State private var serverDeleteSource = true
-    @State private var serverDeleteExport = true
-    @State private var serverDeleteConfig = false
+    @State private var showExportConfirmation = false
+    @State private var selectedExportURL: URL?
 
     var body: some View {
         @Bindable var vmBindable = vm
@@ -58,8 +54,38 @@ struct PlaylistsView: View {
                 DocumentExportPicker { url in
                     showExportPicker = false
                     if let url {
-                        Task { await exportToFolder(url) }
+                        selectedExportURL = url
+                        showExportConfirmation = true
                     }
+                }
+            }
+            .alert("Confirm Export", isPresented: $showExportConfirmation) {
+                if shouldSuggestDefaultPath {
+                    Button("Export to \(vm.defaultUsbDir)") {
+                        if let url = selectedExportURL {
+                            Task { await exportToFolder(url, subdirectory: vm.defaultUsbDir) }
+                        }
+                    }
+                    Button("Export Here") {
+                        if let url = selectedExportURL {
+                            Task { await exportToFolder(url) }
+                        }
+                    }
+                } else {
+                    Button("Export") {
+                        if let url = selectedExportURL {
+                            Task { await exportToFolder(url) }
+                        }
+                    }
+                }
+                Button("Cancel", role: .cancel) {
+                    selectedExportURL = nil
+                }
+            } message: {
+                if shouldSuggestDefaultPath {
+                    Text("\(exportFileCount) files will be exported to:\n\(selectedExportURL?.path ?? "")\n\nThis looks like the root of a drive. Export to \(vm.defaultUsbDir) instead?")
+                } else {
+                    Text("\(exportFileCount) files will be exported to:\n\(selectedExportURL?.path ?? "")")
                 }
             }
             .alert("Delete Local Files?", isPresented: Binding(
@@ -76,30 +102,6 @@ struct PlaylistsView: View {
                 if let name = playlistToDelete {
                     Text("All downloaded files for \"\(name)\" will be removed from this device.")
                 }
-            }
-            .sheet(isPresented: Binding(
-                get: { serverDeleteKey != nil },
-                set: { if !$0 { serverDeleteKey = nil } }
-            )) {
-                DeleteServerDataSheet(
-                    key: serverDeleteKey ?? "",
-                    deleteSource: $serverDeleteSource,
-                    deleteExport: $serverDeleteExport,
-                    removeConfig: $serverDeleteConfig
-                ) {
-                    if let key = serverDeleteKey {
-                        Task {
-                            await vm.deletePlaylistData(
-                                api: appState.apiClient, key: key,
-                                deleteSource: serverDeleteSource,
-                                deleteExport: serverDeleteExport,
-                                removeConfig: serverDeleteConfig)
-                            await load()
-                        }
-                    }
-                    serverDeleteKey = nil
-                }
-                .presentationDetents([.medium])
             }
             .refreshable {
                 await load()
@@ -305,14 +307,6 @@ struct PlaylistsView: View {
             }
         }
         .swipeActions(edge: .trailing) {
-            Button(role: .destructive) {
-                serverDeleteSource = true
-                serverDeleteExport = true
-                serverDeleteConfig = false
-                serverDeleteKey = playlist.key
-            } label: {
-                Label("Delete Server Data", systemImage: "server.rack")
-            }
             if hasLocal {
                 Button(role: .destructive) {
                     playlistToDelete = playlist.key
@@ -359,6 +353,22 @@ struct PlaylistsView: View {
 
     private var hasLocalFiles: Bool {
         vm.exportDirs.contains { !appState.downloadManager.localFiles(playlist: $0.name).isEmpty }
+    }
+
+    private var exportFileCount: Int {
+        switch exportScope {
+        case .all:
+            return vm.exportDirs.reduce(0) { $0 + appState.downloadManager.localFiles(playlist: $1.name).count }
+        case .playlist(let name):
+            return appState.downloadManager.localFiles(playlist: name).count
+        }
+    }
+
+    private var shouldSuggestDefaultPath: Bool {
+        guard let url = selectedExportURL else { return false }
+        let path = url.path
+        let usbDir = vm.defaultUsbDir
+        return !path.hasSuffix("/\(usbDir)") && !path.contains("/\(usbDir)/")
     }
 
     // MARK: - Actions
@@ -409,12 +419,8 @@ struct PlaylistsView: View {
         downloadTask?.cancel()
     }
 
-    private func exportToFolder(_ destDir: URL) async {
+    private func exportToFolder(_ destDir: URL, subdirectory: String? = nil) async {
         appState.usbExport.reset()
-
-        // Append profile's USB directory if configured
-        let usbDir = appState.usbDir
-        let targetDir = usbDir.isEmpty ? destDir : destDir.appendingPathComponent(usbDir)
 
         let urls: [URL]
         switch exportScope {
@@ -429,7 +435,7 @@ struct PlaylistsView: View {
             return
         }
 
-        _ = await appState.usbExport.exportFiles(urls: urls, to: targetDir)
+        _ = await appState.usbExport.exportFiles(urls: urls, to: destDir, subdirectory: subdirectory)
     }
 
     private func deleteLocal(_ name: String) {
@@ -438,53 +444,6 @@ struct PlaylistsView: View {
             storageUsed = appState.downloadManager.localStorageUsed()
         } catch {
             downloadError = error.localizedDescription
-        }
-    }
-}
-
-/// Sheet for selecting what server data to delete for a playlist.
-struct DeleteServerDataSheet: View {
-    @Environment(\.dismiss) private var dismiss
-
-    let key: String
-    @Binding var deleteSource: Bool
-    @Binding var deleteExport: Bool
-    @Binding var removeConfig: Bool
-    let onDelete: () -> Void
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    Text("Delete data for \"\(key)\" from the server.")
-                        .foregroundStyle(.secondary)
-                }
-                Section("Options") {
-                    Toggle("Source files", isOn: $deleteSource)
-                    Toggle("Export files", isOn: $deleteExport)
-                    Toggle("Remove from config", isOn: $removeConfig)
-                }
-                Section {
-                    Button(role: .destructive) {
-                        onDelete()
-                    } label: {
-                        HStack {
-                            Spacer()
-                            Text("Delete")
-                                .fontWeight(.semibold)
-                            Spacer()
-                        }
-                    }
-                    .disabled(!deleteSource && !deleteExport && !removeConfig)
-                }
-            }
-            .navigationTitle("Delete Server Data")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
         }
     }
 }

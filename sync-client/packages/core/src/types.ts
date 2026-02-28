@@ -136,6 +136,7 @@ export interface SyncProgress {
   phase: SyncPhase;
   playlist?: string;
   file?: string;
+  subdir?: string;
   processed: number;
   total: number;
   copied: number;

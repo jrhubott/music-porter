@@ -324,7 +324,9 @@ export function SyncPage() {
             </div>
             {progress.file && (
               <small className="text-secondary mt-2 d-block text-truncate">
-                {progress.playlist}/{progress.file}
+                {progress.subdir !== undefined
+                  ? (progress.subdir ? `${progress.subdir}/${progress.file}` : progress.file)
+                  : `${progress.playlist}/${progress.file}`}
               </small>
             )}
             <div className="d-flex gap-3 mt-2">

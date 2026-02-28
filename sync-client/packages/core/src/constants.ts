@@ -51,3 +51,6 @@ export const USB_SYNC_KEY_PREFIX = 'usbkey-';
 
 /** Sync key prefix for generic client destinations. */
 export const CLIENT_SYNC_KEY_PREFIX = 'client-';
+
+/** Per-file download timeout (ms) — 5 minutes, generous for large files on slow USB. */
+export const FILE_DOWNLOAD_TIMEOUT_MS = 300_000;

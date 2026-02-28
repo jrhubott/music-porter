@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, statSync, createWriteStream, renameSync, unlinkS
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
-import { CLIENT_SYNC_KEY_PREFIX, DEFAULT_CONCURRENCY, TEMP_SUFFIX, USB_SYNC_KEY_PREFIX } from './constants.js';
+import { CLIENT_SYNC_KEY_PREFIX, DEFAULT_CONCURRENCY, FILE_DOWNLOAD_TIMEOUT_MS, TEMP_SUFFIX, USB_SYNC_KEY_PREFIX } from './constants.js';
 import type { APIClient } from './api-client.js';
 import type { FileInfo, SyncManifest, SyncResult } from './types.js';
 import type { LogCallback, ProgressCallback } from './progress.js';
@@ -158,6 +158,7 @@ export class SyncEngine {
             phase: 'syncing',
             playlist: key,
             file: diskName,
+            subdir,
             processed,
             total: grandTotal,
             copied: totalCopied,
@@ -181,6 +182,7 @@ export class SyncEngine {
                 phase: 'syncing',
                 playlist: key,
                 file: diskName,
+                subdir,
                 processed,
                 total: grandTotal,
                 copied: totalCopied,
@@ -199,31 +201,23 @@ export class SyncEngine {
 
       if (aborted) break;
 
-      // Record skipped files on server (fire-and-forget)
-      if (!options.dryRun && Object.keys(syncedFiles).length > 0) {
-        this.client
-          .recordSync(syncKey, key, Object.keys(syncedFiles))
-          .catch(() => {});
-      }
-
       // Download files with concurrency limit
       if (!options.dryRun) {
         const results = await this.downloadBatch(
           key,
           filesToDownload,
           destDir,
-          syncKey,
           concurrency,
           options.profile,
           options.signal,
           (file, success) => {
             const dn = file.display_filename || file.filename;
-            const subdir = file.output_subdir ?? key;
-            const manifestKey = subdir ? `${subdir}/${dn}` : dn;
+            const fileSubdir = file.output_subdir ?? key;
+            const fileManifestKey = fileSubdir ? `${fileSubdir}/${dn}` : dn;
             processed++;
             if (success) {
               totalCopied++;
-              syncedFiles[manifestKey] = file.size;
+              syncedFiles[fileManifestKey] = file.size;
             } else {
               totalFailed++;
             }
@@ -231,6 +225,7 @@ export class SyncEngine {
               phase: 'syncing',
               playlist: key,
               file: dn,
+              subdir: fileSubdir,
               processed,
               total: grandTotal,
               copied: totalCopied,
@@ -248,20 +243,30 @@ export class SyncEngine {
         // Dry run — count as would-be copies
         for (const file of filesToDownload) {
           const dn = file.display_filename || file.filename;
-          const subdir = file.output_subdir ?? key;
+          const drySubdir = file.output_subdir ?? key;
           processed++;
           totalCopied++;
-          log('info', `[dry-run] Would download: ${subdir ? subdir + '/' : ''}${dn}`);
+          log('info', `[dry-run] Would download: ${drySubdir ? drySubdir + '/' : ''}${dn}`);
           onProgress({
             phase: 'syncing',
             playlist: key,
             file: dn,
+            subdir: drySubdir,
             processed,
             total: grandTotal,
             copied: totalCopied,
             skipped: totalSkipped,
             failed: totalFailed,
           });
+        }
+      }
+
+      // Record all synced files (skipped + downloaded) to server in one batch
+      if (!options.dryRun && Object.keys(syncedFiles).length > 0) {
+        try {
+          await this.client.recordSync(syncKey, key, Object.keys(syncedFiles));
+        } catch (err) {
+          log('warn', `Failed to record sync for "${key}": ${err}`);
         }
       }
 
@@ -299,7 +304,6 @@ export class SyncEngine {
     playlistKey: string,
     files: FileInfo[],
     destDir: string,
-    syncKey: string,
     concurrency: number,
     profile: string | undefined,
     signal: AbortSignal | undefined,
@@ -318,14 +322,6 @@ export class SyncEngine {
         const file = files[index++]!;
         const success = await this.downloadFile(playlistKey, file, destDir, profile, signal, log);
         onFile(file, success);
-
-        // Record to server (fire-and-forget) — use display name (what's on disk)
-        if (success) {
-          const dn = file.display_filename || file.filename;
-          this.client
-            .recordSync(syncKey, playlistKey, [dn])
-            .catch(() => {});
-        }
       }
     };
 
@@ -355,7 +351,11 @@ export class SyncEngine {
     const tmpPath = filePath + TEMP_SUFFIX;
 
     try {
-      const { body } = await this.client.downloadFile(playlistKey, file.filename, profile, signal);
+      const timeoutSignal = AbortSignal.timeout(FILE_DOWNLOAD_TIMEOUT_MS);
+      const combinedSignal = signal
+        ? AbortSignal.any([signal, timeoutSignal])
+        : timeoutSignal;
+      const { body } = await this.client.downloadFile(playlistKey, file.filename, profile, combinedSignal);
       const nodeStream = Readable.fromWeb(body as import('node:stream/web').ReadableStream);
       const writeStream = createWriteStream(tmpPath);
       await pipeline(nodeStream, writeStream);
@@ -369,7 +369,12 @@ export class SyncEngine {
         // Ignore cleanup errors
       }
       if (signal?.aborted) return false;
-      log('error', `Failed to download ${playlistKey}/${file.filename}: ${err}`);
+      const isTimeout = err instanceof DOMException && err.name === 'TimeoutError';
+      if (isTimeout) {
+        log('warn', `Download timed out for ${playlistKey}/${file.filename}`);
+      } else {
+        log('error', `Failed to download ${playlistKey}/${file.filename}: ${err}`);
+      }
       return false;
     }
   }
