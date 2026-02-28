@@ -2840,6 +2840,26 @@ class TrackDB:
         finally:
             conn.close()
 
+    def get_playlist_fingerprint(self, playlist):
+        """Return a lightweight fingerprint (count + max_updated_at + total_size).
+
+        Changes when any track is added, removed, or updated.
+        Returns None if the playlist has no tracks.
+        """
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS cnt, MAX(updated_at) AS max_updated, "
+                "COALESCE(SUM(file_size_bytes), 0) AS total_size "
+                "FROM tracks WHERE playlist = ?",
+                (playlist,),
+            ).fetchone()
+            if not row or row["cnt"] == 0:
+                return None
+            return f"{row['cnt']}-{row['max_updated']}-{row['total_size']}"
+        finally:
+            conn.close()
+
 
 class EQConfigManager:
     """Persistent EQ configuration per profile/playlist using SQLite.
