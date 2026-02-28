@@ -3919,10 +3919,11 @@ def audit_library(track_db, project_root=None, logger=None,
                   sync_tracker=None):
     """Verify DB records match filesystem and clean up orphans.
 
-    Three phases:
+    Four phases:
     1. Verify DB records against filesystem (remove stale records, fix fields)
     2. Find orphan files on disk with no DB record (delete them)
-    3. Cross-check sync DB against track DB (remove stale sync records)
+    3. Deduplicate tracks sharing the same source M4A
+    4. Cross-check sync DB against track DB (remove stale sync records)
 
     Returns a structured summary dict.
     """
@@ -3940,6 +3941,7 @@ def audit_library(track_db, project_root=None, logger=None,
         'source_cleared': 0,
         'paths_normalized': 0,
         'sizes_updated': 0,
+        'duplicates_removed': 0,
         'sync_records_removed': 0,
         'details': [],
     }
@@ -4058,7 +4060,48 @@ def audit_library(track_db, project_root=None, logger=None,
                 _detail(f"Deleted orphan artwork: {rel_art}")
                 stats['orphan_artwork_removed'] += 1
 
-    # ── Phase 3: Cross-check sync DB against track DB ─────────────
+    # ── Phase 3: Deduplicate tracks sharing the same source M4A ──
+    if cancel_event and cancel_event.is_set():
+        logger.warn("Audit cancelled by user")
+        return stats
+
+    logger.info("=== Phase 3: Detecting duplicate source_m4a_path entries ===")
+    # Re-fetch tracks (Phase 1 may have deleted some)
+    tracks = track_db.get_all_tracks()
+    source_map = {}  # source_m4a_path → list of track dicts
+    for t in tracks:
+        src = t.get('source_m4a_path')
+        if src:
+            source_map.setdefault(src, []).append(t)
+
+    for src_path, dupes in source_map.items():
+        if len(dupes) < 2:
+            continue
+        # Keep the newest record (highest created_at), remove the rest
+        dupes.sort(key=lambda t: t.get('created_at', 0), reverse=True)
+        keeper = dupes[0]
+        for dup in dupes[1:]:
+            if cancel_event and cancel_event.is_set():
+                logger.warn("Audit cancelled by user")
+                return stats
+            dup_uuid = dup['uuid']
+            # Delete the duplicate MP3
+            dup_mp3 = root / dup.get('file_path', '')
+            if dup_mp3.is_file():
+                dup_mp3.unlink()
+            # Delete the duplicate artwork
+            dup_art = dup.get('cover_art_path')
+            if dup_art:
+                dup_art_path = root / dup_art
+                if dup_art_path.is_file():
+                    dup_art_path.unlink()
+            track_db.delete_track(dup_uuid)
+            _detail(
+                f"Removed duplicate: uuid={dup_uuid} "
+                f"(kept {keeper['uuid']}, source={src_path})")
+            stats['duplicates_removed'] += 1
+
+    # ── Phase 4: Cross-check sync DB against track DB ─────────────
     if sync_tracker:
         if cancel_event and cancel_event.is_set():
             logger.warn("Audit cancelled by user")
@@ -4083,7 +4126,7 @@ def audit_library(track_db, project_root=None, logger=None,
             stats['sync_records_removed'] = removed
             logger.info(f"Removed {removed} stale sync records")
     else:
-        logger.info("=== Phase 3: Skipped (no sync tracker) ===")
+        logger.info("=== Phase 4: Skipped (no sync tracker) ===")
 
     # ── Summary ───────────────────────────────────────────────────
     logger.info("=== Audit Summary ===")
@@ -4095,6 +4138,7 @@ def audit_library(track_db, project_root=None, logger=None,
     logger.info(f"  Source paths cleared:  {stats['source_cleared']}")
     logger.info(f"  Paths normalized:      {stats['paths_normalized']}")
     logger.info(f"  Sizes updated:         {stats['sizes_updated']}")
+    logger.info(f"  Duplicates removed:    {stats['duplicates_removed']}")
     logger.info(f"  Sync records removed:  {stats['sync_records_removed']}")
 
     return stats
