@@ -14,6 +14,7 @@ import re
 import time
 from datetime import date, datetime
 from pathlib import Path
+from urllib.parse import quote
 
 from flask import (
     Blueprint,
@@ -46,6 +47,17 @@ def _build_display_filename(track):
     if artist:
         return f"{mp.sanitize_filename(artist)} - {mp.sanitize_filename(title)}.mp3"
     return f"{mp.sanitize_filename(title)}.mp3"
+
+
+def _content_disposition(filename):
+    """Build RFC 5987 Content-Disposition for non-ASCII filenames."""
+    try:
+        filename.encode('latin-1')
+        return f'attachment; filename="{filename}"'
+    except UnicodeEncodeError:
+        ascii_fallback = filename.encode('ascii', 'replace').decode('ascii')
+        utf8_quoted = quote(filename)
+        return f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{utf8_quoted}"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1035,6 +1047,21 @@ def api_files_list(playlist_key):
                 entry['output_subdir'] = ''
         files.append(entry)
 
+    # Deduplicate display_filenames — append (2), (3), etc. for collisions.
+    # Scoped per output_subdir so cross-directory names don't collide.
+    seen = {}
+    for entry in files:
+        scope_key = entry.get('output_subdir', '')
+        disp = entry['display_filename']
+        full_key = (scope_key, disp)
+        if full_key in seen:
+            seen[full_key] += 1
+            stem, ext = disp.rsplit('.', 1) if '.' in disp else (disp, '')
+            suffix = f" ({seen[full_key]})"
+            entry['display_filename'] = f"{stem}{suffix}.{ext}" if ext else f"{stem}{suffix}"
+        else:
+            seen[full_key] = 1
+
     include_sync = request.args.get('include_sync', '').lower() == 'true'
     if include_sync and ctx.sync_tracker:
         sync_map = ctx.sync_tracker.get_file_sync_map(playlist_key)
@@ -1131,8 +1158,7 @@ def api_files_download(playlist_key, filename):
         mimetype='audio/mpeg',
         headers={
             'Content-Length': str(total_size),
-            'Content-Disposition': (
-                f'attachment; filename="{profile_download_name}"'),
+            'Content-Disposition': _content_disposition(profile_download_name),
         },
     )
 
@@ -1609,19 +1635,84 @@ def api_sync_run():
 
 @api_bp.route('/api/sync/status')
 def api_sync_status():
-    """Summary of all tracked sync keys."""
+    """Summary of all tracked sync keys.
+
+    Uses TrackDB for total file counts and sync_files table for synced
+    counts — avoids the broken filesystem-walk approach.
+    """
     ctx = _ctx()
-    library_dir = str(ctx.project_root / mp.get_library_dir())
-    results = ctx.sync_tracker.get_all_keys_summary(library_dir)
+    keys = ctx.sync_tracker.get_keys()
+    playlist_stats = {
+        s['playlist']: s['track_count']
+        for s in ctx.track_db.get_playlist_stats()
+    }
+    total_library_files = sum(playlist_stats.values())
+
+    results = []
+    for key_info in keys:
+        synced_counts = ctx.sync_tracker.get_synced_counts(
+            key_info['key_name'])
+        total_synced = sum(synced_counts.values())
+        results.append({
+            'key_name': key_info['key_name'],
+            'last_sync_at': key_info['last_sync_at'],
+            'total_files': total_library_files,
+            'synced_files': total_synced,
+            'new_files': total_library_files - total_synced,
+            'new_playlists': 0,
+        })
     return jsonify(results)
 
 
 @api_bp.route('/api/sync/status/<key>')
 def api_sync_status_detail(key):
-    """Per-playlist breakdown for one sync key."""
+    """Per-playlist breakdown for one sync key.
+
+    Uses TrackDB for total file counts and sync_files table for synced
+    counts — avoids the broken filesystem-walk approach.
+    """
     ctx = _ctx()
-    library_dir = str(ctx.project_root / mp.get_library_dir())
-    status = ctx.sync_tracker.get_sync_status(key, library_dir)
+
+    # Get key metadata
+    all_keys = ctx.sync_tracker.get_keys()
+    key_info = next((k for k in all_keys if k['key_name'] == key), None)
+    last_sync = key_info['last_sync_at'] if key_info else 0
+
+    playlist_stats = {
+        s['playlist']: s['track_count']
+        for s in ctx.track_db.get_playlist_stats()
+    }
+    synced_counts = ctx.sync_tracker.get_synced_counts(key)
+
+    playlists = []
+    total_files = 0
+    total_synced = 0
+    total_new = 0
+    new_playlist_count = 0
+
+    for playlist_name, track_count in sorted(playlist_stats.items()):
+        synced = synced_counts.get(playlist_name, 0)
+        new = track_count - synced
+        is_new_playlist = synced == 0
+
+        playlists.append({
+            'name': playlist_name,
+            'total_files': track_count,
+            'synced_files': synced,
+            'new_files': new,
+            'is_new_playlist': is_new_playlist,
+        })
+        total_files += track_count
+        total_synced += synced
+        total_new += new
+        if is_new_playlist:
+            new_playlist_count += 1
+
+    status = mp.SyncStatusResult(
+        sync_key=key, last_sync_at=last_sync,
+        playlists=playlists, total_files=total_files,
+        synced_files=total_synced, new_files=total_new,
+        new_playlists=new_playlist_count)
     return jsonify(status.to_dict())
 
 

@@ -2045,6 +2045,20 @@ class SyncTracker:
         finally:
             conn.close()
 
+    def get_synced_counts(self, sync_key):
+        """Return per-playlist synced file counts for a sync key."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT playlist, COUNT(*) AS cnt
+                   FROM sync_files WHERE sync_key = ?
+                   GROUP BY playlist""",
+                (sync_key,),
+            ).fetchall()
+            return {r['playlist']: r['cnt'] for r in rows}
+        finally:
+            conn.close()
+
     def get_synced_files(self, sync_key, playlist=None):
         """Return set of tracked file paths for a sync key.
 
