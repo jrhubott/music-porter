@@ -408,39 +408,45 @@ export function SyncPage() {
                       <div className="d-flex align-items-center gap-2">
                         <input
                           type="checkbox"
-                          className="form-check-input"
+                          className="form-check-input flex-shrink-0"
                           checked={selectedPlaylists.has(p.key)}
                           onChange={() => togglePlaylist(p.key)}
                           onClick={(e) => e.stopPropagation()}
                         />
-                        <div className="flex-grow-1">
-                          <div className="d-flex align-items-center gap-1">
-                            <span className="fw-bold">{p.name}</span>
-                            {(isPinned || (cacheStatus && cacheStatus.cached > 0)) && (
-                              <span className="badge bg-info bg-opacity-25 text-info" style={{ fontSize: '0.65em' }}>
-                                {cacheStatus && cacheStatus.cached === (p.file_count ?? 0)
-                                  ? 'cached'
-                                  : `${cacheStatus?.cached ?? 0}/${p.file_count ?? '?'} cached`}
-                              </span>
-                            )}
-                          </div>
-                          <small className="text-secondary">
-                            {p.file_count ?? 0} {p.file_count === 1 ? 'file' : 'files'}
+                        <div className="flex-grow-1" style={{ minWidth: 0 }}>
+                          <div className="text-truncate fw-bold">{p.name}</div>
+                          <div className="d-flex align-items-center gap-2 mt-1">
+                            <small className="text-secondary flex-shrink-0">
+                              {p.file_count ?? 0} {p.file_count === 1 ? 'file' : 'files'}
+                            </small>
+                            {(isPinned || (cacheStatus && cacheStatus.cached > 0)) && (() => {
+                              const allCached = cacheStatus && cacheStatus.cached === (p.file_count ?? 0);
+                              return (
+                                <span
+                                  className={`badge bg-info bg-opacity-25 flex-shrink-0 ${allCached ? 'text-info' : 'text-warning'}`}
+                                  style={{ fontSize: '0.65em' }}
+                                >
+                                  {allCached
+                                    ? 'cached'
+                                    : `${cacheStatus?.cached ?? 0}`}
+                                </span>
+                              );
+                            })()}
                             {!isOffline && (() => {
                               const syncInfo = destSyncStatus?.playlists.find(
                                 (sp) => sp.name === p.key || sp.name === p.name,
                               );
                               if (!syncInfo) return null;
                               if (syncInfo.new_files === 0)
-                                return <span className="text-success ms-2">synced</span>;
+                                return <small className="text-success flex-shrink-0">synced</small>;
                               if (syncInfo.is_new_playlist)
-                                return <span className="text-warning ms-2">all new</span>;
-                              return <span className="text-info ms-2">{syncInfo.new_files} new</span>;
+                                return <small className="text-warning flex-shrink-0">all new</small>;
+                              return <small className="text-info flex-shrink-0">{syncInfo.new_files} new</small>;
                             })()}
-                          </small>
+                          </div>
                         </div>
                         <button
-                          className={`btn btn-sm ${isPinned ? 'btn-info' : 'btn-outline-secondary'}`}
+                          className={`btn btn-sm flex-shrink-0 ${isPinned ? 'btn-info' : 'btn-outline-secondary'}`}
                           onClick={(e) => { e.stopPropagation(); handleTogglePin(p.key); }}
                           title={isPinned ? 'Unpin playlist' : 'Pin for offline caching'}
                         >

@@ -91,6 +91,7 @@ body {
   padding: 1rem;
   cursor: pointer;
   transition: border-color 0.15s;
+  height: 100%;
 }
 
 .playlist-card:hover {
