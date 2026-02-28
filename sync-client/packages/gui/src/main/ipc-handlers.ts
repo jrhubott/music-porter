@@ -186,6 +186,10 @@ export function registerIPCHandlers(): void {
     return apiClient.getSyncDestinations();
   });
 
+  ipcMain.handle('data:getAbout', async () => {
+    return apiClient.getAbout();
+  });
+
   // ── Sync ──
 
   ipcMain.handle(

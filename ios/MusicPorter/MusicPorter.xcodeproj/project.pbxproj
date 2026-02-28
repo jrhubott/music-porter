@@ -53,6 +53,7 @@
 		A1000002F /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002F /* LibraryView.swift */; };
 		A10000030 /* BackgroundDownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000032 /* BackgroundDownloadManager.swift */; };
 		A10000031 /* DownloadStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000033 /* DownloadStateStore.swift */; };
+		A10000034 /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000034 /* AboutView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -104,6 +105,7 @@
 		A20000031 /* MusicPorter.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MusicPorter.entitlements; sourceTree = "<group>"; };
 		A20000032 /* BackgroundDownloadManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundDownloadManager.swift; sourceTree = "<group>"; };
 		A20000033 /* DownloadStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadStateStore.swift; sourceTree = "<group>"; };
+		A20000034 /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
 		A30000001 /* MusicPorter.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MusicPorter.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -201,6 +203,7 @@
 				A20000008 /* PipelineView.swift */,
 				A20000027 /* AppleMusicView.swift */,
 				A2000000A /* SettingsView.swift */,
+				A20000034 /* AboutView.swift */,
 				A2000000B /* OperationsView.swift */,
 				A2000002D /* SyncStatusView.swift */,
 				A2000002F /* LibraryView.swift */,
@@ -317,6 +320,7 @@
 				A10000008 /* PipelineView.swift in Sources */,
 				A10000027 /* AppleMusicView.swift in Sources */,
 				A1000000A /* SettingsView.swift in Sources */,
+				A10000034 /* AboutView.swift in Sources */,
 				A1000000B /* OperationsView.swift in Sources */,
 				A10000026 /* DocumentExportPicker.swift in Sources */,
 				A1000000E /* ProgressPanel.swift in Sources */,

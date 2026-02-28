@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
+  AboutResponse,
   BackgroundPrefetchStatus,
   ConnectionState,
   CookieStatus,
@@ -41,6 +42,7 @@ const electronAPI = {
   getSyncKeys: (): Promise<SyncKeySummary[]> => ipcRenderer.invoke('data:getSyncKeys'),
   getSyncDestinations: (): Promise<SyncDestinationsResponse> =>
     ipcRenderer.invoke('data:getSyncDestinations'),
+  getAbout: (): Promise<AboutResponse> => ipcRenderer.invoke('data:getAbout'),
 
   // Sync
   startSync: (opts: {

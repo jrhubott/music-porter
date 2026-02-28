@@ -312,6 +312,12 @@ final class APIClient {
         try await get("/api/library-stats")
     }
 
+    // MARK: - About
+
+    func getAbout() async throws -> AboutResponse {
+        try await get("/api/about")
+    }
+
     // MARK: - HTTP Helpers
 
     private func makeRequest(_ path: String, method: String) throws -> URLRequest {
@@ -585,6 +591,16 @@ struct PlaylistSummary: Identifiable, Codable {
         case sizeBytes = "size_bytes"
         case avgSizeMb = "avg_size_mb"
         case lastModified = "last_modified"
+    }
+}
+
+struct AboutResponse: Codable {
+    let version: String
+    let releaseNotes: String?
+
+    enum CodingKeys: String, CodingKey {
+        case version
+        case releaseNotes = "release_notes"
     }
 }
 

@@ -11,6 +11,7 @@ import {
   ServerError,
 } from './errors.js';
 import type {
+  AboutResponse,
   AuthValidateResponse,
   ClientRecordResponse,
   ConnectionState,
@@ -234,6 +235,12 @@ export class APIClient {
 
   async getServerInfo(): Promise<ServerInfoResponse> {
     return this.get<ServerInfoResponse>('/api/server-info');
+  }
+
+  // ── About ──
+
+  async getAbout(): Promise<AboutResponse> {
+    return this.get<AboutResponse>('/api/about');
   }
 
   // ── HTTP Helpers ──

@@ -105,6 +105,11 @@ export interface ClientRecordResponse {
   recorded: number;
 }
 
+export interface AboutResponse {
+  version: string;
+  release_notes: string;
+}
+
 export interface OkResponse {
   ok: boolean;
   error?: string;

@@ -66,6 +66,11 @@ struct SettingsView: View {
 
                 Section("About") {
                     LabeledContent("App Version", value: MusicPorterApp.appVersion)
+                    NavigationLink {
+                        AboutView()
+                    } label: {
+                        Label("Release Notes", systemImage: "doc.text")
+                    }
                 }
 
                 if let error {

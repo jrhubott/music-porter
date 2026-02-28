@@ -1,5 +1,6 @@
 // Types
 export type {
+  AboutResponse,
   AppConfig,
   AuthValidateResponse,
   CacheEntry,
