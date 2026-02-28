@@ -1,8 +1,9 @@
-import { DEFAULT_CONCURRENCY, FILE_DOWNLOAD_TIMEOUT_MS } from './constants.js';
-import type { APIClient } from './api-client.js';
+import { DEFAULT_CONCURRENCY, FILE_DOWNLOAD_TIMEOUT_MS } from '../constants.js';
+import type { APIClient } from '../api-client.js';
 import type { CacheManager } from './cache-manager.js';
-import type { FileInfo, PrefetchResult } from './types.js';
-import type { LogCallback, ProgressCallback } from './progress.js';
+import type { FileInfo } from '../types.js';
+import type { PrefetchResult } from './types.js';
+import type { LogCallback, ProgressCallback } from '../progress.js';
 
 export interface PrefetchOptions {
   /** Playlist keys to prefetch. If empty, uses all pinned playlists. */

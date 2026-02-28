@@ -4,7 +4,7 @@ import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { CLIENT_SYNC_KEY_PREFIX, DEFAULT_CONCURRENCY, FILE_DOWNLOAD_TIMEOUT_MS, TEMP_SUFFIX, USB_SYNC_KEY_PREFIX } from './constants.js';
 import type { APIClient } from './api-client.js';
-import type { CacheManager } from './cache-manager.js';
+import type { CacheManager } from './cache/cache-manager.js';
 import type { FileInfo, SyncManifest, SyncResult } from './types.js';
 import type { LogCallback, ProgressCallback } from './progress.js';
 import {
