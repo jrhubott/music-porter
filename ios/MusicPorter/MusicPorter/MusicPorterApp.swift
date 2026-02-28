@@ -13,7 +13,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 @main
 struct MusicPorterApp: App {
     /// Independent iOS app version — only bump when iOS code changes.
-    static let appVersion = "1.3.0"
+    static let appVersion = "1.5.0"
 
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @State private var appState = AppState()

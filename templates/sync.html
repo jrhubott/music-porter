@@ -3,6 +3,33 @@
 {% block content %}
 <h4 class="mb-4">Sync</h4>
 
+<!-- Output Profile -->
+<div class="row g-4 mb-4">
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-body">
+        <h6 class="card-title"><i class="bi bi-sliders"></i> Output Profile</h6>
+        <div id="profileCards" class="mt-3">Loading...</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-body">
+        <h6 class="card-title">Profile Comparison</h6>
+        <div class="table-responsive">
+          <table class="table table-sm table-bordered mb-0">
+            <thead id="profileCompareHead">
+              <tr><th>Property</th></tr>
+            </thead>
+            <tbody id="profileCompare"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Section 1: Sync Operation -->
 <div class="card mb-4">
   <div class="card-header"><i class="bi bi-arrow-left-right"></i> Sync Files</div>
@@ -315,6 +342,69 @@
 // ── Cached state for sync buttons ──
 let cachedProfile = '';
 
+// ── Output Profile ──
+function loadProfileCards() {
+  fetch('/api/settings').then(r=>r.json()).then(data => {
+    const profiles = data.profiles;
+    const activeProfile = data.settings.output_type || 'ride-command';
+    let html = '';
+    for (const [name, p] of Object.entries(profiles)) {
+      const active = name === activeProfile;
+      html += `
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="radio" name="profileRadio" id="profile_${name}" value="${name}" ${active ? 'checked' : ''}>
+          <label class="form-check-label" for="profile_${name}">
+            <strong>${name}</strong> <span class="text-muted">- ${p.description}</span>
+            ${active ? '<span class="badge bg-success ms-2">Active</span>' : ''}
+          </label>
+        </div>`;
+    }
+    html += '<button type="button" class="btn btn-outline-primary btn-sm mt-2" id="saveProfile">Apply Profile</button>';
+    document.getElementById('profileCards').innerHTML = html;
+
+    document.getElementById('saveProfile').addEventListener('click', function() {
+      const selected = document.querySelector('input[name="profileRadio"]:checked').value;
+      fetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({output_type: selected})})
+        .then(r=>r.json()).then(() => { showToast('Profile updated to ' + selected, 'success'); loadProfileCards(); });
+    });
+
+    // Profile comparison table
+    const names = Object.keys(profiles);
+    if (names.length >= 1) {
+      const headRow = '<th>Property</th>' + names.map(n => `<th>${n}</th>`).join('');
+      document.getElementById('profileCompareHead').innerHTML = `<tr>${headRow}</tr>`;
+
+      const fmtArtwork = v => v > 0 ? v + 'px' : v === 0 ? 'original' : 'stripped';
+      const fmtVersions = v => Array.isArray(v) ? v.join(', ') : String(v);
+      const fmtDir = v => v || '(flat)';
+      const fmtExtra = v => (v && Object.keys(v).length > 0) ? JSON.stringify(v) : 'none';
+      const fmtGenre = v => v || 'none';
+      const fmtStr = v => v || '';
+
+      const fields = [
+        ['ID3 Title', 'id3_title', fmtStr],
+        ['ID3 Artist', 'id3_artist', fmtStr],
+        ['ID3 Album', 'id3_album', fmtStr],
+        ['ID3 Genre', 'id3_genre', fmtGenre],
+        ['ID3 Extra', 'id3_extra', fmtExtra],
+        ['ID3 Versions', 'id3_versions', fmtVersions],
+        ['Artwork', 'artwork_size', fmtArtwork],
+        ['Filename', 'filename', fmtStr],
+        ['Directory', 'directory', fmtDir],
+        ['USB Dir', 'usb_dir', fmtDir],
+      ];
+
+      const rows = fields.map(([label, key, fmt]) => {
+        const cells = names.map(n => `<td>${fmt(profiles[n][key])}</td>`).join('');
+        return `<tr><td>${label}</td>${cells}</tr>`;
+      });
+      document.getElementById('profileCompare').innerHTML = rows.join('');
+    }
+  });
+}
+loadProfileCards();
+
 // ── Destination loading ──
 let destsMeta = []; // [{name, path, type, available}]
 
@@ -357,8 +447,8 @@ function loadSources() {
     fetch('/api/status').then(r => r.json()).then(status => {
       const profile = status.profile;
       cachedProfile = profile;
-      let opts = `<option value="export/${profile}">All (export/${profile}/)</option>`;
-      opts += dirs.map(d => `<option value="export/${profile}/${d.name}">${d.name} (${d.files} files)</option>`).join('');
+      let opts = `<option value="">All playlists</option>`;
+      opts += dirs.map(d => `<option value="${d.name}">${d.name} (${d.files} files)</option>`).join('');
       sel.innerHTML = opts;
     });
   });
@@ -369,10 +459,10 @@ function findDestMeta(keyName) {
   return destsMeta.find(d => d.name !== '__custom__' && (d.name === keyName || d.effective_key === keyName));
 }
 
-function syncToKey(keyName, sourceDir) {
+function syncToKey(keyName, playlistKey) {
   const meta = findDestMeta(keyName);
   if (!meta) { showToast('Destination not found: ' + keyName, 'warning'); return; }
-  const data = { source_dir: sourceDir, destination: meta.name };
+  const data = { source_dir: 'library/audio', playlist_key: playlistKey, destination: meta.name };
 
   document.getElementById('syncStatus').textContent = 'Running';
   document.getElementById('syncStatus').className = 'badge bg-primary badge-running';
@@ -392,11 +482,11 @@ document.getElementById('syncForm').addEventListener('submit', function(e) {
   const meta = destsMeta[idx];
   if (!meta) { showToast('Select a destination', 'warning'); return; }
 
-  const sourceDir = document.getElementById('syncSource').value;
-  if (!sourceDir) { showToast('Select a source directory', 'warning'); return; }
+  const playlistKey = document.getElementById('syncSource').value;
 
   const data = {
-    source_dir: sourceDir,
+    source_dir: 'library/audio',
+    playlist_key: playlistKey,
     destination: meta.name,
     dry_run: document.getElementById('syncDryRun').checked,
     verbose: document.getElementById('syncVerbose').checked,
@@ -470,7 +560,7 @@ function loadSyncStatusData() {
         <td class="text-end">${lastSync}</td>
         <td class="text-center">
           ${csyncHasFSA ? `<button class="btn btn-outline-success btn-sm py-0 px-1 me-1" onclick="clientSyncToKey('${k.key_name}', null)" title="Sync via browser (File System Access)"><i class="bi bi-pc-display"></i></button>` : ''}
-          <button class="btn btn-outline-primary btn-sm py-0 px-1 me-1" onclick="syncToKey('${k.key_name}', 'export/${cachedProfile}')" title="${syncTitle}" ${syncDisabled}>
+          <button class="btn btn-outline-primary btn-sm py-0 px-1 me-1" onclick="syncToKey('${k.key_name}', 'library')" title="${syncTitle}" ${syncDisabled}>
             <i class="bi bi-arrow-repeat"></i>
           </button>
           <button class="btn btn-outline-warning btn-sm py-0 px-1 me-1" onclick="promptRenameKey('${k.key_name}')" title="Rename key">
@@ -525,7 +615,7 @@ function showDetail(keyName) {
         <td class="text-center">${statusBadge}</td>
         <td class="text-center">
           ${csyncHasFSA ? `<button class="btn btn-outline-success btn-sm py-0 px-1 me-1" onclick="clientSyncToKey('${keyName}', ['${p.name}'])" title="Sync playlist via browser"><i class="bi bi-pc-display"></i></button>` : ''}
-          <button class="btn btn-outline-primary btn-sm py-0 px-1 me-1" onclick="syncToKey('${keyName}', 'export/${cachedProfile}/${p.name}')" title="${detailSyncTitle}" ${detailSyncDisabled}>
+          <button class="btn btn-outline-primary btn-sm py-0 px-1 me-1" onclick="syncToKey('${keyName}', '${p.name}')" title="${detailSyncTitle}" ${detailSyncDisabled}>
             <i class="bi bi-arrow-repeat"></i>
           </button>
           <button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="deletePlaylist('${keyName}', '${p.name}')" title="Delete playlist tracking">

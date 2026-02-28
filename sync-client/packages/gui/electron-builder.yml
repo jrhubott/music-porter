@@ -1,0 +1,22 @@
+appId: com.musicporter.sync
+productName: Music Porter Sync
+directories:
+  buildResources: build
+  output: out
+files:
+  - dist/**/*
+  - "!node_modules/**/*"
+mac:
+  target:
+    - dmg
+    - zip
+  category: public.app-category.music
+  hardenedRuntime: true
+win:
+  target:
+    - nsis
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Audio

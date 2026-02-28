@@ -14,7 +14,6 @@ struct PipelineView: View {
     @State private var showExportPicker = false
     @State private var tasks: [TaskInfo] = []
     @State private var eqConfig = EQConfig()
-    @State private var activeProfile = "ride-command"
 
     let presets = ["lossless", "high", "medium", "low"]
 
@@ -35,6 +34,18 @@ struct PipelineView: View {
                 taskHistorySection
             }
             .navigationTitle("Process")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    if !appState.activeProfile.isEmpty {
+                        Text(appState.activeProfile)
+                            .font(.caption)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Capsule())
+                    }
+                }
+            }
             .task { await loadData() }
             .onChange(of: selectedPlaylist) { _, newPlaylist in
                 if let key = newPlaylist?.key {
@@ -209,15 +220,10 @@ struct PipelineView: View {
         async let p = appState.apiClient.getPlaylists()
         async let d = appState.apiClient.getSyncDestinations()
         async let t = appState.apiClient.getTasks()
-        async let s = appState.apiClient.getSettings()
         playlists = (try? await p) ?? []
         let destResponse = try? await d
         destinations = destResponse?.destinations ?? []
         tasks = (try? await t) ?? []
-        if let settings = try? await s,
-           case .string(let outputType) = settings.settings["output_type"] {
-            activeProfile = outputType
-        }
         // Auto-load EQ for first playlist
         if let first = playlists.first {
             await loadEQForPlaylist(first.key)
@@ -225,7 +231,7 @@ struct PipelineView: View {
     }
 
     private func loadEQForPlaylist(_ playlist: String) async {
-        if let resolved = try? await appState.apiClient.resolveEQ(profile: activeProfile, playlist: playlist) {
+        if let resolved = try? await appState.apiClient.resolveEQ(profile: appState.activeProfile, playlist: playlist) {
             eqConfig = resolved.eq
         }
     }
@@ -250,6 +256,10 @@ struct PipelineView: View {
     private func exportToFolder(_ destDir: URL) async {
         guard let playlist = selectedPlaylist else { return }
 
+        // Append profile's USB directory if configured
+        let usbDir = appState.usbDir
+        let targetDir = usbDir.isEmpty ? destDir : destDir.appendingPathComponent(usbDir)
+
         let localFiles = appState.downloadManager.localFiles(playlist: playlist.key)
         let localNames = Set(localFiles.map(\.lastPathComponent))
 
@@ -270,8 +280,9 @@ struct PipelineView: View {
         guard !entries.isEmpty else { return }
         let groups = [PlaylistExportGroup(playlist: playlist.key, entries: entries)]
         _ = await appState.usbExport.exportFiles(
-            groups: groups, to: destDir,
-            cacheToDevice: appState.usbExport.cacheToDevice)
+            groups: groups, to: targetDir,
+            cacheToDevice: appState.usbExport.cacheToDevice,
+            profile: appState.activeProfile)
     }
 
     private func statusColor(_ status: String) -> Color {

@@ -2,7 +2,6 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
-    @State private var settings: SettingsResponse?
     @State private var error: String?
 
     var body: some View {
@@ -10,12 +9,23 @@ struct SettingsView: View {
             List {
                 Section("Server") {
                     if let server = appState.currentServer {
-                        if let url = server.url {
-                            LabeledContent("URL", value: url)
-                        } else {
-                            LabeledContent("Host", value: "\(server.host):\(server.port)")
+                        HStack(spacing: 12) {
+                            connectionIcon
+                                .font(.title2)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(server.name)
+                                    .font(.headline)
+                                connectionLabel
+                            }
                         }
-                        LabeledContent("Name", value: server.name)
+
+                        if let baseURL = appState.apiClient.activeBaseURL {
+                            LabeledContent("Active URL", value: baseURL.absoluteString)
+                        }
+                        if server.hasExternalURL {
+                            LabeledContent("External URL", value: server.externalURL!)
+                        }
+                        LabeledContent("Local URL", value: server.localURL?.absoluteString ?? "\(server.host):\(server.port)")
                     }
                     Button("Disconnect", role: .destructive) {
                         appState.disconnect()
@@ -35,16 +45,20 @@ struct SettingsView: View {
                     }
                 }
 
-                if let settings {
-                    Section("Profiles") {
-                        ForEach(Array(settings.profiles.keys.sorted()), id: \.self) { name in
-                            if let profile = settings.profiles[name] {
-                                VStack(alignment: .leading) {
-                                    Text(name).font(.headline)
-                                    Text(profile.description)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
+                if !appState.profiles.isEmpty {
+                    Section("Output Profile") {
+                        Picker("Profile", selection: Binding(
+                            get: { appState.activeProfile },
+                            set: { appState.activeProfile = $0 }
+                        )) {
+                            ForEach(Array(appState.profiles.keys.sorted()), id: \.self) { name in
+                                Text(name).tag(name)
+                            }
+                        }
+                        if let profile = appState.profiles[appState.activeProfile] {
+                            LabeledContent("Description", value: profile.description)
+                            if !profile.usbDir.isEmpty {
+                                LabeledContent("USB Directory", value: profile.usbDir)
                             }
                         }
                     }
@@ -66,11 +80,32 @@ struct SettingsView: View {
         }
     }
 
+    @ViewBuilder
+    private var connectionIcon: some View {
+        if appState.apiClient.connectionType == .external {
+            Image(systemName: "globe")
+                .foregroundStyle(.blue)
+        } else {
+            Image(systemName: "house")
+                .foregroundStyle(.green)
+        }
+    }
+
+    @ViewBuilder
+    private var connectionLabel: some View {
+        if let type = appState.apiClient.connectionType {
+            Text(type == .local ? "Connected via Local Network" : "Connected via External URL")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     private func loadSettings() async {
-        do {
-            settings = try await appState.apiClient.getSettings()
-        } catch {
-            self.error = error.localizedDescription
+        // Profiles are fetched by AppState on connect; refresh if empty
+        if appState.profiles.isEmpty {
+            if let settings = try? await appState.apiClient.getSettings() {
+                appState.profiles = settings.profiles
+            }
         }
     }
 }

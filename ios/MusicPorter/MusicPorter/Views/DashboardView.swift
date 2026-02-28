@@ -12,9 +12,7 @@ struct DashboardView: View {
                     serverStatusSection
                     activeOperationsSection
                     sourceLibrarySection
-                    exportLibrarySection
-                    tagIntegritySection
-                    coverArtSection
+                    librarySection
                     freshnessSection
                     syncStatusSection
                     playlistsSection
@@ -53,7 +51,6 @@ struct DashboardView: View {
             GroupBox("Server Status") {
                 VStack(alignment: .leading, spacing: 8) {
                     LabeledContent("Version", value: status.version)
-                    LabeledContent("Profile", value: status.profile)
                     HStack {
                         Text("Cookies")
                         Spacer()
@@ -153,79 +150,22 @@ struct DashboardView: View {
         }
     }
 
-    // MARK: - 4. Export Library Stats
+    // MARK: - 4. Library Stats
 
     @ViewBuilder
-    private var exportLibrarySection: some View {
+    private var librarySection: some View {
         if let summary = vm.summary {
-            GroupBox("Export Library") {
+            GroupBox("Library") {
                 HStack(spacing: 12) {
+                    StatCard(value: "\(summary.totalPlaylists)", label: "Playlists")
                     StatCard(value: "\(summary.totalFiles)", label: "Files")
                     StatCard(value: formatBytes(summary.totalSizeBytes), label: "Size")
-                    StatCard(
-                        value: tagIntegrityPercent(summary.tagIntegrity),
-                        label: "Tags")
-                    StatCard(
-                        value: coverArtPercent(summary.coverArt),
-                        label: "Cover Art")
                 }
             }
         }
     }
 
-    // MARK: - 5. Tag Integrity Breakdown
-
-    @ViewBuilder
-    private var tagIntegritySection: some View {
-        if let summary = vm.summary, summary.tagIntegrity.checked > 0 {
-            let ti = summary.tagIntegrity
-            GroupBox("Tag Integrity") {
-                VStack(spacing: 8) {
-                    barRow(
-                        label: "Protected",
-                        count: ti.protected,
-                        total: ti.checked,
-                        color: .green)
-                    barRow(
-                        label: "Missing",
-                        count: ti.missing,
-                        total: ti.checked,
-                        color: .red)
-                }
-            }
-        }
-    }
-
-    // MARK: - 6. Cover Art Breakdown
-
-    @ViewBuilder
-    private var coverArtSection: some View {
-        if let summary = vm.summary {
-            let ca = summary.coverArt
-            let total = ca.withArt + ca.withoutArt
-            if total > 0 {
-                GroupBox("Cover Art") {
-                    VStack(spacing: 8) {
-                        barRow(label: "With Art", count: ca.withArt, total: total, color: .green)
-                        barRow(label: "Without Art", count: ca.withoutArt, total: total, color: .red)
-                        if ca.withArt > 0 {
-                            HStack {
-                                Label("\(ca.original) original", systemImage: "photo")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                Label("\(ca.resized) resized", systemImage: "arrow.down.right.and.arrow.up.left")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - 7. Freshness
+    // MARK: - 5. Freshness
 
     @ViewBuilder
     private var freshnessSection: some View {
@@ -314,19 +254,6 @@ struct DashboardView: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                 Spacer()
-                                if playlist.tagsChecked > 0 {
-                                    let pct = Int(Double(playlist.tagsProtected) / Double(playlist.tagsChecked) * 100)
-                                    Text("Tags \(pct)%")
-                                        .font(.caption)
-                                        .foregroundStyle(pct == 100 ? .green : .yellow)
-                                }
-                                let artTotal = playlist.coverWith + playlist.coverWithout
-                                if artTotal > 0 {
-                                    let pct = Int(Double(playlist.coverWith) / Double(artTotal) * 100)
-                                    Text("Art \(pct)%")
-                                        .font(.caption)
-                                        .foregroundStyle(pct == 100 ? .green : .yellow)
-                                }
                             }
                         }
                         .padding(.vertical, 8)
@@ -349,32 +276,6 @@ struct DashboardView: View {
         let mins = Int(seconds) / 60
         let secs = Int(seconds) % 60
         return mins > 0 ? "\(mins)m \(secs)s" : "\(secs)s"
-    }
-
-    private func tagIntegrityPercent(_ ti: TagIntegrityStats) -> String {
-        guard ti.checked > 0 else { return "N/A" }
-        return "\(Int(Double(ti.protected) / Double(ti.checked) * 100))%"
-    }
-
-    private func coverArtPercent(_ ca: CoverArtStats) -> String {
-        let total = ca.withArt + ca.withoutArt
-        guard total > 0 else { return "N/A" }
-        return "\(Int(Double(ca.withArt) / Double(total) * 100))%"
-    }
-
-    private func barRow(label: String, count: Int, total: Int, color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack {
-                Text(label)
-                    .font(.caption)
-                Spacer()
-                Text("\(count) / \(total)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            ProgressView(value: Double(count), total: Double(max(total, 1)))
-                .tint(color)
-        }
     }
 
     private func freshnessPill(label: String, count: Int, color: Color) -> some View {

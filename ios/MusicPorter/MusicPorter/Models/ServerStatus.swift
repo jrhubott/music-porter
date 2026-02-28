@@ -5,7 +5,6 @@ struct ServerStatus: Codable {
     let version: String
     let cookies: CookieStatus
     let library: LibraryStats
-    let profile: String
     let busy: Bool
 }
 

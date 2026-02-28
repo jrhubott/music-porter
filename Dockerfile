@@ -18,7 +18,7 @@ COPY music-porter porter_core.py web_ui.py web_api.py release-notes.txt ./
 COPY templates/ templates/
 
 # Pre-create data directories for volume mounts
-RUN mkdir -p music export logs data
+RUN mkdir -p library logs data
 
 # Real-time output for SSE streaming and logs
 ENV PYTHONUNBUFFERED=1

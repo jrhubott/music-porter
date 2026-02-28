@@ -21,13 +21,15 @@ Merge dev into main following the 3-tier version workflow.
 2. **Determine versions**
    - Read VERSION from `porter_core.py` line 50, extract base version (strip `-dev+hash`)
    - Check for iOS changes: `git diff $(git describe --tags --abbrev=0 main)..dev --name-only -- ios/`
-   - **Single prompt** asking: version bump type (PATCH/MINOR/MAJOR with suggestion based on commits), and if iOS files changed, also ask for new iOS version (suggest PATCH bump of current `appVersion` from `MusicPorterApp.swift`)
+   - Check for sync-client changes: `git diff $(git describe --tags --abbrev=0 main)..dev --name-only -- sync-client/`
+   - **Single prompt** asking: version bump type (PATCH/MINOR/MAJOR with suggestion based on commits), and if iOS files changed, also ask for new iOS version (suggest PATCH bump of current `appVersion` from `MusicPorterApp.swift`), and if sync-client files changed, also ask for new sync client version (suggest PATCH bump of current `VERSION` from `sync-client/packages/core/src/constants.ts`)
 
 3. **Prepare release on dev**
    - **SRS gate:** Scan all `SRS/*.md` for unchecked `[ ]` — abort listing all incomplete items if any found
    - **README:** Silently strikethrough any Future Features matching this release, adding "*(implemented in vX.Y.Z)*"
    - **Release notes:** Prepend entry to `release-notes.txt` — `Version X.Y.Z (YYYY-MM-DD):` with bullet points from commits since last tag
    - **iOS:** If applicable, update `appVersion` in `MusicPorterApp.swift` and add bullet to release notes
+   - **Sync client:** If applicable, update `VERSION` in `sync-client/packages/core/src/constants.ts` and add bullet to release notes
    - **Version commit:** Set `VERSION = "X.Y.Z"` in `porter_core.py`, stage all changes, commit: `Update version to X.Y.Z for merge to main`
 
 4. **Merge to main**

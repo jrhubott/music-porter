@@ -171,6 +171,19 @@ class WebDisplayHandler:
     def show_status(self, message, level="info"):
         self._queue.put({'level': level.upper(), 'message': message})
 
+    def show_overall_progress(self, current, total, stage):
+        """Emit overall progress (playlist X of Y) for multi-playlist ops."""
+        if self._cancel_event and self._cancel_event.is_set():
+            return
+        pct = int(current * 100 / total) if total > 0 else 0
+        self._queue.put({
+            'type': 'overall_progress',
+            'current': current,
+            'total': total,
+            'percent': pct,
+            'stage': stage,
+        })
+
     def show_banner(self, title, subtitle=None):
         pass  # Web UI has its own page headers
 
@@ -587,10 +600,10 @@ class PipelineScheduler:
                 audit_logger=self._ctx.audit_logger,
                 audit_source='scheduler',
             )
-            profile = self._ctx.get_output_profile(config)
             workers = config.get_setting('workers', mp.DEFAULT_WORKERS)
+            quality_preset = preset or config.get_setting(
+                'quality_preset', mp.DEFAULT_QUALITY_PRESET)
             deps = mp.DependencyChecker(logger)
-            quality_preset = preset or profile.quality_preset
             display = self._ctx.make_display_handler(task_id)
             task = self._ctx.task_manager.get(task_id)
 
@@ -598,7 +611,7 @@ class PipelineScheduler:
                 logger, deps, config,
                 quality_preset=quality_preset,
                 workers=workers,
-                output_profile=profile,
+                track_db=self._ctx.track_db,
                 display_handler=display,
                 cancel_event=task.cancel_event,
                 audit_logger=self._ctx.audit_logger,
@@ -626,6 +639,9 @@ class PipelineScheduler:
             for i, pl in enumerate(to_run):
                 if task.cancel_event.is_set():
                     break
+                display.show_overall_progress(
+                    i + 1, len(to_run),
+                    f"Playlist {i + 1} of {len(to_run)}: {pl.name}")
                 logger.info(f"\n{'=' * 60}")
                 logger.info(
                     f"Processing {i + 1}/{len(to_run)}: {pl.name}")
@@ -633,11 +649,15 @@ class PipelineScheduler:
                 idx = config.playlists.index(pl) + 1
                 orchestrator.run_full_pipeline(
                     playlist=str(idx), auto=True,
-                    copy_to_usb=False, dry_run=False, verbose=False,
+                    dry_run=False, verbose=False,
                     quality_preset=quality_preset,
                 )
                 aggregate.add_playlist_result(orchestrator.stats)
 
+            if to_run:
+                display.show_overall_progress(
+                    len(to_run), len(to_run),
+                    f"All {len(to_run)} playlists complete")
             aggregate.end_time = time.time()
             agg_result = aggregate.to_result()
             return {
@@ -727,6 +747,7 @@ class AppContext:
     task_manager: TaskManager
     audit_logger: object  # mp.AuditLogger
     sync_tracker: object  # mp.SyncTracker
+    track_db: object  # mp.TrackDB
     api_key: str
     project_root: Path
     scheduler: 'PipelineScheduler | None' = None
@@ -850,6 +871,7 @@ def create_app(project_root=None, no_auth=False, server_host=None,
         task_manager=TaskManager(task_db=_task_db),
         audit_logger=mp.AuditLogger(_db_path),
         sync_tracker=mp.SyncTracker(_db_path),
+        track_db=mp.TrackDB(_db_path),
         api_key=_api_key,
         project_root=project_root,
     )
@@ -943,25 +965,25 @@ def create_app(project_root=None, no_auth=False, server_host=None,
     def dashboard():
         return render_template('dashboard.html')
 
+    @app.route('/sources')
+    def sources_page():
+        return render_template('sources.html')
+
     @app.route('/playlists')
     def playlists_page():
-        return render_template('playlists.html')
+        return redirect(url_for('sources_page'))
+
+    @app.route('/process')
+    def process_page():
+        return render_template('process.html')
 
     @app.route('/pipeline')
     def pipeline_page():
-        return render_template('pipeline.html')
+        return redirect('/process#pipeline')
 
     @app.route('/convert')
     def convert_page():
-        return render_template('convert.html')
-
-    @app.route('/tags')
-    def tags_page():
-        return render_template('tags.html')
-
-    @app.route('/cover-art')
-    def cover_art_page():
-        return render_template('cover_art.html')
+        return redirect('/process#convert')
 
     @app.route('/sync')
     def sync_page():

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% block title %}Playlists - Music Porter{% endblock title %}
+{% block title %}Sources - Music Porter{% endblock title %}
 {% block content %}
-<h4 class="mb-4">Playlists</h4>
+<h4 class="mb-4">Sources</h4>
 
 <!-- Add Playlist -->
 <div class="card mb-4">
@@ -62,8 +62,8 @@
           <label class="form-check-label" for="deleteSource">Delete source M4A files</label>
         </div>
         <div class="form-check mb-2">
-          <input class="form-check-input" type="checkbox" id="deleteExport" checked>
-          <label class="form-check-label" for="deleteExport">Delete export MP3 files</label>
+          <input class="form-check-input" type="checkbox" id="deleteLibrary" checked>
+          <label class="form-check-label" for="deleteLibrary">Delete library MP3 files</label>
         </div>
         <div class="form-check mb-2">
           <input class="form-check-input" type="checkbox" id="deleteConfig">
@@ -186,7 +186,7 @@ function openDeleteData(key, name) {
   document.getElementById('deleteDataKey').value = key;
   document.getElementById('deleteDataName').textContent = name;
   document.getElementById('deleteSource').checked = true;
-  document.getElementById('deleteExport').checked = true;
+  document.getElementById('deleteLibrary').checked = true;
   document.getElementById('deleteConfig').checked = false;
   new bootstrap.Modal(document.getElementById('deleteDataModal')).show();
 }
@@ -194,17 +194,17 @@ function openDeleteData(key, name) {
 document.getElementById('deleteDataConfirm').addEventListener('click', function() {
   const key = document.getElementById('deleteDataKey').value;
   const deleteSource = document.getElementById('deleteSource').checked;
-  const deleteExport = document.getElementById('deleteExport').checked;
+  const deleteLibrary = document.getElementById('deleteLibrary').checked;
   const removeConfig = document.getElementById('deleteConfig').checked;
 
-  if (!deleteSource && !deleteExport && !removeConfig) {
+  if (!deleteSource && !deleteLibrary && !removeConfig) {
     showToast('Select at least one option', 'error');
     return;
   }
 
   const data = {
     delete_source: deleteSource,
-    delete_export: deleteExport,
+    delete_library: deleteLibrary,
     remove_config: removeConfig,
   };
   fetch('/api/playlists/' + encodeURIComponent(key) + '/delete-data',

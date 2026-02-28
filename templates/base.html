@@ -26,8 +26,11 @@
     @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .6; } }
     .version-badge { font-size: .75rem; opacity: .6; }
     .toast-container { position: fixed; bottom: 1rem; right: 1rem; z-index: 9999; }
-    /* Progress bar */
-    .sse-progress { margin-bottom: .75rem; display: none; }
+    /* Progress bars */
+    .sse-overall-progress, .sse-progress { margin-bottom: .75rem; display: none; }
+    .sse-overall-progress .progress { height: 1.2rem; background: #1a1a2e; border: 1px solid rgba(255,255,255,.1); }
+    .sse-overall-progress .progress-bar { transition: width .3s ease; font-size: .7rem; font-weight: 600; }
+    .sse-overall-progress .progress-info { display: flex; justify-content: space-between; font-size: .7rem; color: #adb5bd; margin-top: .2rem; }
     .sse-progress .progress { height: 1.4rem; background: #1a1a2e; border: 1px solid rgba(255,255,255,.1); }
     .sse-progress .progress-bar { transition: width .3s ease; font-size: .75rem; font-weight: 600; }
     .sse-progress .progress-info { display: flex; justify-content: space-between; font-size: .75rem; color: #adb5bd; margin-top: .25rem; }
@@ -47,11 +50,8 @@
     </div>
     <nav class="nav flex-column mt-2">
       <a class="nav-link {% if request.path == '/' %}active{% endif %}" href="/"><i class="bi bi-speedometer2"></i>Dashboard</a>
-      <a class="nav-link {% if request.path == '/playlists' %}active{% endif %}" href="/playlists"><i class="bi bi-list-ul"></i>Playlists</a>
-      <a class="nav-link {% if request.path == '/pipeline' %}active{% endif %}" href="/pipeline"><i class="bi bi-arrow-repeat"></i>Pipeline</a>
-      <a class="nav-link {% if request.path == '/convert' %}active{% endif %}" href="/convert"><i class="bi bi-file-earmark-music"></i>Convert</a>
-      <a class="nav-link {% if request.path == '/tags' %}active{% endif %}" href="/tags"><i class="bi bi-tags"></i>Tags</a>
-      <a class="nav-link {% if request.path == '/cover-art' %}active{% endif %}" href="/cover-art"><i class="bi bi-image"></i>Cover Art</a>
+      <a class="nav-link {% if request.path == '/sources' %}active{% endif %}" href="/sources"><i class="bi bi-list-ul"></i>Sources</a>
+      <a class="nav-link {% if request.path == '/process' %}active{% endif %}" href="/process"><i class="bi bi-arrow-repeat"></i>Process</a>
       <a class="nav-link {% if request.path == '/sync' %}active{% endif %}" href="/sync"><i class="bi bi-arrow-left-right"></i>Sync</a>
       <a class="nav-link {% if request.path == '/settings' %}active{% endif %}" href="/settings"><i class="bi bi-gear"></i>Settings</a>
       <hr class="my-2 border-secondary mx-3">
@@ -62,7 +62,7 @@
     <div class="mt-auto p-3 border-top border-secondary">
       <div class="d-flex align-items-center justify-content-between">
         <small class="text-muted">Profile</small>
-        <a href="/settings" class="badge bg-info text-decoration-none" id="sidebarProfile">...</a>
+        <a href="/sync" class="badge bg-info text-decoration-none" id="sidebarProfile">...</a>
       </div>
       {% if server_mode %}
       <div class="mt-2">
@@ -99,9 +99,6 @@
 
     // ── Submit operation and start SSE ──
     function submitOperation(url, formData, logContainerId, onComplete) {
-      const logPanel = document.getElementById(logContainerId);
-      if (logPanel) logPanel.innerHTML = '';
-
       fetch(url, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -123,12 +120,26 @@
 
     // ── SSE log streaming with progress bar ──
     function _ensureProgressBar(panel) {
-      // Insert progress bar container above the log panel if not already present
-      let wrapper = panel.parentNode.querySelector('.sse-progress');
-      if (!wrapper) {
-        wrapper = document.createElement('div');
-        wrapper.className = 'sse-progress';
-        wrapper.innerHTML =
+      // Insert overall + item progress bar containers above the log panel
+      let itemBar = panel.parentNode.querySelector('.sse-progress');
+      let overallBar = panel.parentNode.querySelector('.sse-overall-progress');
+      if (!overallBar) {
+        overallBar = document.createElement('div');
+        overallBar.className = 'sse-overall-progress';
+        overallBar.innerHTML =
+          '<div class="progress">' +
+            '<div class="progress-bar bg-warning" role="progressbar" style="width:0%"></div>' +
+          '</div>' +
+          '<div class="progress-info">' +
+            '<span class="progress-stage"></span>' +
+            '<span class="progress-detail"></span>' +
+          '</div>';
+        panel.parentNode.insertBefore(overallBar, panel);
+      }
+      if (!itemBar) {
+        itemBar = document.createElement('div');
+        itemBar.className = 'sse-progress';
+        itemBar.innerHTML =
           '<div class="progress">' +
             '<div class="progress-bar bg-info" role="progressbar" style="width:0%"></div>' +
           '</div>' +
@@ -136,26 +147,38 @@
             '<span class="progress-stage"></span>' +
             '<span class="progress-detail"></span>' +
           '</div>';
-        panel.parentNode.insertBefore(wrapper, panel);
+        panel.parentNode.insertBefore(itemBar, panel);
       }
-      return wrapper;
+      return {overall: overallBar, item: itemBar};
     }
 
     function startSSE(taskId, containerId, onComplete) {
       const panel = document.getElementById(containerId);
-      if (!panel) return;
+      if (!panel) return null;
       panel.innerHTML = '';
-      const progressEl = _ensureProgressBar(panel);
-      progressEl.style.display = 'none';
+      const bars = _ensureProgressBar(panel);
+      bars.overall.style.display = 'none';
+      bars.item.style.display = 'none';
       const source = new EventSource('/api/stream/' + taskId);
+      source._taskId = taskId;
+      window._lastSSE = source;
 
       source.onmessage = function(e) {
         const msg = JSON.parse(e.data);
-        if (msg.type === 'progress') {
-          progressEl.style.display = 'block';
-          const bar = progressEl.querySelector('.progress-bar');
-          const stage = progressEl.querySelector('.progress-stage');
-          const detail = progressEl.querySelector('.progress-detail');
+        if (msg.type === 'overall_progress') {
+          bars.overall.style.display = 'block';
+          const bar = bars.overall.querySelector('.progress-bar');
+          const stage = bars.overall.querySelector('.progress-stage');
+          const detail = bars.overall.querySelector('.progress-detail');
+          bar.style.width = msg.percent + '%';
+          bar.textContent = msg.percent + '%';
+          stage.textContent = msg.stage || '';
+          detail.textContent = msg.current + ' / ' + msg.total;
+        } else if (msg.type === 'progress') {
+          bars.item.style.display = 'block';
+          const bar = bars.item.querySelector('.progress-bar');
+          const stage = bars.item.querySelector('.progress-stage');
+          const detail = bars.item.querySelector('.progress-detail');
           if (msg.percent >= 0) {
             bar.style.width = msg.percent + '%';
             bar.textContent = msg.percent + '%';
@@ -180,10 +203,16 @@
           panel.scrollTop = panel.scrollHeight;
         } else if (msg.type === 'done') {
           source.close();
-          progressEl.style.display = 'none';
+          bars.overall.style.display = 'none';
+          bars.item.style.display = 'none';
           const line = document.createElement('div');
           line.className = 'log-line mt-2 fw-bold log-' + (msg.status === 'completed' ? 'OK' : 'ERROR');
-          line.textContent = '--- ' + msg.status.toUpperCase() + ' ---';
+          let statusText = '--- ' + msg.status.toUpperCase() + ' ---';
+          if (msg.error) {
+            statusText += '\n' + msg.error;
+            line.style.whiteSpace = 'pre-wrap';
+          }
+          line.textContent = statusText;
           panel.appendChild(line);
           panel.scrollTop = panel.scrollHeight;
           if (msg.status === 'completed') showToast('Operation completed', 'success');
@@ -195,10 +224,12 @@
 
       source.onerror = function() {
         source.close();
-        progressEl.style.display = 'none';
+        bars.overall.style.display = 'none';
+        bars.item.style.display = 'none';
       };
 
       updateOpsBadge();
+      return source;
     }
 
     // ── Operations badge updater ──

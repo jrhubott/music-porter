@@ -1,12 +1,20 @@
 import Foundation
 import UIKit
 
+/// Connection type indicating which URL the client resolved to.
+enum ConnectionType: String {
+    case local
+    case external
+}
+
 /// REST API client for the music-porter server.
 @MainActor @Observable
 final class APIClient {
     var server: ServerConnection?
     var apiKey: String?
     var isConnected = false
+    var activeBaseURL: URL?
+    var connectionType: ConnectionType?
 
     private var session: URLSession = {
         let config = URLSessionConfiguration.default
@@ -23,6 +31,12 @@ final class APIClient {
         KeychainService.save(apiKey: apiKey)
     }
 
+    /// Set the active URL and connection type after resolving dual-URL.
+    func setActiveURL(_ url: URL, type: ConnectionType) {
+        activeBaseURL = url
+        connectionType = type
+    }
+
     /// Validate the API key against the server.
     func validateConnection() async throws -> AuthValidateResponse {
         let response: AuthValidateResponse = try await post("/api/auth/validate", body: [:] as [String: String])
@@ -34,7 +48,21 @@ final class APIClient {
         server = nil
         apiKey = nil
         isConnected = false
+        activeBaseURL = nil
+        connectionType = nil
         KeychainService.delete()
+    }
+
+    // MARK: - URL Construction
+
+    /// Build a full API URL from a path using the active base URL.
+    func buildURL(path: String) -> URL? {
+        guard let baseURL = activeBaseURL else { return nil }
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        components.path = path.hasPrefix("/") ? path : "/" + path
+        return components.url
     }
 
     // MARK: - Status & Info
@@ -96,16 +124,25 @@ final class APIClient {
         try await get("/api/files/\(playlist)")
     }
 
-    func fileDownloadURL(playlist: String, filename: String) -> URL? {
-        server?.apiURL(path: "api/files/\(playlist)/\(filename)")
+    func fileDownloadURL(playlist: String, filename: String, profile: String? = nil) -> URL? {
+        guard let base = buildURL(path: "/api/files/\(playlist)/\(filename)") else { return nil }
+        guard let profile, !profile.isEmpty else { return base }
+        var components = URLComponents(url: base, resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "profile", value: profile)]
+        return components?.url ?? base
     }
 
     func artworkURL(playlist: String, filename: String) -> URL? {
-        server?.apiURL(path: "api/files/\(playlist)/\(filename)/artwork")
+        buildURL(path: "/api/files/\(playlist)/\(filename)/artwork")
     }
 
     func downloadAllURL(playlist: String) -> URL? {
-        server?.apiURL(path: "api/files/\(playlist)/download-all")
+        buildURL(path: "/api/files/\(playlist)/download-all")
+    }
+
+    /// URL for SSE task event streaming.
+    func streamURL(taskId: String) -> URL? {
+        buildURL(path: "/api/stream/\(taskId)")
     }
 
     /// Fetch cover art image with authentication.
@@ -176,35 +213,6 @@ final class APIClient {
         return response.taskId
     }
 
-    func updateTags(directory: String, album: String?, artist: String?) async throws -> String {
-        var body: [String: Any] = ["directory": directory]
-        if let album { body["album"] = album }
-        if let artist { body["artist"] = artist }
-        let response: TaskIdResponse = try await postAny("/api/tags/update", body: body)
-        return response.taskId
-    }
-
-    func restoreTags(directory: String, all: Bool = false, album: Bool = false,
-                     title: Bool = false, artist: Bool = false) async throws -> String {
-        var body: [String: Any] = ["directory": directory]
-        if all { body["all"] = true }
-        if album { body["album"] = true }
-        if title { body["title"] = true }
-        if artist { body["artist"] = true }
-        let response: TaskIdResponse = try await postAny("/api/tags/restore", body: body)
-        return response.taskId
-    }
-
-    func coverArt(action: String, directory: String, source: String? = nil,
-                  image: String? = nil, maxSize: Int? = nil) async throws -> String {
-        var body: [String: Any] = ["directory": directory]
-        if let source { body["source"] = source }
-        if let image { body["image"] = image }
-        if let maxSize { body["max_size"] = maxSize }
-        let response: TaskIdResponse = try await postAny("/api/cover-art/\(action)", body: body)
-        return response.taskId
-    }
-
     // MARK: - Sync Destinations
 
     func getSyncDestinations() async throws -> SyncDestinationsResponse {
@@ -219,8 +227,9 @@ final class APIClient {
         let _: OkResponse = try await delete("/api/sync/destinations/\(name)")
     }
 
-    func syncToDestination(sourceDir: String, destination: String) async throws -> String {
-        let body: [String: Any] = ["source_dir": sourceDir, "destination": destination]
+    func syncToDestination(sourceDir: String, destination: String, profile: String? = nil) async throws -> String {
+        var body: [String: Any] = ["source_dir": sourceDir, "destination": destination]
+        if let profile { body["profile"] = profile }
         let response: TaskIdResponse = try await postAny("/api/sync/run", body: body)
         return response.taskId
     }
@@ -306,8 +315,7 @@ final class APIClient {
     // MARK: - HTTP Helpers
 
     private func makeRequest(_ path: String, method: String) throws -> URLRequest {
-        guard let server else { throw APIError.notConfigured }
-        guard let url = server.apiURL(path: path) else { throw APIError.invalidResponse }
+        guard let url = buildURL(path: path) else { throw APIError.notConfigured }
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -428,10 +436,12 @@ struct ServerInfoResponse: Codable {
     let platform: String
     let profiles: [String]
     let apiVersion: Int
+    let externalURL: String?
 
     enum CodingKeys: String, CodingKey {
         case name, version, platform, profiles
         case apiVersion = "api_version"
+        case externalURL = "external_url"
     }
 }
 
@@ -502,32 +512,37 @@ struct SettingsResponse: Codable {
     let settings: [String: AnyCodableValue]
     let profiles: [String: ProfileInfo]
     let qualityPresets: [String]
-    let dirStructures: [String]
-    let filenameFormats: [String]
 
     enum CodingKeys: String, CodingKey {
         case settings, profiles
         case qualityPresets = "quality_presets"
-        case dirStructures = "dir_structures"
-        case filenameFormats = "filename_formats"
     }
 }
 
 struct ProfileInfo: Codable {
     let description: String
-    let qualityPreset: String
+    let id3Title: String
+    let id3Artist: String
+    let id3Album: String
+    let id3Genre: String
+    let id3Extra: [String: String]
+    let filename: String
+    let directory: String
+    let id3Versions: [String]
     let artworkSize: Int
-    let id3Version: Int
-    let directoryStructure: String
-    let filenameFormat: String
+    let usbDir: String
 
     enum CodingKeys: String, CodingKey {
         case description
-        case qualityPreset = "quality_preset"
+        case id3Title = "id3_title"
+        case id3Artist = "id3_artist"
+        case id3Album = "id3_album"
+        case id3Genre = "id3_genre"
+        case id3Extra = "id3_extra"
+        case filename, directory
+        case id3Versions = "id3_versions"
         case artworkSize = "artwork_size"
-        case id3Version = "id3_version"
-        case directoryStructure = "directory_structure"
-        case filenameFormat = "filename_format"
+        case usbDir = "usb_dir"
     }
 }
 
@@ -536,39 +551,15 @@ struct SummaryResponse: Codable {
     let totalFiles: Int
     let totalSizeBytes: Int
     let scanDuration: Double
-    let tagIntegrity: TagIntegrityStats
-    let coverArt: CoverArtStats
     let freshness: FreshnessStats
     let playlists: [PlaylistSummary]
-    let profile: String
 
     enum CodingKeys: String, CodingKey {
-        case profile, playlists, freshness
+        case playlists, freshness
         case totalPlaylists = "total_playlists"
         case totalFiles = "total_files"
         case totalSizeBytes = "total_size_bytes"
         case scanDuration = "scan_duration"
-        case tagIntegrity = "tag_integrity"
-        case coverArt = "cover_art"
-    }
-}
-
-struct TagIntegrityStats: Codable {
-    let checked: Int
-    let protected: Int
-    let missing: Int
-}
-
-struct CoverArtStats: Codable {
-    let withArt: Int
-    let withoutArt: Int
-    let original: Int
-    let resized: Int
-
-    enum CodingKeys: String, CodingKey {
-        case original, resized
-        case withArt = "with_art"
-        case withoutArt = "without_art"
     }
 }
 
@@ -586,10 +577,6 @@ struct PlaylistSummary: Identifiable, Codable {
     let sizeBytes: Int
     let avgSizeMb: Double
     let freshness: String
-    let tagsChecked: Int
-    let tagsProtected: Int
-    let coverWith: Int
-    let coverWithout: Int
     let lastModified: String?
 
     enum CodingKeys: String, CodingKey {
@@ -597,10 +584,6 @@ struct PlaylistSummary: Identifiable, Codable {
         case fileCount = "file_count"
         case sizeBytes = "size_bytes"
         case avgSizeMb = "avg_size_mb"
-        case tagsChecked = "tags_checked"
-        case tagsProtected = "tags_protected"
-        case coverWith = "cover_with"
-        case coverWithout = "cover_without"
         case lastModified = "last_modified"
     }
 }

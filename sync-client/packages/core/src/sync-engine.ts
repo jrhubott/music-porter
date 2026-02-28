@@ -1,0 +1,406 @@
+import { existsSync, mkdirSync, statSync, createWriteStream, renameSync, unlinkSync } from 'node:fs';
+import { join } from 'node:path';
+import { pipeline } from 'node:stream/promises';
+import { Readable } from 'node:stream';
+import { CLIENT_SYNC_KEY_PREFIX, DEFAULT_CONCURRENCY, FILE_DOWNLOAD_TIMEOUT_MS, TEMP_SUFFIX, USB_SYNC_KEY_PREFIX } from './constants.js';
+import type { APIClient } from './api-client.js';
+import type { FileInfo, SyncManifest, SyncResult } from './types.js';
+import type { LogCallback, ProgressCallback } from './progress.js';
+import {
+  readManifest,
+  writeManifest,
+  getManifestFiles,
+  createManifest,
+  updateManifestPlaylist,
+} from './manifest.js';
+
+export interface SyncOptions {
+  /** Specific playlist keys to sync. If empty, sync all. */
+  playlists?: string[];
+  /** Override the sync key. */
+  syncKey?: string;
+  /** USB drive name — when set, uses usb- prefix for sync key. */
+  usbDriveName?: string;
+  /** Output profile name — when set, server applies profile-specific tags to downloads. */
+  profile?: string;
+  /** Number of parallel downloads. */
+  concurrency?: number;
+  /** AbortSignal for cancellation. */
+  signal?: AbortSignal;
+  /** Preview only — don't download files. */
+  dryRun?: boolean;
+  /** Force re-download all files (ignore manifest and disk cache). */
+  force?: boolean;
+  /** Progress callback. */
+  onProgress?: ProgressCallback;
+  /** Log callback. */
+  onLog?: LogCallback;
+}
+
+/**
+ * Sync engine — downloads files from music-porter server to a local destination.
+ *
+ * Replicates the browser sync flow from templates/sync.html:
+ * 1. Read manifest from destination
+ * 2. Resolve sync key (explicit > manifest > generated)
+ * 3. Write manifest immediately (survives interruptions)
+ * 4. For each playlist: fetch file list, check manifest/disk, download new files
+ * 5. Record synced files to server
+ * 6. Update manifest after each playlist
+ */
+export class SyncEngine {
+  private readonly client: APIClient;
+
+  constructor(client: APIClient) {
+    this.client = client;
+  }
+
+  /**
+   * Run a full sync to a destination directory.
+   */
+  async sync(destDir: string, options: SyncOptions = {}): Promise<SyncResult> {
+    const startTime = Date.now();
+    const concurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
+    const log = options.onLog ?? (() => {});
+    const onProgress = options.onProgress ?? (() => {});
+
+    if (!existsSync(destDir)) {
+      mkdirSync(destDir, { recursive: true });
+    }
+
+    // Phase 1: Read existing manifest
+    const manifest = readManifest(destDir);
+
+    // Phase 2: Resolve sync key
+    const syncKey = this.resolveSyncKey(options.syncKey, manifest, destDir, options.usbDriveName);
+    log('info', `Sync key: ${syncKey}`);
+
+    // Phase 3: Determine which playlists to sync
+    let playlistKeys = options.playlists ?? [];
+    if (playlistKeys.length === 0) {
+      const playlists = await this.client.getPlaylists();
+      playlistKeys = playlists.map((p) => p.key);
+    }
+
+    // Phase 4: Write initial manifest (persists sync_key across interruptions)
+    const activeURL = this.client.connectionState.activeURL ?? '';
+    const newManifest = manifest ?? createManifest(syncKey, activeURL);
+    newManifest.sync_key = syncKey;
+    if (!options.dryRun) {
+      writeManifest(destDir, newManifest);
+    }
+
+    // Phase 5: Discover files for all playlists
+    onProgress({
+      phase: 'discovering',
+      processed: 0,
+      total: 0,
+      copied: 0,
+      skipped: 0,
+      failed: 0,
+    });
+
+    interface PlaylistFiles {
+      key: string;
+      files: FileInfo[];
+    }
+    const playlistFileList: PlaylistFiles[] = [];
+    let grandTotal = 0;
+
+    for (const key of playlistKeys) {
+      if (options.signal?.aborted) break;
+      try {
+        const response = await this.client.getFiles(key, false, options.profile);
+        playlistFileList.push({ key, files: response.files });
+        grandTotal += response.files.length;
+      } catch (err) {
+        log('warn', `Skipping playlist "${key}": ${err}`);
+      }
+    }
+
+    log('info', `Found ${grandTotal} files across ${playlistFileList.length} playlists`);
+    if (options.force) {
+      log('info', 'Force mode: all files will be re-downloaded');
+    }
+
+    // Phase 6: Sync each playlist
+    let totalCopied = 0;
+    let totalSkipped = 0;
+    let totalFailed = 0;
+    let processed = 0;
+    let aborted = false;
+
+    for (const { key, files } of playlistFileList) {
+      if (options.signal?.aborted) {
+        aborted = true;
+        break;
+      }
+
+      const manifestFiles = getManifestFiles(manifest, key);
+      const syncedFiles: Record<string, number> = {};
+      const filesToDownload: FileInfo[] = [];
+
+      // Check which files need downloading
+      for (const file of files) {
+        if (options.signal?.aborted) {
+          aborted = true;
+          break;
+        }
+
+        // Use display_filename for disk/manifest keys (human-readable on disk)
+        const diskName = file.display_filename || file.filename;
+        // Build subdirectory: prefer server-provided output_subdir, fall back to playlist key
+        const subdir = file.output_subdir ?? key;
+        const manifestKey = subdir ? `${subdir}/${diskName}` : diskName;
+        const fileDir = subdir ? join(destDir, subdir) : destDir;
+        const filePath = join(fileDir, diskName);
+
+        if (!options.force) {
+          const manifestSize = manifestFiles[manifestKey];
+          if (manifestSize !== undefined && manifestSize === file.size
+              && existsSync(filePath)) {
+            // Skip — manifest says this file is current and file exists on disk
+            totalSkipped++;
+            processed++;
+            syncedFiles[manifestKey] = file.size;
+            onProgress({
+              phase: 'syncing',
+              playlist: key,
+              file: diskName,
+              subdir,
+              processed,
+              total: grandTotal,
+              copied: totalCopied,
+              skipped: totalSkipped,
+              failed: totalFailed,
+            });
+            continue;
+          }
+
+          // Check disk
+          if (existsSync(filePath)) {
+            try {
+              const stat = statSync(filePath);
+              if (stat.size === file.size) {
+                totalSkipped++;
+                processed++;
+                syncedFiles[manifestKey] = file.size;
+                onProgress({
+                  phase: 'syncing',
+                  playlist: key,
+                  file: diskName,
+                  subdir,
+                  processed,
+                  total: grandTotal,
+                  copied: totalCopied,
+                  skipped: totalSkipped,
+                  failed: totalFailed,
+                });
+                continue;
+              }
+            } catch {
+              // Can't stat — will download
+            }
+          }
+        }
+
+        filesToDownload.push(file);
+      }
+
+      if (aborted) break;
+
+      // Download files with concurrency limit
+      if (!options.dryRun) {
+        const results = await this.downloadBatch(
+          key,
+          filesToDownload,
+          destDir,
+          concurrency,
+          options.profile,
+          options.signal,
+          (file, success) => {
+            const dn = file.display_filename || file.filename;
+            const fileSubdir = file.output_subdir ?? key;
+            const fileManifestKey = fileSubdir ? `${fileSubdir}/${dn}` : dn;
+            processed++;
+            if (success) {
+              totalCopied++;
+              syncedFiles[fileManifestKey] = file.size;
+            } else {
+              totalFailed++;
+            }
+            onProgress({
+              phase: 'syncing',
+              playlist: key,
+              file: dn,
+              subdir: fileSubdir,
+              processed,
+              total: grandTotal,
+              copied: totalCopied,
+              skipped: totalSkipped,
+              failed: totalFailed,
+            });
+          },
+          log,
+        );
+
+        if (results.aborted) {
+          aborted = true;
+        }
+      } else {
+        // Dry run — count as would-be copies
+        for (const file of filesToDownload) {
+          const dn = file.display_filename || file.filename;
+          const drySubdir = file.output_subdir ?? key;
+          processed++;
+          totalCopied++;
+          log('info', `[dry-run] Would download: ${drySubdir ? drySubdir + '/' : ''}${dn}`);
+          onProgress({
+            phase: 'syncing',
+            playlist: key,
+            file: dn,
+            subdir: drySubdir,
+            processed,
+            total: grandTotal,
+            copied: totalCopied,
+            skipped: totalSkipped,
+            failed: totalFailed,
+          });
+        }
+      }
+
+      // Record all synced files (skipped + downloaded) to server in one batch
+      if (!options.dryRun && Object.keys(syncedFiles).length > 0) {
+        try {
+          await this.client.recordSync(syncKey, key, Object.keys(syncedFiles));
+        } catch (err) {
+          log('warn', `Failed to record sync for "${key}": ${err}`);
+        }
+      }
+
+      // Update manifest after each playlist
+      if (!options.dryRun) {
+        updateManifestPlaylist(newManifest, key, syncedFiles);
+        writeManifest(destDir, newManifest);
+      }
+
+      if (aborted) break;
+    }
+
+    const phase = aborted ? 'aborted' : 'complete';
+    onProgress({
+      phase,
+      processed,
+      total: grandTotal,
+      copied: totalCopied,
+      skipped: totalSkipped,
+      failed: totalFailed,
+    });
+
+    return {
+      syncKey,
+      copied: totalCopied,
+      skipped: totalSkipped,
+      failed: totalFailed,
+      aborted,
+      durationMs: Date.now() - startTime,
+    };
+  }
+
+  /** Download a batch of files with concurrency limit. */
+  private async downloadBatch(
+    playlistKey: string,
+    files: FileInfo[],
+    destDir: string,
+    concurrency: number,
+    profile: string | undefined,
+    signal: AbortSignal | undefined,
+    onFile: (file: FileInfo, success: boolean) => void,
+    log: LogCallback,
+  ): Promise<{ aborted: boolean }> {
+    let aborted = false;
+    let index = 0;
+
+    const worker = async () => {
+      while (index < files.length) {
+        if (signal?.aborted) {
+          aborted = true;
+          return;
+        }
+        const file = files[index++]!;
+        const success = await this.downloadFile(playlistKey, file, destDir, profile, signal, log);
+        onFile(file, success);
+      }
+    };
+
+    const workers = Array.from({ length: Math.min(concurrency, files.length) }, () => worker());
+    await Promise.all(workers);
+    return { aborted };
+  }
+
+  /** Download a single file to disk with atomic write (.tmp + rename). */
+  private async downloadFile(
+    playlistKey: string,
+    file: FileInfo,
+    destDir: string,
+    profile: string | undefined,
+    signal: AbortSignal | undefined,
+    log: LogCallback,
+  ): Promise<boolean> {
+    // Use display_filename for disk (human-readable), filename (UUID) for API
+    const diskName = file.display_filename || file.filename;
+    // Build subdirectory: prefer server-provided output_subdir, fall back to playlist key
+    const subdir = file.output_subdir ?? playlistKey;
+    const fileDir = subdir ? join(destDir, subdir) : destDir;
+    if (!existsSync(fileDir)) {
+      mkdirSync(fileDir, { recursive: true });
+    }
+    const filePath = join(fileDir, diskName);
+    const tmpPath = filePath + TEMP_SUFFIX;
+
+    try {
+      const timeoutSignal = AbortSignal.timeout(FILE_DOWNLOAD_TIMEOUT_MS);
+      const combinedSignal = signal
+        ? AbortSignal.any([signal, timeoutSignal])
+        : timeoutSignal;
+      const { body } = await this.client.downloadFile(playlistKey, file.filename, profile, combinedSignal);
+      const nodeStream = Readable.fromWeb(body as import('node:stream/web').ReadableStream);
+      const writeStream = createWriteStream(tmpPath);
+      await pipeline(nodeStream, writeStream);
+      renameSync(tmpPath, filePath);
+      return true;
+    } catch (err) {
+      // Clean up partial download
+      try {
+        if (existsSync(tmpPath)) unlinkSync(tmpPath);
+      } catch {
+        // Ignore cleanup errors
+      }
+      if (signal?.aborted) return false;
+      const isTimeout = err instanceof DOMException && err.name === 'TimeoutError';
+      if (isTimeout) {
+        log('warn', `Download timed out for ${playlistKey}/${file.filename}`);
+      } else {
+        log('error', `Failed to download ${playlistKey}/${file.filename}: ${err}`);
+      }
+      return false;
+    }
+  }
+
+  /** Resolve the sync key from explicit, USB drive name, manifest, or generated. */
+  private resolveSyncKey(
+    explicit: string | undefined,
+    manifest: SyncManifest | null,
+    destDir: string,
+    usbDriveName?: string,
+  ): string {
+    if (explicit) return explicit;
+    // USB drive name takes priority over manifest — the manifest may
+    // contain a stale key from before USB-aware sync was implemented.
+    if (usbDriveName) return `${USB_SYNC_KEY_PREFIX}${usbDriveName}`;
+    if (manifest?.sync_key) return manifest.sync_key;
+    // Generate from directory name
+    const dirName = destDir.split('/').pop() ?? destDir.split('\\').pop() ?? 'sync';
+    return `${CLIENT_SYNC_KEY_PREFIX}${dirName}`;
+  }
+}

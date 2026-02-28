@@ -21,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, ClassVar, Protocol, runtime_checkable
+from typing import ClassVar, Protocol, runtime_checkable
 
 # ══════════════════════════════════════════════════════════════════
 # Section 0: Platform Detection
@@ -47,11 +47,14 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.36.0"
+VERSION = "2.37.0"
 
 DEFAULT_DATA_DIR = "data"
-DEFAULT_MUSIC_DIR = "music"
-DEFAULT_EXPORT_DIR = "export"
+DEFAULT_LIBRARY_DIR = "library"
+SOURCE_SUBDIR = "source"
+AUDIO_SUBDIR = "audio"
+ARTWORK_SUBDIR = "artwork"
+DEFAULT_IMPORTER = "gamdl"
 DEFAULT_LOG_DIR = "logs"
 DEFAULT_LOG_RETENTION_DAYS = 7
 DEFAULT_CONFIG_FILE = "data/config.yaml"
@@ -59,10 +62,13 @@ DEFAULT_COOKIES = "data/cookies.txt"
 DEFAULT_DB_FILE = "data/music-porter.db"
 DEFAULT_USB_DIR = "RZR/Music"
 
+# TXXX frame name used to uniquely identify library MP3 files in the DB
+TXXX_TRACK_UUID = "TrackUUID"
+
 # Schema version constants — increment and add a migration case when changing
 # the config.yaml structure or DB tables/columns.
-CONFIG_SCHEMA_VERSION = 1
-DB_SCHEMA_VERSION = 3
+CONFIG_SCHEMA_VERSION = 3
+DB_SCHEMA_VERSION = 6
 
 # Excluded USB volumes by OS
 if IS_MACOS:
@@ -168,25 +174,28 @@ MAX_DEFAULT_WORKERS = 6
 DEFAULT_WORKERS = min(os.cpu_count() or 1, MAX_DEFAULT_WORKERS)
 
 # Default cleanup options for ID3 tag operations
-DEFAULT_CLEANUP_OPTIONS = {
-    "remove_id3v1": True,
-    "use_id3v23": True,
-    "remove_duplicates": True,
-}
 
 # TXXX frame description constants for original tag preservation
-TXXX_ORIGINAL_TITLE = "OriginalTitle"
-TXXX_ORIGINAL_ARTIST = "OriginalArtist"
-TXXX_ORIGINAL_ALBUM = "OriginalAlbum"
 
 # M4A tag key constants
 M4A_TAG_TITLE = '\xa9nam'
 M4A_TAG_ARTIST = '\xa9ART'
 M4A_TAG_ALBUM = '\xa9alb'
 M4A_TAG_COVER = 'covr'
+M4A_TAG_GENRE = '\xa9gen'
+M4A_TAG_TRACK_NUMBER = 'trkn'
+M4A_TAG_DISC_NUMBER = 'disk'
+M4A_TAG_YEAR = '\xa9day'
+M4A_TAG_COMPOSER = '\xa9wrt'
+M4A_TAG_ALBUM_ARTIST = 'aART'
+M4A_TAG_BPM = 'tmpo'
+M4A_TAG_COMMENT = '\xa9cmt'
+M4A_TAG_COMPILATION = 'cpil'
+M4A_TAG_GROUPING = '\xa9grp'
+M4A_TAG_LYRICS = '\xa9lyr'
+M4A_TAG_COPYRIGHT = 'cprt'
 
 # Cover art constants
-TXXX_ORIGINAL_COVER_ART_HASH = "OriginalCoverArtHash"
 APIC_MIME_JPEG = "image/jpeg"
 APIC_MIME_PNG = "image/png"
 APIC_TYPE_FRONT_COVER = 3
@@ -202,15 +211,15 @@ APPLE_COOKIE_DOMAIN = 'apple.com'
 class OutputProfile:
     name: str
     description: str
-    directory_structure: str  # "flat", "nested-artist", "nested-artist-album"
-    filename_format: str      # "full", "title-only"
-    id3_version: int          # 3 = ID3v2.3, 4 = ID3v2.4
-    strip_id3v1: bool         # Remove ID3v1 tags
-    title_tag_format: str     # "artist_title" → tag as "Artist - Title"
+    id3_title: str            # TIT2 template — e.g. "{artist} - {title}"
+    id3_artist: str           # TPE1 template — e.g. "Various" or "{artist}"
+    id3_album: str            # TALB template — e.g. "{playlist}" or "{album}"
+    id3_genre: str            # TCON template — e.g. "Playlist" or "" (omit)
+    id3_extra: dict           # Frame ID → template value, e.g. {"COMM": "note"}
+    filename: str             # Output filename template — e.g. "{artist} - {title}"
+    directory: str            # Output subdirectory template — "" (flat), "{artist}"
+    id3_versions: list        # ID3 versions to include — e.g. ["v2.3"] or ["v2.4", "v1"]
     artwork_size: int         # >0=resize to max px, 0=original, -1=strip
-    quality_preset: str       # "lossless", "high", "medium", "low"
-    pipeline_album: str       # "playlist_name" or "original"
-    pipeline_artist: str      # "various" or "original"
     usb_dir: str = ""         # Subdirectory within USB volumes (e.g. "RZR/Music")
 
 
@@ -219,28 +228,28 @@ class OutputProfile:
 DEFAULT_OUTPUT_PROFILES: dict = {
     "ride-command": {
         "description": "Polaris Ride Command infotainment system",
-        "directory_structure": "flat",
-        "filename_format": "full",
-        "id3_version": 3,
-        "strip_id3v1": True,
-        "title_tag_format": "artist_title",
+        "id3_title": "{artist} - {title}",
+        "id3_artist": "Various",
+        "id3_album": "{playlist}",
+        "id3_genre": "Playlist",
+        "id3_extra": {},
+        "filename": "{artist} - {title}",
+        "directory": "",
+        "id3_versions": ["v2.3"],
         "artwork_size": 100,
-        "quality_preset": "lossless",
-        "pipeline_album": "playlist_name",
-        "pipeline_artist": "various",
         "usb_dir": "RZR/Music",
     },
     "basic": {
         "description": "Standard MP3 with original tags and artwork",
-        "directory_structure": "nested-artist-album",
-        "filename_format": "full",
-        "id3_version": 4,
-        "strip_id3v1": True,
-        "title_tag_format": "artist_title",
+        "id3_title": "{title}",
+        "id3_artist": "{artist}",
+        "id3_album": "{album}",
+        "id3_genre": "",
+        "id3_extra": {},
+        "filename": "{artist} - {title}",
+        "directory": "{artist}/{album}",
+        "id3_versions": ["v2.4"],
         "artwork_size": 0,
-        "quality_preset": "lossless",
-        "pipeline_album": "original",
-        "pipeline_artist": "original",
         "usb_dir": "",
     },
 }
@@ -248,18 +257,17 @@ DEFAULT_OUTPUT_PROFILES: dict = {
 OUTPUT_PROFILES: dict = {}  # Populated at runtime by load_output_profiles()
 DEFAULT_OUTPUT_TYPE = "ride-command"
 
-# Valid choices for directory structure and filename format
-VALID_DIR_STRUCTURES = ("flat", "nested-artist", "nested-artist-album")
-VALID_FILENAME_FORMATS = ("full", "title-only")
+# Valid ID3 version tokens for the id3_versions list
+VALID_ID3_VERSIONS = ("v2.3", "v2.4", "v1")
 
 # Profile name validation: lowercase alphanumeric with hyphens
 VALID_PROFILE_NAME_RE = re.compile(r'^[a-z0-9]+(-[a-z0-9]+)*$')
 
 # Required fields for each profile entry in config.yaml
 _PROFILE_REQUIRED_FIELDS = (
-    "description", "directory_structure", "filename_format", "id3_version",
-    "strip_id3v1", "title_tag_format", "artwork_size", "quality_preset",
-    "pipeline_album", "pipeline_artist",
+    "description", "id3_title", "id3_artist", "id3_album", "id3_genre",
+    "id3_extra", "filename", "directory", "id3_versions",
+    "artwork_size",
 )
 
 
@@ -286,55 +294,57 @@ def _validate_profile(name, data):
         raise ValueError(
             f"Profile '{name}': 'description' must be a non-empty string")
 
-    ds = data["directory_structure"]
-    if ds not in VALID_DIR_STRUCTURES:
-        raise ValueError(
-            f"Profile '{name}': 'directory_structure' must be one of "
-            f"{VALID_DIR_STRUCTURES}, got '{ds}'")
+    # Template string fields — must be non-empty strings
+    for field_name in ("id3_title", "id3_artist", "id3_album"):
+        val = data[field_name]
+        if not isinstance(val, str) or not val.strip():
+            raise ValueError(
+                f"Profile '{name}': '{field_name}' must be a non-empty string")
 
-    ff = data["filename_format"]
-    if ff not in VALID_FILENAME_FORMATS:
+    # id3_genre — must be a string (empty string = omit genre tag)
+    ig = data["id3_genre"]
+    if not isinstance(ig, str):
         raise ValueError(
-            f"Profile '{name}': 'filename_format' must be one of "
-            f"{VALID_FILENAME_FORMATS}, got '{ff}'")
+            f"Profile '{name}': 'id3_genre' must be a string, got {ig!r}")
 
-    iv = data["id3_version"]
-    if iv not in (3, 4):
+    # id3_extra — must be a dict with string keys and string values
+    et = data["id3_extra"]
+    if not isinstance(et, dict):
         raise ValueError(
-            f"Profile '{name}': 'id3_version' must be 3 or 4, got {iv!r}")
+            f"Profile '{name}': 'id3_extra' must be a mapping, got {type(et).__name__}")
+    for frame_id, val in et.items():
+        if not isinstance(frame_id, str) or not isinstance(val, str):
+            raise ValueError(
+                f"Profile '{name}': 'id3_extra' keys and values must be strings, "
+                f"got {frame_id!r}: {val!r}")
 
-    si = data["strip_id3v1"]
-    if not isinstance(si, bool):
+    # filename — must be a non-empty template string
+    ff = data["filename"]
+    if not isinstance(ff, str) or not ff.strip():
         raise ValueError(
-            f"Profile '{name}': 'strip_id3v1' must be a boolean, got {si!r}")
+            f"Profile '{name}': 'filename' must be a non-empty string")
 
-    ttf = data["title_tag_format"]
-    if ttf != "artist_title":
+    # directory — empty string means flat output
+    df = data["directory"]
+    if not isinstance(df, str):
         raise ValueError(
-            f"Profile '{name}': 'title_tag_format' must be 'artist_title', got '{ttf}'")
+            f"Profile '{name}': 'directory' must be a string, got {df!r}")
+
+    # id3_versions — must be a non-empty list of valid version tokens
+    iv = data["id3_versions"]
+    if not isinstance(iv, list) or not iv:
+        raise ValueError(
+            f"Profile '{name}': 'id3_versions' must be a non-empty list")
+    for v in iv:
+        if v not in VALID_ID3_VERSIONS:
+            raise ValueError(
+                f"Profile '{name}': 'id3_versions' contains invalid version '{v}' "
+                f"(valid: {', '.join(VALID_ID3_VERSIONS)})")
 
     asize = data["artwork_size"]
-    if not isinstance(asize, int) or asize < -1:
+    if not isinstance(asize, int) or isinstance(asize, bool) or asize < -1:
         raise ValueError(
             f"Profile '{name}': 'artwork_size' must be an integer >= -1, got {asize!r}")
-
-    qp = data["quality_preset"]
-    if qp not in QUALITY_PRESETS:
-        raise ValueError(
-            f"Profile '{name}': 'quality_preset' must be one of "
-            f"{list(QUALITY_PRESETS.keys())}, got '{qp}'")
-
-    pa = data["pipeline_album"]
-    if pa not in ("playlist_name", "original"):
-        raise ValueError(
-            f"Profile '{name}': 'pipeline_album' must be 'playlist_name' or "
-            f"'original', got '{pa}'")
-
-    par = data["pipeline_artist"]
-    if par not in ("various", "original"):
-        raise ValueError(
-            f"Profile '{name}': 'pipeline_artist' must be 'various' or "
-            f"'original', got '{par}'")
 
     # usb_dir is optional (defaults to "")
     if "usb_dir" in data:
@@ -345,7 +355,7 @@ def _validate_profile(name, data):
 
 
 _KNOWN_SETTINGS_KEYS = {
-    'output_type', 'workers', 'dir_structure', 'filename_format',
+    'output_type', 'workers', 'quality_preset',
     'api_key', 'server_name', 'log_retention_days', 'scheduler',
 }
 
@@ -531,11 +541,49 @@ def display_name(value):
     return value.replace("-", " ").title()
 
 
-def get_export_dir(profile_name, playlist_key=None):
-    """Build profile-scoped export path: export/<profile>/ or export/<profile>/<playlist>/"""
-    if playlist_key:
-        return f"{DEFAULT_EXPORT_DIR}/{profile_name}/{playlist_key}"
-    return f"{DEFAULT_EXPORT_DIR}/{profile_name}"
+
+
+def get_library_dir():
+    """Return library root path: library/"""
+    return DEFAULT_LIBRARY_DIR
+
+
+def get_source_dir(playlist_key, importer=DEFAULT_IMPORTER):
+    """Build source M4A path: library/source/<importer>/<playlist>/"""
+    return f"{DEFAULT_LIBRARY_DIR}/{SOURCE_SUBDIR}/{importer}/{playlist_key}"
+
+
+def get_audio_dir():
+    """Build flat audio output path: library/audio/"""
+    return f"{DEFAULT_LIBRARY_DIR}/{AUDIO_SUBDIR}"
+
+
+def get_artwork_dir():
+    """Build flat artwork path: library/artwork/"""
+    return f"{DEFAULT_LIBRARY_DIR}/{ARTWORK_SUBDIR}"
+
+
+class SafeTemplateDict(dict):
+    """Dict subclass that returns '{key}' for missing keys in format_map().
+
+    Allows templates to contain variables that may not be available without
+    raising KeyError — unknown variables are left as literal placeholders.
+    """
+
+    def __missing__(self, key):
+        return f"{{{key}}}"
+
+
+def apply_template(template, **variables):
+    """Apply template variables using str.format_map with safe fallback.
+
+    Supported variables: title, artist, album, genre, track_number,
+    track_total, disc_number, disc_total, year, composer, album_artist,
+    bpm, comment, compilation, grouping, lyrics, copyright, playlist,
+    playlist_key.
+    Unknown variables are left as literal '{name}' in the output.
+    """
+    return template.format_map(SafeTemplateDict(variables))
 
 
 # Third-party imports — deferred so the script can start without a venv
@@ -1037,6 +1085,159 @@ def migrate_db_schema(logger=None):
             if logger:
                 logger.info("DB migration 2→3: added scheduled_jobs table")
 
+        # ── Version 3 → 4: tracks table for library metadata ─────────
+        if current < 4:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS tracks (
+                    uuid            TEXT PRIMARY KEY,
+                    playlist        TEXT NOT NULL,
+                    file_path       TEXT NOT NULL,
+                    title           TEXT NOT NULL,
+                    artist          TEXT NOT NULL,
+                    album           TEXT NOT NULL,
+                    cover_art_path  TEXT,
+                    cover_art_hash  TEXT,
+                    duration_s      REAL,
+                    file_size_bytes INTEGER,
+                    source_m4a_path TEXT,
+                    created_at      REAL NOT NULL,
+                    updated_at      REAL NOT NULL
+                )
+            """)
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_tracks_playlist
+                ON tracks(playlist)""")
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_tracks_file_path
+                ON tracks(file_path)""")
+            conn.execute("PRAGMA user_version = 4")
+            conn.commit()
+            changes.append("added tracks table for library metadata storage")
+            if logger:
+                logger.info("DB migration 3→4: added tracks table")
+
+        # ── Version 4 → 5: index on source_m4a_path ──────────────────
+        if current < 5:
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_tracks_source_m4a
+                ON tracks(source_m4a_path)""")
+            conn.execute("PRAGMA user_version = 5")
+            conn.commit()
+            changes.append("added index on tracks.source_m4a_path")
+            if logger:
+                logger.info("DB migration 4→5: added source_m4a_path index")
+
+        # ── Version 5 → 6: extended metadata columns + library restructure ──
+        if current < 6:
+            # 1. DDL: add 14 new metadata columns to tracks table
+            new_columns = [
+                ("genre", "TEXT"),
+                ("track_number", "INTEGER"),
+                ("track_total", "INTEGER"),
+                ("disc_number", "INTEGER"),
+                ("disc_total", "INTEGER"),
+                ("year", "TEXT"),
+                ("composer", "TEXT"),
+                ("album_artist", "TEXT"),
+                ("bpm", "INTEGER"),
+                ("comment", "TEXT"),
+                ("compilation", "INTEGER"),
+                ("grouping", "TEXT"),
+                ("lyrics", "TEXT"),
+                ("copyright", "TEXT"),
+            ]
+            existing_cols = {
+                r[1] for r in conn.execute(
+                    "PRAGMA table_info(tracks)").fetchall()
+            }
+            for col_name, col_type in new_columns:
+                if col_name not in existing_cols:
+                    conn.execute(
+                        f"ALTER TABLE tracks ADD COLUMN {col_name} {col_type}")
+            conn.commit()
+
+            # 2. File moves: restructure library directories on disk
+            library_root = Path(DEFAULT_LIBRARY_DIR)
+            new_source_root = library_root / SOURCE_SUBDIR / DEFAULT_IMPORTER
+            new_mp3_dir = library_root / AUDIO_SUBDIR
+            new_artwork_dir = library_root / ARTWORK_SUBDIR
+
+            if library_root.exists():
+                new_source_root.mkdir(parents=True, exist_ok=True)
+                new_mp3_dir.mkdir(parents=True, exist_ok=True)
+                new_artwork_dir.mkdir(parents=True, exist_ok=True)
+
+                reserved_dirs = {SOURCE_SUBDIR, AUDIO_SUBDIR, ARTWORK_SUBDIR}
+                for item in sorted(library_root.iterdir()):
+                    if not item.is_dir() or item.name.startswith('.'):
+                        continue
+                    if item.name in reserved_dirs:
+                        continue
+
+                    playlist_name = item.name
+                    old_source = item / "source"
+                    old_output = item / "output"
+                    old_artwork = item / "artwork"
+
+                    # Move source/ → library/source/gamdl/<playlist>/
+                    if old_source.exists():
+                        dest = new_source_root / playlist_name
+                        if not dest.exists():
+                            shutil.move(str(old_source), str(dest))
+
+                    # Move output/*.mp3 → library/audio/
+                    if old_output.exists():
+                        for f in old_output.iterdir():
+                            if f.is_file():
+                                dest_file = new_mp3_dir / f.name
+                                if not dest_file.exists():
+                                    shutil.move(str(f), str(dest_file))
+
+                    # Move artwork/* → library/artwork/
+                    if old_artwork.exists():
+                        for f in old_artwork.iterdir():
+                            if f.is_file():
+                                dest_file = new_artwork_dir / f.name
+                                if not dest_file.exists():
+                                    shutil.move(str(f), str(dest_file))
+
+                    # Remove empty old playlist directory
+                    try:
+                        shutil.rmtree(str(item))
+                    except OSError:
+                        pass  # Non-empty — skip
+
+            # 3. DB path updates
+            # file_path: library/<pl>/output/<uuid>.mp3 → library/audio/<uuid>.mp3
+            conn.execute("""
+                UPDATE tracks
+                SET file_path = 'library/audio/' || SUBSTR(file_path,
+                    INSTR(file_path, '/output/') + 8)
+                WHERE file_path LIKE '%/output/%'
+            """)
+            # cover_art_path: artwork/<uuid>.ext → library/artwork/<uuid>.ext
+            conn.execute("""
+                UPDATE tracks
+                SET cover_art_path = 'library/' || cover_art_path
+                WHERE cover_art_path IS NOT NULL
+                  AND cover_art_path LIKE 'artwork/%'
+            """)
+            # source_m4a_path: .../<pl>/source/... → .../source/gamdl/<pl>/...
+            # Handles both relative (library/<pl>/source/...) and absolute paths
+            conn.execute("""
+                UPDATE tracks
+                SET source_m4a_path = REPLACE(
+                    source_m4a_path,
+                    playlist || '/source/',
+                    'source/gamdl/' || playlist || '/'
+                )
+                WHERE source_m4a_path LIKE '%' || playlist || '/source/%'
+            """)
+            conn.execute("PRAGMA user_version = 6")
+            conn.commit()
+            changes.append(
+                "added extended metadata columns, restructured library layout")
+            if logger:
+                logger.info(
+                    "DB migration 5→6: extended metadata + library restructure")
+
         return [MigrationEvent(
             'schema_migrate',
             f"DB schema migrated from version {from_version} to {DB_SCHEMA_VERSION}",
@@ -1130,10 +1331,121 @@ def migrate_config_schema(logger=None):
         data['schema_version'] = 1
         dirty = True
 
-    # Future migrations would go here:
-    # if current < 2:
-    #     data['schema_version'] = 2
-    #     ... version 1 → 2 migration ...
+    # ── Version 1 → 2: template-based output profiles ──────────────
+    if current < 2:
+        ot = data.get('output_types')
+        if isinstance(ot, dict):
+            for _pname, pf in ot.items():
+                if not isinstance(pf, dict):
+                    continue
+
+                # Move quality_preset from profile to settings (global)
+                qp = pf.pop('quality_preset', None)
+                if qp and 'quality_preset' not in data.get('settings', {}):
+                    data.setdefault('settings', {})['quality_preset'] = qp
+
+                # Convert pipeline_album → album_format
+                pa = pf.pop('pipeline_album', None)
+                if 'album_format' not in pf:
+                    if pa == 'playlist_name':
+                        pf['album_format'] = '{playlist}'
+                    else:
+                        pf['album_format'] = '{album}'
+
+                # Convert pipeline_artist → artist_format
+                par = pf.pop('pipeline_artist', None)
+                if 'artist_format' not in pf:
+                    if par == 'various':
+                        pf['artist_format'] = 'Various'
+                    else:
+                        pf['artist_format'] = '{artist}'
+
+                # Convert title_tag_format → title_format
+                ttf = pf.pop('title_tag_format', None)
+                if 'title_format' not in pf:
+                    if ttf == 'artist_title':
+                        pf['title_format'] = '{artist} - {title}'
+                    else:
+                        pf['title_format'] = '{title}'
+
+                # Convert directory_structure → directory_format
+                ds = pf.pop('directory_structure', None)
+                if 'directory_format' not in pf:
+                    if ds == 'nested-artist':
+                        pf['directory_format'] = '{artist}'
+                    elif ds == 'nested-artist-album':
+                        pf['directory_format'] = '{artist}/{album}'
+                    else:
+                        pf['directory_format'] = ''
+
+                # Convert filename_format fixed values → templates
+                ff = pf.get('filename_format', '')
+                if ff == 'full':
+                    pf['filename_format'] = '{artist} - {title}'
+                elif ff == 'title-only':
+                    pf['filename_format'] = '{title}'
+
+                # Convert id3_version + strip_id3v1 → id3_versions list
+                iv = pf.pop('id3_version', None)
+                si = pf.pop('strip_id3v1', None)
+                if 'id3_versions' not in pf:
+                    v2_tag = f'v2.{iv}' if iv in (3, 4) else 'v2.3'
+                    if si is False:
+                        pf['id3_versions'] = [v2_tag, 'v1']
+                    else:
+                        pf['id3_versions'] = [v2_tag]
+
+                # Add extra_tags if missing
+                if 'extra_tags' not in pf:
+                    pf['extra_tags'] = {}
+
+            dirty = True
+            changes.append("migrated output profiles to template-based format")
+            if logger:
+                logger.info(
+                    "Config migration 1→2: migrated profiles to templates")
+
+        data['schema_version'] = 2
+        dirty = True
+
+    # ── Version 2 → 3: rename ID3 content fields with id3_ prefix ────
+    if current < 3:
+        ot = data.get('output_types')
+        if isinstance(ot, dict):
+            # Field renames: old_name → new_name
+            _field_renames = {
+                'title_format': 'id3_title',
+                'artist_format': 'id3_artist',
+                'album_format': 'id3_album',
+                'extra_tags': 'id3_extra',
+                'filename_format': 'filename',
+                'directory_format': 'directory',
+            }
+            for _pname, pf in ot.items():
+                if not isinstance(pf, dict):
+                    continue
+
+                # Rename fields
+                for old_key, new_key in _field_renames.items():
+                    if old_key in pf and new_key not in pf:
+                        pf[new_key] = pf.pop(old_key)
+
+                # Extract TCON from id3_extra into id3_genre
+                if 'id3_genre' not in pf:
+                    extra = pf.get('id3_extra', {})
+                    if isinstance(extra, dict) and 'TCON' in extra:
+                        pf['id3_genre'] = extra.pop('TCON')
+                    else:
+                        pf['id3_genre'] = ''
+
+            dirty = True
+            changes.append("renamed profile fields with id3_ prefix")
+            if logger:
+                logger.info(
+                    "Config migration 2→3: renamed profile fields")
+
+        data['schema_version'] = 3
+        dirty = True
 
     if dirty:
         with open(conf_path, 'w') as f:
@@ -1867,6 +2179,20 @@ class SyncTracker:
         finally:
             conn.close()
 
+    def get_synced_counts(self, sync_key):
+        """Return per-playlist synced file counts for a sync key."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT playlist, COUNT(*) AS cnt
+                   FROM sync_files WHERE sync_key = ?
+                   GROUP BY playlist""",
+                (sync_key,),
+            ).fetchall()
+            return {r['playlist']: r['cnt'] for r in rows}
+        finally:
+            conn.close()
+
     def get_synced_files(self, sync_key, playlist=None):
         """Return set of tracked file paths for a sync key.
 
@@ -2155,9 +2481,364 @@ class SyncTracker:
             sync_map.setdefault(r['file_path'], []).append(r['sync_key'])
         return sync_map
 
+    def get_all_sync_files(self):
+        """Return all sync_file records as a list of dicts.
+
+        Each dict has: id, sync_key, file_path, playlist, synced_at.
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT id, sync_key, file_path, playlist, synced_at "
+                "FROM sync_files"
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def delete_sync_files_by_ids(self, ids):
+        """Delete sync_file records by their IDs.
+
+        Returns count of deleted records.
+        """
+        if not ids:
+            return 0
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                placeholders = ','.join('?' * len(ids))
+                cursor = conn.execute(
+                    f"DELETE FROM sync_files WHERE id IN ({placeholders})",
+                    list(ids),
+                )
+                conn.commit()
+                return cursor.rowcount
+            finally:
+                conn.close()
+
 
 # Backwards compatibility alias
 USBSyncTracker = SyncTracker
+
+
+class TrackDB:
+    """Persistent library track metadata using SQLite.
+
+    Stores title, artist, album, cover art references, and file info for
+    every MP3 in the library.  Library MP3s carry only a TXXX:TrackUUID
+    tag; all human-readable metadata lives here and is applied on-the-fly
+    by TagApplicator during sync/download.
+
+    Follows the AuditLogger/SyncTracker pattern:
+    WAL mode, write lock, lockless reads, connection-per-call.
+    """
+
+    def __init__(self, db_path=DEFAULT_DB_FILE):
+        self._db_path = str(db_path)
+        Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._write_lock = threading.Lock()
+        self._init_db()
+
+    def _connect(self):
+        conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_db(self):
+        conn = self._connect()
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS tracks (
+                    uuid            TEXT PRIMARY KEY,
+                    playlist        TEXT NOT NULL,
+                    file_path       TEXT NOT NULL,
+                    title           TEXT NOT NULL,
+                    artist          TEXT NOT NULL,
+                    album           TEXT NOT NULL,
+                    cover_art_path  TEXT,
+                    cover_art_hash  TEXT,
+                    duration_s      REAL,
+                    file_size_bytes INTEGER,
+                    source_m4a_path TEXT,
+                    genre           TEXT,
+                    track_number    INTEGER,
+                    track_total     INTEGER,
+                    disc_number     INTEGER,
+                    disc_total      INTEGER,
+                    year            TEXT,
+                    composer        TEXT,
+                    album_artist    TEXT,
+                    bpm             INTEGER,
+                    comment         TEXT,
+                    compilation     INTEGER,
+                    grouping        TEXT,
+                    lyrics          TEXT,
+                    copyright       TEXT,
+                    created_at      REAL NOT NULL,
+                    updated_at      REAL NOT NULL
+                )
+            """)
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_tracks_playlist
+                ON tracks(playlist)""")
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_tracks_file_path
+                ON tracks(file_path)""")
+            conn.execute(f"PRAGMA user_version = {DB_SCHEMA_VERSION}")
+            conn.commit()
+        finally:
+            conn.close()
+
+    # ── Write methods (lock-protected) ────────────────────────────
+
+    def insert_track(self, uuid, playlist, file_path, title, artist, album,
+                     cover_art_path=None, cover_art_hash=None,
+                     duration_s=None, file_size_bytes=None,
+                     source_m4a_path=None, genre=None,
+                     track_number=None, track_total=None,
+                     disc_number=None, disc_total=None,
+                     year=None, composer=None, album_artist=None,
+                     bpm=None, comment=None, compilation=None,
+                     grouping=None, lyrics=None, copyright_text=None):
+        """Insert or replace a track record."""
+        now = time.time()
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    """INSERT INTO tracks
+                       (uuid, playlist, file_path, title, artist, album,
+                        cover_art_path, cover_art_hash, duration_s,
+                        file_size_bytes, source_m4a_path,
+                        genre, track_number, track_total,
+                        disc_number, disc_total, year, composer,
+                        album_artist, bpm, comment, compilation,
+                        grouping, lyrics, copyright,
+                        created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                               ?, ?)
+                       ON CONFLICT(uuid) DO UPDATE SET
+                        playlist = excluded.playlist,
+                        file_path = excluded.file_path,
+                        title = excluded.title,
+                        artist = excluded.artist,
+                        album = excluded.album,
+                        cover_art_path = excluded.cover_art_path,
+                        cover_art_hash = excluded.cover_art_hash,
+                        duration_s = excluded.duration_s,
+                        file_size_bytes = excluded.file_size_bytes,
+                        source_m4a_path = excluded.source_m4a_path,
+                        genre = excluded.genre,
+                        track_number = excluded.track_number,
+                        track_total = excluded.track_total,
+                        disc_number = excluded.disc_number,
+                        disc_total = excluded.disc_total,
+                        year = excluded.year,
+                        composer = excluded.composer,
+                        album_artist = excluded.album_artist,
+                        bpm = excluded.bpm,
+                        comment = excluded.comment,
+                        compilation = excluded.compilation,
+                        grouping = excluded.grouping,
+                        lyrics = excluded.lyrics,
+                        copyright = excluded.copyright,
+                        updated_at = excluded.updated_at""",
+                    (uuid, playlist, file_path, title, artist, album,
+                     cover_art_path, cover_art_hash, duration_s,
+                     file_size_bytes, source_m4a_path,
+                     genre, track_number, track_total,
+                     disc_number, disc_total, year, composer,
+                     album_artist, bpm, comment, compilation,
+                     grouping, lyrics, copyright_text, now, now),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def update_track_metadata(self, uuid, genre=None, track_number=None,
+                              track_total=None, disc_number=None,
+                              disc_total=None, year=None, composer=None,
+                              album_artist=None, bpm=None, comment=None,
+                              compilation=None, grouping=None,
+                              lyrics=None, copyright_text=None,
+                              title=None, artist=None, album=None):
+        """Update metadata columns for an existing track by UUID."""
+        now = time.time()
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    """UPDATE tracks SET
+                        title = COALESCE(?, title),
+                        artist = COALESCE(?, artist),
+                        album = COALESCE(?, album),
+                        genre = ?, track_number = ?, track_total = ?,
+                        disc_number = ?, disc_total = ?, year = ?,
+                        composer = ?, album_artist = ?, bpm = ?,
+                        comment = ?, compilation = ?, grouping = ?,
+                        lyrics = ?, copyright = ?,
+                        updated_at = ?
+                       WHERE uuid = ?""",
+                    (title, artist, album,
+                     genre, track_number, track_total,
+                     disc_number, disc_total, year,
+                     composer, album_artist, bpm,
+                     comment, compilation, grouping,
+                     lyrics, copyright_text, now, uuid),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def repair_track(self, uuid, **kwargs):
+        """Update repair-related fields for a track by UUID.
+
+        Accepts keyword arguments for: file_size_bytes, cover_art_path,
+        cover_art_hash, source_m4a_path.  Only provided fields are updated.
+        """
+        allowed = {'file_size_bytes', 'cover_art_path', 'cover_art_hash',
+                    'source_m4a_path'}
+        updates = {k: v for k, v in kwargs.items() if k in allowed}
+        if not updates:
+            return
+        now = time.time()
+        set_clause = ', '.join(f"{col} = ?" for col in updates)
+        set_clause += ', updated_at = ?'
+        values = [*list(updates.values()), now, uuid]
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    f"UPDATE tracks SET {set_clause} WHERE uuid = ?",
+                    values,
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def delete_track(self, uuid):
+        """Delete a single track by UUID."""
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                conn.execute("DELETE FROM tracks WHERE uuid = ?", (uuid,))
+                conn.commit()
+            finally:
+                conn.close()
+
+    def delete_tracks_by_playlist(self, playlist):
+        """Delete all tracks belonging to a playlist."""
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "DELETE FROM tracks WHERE playlist = ?", (playlist,))
+                conn.commit()
+            finally:
+                conn.close()
+
+    # ── Read methods (lockless — WAL mode) ────────────────────────
+
+    def get_track(self, uuid):
+        """Return a single track as a dict, or None."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM tracks WHERE uuid = ?", (uuid,)
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def get_track_by_path(self, file_path):
+        """Return a track by its library file_path, or None."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM tracks WHERE file_path = ?", (file_path,)
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def get_track_by_source_m4a(self, source_m4a_path):
+        """Return a track by its source M4A path, or None."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM tracks WHERE source_m4a_path = ?",
+                (source_m4a_path,),
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def get_tracks_by_playlist(self, playlist):
+        """Return all tracks for a playlist, ordered by title."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM tracks WHERE playlist = ? ORDER BY title",
+                (playlist,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_all_playlists(self):
+        """Return a sorted list of distinct playlist names."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT DISTINCT playlist FROM tracks ORDER BY playlist"
+            ).fetchall()
+            return [r['playlist'] for r in rows]
+        finally:
+            conn.close()
+
+    def get_playlist_stats(self):
+        """Return per-playlist aggregate stats.
+
+        Returns list of dicts with keys: playlist, track_count,
+        total_size_bytes, cover_with, cover_without.
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute("""
+                SELECT playlist,
+                       COUNT(*) AS track_count,
+                       COALESCE(SUM(file_size_bytes), 0) AS total_size_bytes,
+                       SUM(CASE WHEN cover_art_path IS NOT NULL
+                           THEN 1 ELSE 0 END) AS cover_with,
+                       SUM(CASE WHEN cover_art_path IS NULL
+                           THEN 1 ELSE 0 END) AS cover_without
+                FROM tracks
+                GROUP BY playlist
+                ORDER BY playlist
+            """).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_track_count(self):
+        """Return the total number of tracks across all playlists."""
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT COUNT(*) AS cnt FROM tracks").fetchone()
+            return row['cnt'] if row else 0
+        finally:
+            conn.close()
+
+    def get_all_tracks(self):
+        """Return all tracks, ordered by playlist then title."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM tracks ORDER BY playlist, title"
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
 
 
 class EQConfigManager:
@@ -2492,15 +3173,15 @@ class ConfigManager:
             self.output_profiles[name] = OutputProfile(
                 name=name,
                 description=fields["description"],
-                directory_structure=fields["directory_structure"],
-                filename_format=fields["filename_format"],
-                id3_version=fields["id3_version"],
-                strip_id3v1=fields["strip_id3v1"],
-                title_tag_format=fields["title_tag_format"],
+                id3_title=fields["id3_title"],
+                id3_artist=fields["id3_artist"],
+                id3_album=fields["id3_album"],
+                id3_genre=fields["id3_genre"],
+                id3_extra=dict(fields.get("id3_extra", {})),
+                filename=fields["filename"],
+                directory=fields["directory"],
+                id3_versions=list(fields["id3_versions"]),
                 artwork_size=fields["artwork_size"],
-                quality_preset=fields["quality_preset"],
-                pipeline_album=fields["pipeline_album"],
-                pipeline_artist=fields["pipeline_artist"],
                 usb_dir=fields.get("usb_dir", ""),
             )
 
@@ -2513,6 +3194,7 @@ class ConfigManager:
         self.settings = {
             'output_type': DEFAULT_OUTPUT_TYPE,
             'workers': DEFAULT_WORKERS,
+            'quality_preset': DEFAULT_QUALITY_PRESET,
             'server_name': '',
             'log_retention_days': DEFAULT_LOG_RETENTION_DAYS,
         }
@@ -2538,9 +3220,9 @@ class ConfigManager:
         else:
             output_types = {}
             for name, p in self.output_profiles.items():
-                output_types[name] = {
-                    f: getattr(p, f) for f in _PROFILE_REQUIRED_FIELDS
-                }
+                fields = {f: getattr(p, f) for f in _PROFILE_REQUIRED_FIELDS}
+                fields['usb_dir'] = p.usb_dir
+                output_types[name] = fields
 
         data = {
             'schema_version': CONFIG_SCHEMA_VERSION,
@@ -3061,83 +3743,12 @@ class DependencyChecker:
 # Section 5: Tag Management Module
 # ══════════════════════════════════════════════════════════════════
 
-def _get_txxx(tags, desc_name):
-    """
-    Safely retrieve a TXXX frame value by its desc attribute.
-    Iterates tag values directly by frame type rather than key
-    format to avoid mutagen key indexing inconsistencies after
-    save/reload cycles.
-    """
-    from mutagen.id3 import TXXX
-    for frame in tags.values():
-        if isinstance(frame, TXXX) and frame.desc == desc_name:
-            return str(frame.text[0]) if frame.text else ""
-    return ""
 
 
-def _txxx_exists(tags, desc_name):
-    """
-    Returns True if a TXXX frame with the given desc already exists.
-    Iterates tag values directly by frame type rather than key
-    format to avoid mutagen key indexing inconsistencies after
-    save/reload cycles.
-    """
-    from mutagen.id3 import TXXX
-    for frame in tags.values():
-        if isinstance(frame, TXXX) and frame.desc == desc_name:
-            return True
-    return False
 
 
-def save_original_tag(tags, tag_key, tag_name, current_value, label, logger=None,
-                      verbose=False):
-    """
-    Save the original value in a TXXX tag only if one does not already
-    exist. Uses _txxx_exists() as a hard gate — if the tag is already
-    present it will never be written to again regardless of its value.
-    This ensures the true original is permanently protected.
-
-    Returns:
-        tuple: (value, was_newly_stored)
-            - value: The tag value (existing or newly stored)
-            - was_newly_stored: True if a new TXXX frame was created,
-                                False if frame already existed or was skipped
-    """
-    from mutagen.id3 import TXXX
-
-    # ── Hard gate: if it already exists, never write to it again ──
-    if _txxx_exists(tags, tag_name):
-        existing = _get_txxx(tags, tag_name)
-        if logger:
-            logger.debug(f"Original {label} already saved: '{existing}'. Not overwriting.")
-        return (existing, False)
-
-    # Not found — safe to store for the first time
-    if current_value:
-        tags.add(TXXX(encoding=3, desc=tag_name, text=current_value))
-        if logger:
-            msg = f"Stored original {label} '{current_value}' in '{tag_name}' tag"
-            if verbose:
-                logger.info(msg)
-            else:
-                logger.file_info(msg)
-        return (current_value, True)
-    else:
-        if logger:
-            logger.debug(f"No existing {label} tag found. Skipping original {label} save")
-        return ("", False)
 
 
-def _strip_artist_prefix(title, artist):
-    """
-    If title starts with 'artist - ' strip that prefix and return
-    the clean title. Handles the case where a previous run already
-    compounded the title.
-    """
-    prefix = f"{artist} - "
-    if title.startswith(prefix):
-        return title[len(prefix):]
-    return title
 
 
 def sanitize_filename(name):
@@ -3146,38 +3757,472 @@ def sanitize_filename(name):
     return "".join(c for c in name if c not in invalid_chars)
 
 
-def read_m4a_tags(input_file):
+def deduplicate_filenames(filenames, scopes=None):
+    """Deduplicate a list of filenames, appending (2), (3) for collisions.
+
+    Args:
+        filenames: List of filename strings.
+        scopes: Optional list of scope keys (same length as filenames).
+            Files in different scopes won't collide.
+
+    Returns:
+        List of deduplicated filenames (same length/order as input).
     """
-    Read title, artist, and album tags from an M4A file.
-    Returns (title, artist, album) tuple with 'Unknown *' defaults.
+    seen = {}
+    result = []
+    for i, filename in enumerate(filenames):
+        scope = scopes[i] if scopes else ''
+        full_key = (scope, filename)
+        if full_key in seen:
+            seen[full_key] += 1
+            stem, ext = (filename.rsplit('.', 1)
+                         if '.' in filename else (filename, ''))
+            suffix = f" ({seen[full_key]})"
+            result.append(
+                f"{stem}{suffix}.{ext}" if ext else f"{stem}{suffix}")
+        else:
+            seen[full_key] = 1
+            result.append(filename)
+    return result
+
+
+def read_m4a_tags(input_file):
+    """Read metadata tags from an M4A file.
+
+    Returns a dict with keys: title, artist, album, genre, track_number,
+    track_total, disc_number, disc_total, year, composer, album_artist,
+    bpm, comment, compilation, grouping, lyrics, copyright.
     """
     from mutagen.mp4 import MP4
     m4a = MP4(str(input_file))
-    title  = str(m4a.tags.get(M4A_TAG_TITLE, ['Unknown Title'])[0])
-    artist = str(m4a.tags.get(M4A_TAG_ARTIST, ['Unknown Artist'])[0])
-    album  = str(m4a.tags.get(M4A_TAG_ALBUM, ['Unknown Album'])[0])
-    return title, artist, album
+    tags = m4a.tags or {}
+
+    # String tags with defaults
+    title = str(tags.get(M4A_TAG_TITLE, ['Unknown Title'])[0])
+    artist = str(tags.get(M4A_TAG_ARTIST, ['Unknown Artist'])[0])
+    album = str(tags.get(M4A_TAG_ALBUM, ['Unknown Album'])[0])
+
+    # String tags (empty string if missing)
+    genre = str(tags.get(M4A_TAG_GENRE, [''])[0])
+    year = str(tags.get(M4A_TAG_YEAR, [''])[0])
+    composer = str(tags.get(M4A_TAG_COMPOSER, [''])[0])
+    album_artist = str(tags.get(M4A_TAG_ALBUM_ARTIST, [''])[0])
+    comment = str(tags.get(M4A_TAG_COMMENT, [''])[0])
+    grouping = str(tags.get(M4A_TAG_GROUPING, [''])[0])
+    lyrics = str(tags.get(M4A_TAG_LYRICS, [''])[0])
+    copyright_text = str(tags.get(M4A_TAG_COPYRIGHT, [''])[0])
+
+    # Tuple tags: (number, total) — None if 0
+    trkn = tags.get(M4A_TAG_TRACK_NUMBER, [(0, 0)])[0]
+    track_number = trkn[0] if trkn[0] else None
+    track_total = trkn[1] if trkn[1] else None
+
+    disk = tags.get(M4A_TAG_DISC_NUMBER, [(0, 0)])[0]
+    disc_number = disk[0] if disk[0] else None
+    disc_total = disk[1] if disk[1] else None
+
+    # Integer tag
+    bpm = tags.get(M4A_TAG_BPM, [None])[0]
+
+    # Boolean tag (cpil is stored as a bare bool, not a list)
+    compilation = bool(tags.get(M4A_TAG_COMPILATION, False))
+
+    return {
+        'title': title, 'artist': artist, 'album': album,
+        'genre': genre, 'track_number': track_number,
+        'track_total': track_total, 'disc_number': disc_number,
+        'disc_total': disc_total, 'year': year, 'composer': composer,
+        'album_artist': album_artist, 'bpm': bpm, 'comment': comment,
+        'compilation': compilation, 'grouping': grouping,
+        'lyrics': lyrics, 'copyright': copyright_text,
+    }
 
 
-def build_expected_mp3_path(m4a_file, export_dir, output_profile):
-    """Given an M4A file and profile, return the expected MP3 Path."""
-    title, artist, album = read_m4a_tags(m4a_file)
-    safe_title = sanitize_filename(title)
-    safe_artist = sanitize_filename(artist)
-    safe_album = sanitize_filename(album)
 
-    if output_profile.filename_format == "title-only":
-        filename = f"{safe_title}.mp3"
+
+def backfill_track_metadata(track_db, project_root=None, logger=None,
+                            display_handler=None, cancel_event=None):
+    """Re-read M4A tags for all tracks and update extended metadata columns.
+
+    Queries all tracks with a non-null source_m4a_path, re-reads the M4A
+    tags, and calls update_track_metadata() to populate the 14 new columns.
+    Skips tracks where the source file doesn't exist on disk.
+    """
+    logger = logger or Logger()
+    root = Path(project_root) if project_root else Path('.')
+    tracks = track_db.get_all_tracks()
+    total = len(tracks)
+    updated = 0
+    skipped = 0
+    errors = 0
+
+    logger.info(f"Backfill: scanning {total} tracks for metadata updates")
+
+    for i, track in enumerate(tracks):
+        if cancel_event and cancel_event.is_set():
+            logger.warn("Backfill cancelled by user")
+            break
+
+        source_path = track.get('source_m4a_path')
+        if not source_path:
+            skipped += 1
+            continue
+        # Resolve relative paths against project root
+        source_file = Path(source_path)
+        if not source_file.is_absolute():
+            source_file = root / source_file
+        if not source_file.exists():
+            skipped += 1
+            continue
+
+        try:
+            m4a_tags = read_m4a_tags(source_file)
+            track_db.update_track_metadata(
+                uuid=track['uuid'],
+                title=m4a_tags['title'],
+                artist=m4a_tags['artist'],
+                album=m4a_tags['album'],
+                genre=m4a_tags.get('genre') or None,
+                track_number=m4a_tags.get('track_number'),
+                track_total=m4a_tags.get('track_total'),
+                disc_number=m4a_tags.get('disc_number'),
+                disc_total=m4a_tags.get('disc_total'),
+                year=m4a_tags.get('year') or None,
+                composer=m4a_tags.get('composer') or None,
+                album_artist=m4a_tags.get('album_artist') or None,
+                bpm=m4a_tags.get('bpm'),
+                comment=m4a_tags.get('comment') or None,
+                compilation=1 if m4a_tags.get('compilation') else None,
+                grouping=m4a_tags.get('grouping') or None,
+                lyrics=m4a_tags.get('lyrics') or None,
+                copyright_text=m4a_tags.get('copyright') or None,
+            )
+            updated += 1
+        except Exception as e:
+            logger.error(f"Failed to backfill {track['uuid']}: {e}")
+            errors += 1
+
+        if display_handler and (i + 1) % 10 == 0:
+            display_handler.show_progress(i + 1, total,
+                                          f"Backfill: {i + 1}/{total}")
+
+    logger.info(f"Backfill complete: {updated} updated, {skipped} skipped, {errors} errors")
+    return {'updated': updated, 'skipped': skipped, 'errors': errors,
+            'total': total}
+
+
+AUDIT_PROGRESS_INTERVAL = 10
+
+
+def audit_library(track_db, project_root=None, logger=None,
+                  display_handler=None, cancel_event=None,
+                  sync_tracker=None, allow_updates=False):
+    """Verify DB records match filesystem and clean up orphans.
+
+    Four phases:
+    1. Verify DB records against filesystem (remove stale records, normalize paths)
+    2. Deduplicate tracks sharing the same source M4A (before clearing missing sources)
+    3. Clear missing source paths, find orphan files on disk
+    4. Cross-check sync DB against track DB (remove stale sync records)
+
+    When allow_updates=False (default), no destructive actions are performed —
+    only reports what would happen. Pass allow_updates=True to actually modify
+    the database and delete orphan files.
+
+    Returns a structured summary dict.
+    """
+    logger = logger or Logger()
+    root = Path(project_root) if project_root else Path('.')
+    audio_dir = root / get_audio_dir()
+    artwork_dir = root / get_artwork_dir()
+
+    stats = {
+        'total_tracks_checked': 0,
+        'records_removed': 0,
+        'orphan_files_removed': 0,
+        'orphan_artwork_removed': 0,
+        'cover_art_cleared': 0,
+        'source_cleared': 0,
+        'paths_normalized': 0,
+        'sizes_updated': 0,
+        'duplicates_removed': 0,
+        'sync_records_removed': 0,
+        'details': [],
+    }
+
+    def _detail(msg):
+        stats['details'].append(msg)
+        logger.info(msg)
+
+    # ── Phase 1: Verify DB records, normalize paths ─────────────────
+    logger.info("=== Phase 1: Verifying DB records against filesystem ===")
+    tracks = track_db.get_all_tracks()
+    stats['total_tracks_checked'] = len(tracks)
+
+    # Collect artwork paths referenced by surviving tracks (for Phase 4)
+    referenced_artwork = set()
+
+    for i, track in enumerate(tracks):
+        if cancel_event and cancel_event.is_set():
+            logger.warn("Audit cancelled by user")
+            return stats
+
+        uuid = track['uuid']
+        file_path = track.get('file_path', '')
+        mp3_path = root / file_path if file_path else None
+
+        # Check MP3 exists
+        if not mp3_path or not mp3_path.exists():
+            if allow_updates:
+                track_db.delete_track(uuid)
+            else:
+                logger.dry_run(f"Would remove DB record: uuid={uuid} "
+                               f"(MP3 missing: {file_path})")
+            _detail(f"{'Removed' if allow_updates else 'Would remove'} "
+                    f"DB record: uuid={uuid} (MP3 missing: {file_path})")
+            stats['records_removed'] += 1
+            continue
+
+        # Check cover art exists
+        cover_art = track.get('cover_art_path')
+        if cover_art:
+            art_path = root / cover_art
+            if art_path.exists():
+                referenced_artwork.add(cover_art)
+            else:
+                if allow_updates:
+                    track_db.repair_track(uuid,
+                                          cover_art_path=None,
+                                          cover_art_hash=None)
+                else:
+                    logger.dry_run(
+                        f"Would clear stale cover_art_path for {uuid}")
+                _detail(f"{'Cleared' if allow_updates else 'Would clear'} "
+                        f"stale cover_art_path for {uuid}")
+                stats['cover_art_cleared'] += 1
+
+        # Normalize absolute source_m4a_path to relative (but don't clear
+        # missing paths yet — dedup needs them intact in Phase 2)
+        source_m4a = track.get('source_m4a_path')
+        if source_m4a:
+            source_path = Path(source_m4a)
+            if source_path.is_absolute():
+                try:
+                    rel = source_path.relative_to(root.resolve())
+                    if allow_updates:
+                        track_db.repair_track(uuid,
+                                              source_m4a_path=str(rel))
+                    else:
+                        logger.dry_run(
+                            f"Would normalize path for track {uuid}")
+                    _detail(
+                        f"{'Normalized' if allow_updates else 'Would normalize'}"
+                        f" path for track {uuid}")
+                    stats['paths_normalized'] += 1
+                except ValueError:
+                    if allow_updates:
+                        track_db.repair_track(uuid, source_m4a_path=None)
+                    else:
+                        logger.dry_run(
+                            f"Would clear unreachable source_m4a_path "
+                            f"for {uuid}")
+                    _detail(
+                        f"{'Cleared' if allow_updates else 'Would clear'} "
+                        f"unreachable source_m4a_path for {uuid}")
+                    stats['source_cleared'] += 1
+
+        # Fix file_size_bytes if missing or zero
+        file_size = track.get('file_size_bytes')
+        if (not file_size or file_size == 0) and mp3_path.exists():
+            actual_size = mp3_path.stat().st_size
+            if allow_updates:
+                track_db.repair_track(uuid, file_size_bytes=actual_size)
+            else:
+                logger.dry_run(
+                    f"Would update file_size_bytes for {uuid}: "
+                    f"{actual_size}")
+            _detail(
+                f"{'Updated' if allow_updates else 'Would update'} "
+                f"file_size_bytes for {uuid}: {actual_size}")
+            stats['sizes_updated'] += 1
+
+        if display_handler and (i + 1) % AUDIT_PROGRESS_INTERVAL == 0:
+            display_handler.show_progress(
+                i + 1, len(tracks),
+                f"Phase 1: {i + 1}/{len(tracks)} tracks")
+
+    # ── Phase 2: Deduplicate tracks sharing the same source M4A ──
+    # Run BEFORE clearing missing source paths so duplicates are still
+    # detectable even when the source file has been deleted.
+    if cancel_event and cancel_event.is_set():
+        logger.warn("Audit cancelled by user")
+        return stats
+
+    logger.info("=== Phase 2: Detecting duplicate source_m4a_path entries ===")
+    # Re-fetch tracks (Phase 1 may have deleted some)
+    tracks = track_db.get_all_tracks()
+    source_map = {}  # source_m4a_path → list of track dicts
+    for t in tracks:
+        src = t.get('source_m4a_path')
+        if src:
+            source_map.setdefault(src, []).append(t)
+
+    for src_path, dupes in source_map.items():
+        if len(dupes) < 2:
+            continue
+        # Keep the newest record (highest created_at), remove the rest
+        dupes.sort(key=lambda t: t.get('created_at', 0), reverse=True)
+        keeper = dupes[0]
+        for dup in dupes[1:]:
+            if cancel_event and cancel_event.is_set():
+                logger.warn("Audit cancelled by user")
+                return stats
+            dup_uuid = dup['uuid']
+            if allow_updates:
+                # Delete the duplicate MP3
+                dup_mp3 = root / dup.get('file_path', '')
+                if dup_mp3.is_file():
+                    dup_mp3.unlink()
+                # Delete the duplicate artwork
+                dup_art = dup.get('cover_art_path')
+                if dup_art:
+                    dup_art_path = root / dup_art
+                    if dup_art_path.is_file():
+                        dup_art_path.unlink()
+                # Remove from referenced_artwork so Phase 4 can clean up
+                if dup_art and dup_art in referenced_artwork:
+                    referenced_artwork.discard(dup_art)
+                track_db.delete_track(dup_uuid)
+            else:
+                logger.dry_run(
+                    f"Would remove duplicate: uuid={dup_uuid} "
+                    f"(kept {keeper['uuid']}, source={src_path})")
+            _detail(
+                f"{'Removed' if allow_updates else 'Would remove'} "
+                f"duplicate: uuid={dup_uuid} "
+                f"(kept {keeper['uuid']}, source={src_path})")
+            stats['duplicates_removed'] += 1
+
+    # ── Phase 3: Clear missing source paths, find orphan files ────
+    if cancel_event and cancel_event.is_set():
+        logger.warn("Audit cancelled by user")
+        return stats
+
+    logger.info("=== Phase 3: Clearing stale source paths ===")
+    # Re-fetch after dedup
+    tracks = track_db.get_all_tracks()
+    for track in tracks:
+        if cancel_event and cancel_event.is_set():
+            logger.warn("Audit cancelled by user")
+            return stats
+        source_m4a = track.get('source_m4a_path')
+        if not source_m4a:
+            continue
+        source_path = Path(source_m4a)
+        if not source_path.is_absolute():
+            source_path = root / source_path
+        if not source_path.exists():
+            if allow_updates:
+                track_db.repair_track(track['uuid'],
+                                      source_m4a_path=None)
+            else:
+                logger.dry_run(
+                    f"Would clear missing source_m4a_path "
+                    f"for {track['uuid']}")
+            _detail(
+                f"{'Cleared' if allow_updates else 'Would clear'} "
+                f"missing source_m4a_path for {track['uuid']}")
+            stats['source_cleared'] += 1
+
+    logger.info("=== Phase 3b: Finding orphan files on disk ===")
+
+    # Orphan MP3s
+    if audio_dir.exists():
+        for mp3_file in sorted(audio_dir.glob('*.mp3')):
+            if cancel_event and cancel_event.is_set():
+                logger.warn("Audit cancelled by user")
+                return stats
+            rel_path = str(Path(get_audio_dir()) / mp3_file.name)
+            if not track_db.get_track_by_path(rel_path):
+                if allow_updates:
+                    mp3_file.unlink()
+                else:
+                    logger.dry_run(
+                        f"Would delete orphan file: {rel_path}")
+                _detail(
+                    f"{'Deleted' if allow_updates else 'Would delete'} "
+                    f"orphan file: {rel_path}")
+                stats['orphan_files_removed'] += 1
+
+    # Orphan artwork
+    if artwork_dir.exists():
+        for art_file in sorted(artwork_dir.iterdir()):
+            if cancel_event and cancel_event.is_set():
+                logger.warn("Audit cancelled by user")
+                return stats
+            if not art_file.is_file():
+                continue
+            rel_art = str(Path(get_artwork_dir()) / art_file.name)
+            if rel_art not in referenced_artwork:
+                if allow_updates:
+                    art_file.unlink()
+                else:
+                    logger.dry_run(
+                        f"Would delete orphan artwork: {rel_art}")
+                _detail(
+                    f"{'Deleted' if allow_updates else 'Would delete'} "
+                    f"orphan artwork: {rel_art}")
+                stats['orphan_artwork_removed'] += 1
+
+    # ── Phase 4: Cross-check sync DB against track DB ─────────────
+    if sync_tracker:
+        if cancel_event and cancel_event.is_set():
+            logger.warn("Audit cancelled by user")
+            return stats
+
+        logger.info("=== Phase 3: Verifying sync records against track DB ===")
+        all_sync_files = sync_tracker.get_all_sync_files()
+        # Get all playlists that still have tracks
+        db_playlists = set(track_db.get_all_playlists())
+        stale_ids = []
+
+        for sf in all_sync_files:
+            if sf['playlist'] not in db_playlists:
+                stale_ids.append(sf['id'])
+                _detail(
+                    f"Stale sync record: key={sf['sync_key']}, "
+                    f"playlist={sf['playlist']}, file={sf['file_path']} "
+                    f"(playlist no longer in library)")
+
+        if stale_ids:
+            if allow_updates:
+                removed = sync_tracker.delete_sync_files_by_ids(stale_ids)
+                stats['sync_records_removed'] = removed
+                logger.info(f"Removed {removed} stale sync records")
+            else:
+                stats['sync_records_removed'] = len(stale_ids)
+                logger.dry_run(
+                    f"Would remove {len(stale_ids)} stale sync records")
     else:
-        filename = f"{safe_artist} - {safe_title}.mp3"
+        logger.info("Phase 4: Skipped (no sync tracker)")
 
-    base = Path(export_dir)
-    structure = output_profile.directory_structure
-    if structure == "nested-artist":
-        return base / (safe_artist or "Unknown Artist") / filename
-    elif structure == "nested-artist-album":
-        return base / (safe_artist or "Unknown Artist") / (safe_album or "Unknown Album") / filename
-    return base / filename
+    # ── Summary ───────────────────────────────────────────────────
+    stats['allow_updates'] = allow_updates
+    mode_label = "Audit Summary" if allow_updates else "Audit Summary (report only)"
+    logger.info(f"=== {mode_label} ===")
+    verb = "" if allow_updates else "would be "
+    logger.info(f"  Tracks checked:        {stats['total_tracks_checked']}")
+    logger.info(f"  DB records {verb}removed:    {stats['records_removed']}")
+    logger.info(f"  Orphan files {verb}removed:  {stats['orphan_files_removed']}")
+    logger.info(f"  Orphan artwork {verb}removed:{stats['orphan_artwork_removed']}")
+    logger.info(f"  Cover art {verb}cleared:     {stats['cover_art_cleared']}")
+    logger.info(f"  Source paths {verb}cleared:  {stats['source_cleared']}")
+    logger.info(f"  Paths {verb}normalized:      {stats['paths_normalized']}")
+    logger.info(f"  Sizes {verb}updated:         {stats['sizes_updated']}")
+    logger.info(f"  Duplicates {verb}removed:    {stats['duplicates_removed']}")
+    logger.info(f"  Sync records {verb}removed:  {stats['sync_records_removed']}")
+
+    return stats
 
 
 def read_m4a_cover_art(input_file):
@@ -3231,137 +4276,9 @@ def resize_cover_art_bytes(image_data, max_size, mime_type="image/jpeg"):
     return buf.getvalue(), mime_type
 
 
-def update_title_tag(tags, logger=None, dry_run=False, verbose=False):
-    """
-    Update the TIT2 (Title) tag to 'Artist - Title' format.
-    Prefers TXXX:OriginalArtist and TXXX:OriginalTitle as source
-    values if they exist, otherwise falls back to current TPE1 / TIT2.
-    Protects the original TIT2 value in TXXX:OriginalTitle before
-    any change is made. Never compounds an already-formatted title.
-
-    Returns True if the title was updated, False otherwise.
-    """
-    from mutagen.id3 import TIT2
-
-    orig_title  = _get_txxx(tags, TXXX_ORIGINAL_TITLE)
-    orig_artist = _get_txxx(tags, TXXX_ORIGINAL_ARTIST)
-
-    current_title  = str(tags["TIT2"]) if "TIT2" in tags else ""
-    current_artist = str(tags["TPE1"]) if "TPE1" in tags else ""
-
-    # ── Determine clean source values ─────────────────────────────
-    source_artist = orig_artist if orig_artist else current_artist
-
-    if orig_title:
-        source_title = _strip_artist_prefix(orig_title, source_artist)
-    else:
-        source_title = _strip_artist_prefix(current_title, source_artist)
-
-    new_title = f"{source_artist} - {source_title}"
-
-    # ── Guard: skip if already correct ────────────────────────────
-    if current_title == new_title:
-        if logger:
-            if verbose:
-                logger.skip(f"Title already correct: '{current_title}'")
-            else:
-                logger.file_info(f"Title already correct: '{current_title}'")
-        return False
-
-    if verbose and logger:
-        logger.debug(f"Title source:   '{source_title}' "
-                    f"({TXXX_ORIGINAL_TITLE  if orig_title  else 'TIT2'})")
-        logger.debug(f"Artist source:  '{source_artist}' "
-                    f"({TXXX_ORIGINAL_ARTIST if orig_artist else 'TPE1'})")
-        logger.debug(f"New Title:      '{new_title}'")
-
-    if dry_run:
-        if logger:
-            logger.dry_run(f"Would update Title: '{current_title}' → '{new_title}'")
-        return False
-
-    tags["TIT2"] = TIT2(encoding=3, text=new_title)
-    if logger:
-        msg = f"Title updated: '{current_title}' → '{new_title}'"
-        if verbose:
-            logger.info(msg)
-        else:
-            logger.file_info(msg)
-    return True
 
 
-def _apply_cleanup(tags, filepath, cleanup_options):
-    """
-    Strip all non-essential ID3 frames, keeping only Title, Artist,
-    Album, and the three OriginalTitle / OriginalArtist / OriginalAlbum
-    TXXX preservation tags. Uses isinstance() check on frame values
-    rather than key string matching to reliably identify TXXX frames
-    after save/reload cycles.
-    """
-    from mutagen.id3 import TXXX
 
-    v2_version = 3 if cleanup_options.get("use_id3v23") else 4
-    v1         = 0 if cleanup_options.get("remove_id3v1") else 1
-
-    allowed_frames     = {"TIT2", "TPE1", "TALB", "APIC"}
-    allowed_txxx_descs = {TXXX_ORIGINAL_TITLE, TXXX_ORIGINAL_ARTIST, TXXX_ORIGINAL_ALBUM,
-                          TXXX_ORIGINAL_COVER_ART_HASH}
-
-    for key in list(tags.keys()):
-        frame = tags[key]
-        if isinstance(frame, TXXX):
-            if frame.desc in allowed_txxx_descs:
-                continue
-            del tags[key]
-        else:
-            base = key.split(":")[0]
-            if base not in allowed_frames:
-                del tags[key]
-
-    # ── Remove duplicate frames ────────────────────────────────────
-    if cleanup_options.get("remove_duplicates"):
-        seen = {}
-        for key in list(tags.keys()):
-            frame = tags[key]
-
-            # Special handling for TXXX frames: track by description, not base key
-            if isinstance(frame, TXXX):
-                # Use full TXXX:desc as the unique identifier
-                unique_key = f"TXXX:{frame.desc}"
-                if unique_key in seen:
-                    del tags[key]
-                else:
-                    seen[unique_key] = True
-            else:
-                # For all other frame types, use base key as before
-                base = key.split(":")[0]
-                if base in seen:
-                    del tags[key]
-                else:
-                    seen[base] = True
-
-    tags.save(filepath, v2_version=v2_version, v1=v1)
-
-
-class TagStatistics:
-    """Tracks tagging operation statistics."""
-
-    def __init__(self):
-        self.title_updated = 0
-        self.album_updated = 0      # NEW: Track album tag updates
-        self.artist_updated = 0     # NEW: Track artist tag updates
-        self.title_stored = 0
-        self.artist_stored = 0
-        self.album_stored = 0
-        self.title_protected = 0
-        self.artist_protected = 0
-        self.album_protected = 0
-        self.title_restored = 0
-        self.artist_restored = 0
-        self.album_restored = 0
-        self.title_missing = 0
-        self.artist_missing = 0
-        self.album_missing = 0
 
 
 
@@ -3467,40 +4384,6 @@ class NullDisplayHandler:
         pass
 
 
-class LegacyDisplayHandler:
-    """Backward-compatible DisplayHandler that reproduces original print() behavior.
-
-    During the service layer migration, this was available for classes not yet
-    migrated to the DisplayHandler protocol. Now that migration is complete,
-    CLIDisplayHandler is the recommended handler for CLI use. This class
-    remains for backward compatibility.
-    """
-
-    def __init__(self, logger=None):
-        self._logger = logger
-        self._bar = None
-
-    def show_progress(self, current, total, message):
-        if self._bar is None or self._bar.total != total:
-            if self._bar is not None:
-                self._bar.close()
-            self._bar = ProgressBar(total=total, desc=message, logger=self._logger)
-        self._bar.update(1)
-
-    def finish_progress(self):
-        if self._bar is not None:
-            self._bar.close()
-            self._bar = None
-
-    def show_status(self, message, level="info"):
-        print(message)
-
-    def show_banner(self, title, subtitle=None):
-        print(f"\n{'=' * 60}")
-        print(f"  {title}")
-        if subtitle:
-            print(f"  {subtitle}")
-        print(f"{'=' * 60}\n")
 
 
 def _is_cancelled(event):
@@ -3544,61 +4427,10 @@ class _DisplayProgress:
 
 # ── Result Dataclasses ────────────────────────────────────────────
 
-@dataclass
-class TagUpdateResult:
-    """Result of TaggerManager.update_tags()."""
-    success: bool
-    directory: str
-    duration: float
-    files_processed: int
-    files_updated: int
-    files_skipped: int
-    errors: int
-    title_updated: int = 0
-    album_updated: int = 0
-    artist_updated: int = 0
-    title_stored: int = 0
-    artist_stored: int = 0
-    album_stored: int = 0
-
-    def to_dict(self) -> dict:
-        return asdict(self)
 
 
-@dataclass
-class TagRestoreResult:
-    """Result of TaggerManager.restore_tags()."""
-    success: bool
-    directory: str
-    duration: float
-    files_processed: int
-    files_restored: int
-    files_skipped: int
-    errors: int
-    title_restored: int = 0
-    artist_restored: int = 0
-    album_restored: int = 0
-
-    def to_dict(self) -> dict:
-        return asdict(self)
 
 
-@dataclass
-class TagResetResult:
-    """Result of TaggerManager.reset_tags_from_source()."""
-    success: bool
-    input_dir: str
-    output_dir: str
-    duration: float
-    files_matched: int
-    files_reset: int
-    files_skipped: int
-    errors: int
-    tags_reset: int = 0
-    tags_rewritten: int = 0
-
-    def to_dict(self) -> dict:
-        return asdict(self)
 
 
 @dataclass
@@ -3678,65 +4510,6 @@ USBSyncResult = SyncResult
 USBSyncStatusResult = SyncStatusResult
 
 
-@dataclass
-class LibrarySummaryResult:
-    """Result of SummaryManager.generate_summary()."""
-    success: bool
-    export_dir: str
-    scan_duration: float
-    mode: str  # "quick", "default", "detailed"
-    total_playlists: int = 0
-    total_files: int = 0
-    total_size_bytes: int = 0
-    avg_file_size: float = 0.0
-    files_with_protection_tags: int = 0
-    files_missing_protection_tags: int = 0
-    sample_size: int = 0
-    files_with_cover_art: int = 0
-    files_without_cover_art: int = 0
-    files_with_original_cover_art: int = 0
-    files_with_resized_cover_art: int = 0
-    playlist_summaries: list = field(default_factory=list)
-    music_library_stats: Any = None  # MusicLibraryStats or None
-
-    def to_dict(self) -> dict:
-        d = asdict(self)
-        # PlaylistSummary objects need manual conversion
-        d['playlist_summaries'] = [
-            {
-                'name': p.name, 'path': p.path,
-                'file_count': p.file_count,
-                'total_size_bytes': p.total_size_bytes,
-                'avg_file_size_mb': p.avg_file_size_mb,
-                'files_with_cover_art': p.files_with_cover_art,
-                'files_without_cover_art': p.files_without_cover_art,
-            } if hasattr(p, 'name') else p
-            for p in self.playlist_summaries
-        ]
-        return d
-
-
-@dataclass
-class CoverArtResult:
-    """Result of CoverArtManager action methods."""
-    success: bool
-    action: str  # "embed", "extract", "update", "strip", "resize"
-    directory: str
-    duration: float
-    files_processed: int = 0
-    files_modified: int = 0
-    files_skipped: int = 0
-    errors: int = 0
-    source_dir: str | None = None
-    image_path: str | None = None
-    no_source: int = 0
-    max_size: int | None = None
-    total_before: int = 0
-    total_after: int = 0
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
 
 @dataclass
 class DeleteResult:
@@ -3744,7 +4517,7 @@ class DeleteResult:
     success: bool
     playlist_key: str
     source_deleted: bool = False
-    export_deleted: bool = False
+    library_deleted: bool = False
     config_removed: bool = False
     files_deleted: int = 0
     bytes_freed: int = 0
@@ -3767,14 +4540,7 @@ class PipelineResult:
     stages_skipped: list = field(default_factory=list)
     download_result: DownloadResult | None = None
     conversion_result: ConversionResult | None = None
-    tag_result: TagUpdateResult | None = None
-    cover_art_result: CoverArtResult | None = None
     usb_result: USBSyncResult | None = None
-    # Pipeline-specific stats carried over from PipelineStatistics
-    tagging_album: str | None = None
-    tagging_artist: str | None = None
-    cover_art_embedded: int = 0
-    cover_art_missing: int = 0
     usb_destination: str | None = None
 
     def to_dict(self) -> dict:
@@ -3818,587 +4584,6 @@ class DependencyCheckResult:
         return asdict(self)
 
 
-@dataclass
-class UnconvertedListResult:
-    """Result of listing unconverted files across playlists."""
-    success: bool
-    profile: str
-    playlists: list = field(default_factory=list)
-    total_unconverted: int = 0
-    total_playlists_with_unconverted: int = 0
-    total_playlists_scanned: int = 0
-    scan_duration: float = 0.0
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-
-@dataclass
-class DiffListResult:
-    """Result of diff listing showing unconverted and orphaned files."""
-    success: bool
-    profile: str
-    playlists: list = field(default_factory=list)
-    total_unconverted: int = 0
-    total_orphaned: int = 0
-    total_duplicates: int = 0
-    total_playlists_scanned: int = 0
-    total_playlists_with_differences: int = 0
-    scan_duration: float = 0.0
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-
-class TaggerManager:
-    """Manages MP3 tag operations (update, restore, reset)."""
-
-    def __init__(self, logger=None, cleanup_options=None, output_profile=None,
-                 prompt_handler=None, display_handler=None, cancel_event=None,
-                 audit_logger=None, audit_source='cli'):
-        self.logger = logger or Logger()
-        self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
-        self.display_handler = display_handler or NullDisplayHandler()
-        self.cancel_event = cancel_event
-        self.audit_logger = audit_logger
-        self._audit_source = audit_source
-        self.output_profile = output_profile or OUTPUT_PROFILES[DEFAULT_OUTPUT_TYPE]
-        if output_profile is not None:
-            self.cleanup_options = {
-                "remove_id3v1": output_profile.strip_id3v1,
-                "use_id3v23": output_profile.id3_version == 3,
-                "remove_duplicates": True,
-            }
-        else:
-            self.cleanup_options = cleanup_options or DEFAULT_CLEANUP_OPTIONS
-        self.stats = TagStatistics()
-
-    def update_tags(self, directory, new_album=None, new_artist=None,
-                   dry_run=False, verbose=False):
-        """
-        Recursively update album and/or artist tags for all MP3s under a
-        directory. Originals are stored in TXXX:OriginalAlbum /
-        OriginalArtist / OriginalTitle BEFORE any tag is modified.
-        """
-        from mutagen.id3 import ID3, TALB, TPE1, ID3NoHeaderError
-
-        directory = Path(directory)
-        if not directory.is_dir():
-            self.logger.error(f"Directory not found: {directory}")
-            return TagUpdateResult(success=False, directory=str(directory),
-                                   duration=0, files_processed=0, files_updated=0,
-                                   files_skipped=0, errors=1)
-
-        mp3_files = list(directory.rglob("*.mp3"))
-
-        if not mp3_files:
-            self.logger.info(f"No MP3 files found in '{directory}'")
-            return TagUpdateResult(success=True, directory=str(directory),
-                                   duration=0, files_processed=0, files_updated=0,
-                                   files_skipped=0, errors=0)
-
-        self.logger.info(f"Found {len(mp3_files)} MP3 file(s)")
-        self.logger.info(f"New Album:  {new_album or '—'}")
-        self.logger.info(f"New Artist: {new_artist or '—'}")
-
-        start_time = time.time()
-        updated = 0
-        skipped = 0
-        errors = 0
-
-        progress = _DisplayProgress(
-            self.display_handler, total=len(mp3_files), desc="Tagging",
-        )
-
-        try:
-            for filepath in mp3_files:
-                if _is_cancelled(self.cancel_event):
-                    self.logger.warn("Tag update cancelled by user")
-                    break
-                filename = filepath.relative_to(directory)
-
-                try:
-                    try:
-                        tags = ID3(str(filepath))
-                    except ID3NoHeaderError:
-                        self.logger.warn(f"No ID3 tags found in '{filename}'. Skipping.")
-                        skipped += 1
-                        progress.update(1)
-                        continue
-
-                    current_album  = str(tags["TALB"]) if "TALB" in tags else ""
-                    current_artist = str(tags["TPE1"]) if "TPE1" in tags else ""
-                    current_title  = str(tags["TIT2"]) if "TIT2" in tags else ""
-
-                    if verbose:
-                        self.logger.debug("Tags BEFORE update:")
-                        self.logger.debug(f"  → Title:  '{current_title}'")
-                        self.logger.debug(f"  → Artist: '{current_artist}'")
-                        self.logger.debug(f"  → Album:  '{current_album}'")
-
-                    if dry_run:
-                        if new_album:
-                            self.logger.dry_run(f"Album:  '{current_album}' → '{new_album}'")
-                        if new_artist:
-                            self.logger.dry_run(f"Artist: '{current_artist}' → '{new_artist}'")
-                        update_title_tag(tags, self.logger, dry_run=True, verbose=verbose)
-                        continue
-
-                    # ── Store ALL originals BEFORE any tag is modified ──
-                    file_changed = False
-
-                    if new_album:
-                        _, was_stored = save_original_tag(
-                            tags, "TXXX:OriginalAlbum", TXXX_ORIGINAL_ALBUM,
-                            current_album, "album", self.logger, verbose=verbose)
-                        if was_stored:
-                            self.stats.album_stored += 1
-                        else:
-                            self.stats.album_protected += 1
-
-                    if new_artist:
-                        _, was_stored = save_original_tag(
-                            tags, "TXXX:OriginalArtist", TXXX_ORIGINAL_ARTIST,
-                            current_artist, "artist", self.logger, verbose=verbose)
-                        if was_stored:
-                            self.stats.artist_stored += 1
-                        else:
-                            self.stats.artist_protected += 1
-
-                    # ── Store OriginalTitle BEFORE update_title_tag() runs ──
-                    source_artist = _get_txxx(tags, TXXX_ORIGINAL_ARTIST) or current_artist
-                    clean_title   = _strip_artist_prefix(current_title, source_artist)
-                    _, was_stored = save_original_tag(
-                        tags, "TXXX:OriginalTitle", TXXX_ORIGINAL_TITLE,
-                        clean_title, "title", self.logger, verbose=verbose)
-                    if was_stored:
-                        self.stats.title_stored += 1
-                    else:
-                        self.stats.title_protected += 1
-
-                    # ── Now apply new tag values ───────────────────────────
-                    if new_album:
-                        if current_album != new_album:
-                            file_changed = True
-                            self.stats.album_updated += 1  # Track album updates
-                        tags["TALB"] = TALB(encoding=3, text=new_album)
-
-                    if new_artist:
-                        if current_artist != new_artist:
-                            file_changed = True
-                            self.stats.artist_updated += 1  # Track artist updates
-                        tags["TPE1"] = TPE1(encoding=3, text=new_artist)
-
-                    # ── Refresh Title to 'Artist - Title' format ──────────
-                    if update_title_tag(tags, self.logger, dry_run=dry_run, verbose=verbose):
-                        self.stats.title_updated += 1
-                        file_changed = True
-
-                    _apply_cleanup(tags, str(filepath), self.cleanup_options)
-
-                    if file_changed:
-                        updated += 1
-                        msg = f"[{updated}/{len(mp3_files)}] Tags updated: {filename}"
-                    else:
-                        skipped += 1
-                        msg = f"[{skipped}/{len(mp3_files)}] Skipping (no changes): {filename}"
-                    if not verbose:
-                        self.logger.file_info(msg)
-                    else:
-                        self.logger.info(msg)
-                    progress.update(1)
-
-                except Exception as e:
-                    self.logger.error(f"Failed to update '{filename}': {e}")
-                    errors += 1
-                    progress.update(1)
-        finally:
-            progress.close()
-
-        duration = time.time() - start_time
-        if self.audit_logger:
-            self.audit_logger.log(
-                'tag_update', f"Tag update: {directory}",
-                'completed' if errors == 0 else 'failed',
-                params={'directory': str(directory), 'files_updated': updated,
-                        'errors': errors},
-                duration_s=duration, source=self._audit_source)
-        return TagUpdateResult(
-            success=errors == 0,
-            directory=str(directory),
-            duration=duration,
-            files_processed=updated + skipped,
-            files_updated=updated,
-            files_skipped=skipped,
-            errors=errors,
-            title_updated=self.stats.title_updated,
-            album_updated=self.stats.album_updated,
-            artist_updated=self.stats.artist_updated,
-            title_stored=self.stats.title_stored,
-            artist_stored=self.stats.artist_stored,
-            album_stored=self.stats.album_stored,
-        )
-
-    def restore_tags(self, directory, restore_album=False, restore_title=False,
-                    restore_artist=False, dry_run=False, verbose=False):
-        """
-        Recursively restore original tags for all MP3s under a directory
-        by reading values from TXXX:OriginalTitle / OriginalArtist /
-        OriginalAlbum tags.
-        """
-        from mutagen.id3 import ID3, TALB, TIT2, TPE1, ID3NoHeaderError
-
-        directory = Path(directory)
-        if not directory.is_dir():
-            self.logger.error(f"Directory not found: {directory}")
-            return TagRestoreResult(success=False, directory=str(directory),
-                                    duration=0, files_processed=0, files_restored=0,
-                                    files_skipped=0, errors=1)
-
-        mp3_files = list(directory.rglob("*.mp3"))
-
-        if not mp3_files:
-            self.logger.info(f"No MP3 files found in '{directory}'")
-            return TagRestoreResult(success=True, directory=str(directory),
-                                    duration=0, files_processed=0, files_restored=0,
-                                    files_skipped=0, errors=0)
-
-        self.logger.info(f"Found {len(mp3_files)} MP3 file(s)")
-        self.logger.info(f"Restoring Album:  {restore_album}")
-        self.logger.info(f"Restoring Title:  {restore_title}")
-        self.logger.info(f"Restoring Artist: {restore_artist}")
-
-        start_time = time.time()
-        count = 0
-        restored = 0
-        skipped = 0
-        errors = 0
-
-        progress = _DisplayProgress(
-            self.display_handler, total=len(mp3_files), desc="Restoring",
-        )
-
-        try:
-            for filepath in mp3_files:
-                if _is_cancelled(self.cancel_event):
-                    self.logger.warn("Tag restore cancelled by user")
-                    break
-                count += 1
-                filename = filepath.relative_to(directory)
-
-                try:
-                    try:
-                        tags = ID3(str(filepath))
-                    except ID3NoHeaderError:
-                        self.logger.warn(f"No ID3 tags found in '{filename}'. Skipping.")
-                        skipped += 1
-                        progress.update(1)
-                        continue
-
-                    orig_title  = _get_txxx(tags, TXXX_ORIGINAL_TITLE)
-                    orig_artist = _get_txxx(tags, TXXX_ORIGINAL_ARTIST)
-                    orig_album  = _get_txxx(tags, TXXX_ORIGINAL_ALBUM)
-
-                    if verbose:
-                        self.logger.debug("Preserved originals:")
-                        self.logger.debug(f"  → OriginalTitle:  '{orig_title}'")
-                        self.logger.debug(f"  → OriginalArtist: '{orig_artist}'")
-                        self.logger.debug(f"  → OriginalAlbum:  '{orig_album}'")
-
-                    file_restored = False
-
-                    if restore_title:
-                        if orig_title:
-                            if dry_run:
-                                self.logger.dry_run(f"Would restore Title: → '{orig_title}'")
-                            else:
-                                tags["TIT2"] = TIT2(encoding=3, text=orig_title)
-                                msg = f"Title restored → '{orig_title}'"
-                                if verbose:
-                                    self.logger.info(msg)
-                                else:
-                                    self.logger.file_info(msg)
-                                self.stats.title_restored += 1
-                                file_restored = True
-                        else:
-                            if verbose:
-                                self.logger.skip(f"No OriginalTitle for '{filename}'")
-                            else:
-                                self.logger.file_info(f"No OriginalTitle for '{filename}'")
-                            self.stats.title_missing += 1
-
-                    if restore_artist:
-                        if orig_artist:
-                            if dry_run:
-                                self.logger.dry_run(f"Would restore Artist: → '{orig_artist}'")
-                            else:
-                                tags["TPE1"] = TPE1(encoding=3, text=orig_artist)
-                                msg = f"Artist restored → '{orig_artist}'"
-                                if verbose:
-                                    self.logger.info(msg)
-                                else:
-                                    self.logger.file_info(msg)
-                                self.stats.artist_restored += 1
-                                file_restored = True
-                        else:
-                            if verbose:
-                                self.logger.skip(f"No OriginalArtist for '{filename}'")
-                            else:
-                                self.logger.file_info(f"No OriginalArtist for '{filename}'")
-                            self.stats.artist_missing += 1
-
-                    if restore_album:
-                        if orig_album:
-                            if dry_run:
-                                self.logger.dry_run(f"Would restore Album: → '{orig_album}'")
-                            else:
-                                tags["TALB"] = TALB(encoding=3, text=orig_album)
-                                msg = f"Album restored → '{orig_album}'"
-                                if verbose:
-                                    self.logger.info(msg)
-                                else:
-                                    self.logger.file_info(msg)
-                                self.stats.album_restored += 1
-                                file_restored = True
-                        else:
-                            if verbose:
-                                self.logger.skip(f"No OriginalAlbum for '{filename}'")
-                            else:
-                                self.logger.file_info(f"No OriginalAlbum for '{filename}'")
-                            self.stats.album_missing += 1
-
-                    if not dry_run and file_restored:
-                        _apply_cleanup(tags, str(filepath), self.cleanup_options)
-                        restored += 1
-                        msg = f"[{restored}/{len(mp3_files)}] Tags restored: {filename}"
-                    elif not file_restored:
-                        skipped += 1
-                        msg = f"[{skipped}/{len(mp3_files)}] Skipping (nothing to restore): {filename}"
-                    else:
-                        msg = None
-                    if msg:
-                        if not verbose:
-                            self.logger.file_info(msg)
-                        else:
-                            self.logger.info(msg)
-                    progress.update(1)
-
-                except Exception as e:
-                    self.logger.error(f"Failed to restore '{filename}': {e}")
-                    errors += 1
-                    progress.update(1)
-        finally:
-            progress.close()
-
-        duration = time.time() - start_time
-        if self.audit_logger:
-            self.audit_logger.log(
-                'tag_restore', f"Tag restore: {directory}",
-                'completed' if errors == 0 else 'failed',
-                params={'directory': str(directory), 'files_restored': restored,
-                        'errors': errors},
-                duration_s=duration, source=self._audit_source)
-        return TagRestoreResult(
-            success=errors == 0,
-            directory=str(directory),
-            duration=duration,
-            files_processed=restored + skipped,
-            files_restored=restored,
-            files_skipped=skipped,
-            errors=errors,
-            title_restored=self.stats.title_restored,
-            artist_restored=self.stats.artist_restored,
-            album_restored=self.stats.album_restored,
-        )
-
-    def reset_tags_from_source(self, input_dir, output_dir, dry_run=False, verbose=False):
-        """
-        Recursively walk input_dir for .m4a files. For each one, read the
-        original Title, Artist, and Album tags directly from the source,
-        find the matching MP3 in output_dir, reset all three TXXX:Original*
-        protection tags from the source values, rewrite TIT2/TPE1/TALB,
-        refresh the title to 'Artist - Title' format, and save.
-
-        ⚠️ WARNING: This permanently overwrites TXXX:Original* frames!
-        """
-        from mutagen.id3 import ID3, TALB, TIT2, TPE1, TXXX, ID3NoHeaderError
-
-        start_time = time.time()
-
-        input_path = Path(input_dir)
-        output_path = Path(output_dir)
-
-        if not input_path.is_dir():
-            self.logger.error(f"Input directory not found: {input_path}")
-            return TagResetResult(success=False, input_dir=str(input_path),
-                                  output_dir=str(output_path), duration=0,
-                                  files_matched=0, files_reset=0, files_skipped=0, errors=1)
-
-        if not output_path.is_dir():
-            self.logger.error(f"Output directory not found: {output_path}")
-            return TagResetResult(success=False, input_dir=str(input_path),
-                                  output_dir=str(output_path), duration=0,
-                                  files_matched=0, files_reset=0, files_skipped=0, errors=1)
-
-        # Find all M4A files
-        m4a_files = [
-            f for f in input_path.rglob("*.m4a")
-            if not f.name.startswith('._')
-        ]
-
-        if not m4a_files:
-            self.logger.info(f"No .m4a files found in '{input_path}'")
-            return TagResetResult(success=True, input_dir=str(input_path),
-                                  output_dir=str(output_path), duration=0,
-                                  files_matched=0, files_reset=0, files_skipped=0, errors=0)
-
-        total = len(m4a_files)
-        count = 0
-        updated = 0
-        skipped = 0
-        errors = 0
-        tags_reset = 0
-
-        self.logger.info(f"Found {total} .m4a source file(s)")
-
-        # Confirmation prompt (unless dry-run)
-        if not dry_run:
-            msg = (f"WARNING: --reset-tags will permanently overwrite all "
-                   f"TXXX:Original* protection tags in '{output_path}' "
-                   f"with values read fresh from '{input_path}'. "
-                   f"This cannot be undone.")
-            if not self.prompt_handler.confirm_destructive(msg):
-                self.logger.info("Cancelled. No files were modified.")
-                return TagResetResult(success=False, input_dir=str(input_path),
-                                      output_dir=str(output_path), duration=0,
-                                      files_matched=0, files_reset=0, files_skipped=0, errors=0)
-
-        for input_file in m4a_files:
-            if _is_cancelled(self.cancel_event):
-                self.logger.warn("Tag reset cancelled by user")
-                break
-            count += 1
-            display_name = input_file.relative_to(input_path)
-
-            self.logger.info(f"[{count}/{total}] Resetting tags from source: {display_name}")
-
-            try:
-                # Read M4A tags
-                title, artist, album = read_m4a_tags(input_file)
-
-                # Find matching MP3 using profile-aware filename and path
-                safe_title = self._sanitize_filename(title)
-                safe_artist = self._sanitize_filename(artist)
-                safe_album = self._sanitize_filename(album)
-                fmt = self.output_profile.filename_format
-                if fmt == "title-only":
-                    mp3_filename = f"{safe_title}.mp3"
-                else:
-                    mp3_filename = f"{safe_artist} - {safe_title}.mp3"
-                structure = self.output_profile.directory_structure
-                if structure == "nested-artist":
-                    mp3_path = output_path / safe_artist / mp3_filename
-                elif structure == "nested-artist-album":
-                    mp3_path = output_path / safe_artist / safe_album / mp3_filename
-                else:
-                    mp3_path = output_path / mp3_filename
-
-                if not mp3_path.exists():
-                    self.logger.skip(f"No matching MP3 found: '{mp3_filename}'")
-                    skipped += 1
-                    continue
-
-                if verbose:
-                    self.logger.debug("Source .m4a tags:")
-                    self.logger.debug(f"  → Title:  '{title}'")
-                    self.logger.debug(f"  → Artist: '{artist}'")
-                    self.logger.debug(f"  → Album:  '{album}'")
-                    self.logger.debug(f"Matched MP3: '{mp3_path}'")
-
-                if dry_run:
-                    self.logger.dry_run("Would reset MP3 tags from source:")
-                    self.logger.dry_run(f"  → TIT2 / OriginalTitle:  '{title}'")
-                    self.logger.dry_run(f"  → TPE1 / OriginalArtist: '{artist}'")
-                    self.logger.dry_run(f"  → TALB / OriginalAlbum:  '{album}'")
-                    self.logger.dry_run(f"  → Title would become:    '{artist} - {title}'")
-                    continue
-
-                # Load MP3 tags
-                try:
-                    tags = ID3(str(mp3_path))
-                except ID3NoHeaderError:
-                    tags = ID3()
-
-                # ── Hard reset: remove existing Original* TXXX frames ──
-                # This clears the hard gate so save_original_tag() can
-                # write fresh values from the source .m4a
-                for key in list(tags.keys()):
-                    frame = tags[key]
-                    if isinstance(frame, TXXX) and frame.desc in {
-                        TXXX_ORIGINAL_TITLE, TXXX_ORIGINAL_ARTIST, TXXX_ORIGINAL_ALBUM
-                    }:
-                        del tags[key]
-                        tags_reset += 1
-
-                # ── Write fresh base tags from source .m4a ────────────
-                tags["TIT2"] = TIT2(encoding=3, text=title)
-                tags["TPE1"] = TPE1(encoding=3, text=artist)
-                tags["TALB"] = TALB(encoding=3, text=album)
-
-                # ── Store fresh originals — gate is clear after reset ──
-                save_original_tag(tags, "TXXX:OriginalTitle", TXXX_ORIGINAL_TITLE,
-                                title, "title", self.logger, verbose=verbose)
-                save_original_tag(tags, "TXXX:OriginalArtist", TXXX_ORIGINAL_ARTIST,
-                                artist, "artist", self.logger, verbose=verbose)
-                save_original_tag(tags, "TXXX:OriginalAlbum", TXXX_ORIGINAL_ALBUM,
-                                album, "album", self.logger, verbose=verbose)
-
-                # ── Refresh Title to 'Artist - Title' format ──────────
-                update_title_tag(tags, self.logger, dry_run=dry_run, verbose=verbose)
-
-                _apply_cleanup(tags, str(mp3_path), self.cleanup_options)
-
-                if verbose:
-                    self.logger.debug("Tags AFTER reset:")
-                    self.logger.debug(f"  → Title:          '{tags['TIT2']!s}'")
-                    self.logger.debug(f"  → Artist:         '{artist}'")
-                    self.logger.debug(f"  → Album:          '{album}'")
-                    self.logger.debug(f"  → OriginalTitle:  '{title}'")
-                    self.logger.debug(f"  → OriginalArtist: '{artist}'")
-                    self.logger.debug(f"  → OriginalAlbum:  '{album}'")
-
-                self.logger.ok(f"Tags reset from source → '{mp3_filename}'")
-                updated += 1
-
-            except Exception as e:
-                self.logger.error(f"Failed to reset tags for '{display_name}': {e}")
-                errors += 1
-
-        duration = time.time() - start_time
-
-        if self.audit_logger:
-            self.audit_logger.log(
-                'tag_reset', f"Tag reset: {input_dir} → {output_dir}",
-                'completed' if errors == 0 else 'failed',
-                params={'input_dir': str(input_dir), 'output_dir': str(output_dir),
-                        'files_reset': updated, 'errors': errors},
-                duration_s=duration, source=self._audit_source)
-        return TagResetResult(
-            success=errors == 0,
-            input_dir=str(input_dir),
-            output_dir=str(output_dir),
-            duration=duration,
-            files_matched=total,
-            files_reset=updated,
-            files_skipped=skipped,
-            errors=errors,
-            tags_reset=tags_reset,
-            tags_rewritten=updated * 3,
-        )
-
-    def _sanitize_filename(self, name):
-        """Remove invalid filename characters."""
-        return sanitize_filename(name)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -4430,11 +4615,251 @@ class ConversionStatistics:
             return self._progress_counter
 
 
-class Converter:
-    """Manages M4A to MP3 conversion with tag preservation."""
+class TagApplicator:
+    """Applies profile-specific ID3 tags to clean library MP3s on-the-fly.
 
-    def __init__(self, logger=None, quality_preset='lossless', workers=None, embed_cover_art=True,
-                 output_profile=None, display_handler=None, cancel_event=None,
+    Library MP3s contain only a TXXX:TrackUUID identifier.  This class
+    reads track metadata from TrackDB and applies profile-driven tags
+    (title, artist, album, genre, id3_extra, cover art) either:
+    - As a streaming response (build_tagged_stream) for HTTP serving
+    - As a file copy (apply_tags_to_file) for physical sync
+    """
+
+    # Mapping of ID3v2 frame ID prefixes to mutagen constructors.
+    # Populated lazily on first use to avoid import at module level.
+    _frame_constructors = None
+
+    def __init__(self, track_db, project_root='.'):
+        self.track_db = track_db
+        self.project_root = Path(project_root)
+
+    @classmethod
+    def _get_frame_constructors(cls):
+        """Lazy-init frame constructor mapping."""
+        if cls._frame_constructors is None:
+            from mutagen.id3 import COMM, TXXX
+            cls._frame_constructors = {
+                'TXXX': TXXX,
+                'COMM': COMM,
+            }
+        return cls._frame_constructors
+
+    def _resolve_template_vars(self, track_meta, playlist_name):
+        """Build template variable dict from track metadata."""
+        return {
+            'title': track_meta.get('title', ''),
+            'artist': track_meta.get('artist', ''),
+            'album': track_meta.get('album', ''),
+            'genre': track_meta.get('genre') or '',
+            'track_number': str(track_meta.get('track_number') or ''),
+            'track_total': str(track_meta.get('track_total') or ''),
+            'disc_number': str(track_meta.get('disc_number') or ''),
+            'disc_total': str(track_meta.get('disc_total') or ''),
+            'year': track_meta.get('year') or '',
+            'composer': track_meta.get('composer') or '',
+            'album_artist': track_meta.get('album_artist') or '',
+            'bpm': str(track_meta.get('bpm') or ''),
+            'comment': track_meta.get('comment') or '',
+            'compilation': '1' if track_meta.get('compilation') else '',
+            'grouping': track_meta.get('grouping') or '',
+            'lyrics': track_meta.get('lyrics') or '',
+            'copyright': track_meta.get('copyright') or '',
+            'playlist': playlist_name,
+            'playlist_key': track_meta.get('playlist', ''),
+        }
+
+    def _build_id3_tags(self, track_meta, profile, playlist_name):
+        """Build a mutagen ID3 tag object with profile-specific tags.
+
+        Returns (tags, v2_version, include_v1) tuple.
+        """
+        from mutagen.id3 import APIC, ID3, TALB, TIT2, TPE1, TXXX
+
+        tvars = self._resolve_template_vars(track_meta, playlist_name)
+
+        tags = ID3()
+
+        # Primary tag templates
+        tags["TIT2"] = TIT2(encoding=3,
+                            text=apply_template(profile.id3_title, **tvars))
+        tags["TPE1"] = TPE1(encoding=3,
+                            text=apply_template(profile.id3_artist, **tvars))
+        tags["TALB"] = TALB(encoding=3,
+                            text=apply_template(profile.id3_album, **tvars))
+
+        # Genre tag (TCON) — only add if non-empty
+        if profile.id3_genre:
+            from mutagen.id3 import TCON
+            tags["TCON"] = TCON(encoding=3,
+                                text=apply_template(profile.id3_genre, **tvars))
+
+        # Extra tags (arbitrary ID3 frames from profile)
+        primary_frames = {'TIT2', 'TPE1', 'TALB', 'TCON'}
+        for frame_id, value_template in profile.id3_extra.items():
+            if frame_id in primary_frames:
+                continue  # Primary fields take precedence
+            value = apply_template(value_template, **tvars)
+            if not value:
+                continue  # Empty string = omit frame
+
+            if frame_id.startswith('TXXX:'):
+                desc = frame_id[5:]  # Strip "TXXX:" prefix
+                tags.add(TXXX(encoding=3, desc=desc, text=[value]))
+            elif frame_id == 'COMM':
+                constructors = self._get_frame_constructors()
+                tags.add(constructors['COMM'](
+                    encoding=3, lang='eng', desc='', text=[value]))
+            elif frame_id.startswith('T'):
+                # Generic text frame (TCON, TPE2, TRCK, TDRC, etc.)
+                from mutagen.id3 import Frames
+                frame_cls = Frames.get(frame_id)
+                if frame_cls:
+                    tags[frame_id] = frame_cls(encoding=3, text=value)
+
+        # Cover art
+        cover_art_path = track_meta.get('cover_art_path')
+        if cover_art_path and profile.artwork_size != -1:
+            full_art_path = self.project_root / cover_art_path
+            if full_art_path.exists():
+                art_data = full_art_path.read_bytes()
+                art_mime = (APIC_MIME_PNG if cover_art_path.endswith('.png')
+                            else APIC_MIME_JPEG)
+                if profile.artwork_size > 0:
+                    art_data, art_mime = resize_cover_art_bytes(
+                        art_data, profile.artwork_size, art_mime)
+                tags.add(APIC(
+                    encoding=3,
+                    mime=art_mime,
+                    type=APIC_TYPE_FRONT_COVER,
+                    desc='Cover',
+                    data=art_data,
+                ))
+
+        # Determine ID3 version settings from profile.id3_versions
+        v2_version = 4  # default
+        include_v1 = False
+        for v in profile.id3_versions:
+            if v == 'v2.3':
+                v2_version = 3
+            elif v == 'v2.4':
+                v2_version = 4
+            elif v == 'v1':
+                include_v1 = True
+
+        return tags, v2_version, include_v1
+
+    def _find_audio_offset(self, mp3_path):
+        """Find where audio data starts in an MP3 file (after ID3v2 header).
+
+        Returns the byte offset of the first audio frame.
+        """
+        with open(mp3_path, 'rb') as f:
+            header = f.read(10)
+            if len(header) < 10 or header[:3] != b'ID3':
+                return 0  # No ID3v2 header — audio starts at byte 0
+
+            # ID3v2 size is stored as a 4-byte syncsafe integer (bytes 6-9)
+            size_bytes = header[6:10]
+            tag_size = (
+                (size_bytes[0] << 21)
+                | (size_bytes[1] << 14)
+                | (size_bytes[2] << 7)
+                | size_bytes[3]
+            )
+            # Total ID3v2 header = 10-byte header + tag_size
+            ID3V2_HEADER_SIZE = 10
+            return ID3V2_HEADER_SIZE + tag_size
+
+    def build_tagged_stream(self, mp3_path, track_meta, profile,
+                            playlist_name):
+        """Build components for streaming a tagged MP3.
+
+        Returns (id3_bytes, audio_offset, total_size):
+        - id3_bytes: Complete ID3v2 tag block as bytes
+        - audio_offset: Where audio data starts in the clean MP3
+        - total_size: Total size of the tagged MP3 stream
+        """
+        import io
+
+        tags, v2_version, _include_v1 = self._build_id3_tags(
+            track_meta, profile, playlist_name)
+
+        # Render the ID3v2 tag to bytes
+        tag_buf = io.BytesIO()
+        tags.save(tag_buf, v2_version=v2_version, v1=0)
+        id3_bytes = tag_buf.getvalue()
+
+        # Find where audio starts in the clean MP3
+        audio_offset = self._find_audio_offset(mp3_path)
+
+        # Total size = new tags + raw audio
+        file_size = Path(mp3_path).stat().st_size
+        audio_size = file_size - audio_offset
+        total_size = len(id3_bytes) + audio_size
+
+        return id3_bytes, audio_offset, total_size
+
+    def apply_tags_to_file(self, mp3_path, track_meta, profile,
+                           playlist_name, output_path):
+        """Write a fully-tagged copy of the MP3 to output_path.
+
+        Used during physical sync to create profile-specific copies.
+        """
+        tags, v2_version, include_v1 = self._build_id3_tags(
+            track_meta, profile, playlist_name)
+
+        audio_offset = self._find_audio_offset(mp3_path)
+
+        # Ensure output directory exists
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+        import io
+        tag_buf = io.BytesIO()
+        tags.save(tag_buf, v2_version=v2_version,
+                  v1=1 if include_v1 else 0)
+        tag_bytes = tag_buf.getvalue()
+
+        with open(output_path, 'wb') as out:
+            out.write(tag_bytes)
+            with open(mp3_path, 'rb') as src:
+                src.seek(audio_offset)
+                while True:
+                    chunk = src.read(65536)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+
+    def build_output_filename(self, track_meta, profile, playlist_name):
+        """Build destination filename using the profile's filename template."""
+        tvars = self._resolve_template_vars(track_meta, playlist_name)
+        name = apply_template(profile.filename, **tvars)
+        return sanitize_filename(name) + '.mp3'
+
+    def build_output_subdir(self, track_meta, profile, playlist_name):
+        """Build destination subdirectory using the profile's directory template.
+
+        Returns empty string for flat output.
+        """
+        if not profile.directory:
+            return ''
+        tvars = self._resolve_template_vars(track_meta, playlist_name)
+        subdir = apply_template(profile.directory, **tvars)
+        # Sanitize each path component
+        parts = subdir.split('/')
+        return '/'.join(sanitize_filename(p) for p in parts if p)
+
+
+class Converter:
+    """Converts M4A files to clean library MP3s.
+
+    Library MP3s contain only a TXXX:TrackUUID identifier tag.
+    All human-readable metadata (title, artist, album) is stored in TrackDB.
+    Cover art is extracted to disk files.
+    Profile-specific tags are applied later by TagApplicator during sync/download.
+    """
+
+    def __init__(self, logger=None, quality_preset='lossless', workers=None,
+                 track_db=None, display_handler=None, cancel_event=None,
                  audit_logger=None, audit_source='cli', eq_config=None):
         self.logger = logger or Logger()
         self.display_handler = display_handler or NullDisplayHandler()
@@ -4445,8 +4870,7 @@ class Converter:
         self.quality_preset = quality_preset
         self.quality_settings = self._get_quality_settings(quality_preset)
         self.workers = workers if workers is not None else DEFAULT_WORKERS
-        self.embed_cover_art = embed_cover_art
-        self.output_profile = output_profile or OUTPUT_PROFILES[DEFAULT_OUTPUT_TYPE]
+        self.track_db = track_db
         self.eq_config = eq_config or EQConfig()
 
     def _get_quality_settings(self, preset):
@@ -4471,53 +4895,75 @@ class Converter:
         """Remove invalid filename characters."""
         return sanitize_filename(name)
 
-    def _build_output_filename(self, artist: str, title: str) -> str:
-        """Build output filename based on the active output profile."""
-        if self.output_profile.filename_format == "title-only":
-            return f"{title}.mp3"
-        # Default: artist_title
-        return f"{artist} - {title}.mp3"
+    def _build_output_filename(self, track_uuid: str) -> str:
+        """Build library output filename: '<uuid>.mp3'."""
+        return f"{track_uuid}.mp3"
 
-    def _build_output_path(self, base_path: Path, filename: str, artist: str | None = None, album: str | None = None) -> Path:
-        """Build output file path based on the active output profile."""
-        structure = self.output_profile.directory_structure
-        if structure == "nested-artist":
-            safe_artist = artist or "Unknown Artist"
-            return base_path / safe_artist / filename
-        elif structure == "nested-artist-album":
-            safe_artist = artist or "Unknown Artist"
-            safe_album = album or "Unknown Album"
-            return base_path / safe_artist / safe_album / filename
-        # Default: flat
+    def _build_output_path(self, base_path: Path, filename: str) -> Path:
+        """Build library output path — always flat: base_path/filename."""
         return base_path / filename
 
-    def _convert_single_file(self, input_file, input_path, output_path, force, dry_run, verbose, progress_bar=None):
-        """Convert a single M4A file to MP3. Thread-safe for parallel execution."""
+    @staticmethod
+    def _extract_cover_art_to_disk(m4a_file, artwork_dir, track_uuid):
+        """Extract cover art from M4A source and save to disk.
+
+        Returns (relative_path, sha256_hash) or (None, None) if no art found.
+        The relative_path is relative to the project root (e.g. library/artwork/<uuid>.ext).
+        """
         import hashlib
 
-        from mutagen.id3 import APIC, ID3, TALB, TIT2, TPE1, TXXX, ID3NoHeaderError
+        cover_data, cover_mime = read_m4a_cover_art(m4a_file)
+        if not cover_data:
+            return None, None
+
+        ext = 'png' if cover_mime == APIC_MIME_PNG else 'jpg'
+        artwork_dir = Path(artwork_dir)
+        artwork_dir.mkdir(parents=True, exist_ok=True)
+
+        art_filename = f"{track_uuid}.{ext}"
+        art_path = artwork_dir / art_filename
+        art_path.write_bytes(cover_data)
+
+        art_hash = hashlib.sha256(cover_data).hexdigest()[:16]
+        return f"{get_artwork_dir()}/{art_filename}", art_hash
+
+    def _convert_single_file(self, input_file, input_path, output_path,
+                             playlist_key, force, dry_run, verbose,
+                             progress_bar=None):
+        """Convert a single M4A file to a clean library MP3. Thread-safe."""
+        import uuid as _uuid
+
+        from mutagen.id3 import ID3, TXXX, ID3NoHeaderError
+        from mutagen.mp3 import MP3
 
         display_name = input_file.relative_to(input_path)
         count = self.stats.next_progress()
 
+        # Normalize source_m4a_path to always be relative
+        # (e.g. library/source/gamdl/<key>/Artist/Album/Track.m4a)
+        # regardless of whether input_path is absolute or relative
+        rel_source = str(
+            Path(get_source_dir(playlist_key)) / input_file.relative_to(input_path)
+        )
+
         try:
             # Read M4A tags
-            title, artist, album = read_m4a_tags(input_file)
+            m4a_tags = read_m4a_tags(input_file)
+            title = m4a_tags['title']
+            artist = m4a_tags['artist']
+            album = m4a_tags['album']
+            human_label = f"{artist} - {title}"
 
-            # Create output filename based on active output profile
-            safe_title = self._sanitize_filename(title)
-            safe_artist = self._sanitize_filename(artist)
-            safe_album = self._sanitize_filename(album)
-            output_filename = self._build_output_filename(safe_artist, safe_title)
-            output_file = self._build_output_path(output_path, output_filename, safe_artist, safe_album)
-            already_exists = output_file.exists()
+            # Check TrackDB for existing conversion of this source M4A
+            existing_track = None
+            if self.track_db:
+                existing_track = self.track_db.get_track_by_source_m4a(
+                    rel_source)
 
-            if already_exists and not force:
+            if existing_track and not force:
                 self.stats.increment('skipped')
-                collision_hint = ""
-                if self.output_profile.filename_format != "full":
-                    collision_hint = " (possible filename collision — try 'full' format)"
-                msg = f"[{count}/{self.stats.total_found}] Skipping (already exists): {output_filename}{collision_hint}"
+                msg = (f"[{count}/{self.stats.total_found}] "
+                       f"Skipping (already converted): {human_label}")
                 if progress_bar and not verbose:
                     self.logger.file_info(msg)
                 else:
@@ -4526,69 +4972,91 @@ class Converter:
                     progress_bar.update(1)
                 return
 
+            # Generate UUID first — used for both filename and DB record
+            track_uuid = _uuid.uuid4().hex
+            output_filename = self._build_output_filename(track_uuid)
+            output_file = self._build_output_path(output_path, output_filename)
+
+            # If force re-converting, delete old file + DB entry
+            if existing_track and force:
+                old_path = Path(existing_track['file_path'])
+                if not old_path.is_absolute():
+                    old_path = Path('.') / old_path
+                if old_path.exists():
+                    old_path.unlink()
+                # Clean up old cover art
+                if existing_track.get('cover_art_path'):
+                    old_art = Path(existing_track['cover_art_path'])
+                    if not old_art.is_absolute():
+                        old_art = Path('.') / old_art
+                    if old_art.exists():
+                        old_art.unlink()
+                if self.track_db:
+                    self.track_db.delete_track(existing_track['uuid'])
+
             if verbose:
                 self.logger.debug(f"Source file:  '{input_file}'")
-                self.logger.debug(f"File size:    {input_file.stat().st_size / 1024:.1f} KB")
-                if already_exists and force:
-                    self.logger.debug(f"Force flag set — overwriting: '{output_filename}'")
-                # Display quality settings
+                self.logger.debug(
+                    f"File size:    {input_file.stat().st_size / 1024:.1f} KB")
+                if existing_track and force:
+                    self.logger.debug(
+                        f"Force flag set — re-converting: {human_label}")
                 quality_desc = f"{self.quality_settings['mode'].upper()}"
                 if self.quality_settings['mode'] == 'vbr':
                     quality_desc += f" quality {self.quality_settings['value']}"
                 else:
-                    quality_desc += f" {self.quality_settings['value']}kbps"
-                self.logger.debug(f"Quality:      {quality_desc} (preset: {self.quality_preset})")
+                    quality_desc += (
+                        f" {self.quality_settings['value']}kbps")
+                self.logger.debug(
+                    f"Quality:      {quality_desc} "
+                    f"(preset: {self.quality_preset})")
                 if self.eq_config.any_enabled:
                     effects = ', '.join(self.eq_config.enabled_effects)
                     self.logger.debug(f"EQ effects:   {effects}")
-                    self.logger.debug(f"Filter chain: {self.eq_config.build_filter_chain()}")
+                    self.logger.debug(
+                        f"Filter chain: {self.eq_config.build_filter_chain()}")
                 self.logger.debug("Source tags:")
                 self.logger.debug(f"  → Title:  '{title}'")
                 self.logger.debug(f"  → Artist: '{artist}'")
                 self.logger.debug(f"  → Album:  '{album}'")
 
             if dry_run:
-                if already_exists and force:
-                    self.logger.dry_run(f"Would overwrite: '{output_filename}'")
+                if existing_track and force:
+                    self.logger.dry_run(
+                        f"Would re-convert: {human_label}")
                 else:
-                    self.logger.dry_run(f"Would convert:   '{display_name}'")
-                output_display = str(output_file.relative_to(output_path)) if self.output_profile.directory_structure != "flat" else output_filename
-                self.logger.dry_run(f"  → Output:     '{output_display}'")
+                    self.logger.dry_run(
+                        f"Would convert:   '{display_name}'")
+                self.logger.dry_run(f"  → Output:     {output_filename}")
                 self.logger.dry_run(f"  → Title:      '{title}'")
                 self.logger.dry_run(f"  → Artist:     '{artist}'")
                 self.logger.dry_run(f"  → Album:      '{album}'")
-                artwork_size = self.output_profile.artwork_size
-                if self.embed_cover_art and artwork_size != -1:
-                    cover_data, cover_mime = read_m4a_cover_art(input_file)
-                    if cover_data:
-                        art_desc = f"{len(cover_data) / 1024:.1f} KB ({cover_mime})"
-                        if artwork_size > 0:
-                            art_desc += f", resize to {artwork_size}px"
-                        self.logger.dry_run(f"  → Cover art:  {art_desc}")
-                    else:
-                        self.logger.dry_run("  → Cover art:  (none found in source)")
+                cover_data, _ = read_m4a_cover_art(input_file)
+                if cover_data:
+                    self.logger.dry_run(
+                        f"  → Cover art:  "
+                        f"{len(cover_data) / 1024:.1f} KB (extract to disk)")
                 else:
-                    reason = "stripped by profile" if artwork_size == -1 else "disabled"
-                    self.logger.dry_run(f"  → Cover art:  ({reason})")
+                    self.logger.dry_run(
+                        "  → Cover art:  (none found in source)")
                 if self.eq_config.any_enabled:
                     effects = ', '.join(self.eq_config.enabled_effects)
                     self.logger.dry_run(f"  → EQ effects: {effects}")
                 return
 
-            # Ensure parent directories exist (needed for nested structures)
+            # Ensure output directory exists
             output_file.parent.mkdir(parents=True, exist_ok=True)
 
-            # Run ffmpeg conversion
+            # FFmpeg conversion M4A → MP3
             import ffmpeg as _ffmpeg
             try:
-                # Build FFmpeg parameters based on quality mode
                 ffmpeg_params = {'acodec': 'libmp3lame'}
                 if self.quality_settings['mode'] == 'vbr':
                     ffmpeg_params['q:a'] = self.quality_settings['value']
-                else:  # cbr for lossless
-                    ffmpeg_params['b:a'] = self.quality_settings['value'] + 'k'
+                else:
+                    ffmpeg_params['b:a'] = (
+                        self.quality_settings['value'] + 'k')
 
-                # Apply EQ filter chain if configured
                 filter_chain = self.eq_config.build_filter_chain()
                 if filter_chain:
                     ffmpeg_params['af'] = filter_chain
@@ -4600,69 +5068,81 @@ class Converter:
                     .run(overwrite_output=True, quiet=True)
                 )
             except _ffmpeg.Error as e:
-                # Re-raise as generic exception to be caught by outer try/except
-                error_msg = e.stderr.decode('utf-8') if e.stderr else str(e)
-                raise Exception(f"FFmpeg conversion failed: {error_msg}") from e
+                error_msg = (e.stderr.decode('utf-8')
+                             if e.stderr else str(e))
+                raise Exception(
+                    f"FFmpeg conversion failed: {error_msg}") from e
 
-            # Write basic ID3 tags from source M4A (no modifications)
+            # Write ONLY the TrackUUID identifier tag (no TIT2/TPE1/TALB/APIC)
             try:
-                tags = ID3(str(output_file))
+                id3_tags = ID3(str(output_file))
             except ID3NoHeaderError:
-                tags = ID3()
+                id3_tags = ID3()
 
-            tags["TIT2"] = TIT2(encoding=3, text=title)
-            tags["TPE1"] = TPE1(encoding=3, text=artist)
-            tags["TALB"] = TALB(encoding=3, text=album)
+            # Remove any tags ffmpeg may have copied from the M4A
+            id3_tags.delete(str(output_file))
+            id3_tags = ID3()
+            id3_tags.add(TXXX(encoding=3, desc=TXXX_TRACK_UUID,
+                          text=[track_uuid]))
+            id3_tags.save(str(output_file), v2_version=4, v1=0)
 
-            # Embed cover art from source M4A
-            artwork_size = self.output_profile.artwork_size
-            if self.embed_cover_art and artwork_size != -1:
-                cover_data, cover_mime = read_m4a_cover_art(input_file)
-                if cover_data:
-                    # Hash is always computed from original (pre-resize) data
-                    if not _txxx_exists(tags, TXXX_ORIGINAL_COVER_ART_HASH):
-                        art_hash = hashlib.sha256(cover_data).hexdigest()[:16]
-                        tags.add(TXXX(encoding=3,
-                                      desc=TXXX_ORIGINAL_COVER_ART_HASH,
-                                      text=[art_hash]))
-                    # Resize if profile specifies a max dimension
-                    embed_data, embed_mime = cover_data, cover_mime
-                    if artwork_size > 0:
-                        embed_data, embed_mime = resize_cover_art_bytes(cover_data, artwork_size, cover_mime)
-                    tags.add(APIC(
-                        encoding=3,
-                        mime=embed_mime,
-                        type=APIC_TYPE_FRONT_COVER,
-                        desc='Cover',
-                        data=embed_data,
-                    ))
-                    if verbose:
-                        size_desc = f"{len(embed_data) / 1024:.1f} KB ({embed_mime})"
-                        if artwork_size > 0 and len(embed_data) != len(cover_data):
-                            size_desc += f" (resized to {artwork_size}px)"
-                        self.logger.debug(f"  → Cover art: {size_desc}")
-                else:
-                    if verbose:
-                        self.logger.debug("  → Cover art: (none found in source)")
+            # Extract cover art to flat artwork directory
+            artwork_dir = Path(get_artwork_dir())
+            cover_art_path, cover_art_hash = self._extract_cover_art_to_disk(
+                input_file, artwork_dir, track_uuid)
 
-            # Save using profile-driven ID3 version and v1 settings
-            tags.save(str(output_file),
-                      v2_version=self.output_profile.id3_version,
-                      v1=0 if self.output_profile.strip_id3v1 else 1)
+            if verbose and cover_art_path:
+                self.logger.debug(
+                    f"  → Cover art: extracted to {cover_art_path}")
+
+            # Get MP3 duration and file size
+            mp3_info = MP3(str(output_file))
+            duration_s = mp3_info.info.length if mp3_info.info else None
+            file_size_bytes = output_file.stat().st_size
+
+            # Insert metadata into TrackDB
+            if self.track_db:
+                self.track_db.insert_track(
+                    uuid=track_uuid,
+                    playlist=playlist_key,
+                    file_path=f"{get_audio_dir()}/{output_filename}",
+                    title=title,
+                    artist=artist,
+                    album=album,
+                    cover_art_path=cover_art_path,
+                    cover_art_hash=cover_art_hash,
+                    duration_s=duration_s,
+                    file_size_bytes=file_size_bytes,
+                    source_m4a_path=rel_source,
+                    genre=m4a_tags.get('genre') or None,
+                    track_number=m4a_tags.get('track_number'),
+                    track_total=m4a_tags.get('track_total'),
+                    disc_number=m4a_tags.get('disc_number'),
+                    disc_total=m4a_tags.get('disc_total'),
+                    year=m4a_tags.get('year') or None,
+                    composer=m4a_tags.get('composer') or None,
+                    album_artist=m4a_tags.get('album_artist') or None,
+                    bpm=m4a_tags.get('bpm'),
+                    comment=m4a_tags.get('comment') or None,
+                    compilation=1 if m4a_tags.get('compilation') else None,
+                    grouping=m4a_tags.get('grouping') or None,
+                    lyrics=m4a_tags.get('lyrics') or None,
+                    copyright_text=m4a_tags.get('copyright') or None,
+                )
 
             if verbose:
-                self.logger.debug("Tags AFTER conversion (copied from source):")
-                self.logger.debug(f"  → Title:  '{title}'")
-                self.logger.debug(f"  → Artist: '{artist}'")
-                self.logger.debug(f"  → Album:  '{album}'")
-                self.logger.debug(f"Output size: {output_file.stat().st_size / 1024:.1f} KB")
+                self.logger.debug(f"  → UUID:     {track_uuid}")
+                self.logger.debug(
+                    f"Output size: {file_size_bytes / 1024:.1f} KB")
 
-            if already_exists and force:
+            if existing_track and force:
                 self.stats.increment('overwritten')
-                msg = f"[{count}/{self.stats.total_found}] Overwritten: {output_filename}"
+                msg = (f"[{count}/{self.stats.total_found}] "
+                       f"Converted: {human_label} → {output_filename}")
             else:
                 self.stats.increment('converted')
-                msg = f"[{count}/{self.stats.total_found}] Converted: {output_filename}"
+                msg = (f"[{count}/{self.stats.total_found}] "
+                       f"Converted: {human_label} → {output_filename}")
             if progress_bar and not verbose:
                 self.logger.file_info(msg)
             else:
@@ -4676,21 +5156,32 @@ class Converter:
             if progress_bar:
                 progress_bar.update(1)
 
-    def convert(self, input_dir, output_dir, force=False, dry_run=False, verbose=False):
-        """
-        Recursively scan input_dir for .m4a files, convert them to MP3
-        using ffmpeg, and save all output files flat into output_dir.
-        Tags are written immediately after each conversion.
+    def convert(self, input_dir, output_dir, playlist_key=None,
+                force=False, dry_run=False, verbose=False):
+        """Convert M4A files to clean library MP3s.
+
+        Recursively scans input_dir for .m4a files, converts to MP3 with
+        ffmpeg, and saves flat into output_dir.  Each MP3 gets only a
+        TXXX:TrackUUID tag; metadata is stored in TrackDB.
+
+        Args:
+            playlist_key: Playlist identifier for TrackDB records.
+                         Defaults to output directory name.
         """
         start_time = time.time()
 
         input_path = Path(input_dir)
         output_path = Path(output_dir)
 
+        if playlist_key is None:
+            playlist_key = output_path.name
+
         if input_path.resolve() == output_path.resolve():
-            self.logger.error("Input and output directories cannot be the same")
+            self.logger.error(
+                "Input and output directories cannot be the same")
             return ConversionResult(
-                success=False, input_dir=str(input_dir), output_dir=str(output_dir),
+                success=False, input_dir=str(input_dir),
+                output_dir=str(output_dir),
                 duration=0, quality_preset=self.quality_preset,
                 quality_mode=self.quality_settings['mode'],
                 quality_value=self.quality_settings['value'],
@@ -4706,7 +5197,8 @@ class Converter:
         if not m4a_files:
             self.logger.info(f"No .m4a files found in '{input_dir}'")
             return ConversionResult(
-                success=True, input_dir=str(input_dir), output_dir=str(output_dir),
+                success=True, input_dir=str(input_dir),
+                output_dir=str(output_dir),
                 duration=0, quality_preset=self.quality_preset,
                 quality_mode=self.quality_settings['mode'],
                 quality_value=self.quality_settings['value'],
@@ -4714,11 +5206,13 @@ class Converter:
                 overwritten=0, skipped=0, errors=0)
 
         self.stats.total_found = len(m4a_files)
-        self.logger.info(f"Found {self.stats.total_found} .m4a file(s) (recursive)")
-        self.logger.info(f"Output directory: '{output_dir}' ({display_name(self.output_profile.directory_structure)})")
+        self.logger.info(
+            f"Found {self.stats.total_found} .m4a file(s) (recursive)")
+        self.logger.info(f"Output directory: '{output_dir}' (flat)")
 
         if force:
-            self.logger.info("Force mode enabled — existing files will be overwritten")
+            self.logger.info(
+                "Force mode enabled — existing files will be overwritten")
 
         if self.eq_config.any_enabled:
             effects = ', '.join(self.eq_config.enabled_effects)
@@ -4727,18 +5221,20 @@ class Converter:
         if not dry_run:
             output_path.mkdir(parents=True, exist_ok=True)
 
-        # Determine effective worker count
         effective_workers = min(self.workers, self.stats.total_found)
 
         progress = _DisplayProgress(
-            self.display_handler, total=self.stats.total_found, desc="Converting",
+            self.display_handler, total=self.stats.total_found,
+            desc="Converting",
         )
 
         try:
             if effective_workers > 1:
-                self.logger.info(f"Using {effective_workers} parallel workers")
+                self.logger.info(
+                    f"Using {effective_workers} parallel workers")
 
-                with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+                with ThreadPoolExecutor(
+                        max_workers=effective_workers) as executor:
                     futures = {}
                     for input_file in m4a_files:
                         if _is_cancelled(self.cancel_event):
@@ -4746,49 +5242,62 @@ class Converter:
                         futures[executor.submit(
                             self._convert_single_file,
                             input_file, input_path, output_path,
-                            force, dry_run, verbose, progress
+                            playlist_key, force, dry_run, verbose,
+                            progress
                         )] = input_file
 
                     for future in as_completed(futures):
                         if _is_cancelled(self.cancel_event):
                             for f in futures:
                                 f.cancel()
-                            self.logger.warn("Conversion cancelled by user")
+                            self.logger.warn(
+                                "Conversion cancelled by user")
                             break
-                        # Exceptions are already handled inside _convert_single_file,
-                        # but catch any unexpected errors from the future itself
                         try:
                             future.result()
                         except Exception as e:
                             input_file = futures[future]
-                            self.logger.error(f"Unexpected error processing '{input_file.name}': {e}")
+                            self.logger.error(
+                                f"Unexpected error processing "
+                                f"'{input_file.name}': {e}")
                             self.stats.increment('errors')
             else:
                 for input_file in m4a_files:
                     if _is_cancelled(self.cancel_event):
-                        self.logger.warn("Conversion cancelled by user")
+                        self.logger.warn(
+                            "Conversion cancelled by user")
                         break
                     self._convert_single_file(
                         input_file, input_path, output_path,
-                        force, dry_run, verbose, progress
+                        playlist_key, force, dry_run, verbose,
+                        progress
                     )
         finally:
             progress.close()
 
         duration = time.time() - start_time
 
-        mp3_count = len([f for f in output_path.rglob("*.mp3") if not f.name.startswith('._')])
+        mp3_count = len([
+            f for f in output_path.rglob("*.mp3")
+            if not f.name.startswith('._')
+        ])
         self.stats.mp3_total = mp3_count
 
         if self.audit_logger:
             self.audit_logger.log(
                 'convert', f"Convert: {input_dir}",
                 'completed' if self.stats.errors == 0 else 'failed',
-                params={'input_dir': str(input_dir), 'output_dir': str(output_dir),
-                        'preset': self.quality_preset, 'converted': self.stats.converted,
-                        'errors': self.stats.errors,
-                        'eq_effects': self.eq_config.enabled_effects},
+                params={
+                    'input_dir': str(input_dir),
+                    'output_dir': str(output_dir),
+                    'playlist_key': playlist_key,
+                    'preset': self.quality_preset,
+                    'converted': self.stats.converted,
+                    'errors': self.stats.errors,
+                    'eq_effects': self.eq_config.enabled_effects,
+                },
                 duration_s=duration, source=self._audit_source)
+
         return ConversionResult(
             success=self.stats.errors == 0,
             input_dir=str(input_dir),
@@ -6012,16 +6521,6 @@ class SyncManager:
         # File is up-to-date, skip
         return False
 
-    def _extract_sync_info(self, src_file, source_path):
-        """Extract playlist name and file name from a source file path."""
-        if source_path.is_dir():
-            rel = src_file.relative_to(source_path)
-            parts = rel.parts
-            if len(parts) > 1:
-                return parts[0], str(Path(*parts[1:]))
-            return source_path.name, parts[0]
-        return source_path.parent.name, src_file.name
-
     def select_destination(self, config=None, output_profile=None):
         """Interactive destination picker showing USB drives, saved destinations, and custom path.
 
@@ -6102,7 +6601,8 @@ class SyncManager:
         return sanitized or 'custom-dest'
 
     def sync_to_destination(self, source_dir, dest_path, dest_key,
-                            dry_run=False):
+                            dry_run=False, tag_applicator=None,
+                            profile=None, playlist_name=None):
         """Sync files to any destination with incremental copy logic.
 
         Args:
@@ -6110,6 +6610,13 @@ class SyncManager:
             dest_path: Schemed path (usb:// or folder://) or raw filesystem path
             dest_key: Tracking key name (destination name)
             dry_run: Preview changes without copying
+            tag_applicator: Optional TagApplicator for profile-based tagging
+            profile: Optional OutputProfile (required if tag_applicator is set)
+            playlist_name: Display name of playlist (for template variables)
+
+        When tag_applicator and profile are provided, files are tagged on-the-fly
+        during copy using the profile's template settings.  When omitted, files
+        are copied as-is (raw library MP3s).
 
         Returns:
             SyncResult with operation stats.
@@ -6128,7 +6635,8 @@ class SyncManager:
             fs_path = dest_path
 
         if not source_path.exists():
-            self.logger.error(f"Source directory does not exist: {source_path}")
+            self.logger.error(
+                f"Source directory does not exist: {source_path}")
             return SyncResult(success=False, source=str(source_dir),
                               destination='', dest_key=dest_key or '',
                               duration=0, is_usb=is_usb)
@@ -6150,45 +6658,96 @@ class SyncManager:
         dest = Path(fs_path)
         self.logger.info(f"Syncing {source_path} to {dest}")
 
+        # Helper to look up track metadata from tag_applicator's TrackDB
+        def _get_track_meta(src_file):
+            if not tag_applicator or not tag_applicator.track_db:
+                return None
+            # DB stores paths like library/audio/<uuid>.mp3
+            db_path = f"{get_audio_dir()}/{src_file.name}"
+            return tag_applicator.track_db.get_track_by_path(db_path)
+
+        # Pre-compute destination paths for all files, then deduplicate
+        track_metas = {}  # src_file -> track_meta (or None)
+        raw_filenames = []
+        raw_subdirs = []
+        for src_file in mp3_files:
+            meta = _get_track_meta(src_file)
+            track_metas[src_file] = meta
+            if tag_applicator and profile and meta:
+                pname = playlist_name or meta.get('playlist', '')
+                fname = tag_applicator.build_output_filename(
+                    meta, profile, pname)
+                subdir = tag_applicator.build_output_subdir(
+                    meta, profile, pname)
+            else:
+                # Fallback: preserve relative path
+                if source_path.is_dir():
+                    rel = src_file.relative_to(source_path)
+                    fname = rel.name
+                    subdir = (str(rel.parent)
+                              if len(rel.parts) > 1 else '')
+                else:
+                    fname = src_file.name
+                    subdir = ''
+            raw_filenames.append(fname)
+            raw_subdirs.append(subdir or '')
+
+        deduped_names = deduplicate_filenames(raw_filenames, raw_subdirs)
+
+        # Build src_file -> deduped dest path map
+        dest_path_map = {}
+        for i, src_file in enumerate(mp3_files):
+            subdir = raw_subdirs[i]
+            if subdir:
+                dest_path_map[src_file] = dest / subdir / deduped_names[i]
+            else:
+                dest_path_map[src_file] = dest / deduped_names[i]
+
         if dry_run:
             self.logger.dry_run(f"Would create directory: {dest}")
             for src_file in mp3_files:
-                rel_path = src_file.relative_to(source_path) if source_path.is_dir() else src_file.name
-                dst_file = dest / rel_path
+                dst_file = dest_path_map[src_file]
                 if self._should_copy_file(src_file, dst_file):
                     self.logger.dry_run(f"Would copy: {src_file.name}")
                     stats.files_copied += 1
                 else:
                     if self.logger.verbose:
-                        self.logger.dry_run(f"Would skip (unchanged): {src_file.name}")
+                        self.logger.dry_run(
+                            f"Would skip (unchanged): {src_file.name}")
                     stats.files_skipped += 1
             if is_usb:
-                self.logger.dry_run("Would prompt to eject USB drive after copy")
+                self.logger.dry_run(
+                    "Would prompt to eject USB drive after copy")
             duration = time.time() - start_time
 
             return SyncResult(
                 success=True, source=str(source_path), destination=str(dest),
                 dest_key=dest_key, duration=duration, is_usb=is_usb,
                 files_found=stats.files_found, files_copied=stats.files_copied,
-                files_skipped=stats.files_skipped, files_failed=stats.files_failed)
+                files_skipped=stats.files_skipped,
+                files_failed=stats.files_failed)
 
         # Create destination directory
         try:
             dest.mkdir(parents=True, exist_ok=True)
         except Exception as e:
-            self.logger.error(f"Failed to create destination directory: {e}")
+            self.logger.error(
+                f"Failed to create destination directory: {e}")
             stats.files_failed = stats.files_found
             duration = time.time() - start_time
 
             return SyncResult(
-                success=False, source=str(source_path), destination=str(dest),
+                success=False, source=str(source_path),
+                destination=str(dest),
                 dest_key=dest_key, duration=duration, is_usb=is_usb,
                 files_found=stats.files_found, files_copied=stats.files_copied,
-                files_skipped=stats.files_skipped, files_failed=stats.files_failed)
+                files_skipped=stats.files_skipped,
+                files_failed=stats.files_failed)
 
         # Copy files with incremental check
         progress = _DisplayProgress(
-            self.display_handler, total=len(mp3_files), desc="Syncing files",
+            self.display_handler, total=len(mp3_files),
+            desc="Syncing files",
         )
 
         try:
@@ -6197,37 +6756,48 @@ class SyncManager:
                     self.logger.warn("Sync cancelled by user")
                     break
                 try:
-                    if source_path.is_dir():
-                        rel_path = src_file.relative_to(source_path)
-                    else:
-                        rel_path = src_file.name
-                    dst_file = dest / rel_path
+                    track_meta = track_metas[src_file]
+                    dst_file = dest_path_map[src_file]
 
                     dst_file.parent.mkdir(parents=True, exist_ok=True)
 
                     if self._should_copy_file(src_file, dst_file):
-                        shutil.copy2(src_file, dst_file)
+                        if (tag_applicator and profile
+                                and track_meta):
+                            # Apply profile tags on-the-fly during copy
+                            pname = (playlist_name
+                                     or track_meta.get('playlist', ''))
+                            tag_applicator.apply_tags_to_file(
+                                str(src_file), track_meta, profile,
+                                pname, str(dst_file))
+                        else:
+                            # Raw copy (no profile tagging)
+                            shutil.copy2(src_file, dst_file)
                         stats.files_copied += 1
                         if self.logger.verbose:
                             self.logger.info(f"Copied: {src_file.name}")
                         else:
-                            self.logger.file_info(f"Copied: {src_file.name}")
+                            self.logger.file_info(
+                                f"Copied: {src_file.name}")
+                        if self.sync_tracker and not dry_run:
+                            record_name = dst_file.name
+                            pl_name = (playlist_name
+                                       or source_path.parent.name)
+                            self.sync_tracker.record_file(
+                                dest_key, pl_name, record_name)
                     else:
                         stats.files_skipped += 1
                         if self.logger.verbose:
-                            self.logger.info(f"Skipped (unchanged): {src_file.name}")
+                            self.logger.info(
+                                f"Skipped (unchanged): {src_file.name}")
                         else:
-                            self.logger.file_info(f"Skipped (unchanged): {src_file.name}")
-
-                    if self.sync_tracker and not dry_run:
-                        pl_name, fname = self._extract_sync_info(
-                            src_file, source_path)
-                        self.sync_tracker.record_file(
-                            dest_key, pl_name, fname)
+                            self.logger.file_info(
+                                f"Skipped (unchanged): {src_file.name}")
 
                 except Exception as e:
                     stats.files_failed += 1
-                    self.logger.error(f"Failed to copy {src_file.name}: {e}")
+                    self.logger.error(
+                        f"Failed to copy {src_file.name}: {e}")
 
                 progress.update(1)
         finally:
@@ -6244,7 +6814,8 @@ class SyncManager:
             success=stats.files_failed == 0, source=str(source_path),
             destination=str(dest), dest_key=dest_key, duration=duration,
             is_usb=is_usb, files_found=stats.files_found,
-            files_copied=stats.files_copied, files_skipped=stats.files_skipped,
+            files_copied=stats.files_copied,
+            files_skipped=stats.files_skipped,
             files_failed=stats.files_failed)
 
     def sync_to_usb(self, source_dir, usb_dir=DEFAULT_USB_DIR, dry_run=False, volume=None):
@@ -6355,30 +6926,8 @@ USBManager = SyncManager
 # Section 8A: Library Summary Management
 # ══════════════════════════════════════════════════════════════════
 
-class PlaylistSummary:
-    """Statistics for a single playlist."""
-
-    def __init__(self, name, path):
-        self.name = name
-        self.path = path
-        self.file_count = 0
-        self.total_size_bytes = 0
-        self.avg_file_size_mb = 0.0
-        self.last_modified = None  # datetime
-
-        # Tag integrity (from sampling)
-        self.sample_files_checked = 0
-        self.sample_files_with_tags = 0
-
-        # Cover art stats
-        self.files_with_cover_art = 0
-        self.files_without_cover_art = 0
-        self.files_with_original_cover_art = 0
-        self.files_with_resized_cover_art = 0
-
-
 class MusicLibraryStats:
-    """Statistics for the source music/ directory (M4A library)."""
+    """Statistics for the source M4A library (library/<playlist>/source/)."""
 
     def __init__(self):
         self.total_playlists = 0
@@ -6390,322 +6939,61 @@ class MusicLibraryStats:
         self.playlists = []  # List of dicts: {name, m4a_count, size_bytes, exported_count, unconverted_count}
 
 
-class LibrarySummaryStatistics:
-    """Statistics for the entire export library."""
-
-    def __init__(self):
-        # Aggregate stats
-        self.total_playlists = 0
-        self.total_files = 0
-        self.total_size_bytes = 0
-        self.scan_duration = 0.0
-
-        # Tag integrity (from sampling)
-        self.sample_size = 0
-        self.files_with_protection_tags = 0
-        self.files_missing_protection_tags = 0
-
-        # Cover art stats
-        self.files_with_cover_art = 0
-        self.files_without_cover_art = 0
-        self.files_with_original_cover_art = 0
-        self.files_with_resized_cover_art = 0
-
-        # Per-playlist breakdown
-        self.playlists = []  # List of PlaylistSummary objects
-
-
 class SummaryManager:
-    """Generates summary statistics for the export directory."""
+    """Scans library directories for source/output statistics."""
 
     def __init__(self, logger=None):
         self.logger = logger or Logger()
-        self.stats = LibrarySummaryStatistics()
 
-    def generate_summary(self, export_dir='export/', detailed=False, quick=False,
-                         dry_run=False, music_dir=None, export_profile=None,
-                         no_library=False, output_profile=None):
-        """
-        Generate and display library stats and playlist summary.
+    def scan_music_library(self, track_db=None):
+        """Scan library/source/gamdl/ for M4A stats and conversion status.
 
-        Args:
-            export_dir: Directory to analyze
-            detailed: Show detailed statistics
-            quick: Show only aggregate statistics
-            dry_run: Preview mode (not applicable for summary)
-            music_dir: Music source directory for library stats
-            export_profile: Profile name for conversion status comparison
-            no_library: Skip music directory scan
-            output_profile: OutputProfile for accurate file-level matching
+        Uses TrackDB for per-playlist MP3 counts when available, otherwise
+        counts MP3s in the flat library/audio/ directory.
 
         Returns:
-            LibrarySummaryResult
+            MusicLibraryStats or None if source directory doesn't exist
         """
-        # Scan music library stats (unless skipped)
-        music_stats = None
-        if not no_library:
-            music_stats = self.scan_music_library(
-                music_dir=music_dir,
-                export_profile=export_profile,
-                output_profile=output_profile,
-            )
-
-        start_time = time.time()
-
-        # Check if directory exists
-        export_path = Path(export_dir)
-        if not export_path.exists():
-            mode = "quick" if quick else ("detailed" if detailed else "default")
-            return LibrarySummaryResult(
-                success=True, export_dir=str(export_dir), scan_duration=0,
-                mode=mode, music_library_stats=music_stats)
-
-        # Scan playlists
-        playlist_dirs = self._scan_playlists(export_path)
-
-        if not playlist_dirs:
-            mode = "quick" if quick else ("detailed" if detailed else "default")
-            return LibrarySummaryResult(
-                success=True, export_dir=str(export_dir), scan_duration=0,
-                mode=mode, music_library_stats=music_stats)
-
-        # Analyze each playlist
-        for playlist_dir in playlist_dirs:
-            playlist_summary = self._analyze_playlist(playlist_dir)
-            if playlist_summary:
-                self.stats.playlists.append(playlist_summary)
-
-        # Calculate aggregate statistics
-        self.stats.total_playlists = len(self.stats.playlists)
-        self.stats.total_files = sum(p.file_count for p in self.stats.playlists)
-        self.stats.total_size_bytes = sum(p.total_size_bytes for p in self.stats.playlists)
-
-        # Check tag integrity (always checks all files)
-        self._check_tag_integrity()
-
-        # Record scan duration
-        self.stats.scan_duration = time.time() - start_time
-
-        mode = "quick" if quick else ("detailed" if detailed else "default")
-        avg_size = (self.stats.total_size_bytes / self.stats.total_files
-                    if self.stats.total_files > 0 else 0.0)
-        return LibrarySummaryResult(
-            success=True,
-            export_dir=str(export_dir),
-            scan_duration=self.stats.scan_duration,
-            mode=mode,
-            total_playlists=self.stats.total_playlists,
-            total_files=self.stats.total_files,
-            total_size_bytes=self.stats.total_size_bytes,
-            avg_file_size=avg_size,
-            files_with_protection_tags=self.stats.files_with_protection_tags,
-            files_missing_protection_tags=self.stats.files_missing_protection_tags,
-            sample_size=self.stats.sample_size,
-            files_with_cover_art=self.stats.files_with_cover_art,
-            files_without_cover_art=self.stats.files_without_cover_art,
-            files_with_original_cover_art=self.stats.files_with_original_cover_art,
-            files_with_resized_cover_art=self.stats.files_with_resized_cover_art,
-            playlist_summaries=[p for p in self.stats.playlists],
-            music_library_stats=music_stats,
-        )
-
-    def _scan_playlists(self, export_path):
-        """Discover playlist directories in export directory."""
-        playlist_dirs = []
-
-        try:
-            for item in export_path.iterdir():
-                # Skip files, only process directories
-                if item.is_dir() and not item.name.startswith('.'):
-                    playlist_dirs.append(item)
-        except PermissionError as e:
-            self.logger.warn(f"Permission denied accessing export directory: {e}")
-        except Exception as e:
-            self.logger.warn(f"Error scanning export directory: {e}")
-
-        # Sort by name for consistent output
-        return sorted(playlist_dirs, key=lambda p: p.name)
-
-    def _analyze_playlist(self, playlist_dir):
-        """Analyze statistics for a single playlist directory."""
-        try:
-            mp3_files = list(playlist_dir.rglob("*.mp3"))
-
-            if not mp3_files:
-                return None  # Skip empty playlists
-
-            summary = PlaylistSummary(playlist_dir.name, str(playlist_dir))
-            summary.file_count = len(mp3_files)
-
-            # Calculate total size and find most recent modification
-            total_size = 0
-            latest_mtime = 0
-
-            for mp3_file in mp3_files:
-                try:
-                    stat = mp3_file.stat()
-                    total_size += stat.st_size
-                    if stat.st_mtime > latest_mtime:
-                        latest_mtime = stat.st_mtime
-                except Exception as e:
-                    self.logger.debug(f"Error reading stats for {mp3_file}: {e}")
-
-            summary.total_size_bytes = total_size
-            if summary.file_count > 0:
-                summary.avg_file_size_mb = (total_size / summary.file_count) / (1024 * 1024)
-
-            if latest_mtime > 0:
-                summary.last_modified = datetime.fromtimestamp(latest_mtime)
-
-            return summary
-
-        except PermissionError as e:
-            self.logger.warn(f"Permission denied accessing playlist '{playlist_dir.name}': {e}")
-            return None
-        except Exception as e:
-            self.logger.warn(f"Error analyzing playlist '{playlist_dir.name}': {e}")
-            return None
-
-    def _check_tag_integrity(self):
-        """Check all files for TXXX protection tags and cover art."""
-        import hashlib
-
-        from mutagen.id3 import ID3, ID3NoHeaderError
-
-        for playlist in self.stats.playlists:
-            playlist_path = Path(playlist.path)
-            mp3_files = list(playlist_path.rglob("*.mp3"))
-
-            # Check all files in this playlist
-            for mp3_file in mp3_files:
-                playlist.sample_files_checked += 1
-
-                try:
-                    tags = ID3(mp3_file)
-
-                    # Check for TXXX protection frames
-                    has_original_title = _txxx_exists(tags, TXXX_ORIGINAL_TITLE)
-                    has_original_artist = _txxx_exists(tags, TXXX_ORIGINAL_ARTIST)
-                    has_original_album = _txxx_exists(tags, TXXX_ORIGINAL_ALBUM)
-
-                    if has_original_title and has_original_artist and has_original_album:
-                        playlist.sample_files_with_tags += 1
-                        self.stats.files_with_protection_tags += 1
-                    else:
-                        self.stats.files_missing_protection_tags += 1
-
-                    # Check for cover art (APIC frame)
-                    apic_frame = None
-                    for key in tags:
-                        if key.startswith("APIC"):
-                            apic_frame = tags[key]
-                            break
-
-                    if apic_frame is not None:
-                        playlist.files_with_cover_art += 1
-                        self.stats.files_with_cover_art += 1
-
-                        # Check if cover art is original or resized
-                        original_hash = _get_txxx(tags, TXXX_ORIGINAL_COVER_ART_HASH)
-                        if original_hash:
-                            current_hash = hashlib.sha256(apic_frame.data).hexdigest()[:16]
-                            if current_hash == original_hash:
-                                playlist.files_with_original_cover_art += 1
-                                self.stats.files_with_original_cover_art += 1
-                            else:
-                                playlist.files_with_resized_cover_art += 1
-                                self.stats.files_with_resized_cover_art += 1
-                    else:
-                        playlist.files_without_cover_art += 1
-                        self.stats.files_without_cover_art += 1
-
-                except ID3NoHeaderError:
-                    self.logger.debug(f"No ID3 tags found in {mp3_file}")
-                    self.stats.files_missing_protection_tags += 1
-                    playlist.files_without_cover_art += 1
-                    self.stats.files_without_cover_art += 1
-                except Exception as e:
-                    self.logger.debug(f"Error reading tags from {mp3_file}: {e}")
-                    self.stats.files_missing_protection_tags += 1
-                    playlist.files_without_cover_art += 1
-                    self.stats.files_without_cover_art += 1
-
-        # Calculate aggregate sample size
-        self.stats.sample_size = sum(p.sample_files_checked for p in self.stats.playlists)
-
-
-    def scan_music_library(self, music_dir=None, export_profile=None,
-                           output_profile=None):
-        """
-        Scan the music/ directory for source M4A library stats.
-
-        Args:
-            music_dir: Path to music directory (default: DEFAULT_MUSIC_DIR)
-            export_profile: Profile name to check export status against
-            output_profile: OutputProfile for file-level unconverted matching
-
-        Returns:
-            MusicLibraryStats or None if directory doesn't exist
-        """
-        music_dir = music_dir or DEFAULT_MUSIC_DIR
-        music_path = Path(music_dir)
-
-        if not music_path.exists():
+        source_root = Path(DEFAULT_LIBRARY_DIR) / SOURCE_SUBDIR / DEFAULT_IMPORTER
+        if not source_root.exists():
             return None
 
         stats = MusicLibraryStats()
         start_time = time.time()
 
+        # Get per-playlist MP3 counts from TrackDB
+        db_counts = {}
+        if track_db:
+            for ps in track_db.get_playlist_stats():
+                db_counts[ps['playlist']] = ps['track_count']
+
         try:
-            for item in sorted(music_path.iterdir(), key=lambda p: p.name):
+            for item in sorted(source_root.iterdir(), key=lambda p: p.name):
                 if not item.is_dir() or item.name.startswith('.'):
                     continue
 
                 playlist_name = item.name
+
                 m4a_count = 0
                 size_bytes = 0
-                m4a_files = []
 
-                # Walk recursively — music/ has nested Artist/Album/Track.m4a structure
+                # Walk recursively — source has nested Artist/Album/Track.m4a structure
                 for root, _dirs, files in os.walk(item):
                     for f in files:
                         if f.lower().endswith('.m4a'):
                             m4a_count += 1
-                            m4a_files.append(Path(root) / f)
                             try:
-                                size_bytes += os.path.getsize(os.path.join(root, f))
+                                size_bytes += os.path.getsize(
+                                    os.path.join(root, f))
                             except OSError:
                                 pass
 
                 if m4a_count == 0:
                     continue
 
-                # Check export status using file-level matching
-                exported_count = 0
-                unconverted_count = 0
-                if export_profile and output_profile:
-                    export_dir = get_export_dir(export_profile, playlist_name)
-                    seen_paths = set()
-                    for m4a_path in m4a_files:
-                        try:
-                            expected = build_expected_mp3_path(
-                                m4a_path, export_dir, output_profile,
-                            )
-                            if expected in seen_paths:
-                                continue  # duplicate mapping, already counted
-                            seen_paths.add(expected)
-                            if expected.exists():
-                                exported_count += 1
-                            else:
-                                unconverted_count += 1
-                        except Exception:
-                            unconverted_count += 1
-                elif export_profile:
-                    # Fallback: simple count when no output_profile given
-                    export_path = Path(get_export_dir(export_profile, playlist_name))
-                    if export_path.exists():
-                        exported_count = len(list(export_path.rglob('*.mp3')))
-                    unconverted_count = max(0, m4a_count - exported_count)
+                # Use DB count if available, otherwise 0
+                exported_count = db_counts.get(playlist_name, 0)
+                unconverted_count = max(0, m4a_count - exported_count)
 
                 stats.playlists.append({
                     'name': playlist_name,
@@ -6721,892 +7009,16 @@ class SummaryManager:
                 stats.total_unconverted += unconverted_count
 
         except PermissionError as e:
-            self.logger.warn(f"Permission denied accessing music directory: {e}")
+            self.logger.warn(
+                f"Permission denied accessing library directory: {e}")
         except Exception as e:
-            self.logger.warn(f"Error scanning music directory: {e}")
+            self.logger.warn(f"Error scanning library directory: {e}")
 
         stats.total_playlists = len(stats.playlists)
         stats.scan_duration = time.time() - start_time
 
         return stats
 
-    def get_unconverted_files(self, playlist_name, music_dir, export_profile, output_profile):
-        """Return list of unconverted M4A files for a playlist.
-
-        Each entry: {filename, artist, title, album, expected_mp3}
-        """
-        music_path = Path(music_dir) / playlist_name
-        if not music_path.exists():
-            return []
-
-        export_dir = get_export_dir(export_profile, playlist_name)
-        unconverted = []
-
-        for root, _dirs, files in os.walk(music_path):
-            for f in files:
-                if not f.lower().endswith('.m4a'):
-                    continue
-                m4a_path = Path(root) / f
-                try:
-                    expected = build_expected_mp3_path(m4a_path, export_dir, output_profile)
-                    if not expected.exists():
-                        title, artist, album = read_m4a_tags(m4a_path)
-                        unconverted.append({
-                            'filename': f,
-                            'artist': artist,
-                            'title': title,
-                            'album': album,
-                            'expected_mp3': expected.name,
-                        })
-                except Exception:
-                    unconverted.append({
-                        'filename': f,
-                        'artist': 'Unknown',
-                        'title': f,
-                        'album': 'Unknown',
-                        'expected_mp3': f.replace('.m4a', '.mp3'),
-                    })
-
-        return unconverted
-
-    def get_orphaned_files(self, playlist_name, music_dir, export_profile, output_profile):
-        """Return list of orphaned MP3 files with no source M4A.
-
-        Each entry: {filename}
-        """
-        export_dir = get_export_dir(export_profile, playlist_name)
-        export_path = Path(export_dir)
-        if not export_path.exists():
-            return []
-
-        # Collect all MP3 files in the export directory
-        mp3_files = sorted(export_path.rglob("*.mp3"))
-        if not mp3_files:
-            return []
-
-        # Build set of expected MP3 paths from all M4A source files
-        music_path = Path(music_dir) / playlist_name
-        expected_paths = set()
-        if music_path.exists():
-            for root, _dirs, files in os.walk(music_path):
-                for f in files:
-                    if not f.lower().endswith('.m4a'):
-                        continue
-                    m4a_path = Path(root) / f
-                    try:
-                        expected = build_expected_mp3_path(
-                            m4a_path, export_dir, output_profile,
-                        )
-                        expected_paths.add(expected.resolve())
-                    except Exception:
-                        pass
-
-        # Any MP3 not in the expected set is orphaned
-        orphaned = []
-        for mp3 in mp3_files:
-            if mp3.resolve() not in expected_paths:
-                orphaned.append({'filename': mp3.name})
-
-        return orphaned
-
-    def get_duplicate_files(self, playlist_name, music_dir, export_profile, output_profile):
-        """Return list of duplicate M4A-to-MP3 collisions for a playlist.
-
-        Multiple M4A files that resolve to the same expected MP3 path.
-        Each entry: {expected_mp3, sources: [{filename, artist, title, album}]}
-        """
-        music_path = Path(music_dir) / playlist_name
-        if not music_path.exists():
-            return []
-
-        export_dir = get_export_dir(export_profile, playlist_name)
-        # Group M4A files by their expected MP3 path
-        path_groups = {}
-        for root, _dirs, files in os.walk(music_path):
-            for f in files:
-                if not f.lower().endswith('.m4a'):
-                    continue
-                m4a_path = Path(root) / f
-                try:
-                    expected = build_expected_mp3_path(
-                        m4a_path, export_dir, output_profile,
-                    )
-                    key = expected.resolve()
-                    if key not in path_groups:
-                        path_groups[key] = {'expected_mp3': expected.name, 'sources': []}
-                    title, artist, album = read_m4a_tags(m4a_path)
-                    rel = m4a_path.relative_to(Path(music_dir))
-                    path_groups[key]['sources'].append({
-                        'filename': str(rel),
-                        'artist': artist,
-                        'title': title,
-                        'album': album,
-                    })
-                except Exception:
-                    pass
-
-        # Return only groups with more than one source file
-        return [group for group in path_groups.values() if len(group['sources']) > 1]
-
-    def list_unconverted(self, music_dir, export_profile, output_profile,
-                         playlist_filter=None):
-        """List unconverted M4A files across playlists.
-
-        Args:
-            music_dir: Music source directory
-            export_profile: Profile name for export paths
-            output_profile: Output profile object
-            playlist_filter: Optional playlist name to scope to
-
-        Returns:
-            UnconvertedListResult
-        """
-        start_time = time.time()
-        music_path = Path(music_dir)
-        result_playlists = []
-
-        if not music_path.exists():
-            return UnconvertedListResult(
-                success=True, profile=export_profile,
-                scan_duration=time.time() - start_time,
-            )
-
-        # Determine which playlists to scan
-        if playlist_filter:
-            playlist_dirs = [music_path / playlist_filter]
-        else:
-            playlist_dirs = sorted(
-                [d for d in music_path.iterdir() if d.is_dir() and not d.name.startswith('.')],
-                key=lambda p: p.name,
-            )
-
-        total_unconverted = 0
-        playlists_with_unconverted = 0
-
-        for pdir in playlist_dirs:
-            if not pdir.exists():
-                continue
-            name = pdir.name
-            files = self.get_unconverted_files(name, music_dir, export_profile, output_profile)
-            if files:
-                playlists_with_unconverted += 1
-                total_unconverted += len(files)
-            result_playlists.append({
-                'name': name,
-                'unconverted': files,
-            })
-
-        return UnconvertedListResult(
-            success=True,
-            profile=export_profile,
-            playlists=result_playlists,
-            total_unconverted=total_unconverted,
-            total_playlists_with_unconverted=playlists_with_unconverted,
-            total_playlists_scanned=len(result_playlists),
-            scan_duration=time.time() - start_time,
-        )
-
-    def list_diff(self, music_dir, export_profile, output_profile,
-                  playlist_filter=None):
-        """List unconverted and orphaned files across playlists.
-
-        Args:
-            music_dir: Music source directory
-            export_profile: Profile name for export paths
-            output_profile: Output profile object
-            playlist_filter: Optional playlist name to scope to
-
-        Returns:
-            DiffListResult
-        """
-        start_time = time.time()
-        music_path = Path(music_dir)
-        export_base = Path(get_export_dir(export_profile))
-
-        # Collect playlist names from both music/ and export/ (union)
-        playlist_names = set()
-        if music_path.exists():
-            for d in music_path.iterdir():
-                if d.is_dir() and not d.name.startswith('.'):
-                    playlist_names.add(d.name)
-        if export_base.exists():
-            for d in export_base.iterdir():
-                if d.is_dir() and not d.name.startswith('.'):
-                    playlist_names.add(d.name)
-
-        if playlist_filter:
-            playlist_names = {playlist_filter} & playlist_names
-            if not playlist_names:
-                # Include even if not found, to report empty
-                playlist_names = {playlist_filter}
-
-        result_playlists = []
-        total_unconverted = 0
-        total_orphaned = 0
-        total_duplicates = 0
-        playlists_with_differences = 0
-
-        for name in sorted(playlist_names):
-            unconverted = self.get_unconverted_files(
-                name, music_dir, export_profile, output_profile,
-            )
-            orphaned = self.get_orphaned_files(
-                name, music_dir, export_profile, output_profile,
-            )
-            duplicates = self.get_duplicate_files(
-                name, music_dir, export_profile, output_profile,
-            )
-            in_sync = (len(unconverted) == 0 and len(orphaned) == 0
-                       and len(duplicates) == 0)
-            if not in_sync:
-                playlists_with_differences += 1
-            total_unconverted += len(unconverted)
-            total_orphaned += len(orphaned)
-            total_duplicates += len(duplicates)
-            result_playlists.append({
-                'name': name,
-                'unconverted': unconverted,
-                'orphaned': orphaned,
-                'duplicates': duplicates,
-                'in_sync': in_sync,
-            })
-
-        return DiffListResult(
-            success=True,
-            profile=export_profile,
-            playlists=result_playlists,
-            total_unconverted=total_unconverted,
-            total_orphaned=total_orphaned,
-            total_duplicates=total_duplicates,
-            total_playlists_scanned=len(result_playlists),
-            total_playlists_with_differences=playlists_with_differences,
-            scan_duration=time.time() - start_time,
-        )
-
-    def _format_size(self, bytes_size):
-        """Format bytes to human-readable size."""
-        if bytes_size < 1024:
-            return f"{bytes_size} B"
-        elif bytes_size < 1024 * 1024:
-            return f"{bytes_size / 1024:.1f} KB"
-        elif bytes_size < 1024 * 1024 * 1024:
-            return f"{bytes_size / (1024 * 1024):.1f} MB"
-        else:
-            return f"{bytes_size / (1024 * 1024 * 1024):.1f} GB"
-
-
-# ══════════════════════════════════════════════════════════════════
-# Section 8B: Cover Art Management
-# ══════════════════════════════════════════════════════════════════
-
-class CoverArtManager:
-    """Manages cover art operations: embed, extract, update, strip."""
-
-    def __init__(self, logger=None, output_profile=None, display_handler=None,
-                 cancel_event=None, audit_logger=None, audit_source='cli'):
-        self.logger = logger or Logger()
-        self.output_profile = output_profile or OUTPUT_PROFILES[DEFAULT_OUTPUT_TYPE]
-        self.display_handler = display_handler or NullDisplayHandler()
-        self.cancel_event = cancel_event
-        self.audit_logger = audit_logger
-        self._audit_source = audit_source
-
-    def _audit_cover_art(self, result):
-        """Log a cover art operation to audit trail."""
-        if self.audit_logger:
-            self.audit_logger.log(
-                'cover_art', f"Cover art {result.action}: {result.directory}",
-                'completed' if result.success else 'failed',
-                params={'action': result.action, 'directory': result.directory,
-                        'files_processed': result.files_processed,
-                        'errors': result.errors},
-                duration_s=result.duration, source=self._audit_source)
-
-    def embed(self, directory, source_dir=None, force=False, dry_run=False, verbose=False):
-        """
-        Embed cover art into existing MP3s from matching M4A source files.
-        Auto-derives source dir from export/ → music/ if not specified.
-        """
-        import hashlib
-
-        from mutagen.id3 import APIC, ID3, TXXX, ID3NoHeaderError
-
-        start_time = time.time()
-        dir_path = Path(directory)
-        if not dir_path.exists():
-            self.logger.error(f"Directory not found: '{directory}'")
-            return CoverArtResult(success=False, action="embed", directory=str(directory), duration=0, errors=1)
-
-        # Auto-derive source directory
-        if source_dir is None:
-            # export/profile/PlaylistName → music/PlaylistName
-            # Strip export base + optional profile subdirectory
-            dir_str = str(dir_path)
-            if dir_str.startswith(DEFAULT_EXPORT_DIR + "/"):
-                remainder = dir_str[len(DEFAULT_EXPORT_DIR) + 1:]  # "profile/Playlist" or "Playlist"
-                # Check if next segment is a known profile name
-                parts = remainder.split("/", 1)
-                if len(parts) == 2 and parts[0] in OUTPUT_PROFILES:
-                    # export/profile/Playlist → music/Playlist
-                    source_dir = f"{DEFAULT_MUSIC_DIR}/{parts[1]}"
-                else:
-                    # export/Playlist (legacy flat layout)
-                    source_dir = f"{DEFAULT_MUSIC_DIR}/{remainder}"
-            else:
-                self.logger.error("Cannot auto-derive source directory. Use --source to specify.")
-                return CoverArtResult(success=False, action="embed", directory=str(directory),
-                                      duration=time.time() - start_time, errors=1)
-
-        source_path = Path(source_dir)
-        if not source_path.exists():
-            self.logger.error(f"Source directory not found: '{source_dir}'")
-            return CoverArtResult(success=False, action="embed", directory=str(directory),
-                                  duration=time.time() - start_time, errors=1,
-                                  source_dir=str(source_dir))
-
-        mp3_files = sorted(dir_path.rglob("*.mp3"))
-        if not mp3_files:
-            self.logger.info(f"No MP3 files found in '{directory}'")
-            return CoverArtResult(success=True, action="embed", directory=str(directory),
-                                  duration=time.time() - start_time,
-                                  source_dir=str(source_dir))
-
-        # Build lookup of M4A files by profile-aware filename
-        m4a_lookup = {}
-        for m4a_file in source_path.rglob("*.m4a"):
-            if m4a_file.name.startswith('._'):
-                continue
-            try:
-                title, artist, _ = read_m4a_tags(m4a_file)
-                safe_artist = sanitize_filename(artist)
-                safe_title = sanitize_filename(title)
-                fmt = self.output_profile.filename_format
-                if fmt == "title-only":
-                    key = f"{safe_title}.mp3"
-                else:
-                    key = f"{safe_artist} - {safe_title}.mp3"
-                m4a_lookup[key] = m4a_file
-            except Exception:
-                continue
-
-        self.logger.info(f"Found {len(mp3_files)} MP3 files, {len(m4a_lookup)} M4A sources")
-
-        embedded = 0
-        skipped = 0
-        errors = 0
-        no_source = 0
-
-        progress = _DisplayProgress(
-            self.display_handler, total=len(mp3_files), desc="Embedding cover art",
-        )
-
-        try:
-            for mp3_file in mp3_files:
-                if _is_cancelled(self.cancel_event):
-                    self.logger.warn("Cover art embed cancelled by user")
-                    break
-                try:
-                    # Find matching M4A source
-                    m4a_file = m4a_lookup.get(mp3_file.name)
-                    if not m4a_file:
-                        no_source += 1
-                        if verbose:
-                            self.logger.debug(f"No M4A source for: {mp3_file.name}")
-                        progress.update(1)
-                        continue
-
-                    # Read cover art from M4A
-                    cover_data, cover_mime = read_m4a_cover_art(m4a_file)
-                    if not cover_data:
-                        skipped += 1
-                        if verbose:
-                            self.logger.debug(f"No cover art in source: {m4a_file.name}")
-                        progress.update(1)
-                        continue
-
-                    # Check if MP3 already has cover art
-                    try:
-                        tags = ID3(str(mp3_file))
-                    except ID3NoHeaderError:
-                        tags = ID3()
-
-                    apic_keys = [key for key in tags if key.startswith("APIC")]
-
-                    if apic_keys:
-                        if not force:
-                            skipped += 1
-                            if verbose:
-                                self.logger.debug(f"Already has cover art: {mp3_file.name}")
-                            progress.update(1)
-                            continue
-
-                        # Force mode: check if current art already matches original
-                        original_hash = _get_txxx(tags, TXXX_ORIGINAL_COVER_ART_HASH)
-                        if original_hash:
-                            current_hash = hashlib.sha256(tags[apic_keys[0]].data).hexdigest()[:16]
-                            if current_hash == original_hash:
-                                skipped += 1
-                                if verbose:
-                                    self.logger.debug(f"Already has original cover art: {mp3_file.name}")
-                                progress.update(1)
-                                continue
-
-                    if dry_run:
-                        action = "Would re-embed" if apic_keys else "Would embed"
-                        self.logger.dry_run(f"{action} cover art: {mp3_file.name} ({len(cover_data) / 1024:.1f} KB)")
-                        progress.update(1)
-                        continue
-
-                    # Remove existing APIC frames before embedding
-                    for key in apic_keys:
-                        del tags[key]
-
-                    # Embed cover art
-                    tags.add(APIC(
-                        encoding=3,
-                        mime=cover_mime,
-                        type=APIC_TYPE_FRONT_COVER,
-                        desc='Cover',
-                        data=cover_data,
-                    ))
-
-                    # Store hash with hard-gate protection
-                    if not _txxx_exists(tags, TXXX_ORIGINAL_COVER_ART_HASH):
-                        art_hash = hashlib.sha256(cover_data).hexdigest()[:16]
-                        tags.add(TXXX(encoding=3,
-                                      desc=TXXX_ORIGINAL_COVER_ART_HASH,
-                                      text=[art_hash]))
-
-                    tags.save(str(mp3_file), v2_version=3, v1=0)
-                    embedded += 1
-
-                    if verbose:
-                        self.logger.info(f"Embedded: {mp3_file.name} ({len(cover_data) / 1024:.1f} KB)")
-
-                    progress.update(1)
-
-                except Exception as e:
-                    errors += 1
-                    self.logger.error(f"Failed to embed art for '{mp3_file.name}': {e}")
-                    progress.update(1)
-        finally:
-            progress.close()
-
-        result = CoverArtResult(
-            success=errors == 0, action="embed", directory=str(directory),
-            duration=time.time() - start_time,
-            files_processed=len(mp3_files), files_modified=embedded,
-            files_skipped=skipped, errors=errors,
-            source_dir=str(source_dir), no_source=no_source)
-        self._audit_cover_art(result)
-        return result
-
-    def extract(self, directory, output_dir=None, dry_run=False, verbose=False):
-        """Extract cover art from MP3 files to image files."""
-        from mutagen.id3 import ID3, ID3NoHeaderError
-
-        start_time = time.time()
-        dir_path = Path(directory)
-        if not dir_path.exists():
-            self.logger.error(f"Directory not found: '{directory}'")
-            return CoverArtResult(success=False, action="extract", directory=str(directory), duration=0, errors=1)
-
-        # Default output to same directory
-        if output_dir is None:
-            out_path = dir_path / "cover-art"
-        else:
-            out_path = Path(output_dir)
-
-        mp3_files = sorted(dir_path.rglob("*.mp3"))
-        if not mp3_files:
-            self.logger.info(f"No MP3 files found in '{directory}'")
-            return CoverArtResult(success=True, action="extract", directory=str(directory),
-                                  duration=time.time() - start_time)
-
-        if not dry_run:
-            out_path.mkdir(parents=True, exist_ok=True)
-
-        extracted = 0
-        skipped = 0
-        errors = 0
-
-        progress = _DisplayProgress(
-            self.display_handler, total=len(mp3_files), desc="Extracting cover art",
-        )
-
-        try:
-            for mp3_file in mp3_files:
-                if _is_cancelled(self.cancel_event):
-                    self.logger.warn("Cover art extract cancelled by user")
-                    break
-                try:
-                    try:
-                        tags = ID3(str(mp3_file))
-                    except ID3NoHeaderError:
-                        skipped += 1
-                        progress.update(1)
-                        continue
-
-                    # Find APIC frame
-                    apic_frame = None
-                    for key, frame in tags.items():
-                        if key.startswith("APIC"):
-                            apic_frame = frame
-                            break
-
-                    if not apic_frame:
-                        skipped += 1
-                        if verbose:
-                            self.logger.debug(f"No cover art: {mp3_file.name}")
-                        progress.update(1)
-                        continue
-
-                    # Determine file extension
-                    ext = ".jpg" if apic_frame.mime == APIC_MIME_JPEG else ".png"
-                    stem = mp3_file.stem
-                    out_file = out_path / f"{stem}{ext}"
-
-                    if dry_run:
-                        self.logger.dry_run(f"Would extract: {out_file.name} ({len(apic_frame.data) / 1024:.1f} KB)")
-                        progress.update(1)
-                        continue
-
-                    out_file.write_bytes(apic_frame.data)
-                    extracted += 1
-
-                    if verbose:
-                        self.logger.info(f"Extracted: {out_file.name} ({len(apic_frame.data) / 1024:.1f} KB)")
-
-                    progress.update(1)
-
-                except Exception as e:
-                    errors += 1
-                    self.logger.error(f"Failed to extract art from '{mp3_file.name}': {e}")
-                    progress.update(1)
-        finally:
-            progress.close()
-
-        result = CoverArtResult(
-            success=errors == 0, action="extract", directory=str(directory),
-            duration=time.time() - start_time,
-            files_processed=len(mp3_files), files_modified=extracted,
-            files_skipped=skipped, errors=errors)
-        self._audit_cover_art(result)
-        return result
-
-    def update(self, directory, image_path, dry_run=False, verbose=False):
-        """Replace cover art on all MP3s in a directory from a single image file."""
-        from mutagen.id3 import APIC, ID3, ID3NoHeaderError
-
-        start_time = time.time()
-        dir_path = Path(directory)
-        img_path = Path(image_path)
-
-        if not dir_path.exists():
-            self.logger.error(f"Directory not found: '{directory}'")
-            return CoverArtResult(success=False, action="update", directory=str(directory),
-                                  duration=0, errors=1, image_path=str(image_path))
-
-        if not img_path.exists():
-            self.logger.error(f"Image file not found: '{image_path}'")
-            return CoverArtResult(success=False, action="update", directory=str(directory),
-                                  duration=0, errors=1, image_path=str(image_path))
-
-        # Detect MIME type from extension
-        ext = img_path.suffix.lower()
-        if ext in ('.jpg', '.jpeg'):
-            mime_type = APIC_MIME_JPEG
-        elif ext == '.png':
-            mime_type = APIC_MIME_PNG
-        else:
-            self.logger.error(f"Unsupported image format: '{ext}' (use .jpg or .png)")
-            return CoverArtResult(success=False, action="update", directory=str(directory),
-                                  duration=time.time() - start_time, errors=1,
-                                  image_path=str(image_path))
-
-        cover_data = img_path.read_bytes()
-        self.logger.info(f"Image: {img_path.name} ({len(cover_data) / 1024:.1f} KB, {mime_type})")
-
-        mp3_files = sorted(dir_path.rglob("*.mp3"))
-        if not mp3_files:
-            self.logger.info(f"No MP3 files found in '{directory}'")
-            return CoverArtResult(success=True, action="update", directory=str(directory),
-                                  duration=time.time() - start_time, image_path=str(image_path))
-
-        updated = 0
-        errors = 0
-
-        progress = _DisplayProgress(
-            self.display_handler, total=len(mp3_files), desc="Updating cover art",
-        )
-
-        try:
-            for mp3_file in mp3_files:
-                if _is_cancelled(self.cancel_event):
-                    self.logger.warn("Cover art update cancelled by user")
-                    break
-                try:
-                    if dry_run:
-                        self.logger.dry_run(f"Would update cover art: {mp3_file.name}")
-                        progress.update(1)
-                        continue
-
-                    try:
-                        tags = ID3(str(mp3_file))
-                    except ID3NoHeaderError:
-                        tags = ID3()
-
-                    # Remove existing APIC frames
-                    for key in list(tags.keys()):
-                        if key.startswith("APIC"):
-                            del tags[key]
-
-                    # Add new cover art
-                    tags.add(APIC(
-                        encoding=3,
-                        mime=mime_type,
-                        type=APIC_TYPE_FRONT_COVER,
-                        desc='Cover',
-                        data=cover_data,
-                    ))
-
-                    tags.save(str(mp3_file), v2_version=3, v1=0)
-                    updated += 1
-
-                    if verbose:
-                        self.logger.info(f"Updated: {mp3_file.name}")
-
-                    progress.update(1)
-
-                except Exception as e:
-                    errors += 1
-                    self.logger.error(f"Failed to update art for '{mp3_file.name}': {e}")
-                    progress.update(1)
-        finally:
-            progress.close()
-
-        result = CoverArtResult(
-            success=errors == 0, action="update", directory=str(directory),
-            duration=time.time() - start_time,
-            files_processed=len(mp3_files), files_modified=updated,
-            errors=errors, image_path=str(image_path))
-        self._audit_cover_art(result)
-        return result
-
-    def strip(self, directory, dry_run=False, verbose=False):
-        """Remove cover art from all MP3s in a directory."""
-        from mutagen.id3 import ID3, ID3NoHeaderError
-
-        start_time = time.time()
-        dir_path = Path(directory)
-        if not dir_path.exists():
-            self.logger.error(f"Directory not found: '{directory}'")
-            return CoverArtResult(
-                success=False, action="strip", directory=str(directory),
-                duration=time.time() - start_time,
-                files_processed=0, files_modified=0, files_skipped=0, errors=1)
-
-        mp3_files = sorted(dir_path.rglob("*.mp3"))
-        if not mp3_files:
-            self.logger.info(f"No MP3 files found in '{directory}'")
-            return CoverArtResult(
-                success=True, action="strip", directory=str(directory),
-                duration=time.time() - start_time,
-                files_processed=0, files_modified=0, files_skipped=0, errors=0)
-
-        stripped = 0
-        skipped = 0
-        errors = 0
-
-        progress = _DisplayProgress(
-            self.display_handler, total=len(mp3_files), desc="Stripping cover art",
-        )
-
-        try:
-            for mp3_file in mp3_files:
-                if _is_cancelled(self.cancel_event):
-                    self.logger.warn("Cover art strip cancelled by user")
-                    break
-                try:
-                    try:
-                        tags = ID3(str(mp3_file))
-                    except ID3NoHeaderError:
-                        skipped += 1
-                        progress.update(1)
-                        continue
-
-                    # Find and remove APIC frames
-                    apic_keys = [key for key in tags if key.startswith("APIC")]
-
-                    if not apic_keys:
-                        skipped += 1
-                        if verbose:
-                            self.logger.debug(f"No cover art to strip: {mp3_file.name}")
-                        progress.update(1)
-                        continue
-
-                    if dry_run:
-                        self.logger.dry_run(f"Would strip cover art: {mp3_file.name}")
-                        progress.update(1)
-                        continue
-
-                    for key in apic_keys:
-                        del tags[key]
-
-                    tags.save(str(mp3_file), v2_version=3, v1=0)
-                    stripped += 1
-
-                    if verbose:
-                        self.logger.info(f"Stripped: {mp3_file.name}")
-
-                    progress.update(1)
-
-                except Exception as e:
-                    errors += 1
-                    self.logger.error(f"Failed to strip art from '{mp3_file.name}': {e}")
-                    progress.update(1)
-        finally:
-            progress.close()
-
-        result = CoverArtResult(
-            success=errors == 0, action="strip", directory=str(directory),
-            duration=time.time() - start_time,
-            files_processed=stripped + skipped + errors,
-            files_modified=stripped, files_skipped=skipped, errors=errors)
-        self._audit_cover_art(result)
-        return result
-
-    def resize(self, directory, max_size, dry_run=False, verbose=False):
-        """Resize embedded cover art to a maximum dimension, preserving aspect ratio."""
-        import io
-
-        from mutagen.id3 import ID3, ID3NoHeaderError
-        from PIL import Image
-
-        start_time = time.time()
-        dir_path = Path(directory)
-        if not dir_path.exists():
-            self.logger.error(f"Directory not found: '{directory}'")
-            return CoverArtResult(
-                success=False, action="resize", directory=str(directory),
-                duration=time.time() - start_time,
-                files_processed=0, files_modified=0, files_skipped=0, errors=1)
-
-        mp3_files = sorted(dir_path.rglob("*.mp3"))
-        if not mp3_files:
-            self.logger.info(f"No MP3 files found in '{directory}'")
-            return CoverArtResult(
-                success=True, action="resize", directory=str(directory),
-                duration=time.time() - start_time,
-                files_processed=0, files_modified=0, files_skipped=0, errors=0)
-
-        resized = 0
-        skipped_small = 0
-        skipped_no_art = 0
-        errors = 0
-        total_before = 0
-        total_after = 0
-
-        progress = _DisplayProgress(
-            self.display_handler, total=len(mp3_files), desc="Resizing cover art",
-        )
-
-        try:
-            for mp3_file in mp3_files:
-                if _is_cancelled(self.cancel_event):
-                    self.logger.warn("Cover art resize cancelled by user")
-                    break
-                try:
-                    try:
-                        tags = ID3(str(mp3_file))
-                    except ID3NoHeaderError:
-                        skipped_no_art += 1
-                        progress.update(1)
-                        continue
-
-                    # Find APIC frame
-                    apic_frame = None
-                    for key in tags:
-                        if key.startswith("APIC"):
-                            apic_frame = tags[key]
-                            break
-
-                    if apic_frame is None:
-                        skipped_no_art += 1
-                        if verbose:
-                            self.logger.debug(f"No cover art: {mp3_file.name}")
-                        progress.update(1)
-                        continue
-
-                    original_size = len(apic_frame.data)
-                    total_before += original_size
-
-                    # Open image and check dimensions
-                    img = Image.open(io.BytesIO(apic_frame.data))
-                    width, height = img.size
-
-                    if width <= max_size and height <= max_size:
-                        skipped_small += 1
-                        total_after += original_size
-                        if verbose:
-                            self.logger.debug(f"Already small enough ({width}x{height}): {mp3_file.name}")
-                        progress.update(1)
-                        continue
-
-                    if dry_run:
-                        # Estimate new dimensions
-                        ratio = min(max_size / width, max_size / height)
-                        new_w = int(width * ratio)
-                        new_h = int(height * ratio)
-                        self.logger.dry_run(
-                            f"Would resize: {mp3_file.name} "
-                            f"({width}x{height} → {new_w}x{new_h}, "
-                            f"{original_size / 1024:.0f} KB)"
-                        )
-                        progress.update(1)
-                        continue
-
-                    # Resize using shared helper
-                    new_data, mime = resize_cover_art_bytes(
-                        apic_frame.data, max_size, apic_frame.mime
-                    )
-                    new_size = len(new_data)
-                    total_after += new_size
-
-                    # Compute new dimensions for logging
-                    new_img = Image.open(io.BytesIO(new_data))
-                    new_w, new_h = new_img.size
-
-                    # Replace APIC frame data
-                    apic_frame.data = new_data
-                    apic_frame.mime = mime
-                    tags.save(str(mp3_file), v2_version=3, v1=0)
-                    resized += 1
-
-                    if verbose:
-                        self.logger.info(
-                            f"Resized: {mp3_file.name} "
-                            f"({width}x{height} → {new_w}x{new_h}, "
-                            f"{original_size / 1024:.0f} KB → {new_size / 1024:.0f} KB)"
-                        )
-
-                    progress.update(1)
-
-                except Exception as e:
-                    errors += 1
-                    self.logger.error(f"Failed to resize art in '{mp3_file.name}': {e}")
-                    progress.update(1)
-        finally:
-            progress.close()
-
-        result = CoverArtResult(
-            success=errors == 0, action="resize", directory=str(directory),
-            duration=time.time() - start_time,
-            files_processed=resized + skipped_small + skipped_no_art + errors,
-            files_modified=resized, files_skipped=skipped_small + skipped_no_art,
-            errors=errors)
-        self._audit_cover_art(result)
-        return result
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -7617,49 +7029,65 @@ class DataManager:
     """Manages playlist data lifecycle (deletion, cleanup)."""
 
     def __init__(self, logger=None, config=None, prompt_handler=None, output_profile=None,
-                 audit_logger=None, audit_source='cli'):
+                 audit_logger=None, audit_source='cli', track_db=None):
         self.logger = logger or Logger()
         self.config = config or ConfigManager(logger=self.logger)
         self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
         self.output_profile = output_profile or OUTPUT_PROFILES[DEFAULT_OUTPUT_TYPE]
         self.audit_logger = audit_logger
         self._audit_source = audit_source
+        self.track_db = track_db
 
-    def delete_playlist_data(self, playlist_key, delete_source=True, delete_export=True,
+    def delete_playlist_data(self, playlist_key, delete_source=True, delete_library=True,
                              remove_config=False, dry_run=False):
-        """Delete source M4A and/or export MP3 directories for a playlist.
+        """Delete source M4A and/or library MP3/artwork for a playlist.
+
+        Source files are in library/source/gamdl/<playlist>/ (directory).
+        MP3 and artwork files are in flat dirs — identified via TrackDB.
 
         Returns DeleteResult with stats about what was deleted.
         """
-        source_dir = Path(DEFAULT_MUSIC_DIR) / playlist_key
-        export_dir = Path(get_export_dir(self.output_profile.name, playlist_key))
+        source_dir = Path(get_source_dir(playlist_key))
 
         errors = []
         files_deleted = 0
         bytes_freed = 0
         source_deleted = False
-        export_deleted = False
+        library_deleted = False
         config_removed = False
 
-        # Count files and sizes for each directory
+        # Count source files
         source_files = 0
         source_bytes = 0
-        export_files = 0
-        export_bytes = 0
-
         if delete_source and source_dir.exists():
             for f in source_dir.rglob('*'):
                 if f.is_file():
                     source_files += 1
                     source_bytes += f.stat().st_size
-        if delete_export and export_dir.exists():
-            for f in export_dir.rglob('*'):
-                if f.is_file():
-                    export_files += 1
-                    export_bytes += f.stat().st_size
 
-        total_files = source_files + export_files
-        total_bytes = source_bytes + export_bytes
+        # Count library files (MP3 + artwork) via TrackDB
+        lib_files = 0
+        lib_bytes = 0
+        lib_file_paths = []  # (path, is_mp3_or_art)
+        if delete_library and self.track_db:
+            tracks = self.track_db.get_tracks_by_playlist(playlist_key)
+            for t in tracks:
+                # MP3 file
+                mp3_path = Path(t['file_path'])
+                if mp3_path.exists():
+                    lib_files += 1
+                    lib_bytes += mp3_path.stat().st_size
+                    lib_file_paths.append(mp3_path)
+                # Artwork file
+                if t.get('cover_art_path'):
+                    art_path = Path(t['cover_art_path'])
+                    if art_path.exists():
+                        lib_files += 1
+                        lib_bytes += art_path.stat().st_size
+                        lib_file_paths.append(art_path)
+
+        total_files = source_files + lib_files
+        total_bytes = source_bytes + lib_bytes
 
         if total_files == 0 and not remove_config:
             self.logger.info(f"Nothing to delete for '{playlist_key}'")
@@ -7669,8 +7097,8 @@ class DataManager:
         parts = []
         if source_files > 0:
             parts.append(f"{source_files} source files ({_format_bytes(source_bytes)})")
-        if export_files > 0:
-            parts.append(f"{export_files} export files ({_format_bytes(export_bytes)})")
+        if lib_files > 0:
+            parts.append(f"{lib_files} library files ({_format_bytes(lib_bytes)})")
         if remove_config:
             parts.append("config entry")
 
@@ -7680,8 +7108,8 @@ class DataManager:
         if dry_run:
             if delete_source and source_dir.exists():
                 self.logger.info(f"  [DRY-RUN] Would delete: {source_dir}/ ({source_files} files, {_format_bytes(source_bytes)})")
-            if delete_export and export_dir.exists():
-                self.logger.info(f"  [DRY-RUN] Would delete: {export_dir}/ ({export_files} files, {_format_bytes(export_bytes)})")
+            if lib_files > 0:
+                self.logger.info(f"  [DRY-RUN] Would delete: {lib_files} library files ({_format_bytes(lib_bytes)})")
             if remove_config:
                 self.logger.info(f"  [DRY-RUN] Would remove config entry for '{playlist_key}'")
             return DeleteResult(
@@ -7706,17 +7134,27 @@ class DataManager:
                 errors.append(f"Failed to delete {source_dir}: {e}")
                 self.logger.error(errors[-1])
 
-        # Delete export directory
-        if delete_export and export_dir.exists():
-            try:
-                shutil.rmtree(export_dir)
-                export_deleted = True
-                files_deleted += export_files
-                bytes_freed += export_bytes
-                self.logger.info(f"  Deleted export: {export_dir}/ ({export_files} files, {_format_bytes(export_bytes)})")
-            except OSError as e:
-                errors.append(f"Failed to delete {export_dir}: {e}")
-                self.logger.error(errors[-1])
+        # Delete library files (MP3 + artwork) individually from flat dirs
+        if delete_library and lib_file_paths:
+            deleted_count = 0
+            deleted_bytes = 0
+            for fpath in lib_file_paths:
+                try:
+                    sz = fpath.stat().st_size
+                    fpath.unlink()
+                    deleted_count += 1
+                    deleted_bytes += sz
+                except OSError as e:
+                    errors.append(f"Failed to delete {fpath}: {e}")
+                    self.logger.error(errors[-1])
+            if deleted_count > 0:
+                library_deleted = True
+                files_deleted += deleted_count
+                bytes_freed += deleted_bytes
+                self.logger.info(f"  Deleted library: {deleted_count} files ({_format_bytes(deleted_bytes)})")
+            # Remove TrackDB entries
+            if self.track_db:
+                self.track_db.delete_tracks_by_playlist(playlist_key)
 
         # Remove config entry
         if remove_config:
@@ -7730,7 +7168,7 @@ class DataManager:
             success=len(errors) == 0,
             playlist_key=playlist_key,
             source_deleted=source_deleted,
-            export_deleted=export_deleted,
+            library_deleted=library_deleted,
             config_removed=config_removed,
             files_deleted=files_deleted,
             bytes_freed=bytes_freed,
@@ -7777,12 +7215,6 @@ class PipelineStatistics:
 
         # Tagging stats
         self.tagging_stats = None
-        self.tagging_album = None
-        self.tagging_artist = None
-
-        # Cover art stats
-        self.cover_art_embedded = 0
-        self.cover_art_missing = 0
 
         # Sync stats
         self.sync_success = False
@@ -7803,10 +7235,10 @@ class PlaylistResult:
         self.key = key
         self.name = name
         self.success = False
-        self.failed_stage = None  # "download", "convert", "tag", "sync"
+        self.failed_stage = None  # "download", "convert", "sync"
         self.download_stats = None  # DownloadStatistics
         self.conversion_stats = None  # ConversionStatistics
-        self.tagging_stats = None  # TagStatistics
+        self.tagging_stats = None
         self.sync_success = False
         self.duration = 0.0
 
@@ -7907,13 +7339,15 @@ class AggregateStatistics:
 
 
 class PipelineOrchestrator:
-    """Coordinates multi-stage workflows: download → convert → tag → USB sync."""
+    """Coordinates multi-stage workflows: download → convert → sync."""
 
     def __init__(self, logger=None, deps=None, config=None, quality_preset='lossless',
-                 cookie_path=DEFAULT_COOKIES, workers=None, embed_cover_art=True,
-                 output_profile=None, prompt_handler=None, display_handler=None,
+                 cookie_path=DEFAULT_COOKIES, workers=None,
+                 prompt_handler=None, display_handler=None,
                  cancel_event=None, audit_logger=None, audit_source='cli',
-                 sync_tracker=None, eq_config_manager=None, eq_config_override=None):
+                 sync_tracker=None, track_db=None,
+                 eq_config_manager=None, eq_config_override=None,
+                 project_root=None):
         self.logger = logger or Logger()
         self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
         self.display_handler = display_handler or NullDisplayHandler()
@@ -7923,49 +7357,30 @@ class PipelineOrchestrator:
         self.eq_config_override = eq_config_override
         self._audit_source = audit_source
         self.sync_tracker = sync_tracker
+        self.track_db = track_db
         self.deps = deps or DependencyChecker(self.logger)
         self.config = config or ConfigManager(logger=self.logger)
         self.stats = PipelineStatistics()
         self.quality_preset = quality_preset
         self.cookie_path = cookie_path
         self.workers = workers
-        self.embed_cover_art = embed_cover_art
-        self.output_profile = output_profile or OUTPUT_PROFILES[DEFAULT_OUTPUT_TYPE]
+        self.project_root = Path(project_root) if project_root else Path('.')
 
     def run_full_pipeline(self, playlist=None, url=None, auto=False,
                          sync_destination=None,
                          dry_run=False, verbose=False, quality_preset=None,
-                         validate_cookies=True, auto_refresh_cookies=False,
-                         # Legacy params (ignored, kept for backwards compat)
-                         copy_to_usb=False, usb_dir=None,
-                         sync_dest=None, sync_dest_path=None, sync_dest_is_usb=False):
-        """
-        Execute the complete pipeline: download → convert → tag → sync.
+                         validate_cookies=True, auto_refresh_cookies=False):
+        """Execute the complete pipeline: download → convert → sync.
 
         Args:
             sync_destination: SyncDestination object for post-pipeline sync (optional)
         """
-        # Legacy param compat: build SyncDestination from old-style params
-        if sync_destination is None and (copy_to_usb or sync_dest_path):
-            if sync_dest_path:
-                scheme = 'usb://' if sync_dest_is_usb else 'folder://'
-                _path = sync_dest_path
-                if sync_dest_is_usb and usb_dir:
-                    _path = str(Path(sync_dest_path) / usb_dir)
-                sync_destination = SyncDestination(
-                    sync_dest or Path(sync_dest_path).name,
-                    f'{scheme}{_path}')
-            elif copy_to_usb:
-                # Will be handled via sync_to_usb at Stage 4
-                pass
         self.stats.start_time = time.time()
         convert_result = None
-        tag_result = None
         usb_result = None
 
         # ── Stage 1: Determine source ─────────────────────────────────
         if url:
-            # Direct URL provided
             self.logger.info("=== STAGE 1: Download from URL ===")
             success = self._download_from_url(url, auto, dry_run, verbose,
                                              validate_cookies, auto_refresh_cookies)
@@ -7979,7 +7394,6 @@ class PipelineOrchestrator:
                     stages_skipped=list(self.stats.stages_skipped))
 
         elif playlist:
-            # Playlist key or index provided
             self.logger.info("=== STAGE 1: Download playlist ===")
             success = self._download_playlist(playlist, auto, dry_run, verbose,
                                              validate_cookies, auto_refresh_cookies)
@@ -7993,7 +7407,8 @@ class PipelineOrchestrator:
                     stages_skipped=list(self.stats.stages_skipped))
 
         else:
-            self.logger.error("Either --playlist or --url must be specified for pipeline")
+            self.logger.error(
+                "Either --playlist or --url must be specified for pipeline")
             duration = time.time() - self.stats.start_time
             return PipelineResult(
                 success=False, playlist_name=None, playlist_key=None,
@@ -8010,33 +7425,30 @@ class PipelineOrchestrator:
                 stages_failed=["cancelled"],
                 stages_skipped=list(self.stats.stages_skipped))
 
-        # ── Stage 2: Convert M4A → MP3 ────────────────────────────────
+        # ── Stage 2: Convert M4A → clean library MP3 ─────────────────
         self.logger.info("\n=== STAGE 2: Convert M4A → MP3 ===")
-        music_dir = f"{DEFAULT_MUSIC_DIR}/{self.stats.playlist_key}"
-        export_dir = get_export_dir(self.output_profile.name, self.stats.playlist_key)
+        music_dir = str(self.project_root / get_source_dir(self.stats.playlist_key))
+        library_dir = str(self.project_root / get_audio_dir())
 
-        # Use quality_preset parameter if provided, otherwise use instance default
-        preset = quality_preset if quality_preset is not None else self.quality_preset
+        preset = (quality_preset if quality_preset is not None
+                  else self.quality_preset)
 
-        # Resolve EQ: CLI override > DB playlist override > DB profile default > none
+        # Resolve EQ: override > DB playlist > none
         eq_config = self.eq_config_override
         if eq_config is None and self.eq_config_manager:
             eq_config = self.eq_config_manager.get_eq(
-                self.output_profile.name, self.stats.playlist_key)
+                DEFAULT_OUTPUT_TYPE, self.stats.playlist_key)
 
-        converter = Converter(self.logger, quality_preset=preset, workers=self.workers,
-                              embed_cover_art=self.embed_cover_art,
-                              output_profile=self.output_profile,
-                              display_handler=self.display_handler,
-                              cancel_event=self.cancel_event,
-                              eq_config=eq_config)
+        converter = Converter(
+            self.logger, quality_preset=preset, workers=self.workers,
+            track_db=self.track_db,
+            display_handler=self.display_handler,
+            cancel_event=self.cancel_event,
+            eq_config=eq_config)
         convert_result = converter.convert(
-            music_dir,
-            export_dir,
-            force=False,
-            dry_run=dry_run,
-            verbose=verbose
-        )
+            music_dir, library_dir,
+            playlist_key=self.stats.playlist_key,
+            force=False, dry_run=dry_run, verbose=verbose)
 
         if convert_result.success:
             self.stats.stages_completed.append("convert")
@@ -8056,69 +7468,25 @@ class PipelineOrchestrator:
                 stages_failed=["cancelled"],
                 stages_skipped=list(self.stats.stages_skipped))
 
-        # ── Stage 3: Update tags ───────────────────────────────────────
-        self.logger.info("\n=== STAGE 3: Update tags ===")
-
-        # Determine album/artist from profile settings
-        if self.output_profile.pipeline_album == "playlist_name":
-            new_album = self.stats.playlist_name
-        else:  # "original"
-            new_album = None
-
-        if self.output_profile.pipeline_artist == "various":
-            new_artist = "Various"
-        else:  # "original"
-            new_artist = None
-
-        tagger = TaggerManager(self.logger, output_profile=self.output_profile,
-                               display_handler=self.display_handler,
-                               cancel_event=self.cancel_event)
-        tag_result = tagger.update_tags(
-            export_dir,
-            new_album=new_album,
-            new_artist=new_artist,
-            dry_run=dry_run,
-            verbose=verbose
-        )
-
-        if tag_result.success:
-            self.stats.stages_completed.append("tag")
-            self.stats.tagging_stats = tagger.stats
-            self.stats.tagging_album = new_album
-            self.stats.tagging_artist = new_artist
-        else:
-            self.stats.stages_failed.append("tag")
-            self.logger.error("Tagging stage failed")
-
-        # ── Stage 3b: Cover art check ────────────────────────────────
-        if self.embed_cover_art and self.output_profile.artwork_size != -1:
-            self._check_and_embed_cover_art(export_dir, auto, dry_run, verbose)
-
-        # ── Cancellation check before Stage 4 ────────────────────────
-        if _is_cancelled(self.cancel_event):
-            self.logger.warn("Pipeline cancelled by user")
-            duration = time.time() - self.stats.start_time
-            return PipelineResult(
-                success=False, playlist_name=self.stats.playlist_name,
-                playlist_key=self.stats.playlist_key, duration=duration,
-                stages_completed=list(self.stats.stages_completed),
-                stages_failed=["cancelled"],
-                stages_skipped=list(self.stats.stages_skipped))
-
-        # ── Stage 4: Sync (optional) ──────────────────────────────────
+        # ── Stage 3: Sync (optional) ─────────────────────────────────
         if sync_destination:
-            sync_mgr = SyncManager(self.logger, prompt_handler=self.prompt_handler,
-                                   display_handler=self.display_handler,
-                                   cancel_event=self.cancel_event,
-                                   sync_tracker=self.sync_tracker)
-            self.logger.info(f"\n=== STAGE 4: Sync to {sync_destination.name} ===")
+            sync_mgr = SyncManager(
+                self.logger, prompt_handler=self.prompt_handler,
+                display_handler=self.display_handler,
+                cancel_event=self.cancel_event,
+                sync_tracker=self.sync_tracker)
+            self.logger.info(
+                f"\n=== STAGE 3: Sync to {sync_destination.name} ===")
             usb_result = sync_mgr.sync_to_destination(
-                export_dir, dest_path=sync_destination.path,
+                library_dir, dest_path=sync_destination.path,
                 dest_key=sync_destination.effective_key, dry_run=dry_run)
 
             if usb_result.success:
                 self.stats.stages_completed.append("sync")
-                self.stats.sync_stats = {"files_copied": usb_result.files_copied, "files_skipped": usb_result.files_skipped}
+                self.stats.sync_stats = {
+                    "files_copied": usb_result.files_copied,
+                    "files_skipped": usb_result.files_skipped,
+                }
                 self.stats.sync_success = True
                 self.stats.sync_destination = usb_result.destination
             else:
@@ -8130,13 +7498,16 @@ class PipelineOrchestrator:
             self.audit_logger.log(
                 'pipeline',
                 f"Pipeline: {self.stats.playlist_name or 'unknown'}",
-                'completed' if len(self.stats.stages_failed) == 0 else 'failed',
-                params={'playlist_key': self.stats.playlist_key,
-                        'stages_completed': list(self.stats.stages_completed),
-                        'stages_failed': list(self.stats.stages_failed)},
+                'completed' if not self.stats.stages_failed else 'failed',
+                params={
+                    'playlist_key': self.stats.playlist_key,
+                    'stages_completed': list(self.stats.stages_completed),
+                    'stages_failed': list(self.stats.stages_failed),
+                },
                 duration_s=duration, source=self._audit_source)
+
         return PipelineResult(
-            success=len(self.stats.stages_failed) == 0,
+            success=not self.stats.stages_failed,
             playlist_name=self.stats.playlist_name,
             playlist_key=self.stats.playlist_key,
             duration=duration,
@@ -8145,12 +7516,7 @@ class PipelineOrchestrator:
             stages_skipped=list(self.stats.stages_skipped),
             download_result=self.stats.download_stats,
             conversion_result=convert_result,
-            tag_result=tag_result,
             usb_result=usb_result,
-            tagging_album=self.stats.tagging_album,
-            tagging_artist=self.stats.tagging_artist,
-            cover_art_embedded=self.stats.cover_art_embedded,
-            cover_art_missing=self.stats.cover_art_missing,
             usb_destination=self.stats.sync_destination,
         )
 
@@ -8169,7 +7535,7 @@ class PipelineOrchestrator:
             self.stats.stages_failed.append("download")
             return False
 
-        output_dir = f"{DEFAULT_MUSIC_DIR}/{key}"
+        output_dir = get_source_dir(key)
 
         # Ask to save to config BEFORE download (only if not dry-run and not auto)
         if not dry_run and not auto:
@@ -8224,7 +7590,7 @@ class PipelineOrchestrator:
         self.stats.playlist_key = playlist.key
         self.stats.playlist_name = playlist.name
 
-        output_dir = f"{DEFAULT_MUSIC_DIR}/{playlist.key}"
+        output_dir = get_source_dir(playlist.key)
 
         downloader = Downloader(self.logger, self.deps.venv_python,
                                cookie_path=self.cookie_path,
@@ -8261,76 +7627,5 @@ class PipelineOrchestrator:
         """Ask user if they want to save a new playlist to config."""
         if self.prompt_handler.confirm(f"Save '{album_name}' to {DEFAULT_CONFIG_FILE}?", default=False):
             self.config.add_playlist(key, url, album_name)
-
-    def _check_and_embed_cover_art(self, export_dir, auto, dry_run, verbose):
-        """Check for missing cover art and embed if needed."""
-        from mutagen.id3 import ID3, ID3NoHeaderError
-
-        export_path = Path(export_dir)
-        if not export_path.exists():
-            return
-
-        mp3_files = list(export_path.rglob("*.mp3"))
-        if not mp3_files:
-            return
-
-        # Scan for missing cover art
-        missing = 0
-        for mp3_file in mp3_files:
-            try:
-                tags = ID3(str(mp3_file))
-                if not any(k.startswith("APIC") for k in tags):
-                    missing += 1
-            except (ID3NoHeaderError, Exception):
-                missing += 1
-
-        total = len(mp3_files)
-
-        if missing == 0:
-            self.stats.cover_art_embedded = total
-            return
-        playlist_name = export_path.name
-
-        if dry_run:
-            self.logger.dry_run(
-                f"{playlist_name}: {missing}/{total} files missing cover art — would embed from source"
-            )
-            self.stats.cover_art_missing = missing
-            return
-
-        should_embed = False
-        if auto:
-            self.logger.info(f"\n  {playlist_name}: {missing}/{total} files missing cover art — auto-embedding")
-            should_embed = True
-        else:
-            self.logger.info(f"\n  {playlist_name}: {missing}/{total} files missing cover art")
-            should_embed = self.prompt_handler.confirm(
-                "Embed cover art from source files?", default=True)
-
-        if should_embed:
-            cam = CoverArtManager(self.logger, output_profile=self.output_profile,
-                                  display_handler=self.display_handler,
-                                  cancel_event=self.cancel_event)
-            cam.embed(export_dir, dry_run=False, verbose=verbose)
-            # Resize newly-embedded art if profile specifies a max dimension
-            artwork_size = self.output_profile.artwork_size
-            if artwork_size > 0:
-                cam.resize(export_dir, artwork_size, dry_run=False, verbose=verbose)
-            # Re-scan to get accurate counts
-            embedded_count = 0
-            still_missing = 0
-            for mp3_file in mp3_files:
-                try:
-                    tags = ID3(str(mp3_file))
-                    if any(k.startswith("APIC") for k in tags):
-                        embedded_count += 1
-                    else:
-                        still_missing += 1
-                except (ID3NoHeaderError, Exception):
-                    still_missing += 1
-            self.stats.cover_art_embedded = embedded_count
-            self.stats.cover_art_missing = still_missing
-        else:
-            self.stats.cover_art_missing = missing
 
 

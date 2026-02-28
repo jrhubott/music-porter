@@ -38,14 +38,14 @@ struct ReconnectingView: View {
                 .font(.title2.weight(.semibold))
 
             VStack(spacing: 8) {
-                if let url = server.url {
-                    Text(url)
-                        .font(.body.monospaced())
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("\(server.host):\(server.port)")
-                        .font(.body.monospaced())
-                        .foregroundStyle(.secondary)
+                Text("\(server.host):\(server.port)")
+                    .font(.body.monospaced())
+                    .foregroundStyle(.secondary)
+
+                if let ext = server.externalURL {
+                    Text(ext)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.tertiary)
                 }
 
                 if !server.name.isEmpty {

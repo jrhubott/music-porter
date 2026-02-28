@@ -4,18 +4,8 @@
 <h4 class="mb-4">Settings</h4>
 
 <div class="row g-4">
-  <!-- Output Profile -->
-  <div class="col-md-6">
-    <div class="card h-100">
-      <div class="card-body">
-        <h6 class="card-title"><i class="bi bi-sliders"></i> Output Profile</h6>
-        <div id="profileCards" class="mt-3">Loading...</div>
-      </div>
-    </div>
-  </div>
-
   <!-- General Settings -->
-  <div class="col-md-6">
+  <div class="col-md-12">
     <div class="card h-100">
       <div class="card-body">
         <h6 class="card-title"><i class="bi bi-gear"></i> General Settings</h6>
@@ -234,6 +224,33 @@
   </div>
 </div>
 
+<!-- Library Maintenance -->
+<div class="card mt-4">
+  <div class="card-body">
+    <h6 class="card-title"><i class="bi bi-database-gear"></i> Library Maintenance</h6>
+    <p class="text-muted small mb-2">Re-read metadata from source M4A files to populate extended fields (genre, track number, year, etc.).</p>
+    <button type="button" class="btn btn-outline-secondary btn-sm" id="btnBackfillMetadata">
+      <i class="bi bi-arrow-repeat"></i> Backfill Metadata
+    </button>
+    <hr class="my-3">
+    <p class="text-muted small mb-2">Verify DB records match filesystem. Reports orphan records and files, stale paths, and sync records. Enable "Allow Updates" to actually apply fixes.</p>
+    <div class="form-check mb-2">
+      <input class="form-check-input" type="checkbox" id="chkAuditAllowUpdates">
+      <label class="form-check-label small" for="chkAuditAllowUpdates">
+        Allow Updates
+      </label>
+      <div class="text-warning small mt-1">
+        <i class="bi bi-exclamation-triangle"></i>
+        When enabled, the database may be modified and orphan files deleted.
+      </div>
+    </div>
+    <button type="button" class="btn btn-outline-warning btn-sm" id="btnAuditLibrary">
+      <i class="bi bi-search"></i> Audit Library
+    </button>
+    <div id="maintenanceLogPanel" class="log-panel mt-3 d-none" style="max-height:200px;overflow-y:auto;font-size:.8rem;background:#1a1a2e;padding:.5rem;border-radius:.25rem;"></div>
+  </div>
+</div>
+
 <!-- iOS Pairing (server mode only) -->
 {% if server_mode %}
 <div class="card mt-4">
@@ -269,20 +286,6 @@
 </div>
 {% endif %}
 
-<!-- Profile Details -->
-<div class="card mt-4">
-  <div class="card-body">
-    <h6 class="card-title">Profile Comparison</h6>
-    <div class="table-responsive">
-      <table class="table table-sm table-bordered mb-0">
-        <thead>
-          <tr><th>Property</th><th id="profileCol1">-</th><th id="profileCol2">-</th></tr>
-        </thead>
-        <tbody id="profileCompare"></tbody>
-      </table>
-    </div>
-  </div>
-</div>
 {% endblock content %}
 
 {% block scripts %}
@@ -296,49 +299,6 @@ function loadSettings() {
     document.getElementById('settingWorkers').value = data.settings.workers || 6;
     document.getElementById('settingLogRetention').value = data.settings.log_retention_days || 7;
 
-    // Profile cards
-    const profiles = data.profiles;
-    const activeProfile = data.settings.output_type || 'ride-command';
-    let html = '';
-    for (const [name, p] of Object.entries(profiles)) {
-      const active = name === activeProfile;
-      html += `
-        <div class="form-check mb-2">
-          <input class="form-check-input" type="radio" name="profileRadio" id="profile_${name}" value="${name}" ${active ? 'checked' : ''}>
-          <label class="form-check-label" for="profile_${name}">
-            <strong>${name}</strong> <span class="text-muted">- ${p.description}</span>
-            ${active ? '<span class="badge bg-success ms-2">Active</span>' : ''}
-          </label>
-        </div>`;
-    }
-    html += '<button type="button" class="btn btn-outline-primary btn-sm mt-2" id="saveProfile">Apply Profile</button>';
-    document.getElementById('profileCards').innerHTML = html;
-
-    document.getElementById('saveProfile').addEventListener('click', function() {
-      const selected = document.querySelector('input[name="profileRadio"]:checked').value;
-      fetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({output_type: selected})})
-        .then(r=>r.json()).then(() => { showToast('Profile updated to ' + selected, 'success'); loadSettings(); });
-    });
-
-    // Profile comparison table
-    const names = Object.keys(profiles);
-    if (names.length >= 2) {
-      document.getElementById('profileCol1').textContent = names[0];
-      document.getElementById('profileCol2').textContent = names[1];
-      const p1 = profiles[names[0]], p2 = profiles[names[1]];
-      const rows = [
-        ['Quality', p1.quality_preset, p2.quality_preset],
-        ['Artwork', p1.artwork_size > 0 ? p1.artwork_size + 'px' : p1.artwork_size === 0 ? 'original' : 'stripped',
-                    p2.artwork_size > 0 ? p2.artwork_size + 'px' : p2.artwork_size === 0 ? 'original' : 'stripped'],
-        ['ID3 Version', 'v2.' + p1.id3_version, 'v2.' + p2.id3_version],
-        ['Dir Structure', p1.directory_structure, p2.directory_structure],
-        ['Filename Format', p1.filename_format, p2.filename_format],
-      ];
-      document.getElementById('profileCompare').innerHTML = rows.map(r =>
-        `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`
-      ).join('');
-    }
   });
 }
 
@@ -567,6 +527,38 @@ document.getElementById('btnRunNow').addEventListener('click', function() {
 
 loadSchedulerStatus();
 setInterval(loadSchedulerStatus, 30000);
+
+// ── Library Maintenance ──
+document.getElementById('btnBackfillMetadata').addEventListener('click', function() {
+  const btn = this;
+  const auditBtn = document.getElementById('btnAuditLibrary');
+  btn.disabled = true;
+  auditBtn.disabled = true;
+  const panel = document.getElementById('maintenanceLogPanel');
+  panel.classList.remove('d-none');
+  panel.innerHTML = '';
+
+  submitOperation('/api/library/backfill-metadata', {}, 'maintenanceLogPanel', function(msg) {
+    btn.disabled = false;
+    auditBtn.disabled = false;
+  });
+});
+
+document.getElementById('btnAuditLibrary').addEventListener('click', function() {
+  const btn = this;
+  const backfillBtn = document.getElementById('btnBackfillMetadata');
+  btn.disabled = true;
+  backfillBtn.disabled = true;
+  const panel = document.getElementById('maintenanceLogPanel');
+  panel.classList.remove('d-none');
+  panel.innerHTML = '';
+
+  const allowUpdates = document.getElementById('chkAuditAllowUpdates').checked;
+  submitOperation('/api/library/audit', {allow_updates: allowUpdates}, 'maintenanceLogPanel', function(msg) {
+    btn.disabled = false;
+    backfillBtn.disabled = false;
+  });
+});
 
 // ── EQ Presets ──
 function getActiveProfile() {

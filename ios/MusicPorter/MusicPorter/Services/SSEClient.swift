@@ -12,18 +12,11 @@ actor SSEClient {
     func events(taskId: String) -> AsyncStream<SSEEvent> {
         AsyncStream { continuation in
             let task = Task {
-                guard let server = await apiClient.server else {
+                guard let url = await apiClient.streamURL(taskId: taskId) else {
                     continuation.finish()
                     return
                 }
-                guard let url = server.apiURL(path: "api/stream/\(taskId)") else {
-                    continuation.finish()
-                    return
-                }
-                var request = URLRequest(url: url)
-                if let key = await apiClient.apiKey {
-                    request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-                }
+                var request = await apiClient.authenticatedRequest(for: url)
                 request.timeoutInterval = 300
 
                 do {
