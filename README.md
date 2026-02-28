@@ -122,6 +122,35 @@ Profiles control how tags and filenames are applied when files leave the library
 
 Profiles are fully customizable in `data/config.yaml` under `output_types`.
 
+#### Template Variables
+
+Several profile fields support template variables that are resolved from track metadata at sync/download time:
+
+| Variable | Description |
+|----------|-------------|
+| `{title}` | Track title |
+| `{artist}` | Track artist |
+| `{album}` | Album name |
+| `{playlist}` | Playlist display name |
+| `{playlist_key}` | Playlist key (internal identifier from config) |
+
+Unknown variables are left as literal text (e.g., `{foo}` stays as `{foo}`).
+
+#### Profile Fields
+
+| Field | Type | Supports Templates | Description |
+|-------|------|-------------------|-------------|
+| `id3_title` | string | Yes | ID3v2 TIT2 frame (title tag) |
+| `id3_artist` | string | Yes | ID3v2 TPE1 frame (artist tag) |
+| `id3_album` | string | Yes | ID3v2 TALB frame (album tag) |
+| `id3_genre` | string | Yes | ID3v2 TCON frame (genre tag). Empty string omits the tag |
+| `id3_extra` | dict | Yes (values) | Arbitrary ID3 frames. Keys are frame IDs (e.g., `COMM`, `TXXX:CustomField`), values are template strings |
+| `id3_versions` | list | No | ID3 versions to write (e.g., `[v2.3]`, `[v2.4, v1]`) |
+| `artwork_size` | int | No | Cover art size in pixels. `0` = original size, `-1` = strip artwork |
+| `filename` | string | Yes | Output filename pattern (`.mp3` appended automatically). Characters unsafe for filenames are sanitized |
+| `directory` | string | Yes | Output subdirectory pattern. Empty string = flat output. Use `/` for nested paths (e.g., `{artist}/{album}`) |
+| `usb_dir` | string | No | Subdirectory on USB drives (e.g., `RZR/Music`). Not a template — used as a literal path prefix |
+
 ## Documentation
 
 - **[User Guide](MUSIC-PORTER-GUIDE.md)** - Complete usage guide with examples
@@ -143,6 +172,30 @@ settings:
   workers: 6
   quality_preset: lossless
   server_name: Music Porter
+
+output_types:
+  ride-command:
+    id3_title: '{artist} - {title}'
+    id3_artist: Various
+    id3_album: '{playlist}'
+    id3_genre: Playlist
+    id3_extra: {}
+    id3_versions: [v2.3]
+    artwork_size: 100
+    filename: '{artist} - {title}'
+    directory: ''
+    usb_dir: RZR/Music
+  basic:
+    id3_title: '{title}'
+    id3_artist: '{artist}'
+    id3_album: '{album}'
+    id3_genre: ''
+    id3_extra: {}
+    id3_versions: [v2.4]
+    artwork_size: 0
+    filename: '{artist} - {title}'
+    directory: '{artist}/{album}'
+    usb_dir: ''
 
 playlists:
   - key: Pop_Workout
