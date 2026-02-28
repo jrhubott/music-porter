@@ -182,6 +182,9 @@ export function SyncPage() {
           const updated = await ipc.listDrives();
           setDrives(updated);
         }
+      } else {
+        // Refresh sync status so badges reflect the completed sync
+        loadSyncStatus(destPath, syncDrive?.name);
       }
     } catch {
       // Error handled via progress
