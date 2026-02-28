@@ -565,9 +565,9 @@ function renderUnconvertedFiles(playlist, container, files) {
     return;
   }
   let html = '<div class="table-responsive"><table class="table table-sm table-hover mb-2">' +
-    '<thead><tr><th>Artist</th><th>Title</th><th>Expected MP3</th></tr></thead><tbody>';
+    '<thead><tr><th>Artist</th><th>Title</th></tr></thead><tbody>';
   files.forEach(f => {
-    html += '<tr><td>' + f.artist + '</td><td>' + f.title + '</td><td class="text-muted small">' + f.expected_mp3 + '</td></tr>';
+    html += '<tr><td>' + f.artist + '</td><td>' + f.title + '</td></tr>';
   });
   html += '</tbody></table></div>';
   html += '<button class="btn btn-outline-primary btn-sm" onclick="convertPlaylist(\'' +

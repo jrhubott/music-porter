@@ -352,7 +352,7 @@ def api_library_unconverted(playlist_key):
         unconverted.append({
             'artist': artist,
             'title': title,
-            'expected_mp3': f"{artist} - {title}.mp3",
+            'display_name': f"{artist} - {title}",
         })
 
     return jsonify({'files': unconverted})
