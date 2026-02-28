@@ -8,6 +8,7 @@ const BYTES_PER_MB = 1024 * 1024;
 const BYTES_PER_GB = 1024 * 1024 * 1024;
 const MS_PER_SECOND = 1000;
 const SECONDS_PER_MINUTE = 60;
+const CACHE_NEAR_FULL_THRESHOLD = 0.9;
 
 function formatBytes(bytes: number): string {
   if (bytes >= BYTES_PER_GB) return `${(bytes / BYTES_PER_GB).toFixed(1)} GB`;
@@ -59,6 +60,8 @@ export function SyncPage() {
     setCacheStatuses,
     cacheTotalSize,
     setCacheTotalSize,
+    cacheMaxBytes,
+    setCacheMaxBytes,
     autoPinNewPlaylists,
     setAutoPinNewPlaylists,
     backgroundPrefetchStatus,
@@ -158,6 +161,7 @@ export function SyncPage() {
     try {
       const status = await ipc.cacheGetStatus();
       setCacheTotalSize(status.totalSize);
+      setCacheMaxBytes(status.maxCacheBytes);
       const statuses: Record<string, typeof cacheStatuses[string]> = {};
       for (const s of status.playlists) {
         statuses[s.playlistKey] = s;
@@ -328,12 +332,31 @@ export function SyncPage() {
               {usbDir && <span className="ms-1 opacity-75">({usbDir})</span>}
             </span>
           )}
-          {cacheTotalSize > 0 && !isOffline && (
-            <span className="badge bg-info bg-opacity-25 text-info">
-              <i className="bi bi-database me-1" />
-              {formatBytes(cacheTotalSize)} cached
-            </span>
-          )}
+          {cacheTotalSize > 0 && !isOffline && (() => {
+            const cacheIncomplete = pinnedPlaylists.size > 0 && [...pinnedPlaylists].some((key) => {
+              const status = cacheStatuses[key];
+              const serverCount = playlists.find((p) => p.key === key)?.file_count ?? 0;
+              return !status || status.cached < serverCount;
+            });
+            const cacheNearFull = cacheMaxBytes > 0
+              && cacheTotalSize / cacheMaxBytes >= CACHE_NEAR_FULL_THRESHOLD;
+            const badgeColor = cacheIncomplete
+              ? 'text-danger'
+              : cacheNearFull
+                ? 'text-warning'
+                : 'text-info';
+            const bgColor = cacheIncomplete
+              ? 'bg-danger'
+              : cacheNearFull
+                ? 'bg-warning'
+                : 'bg-info';
+            return (
+              <span className={`badge ${bgColor} bg-opacity-25 ${badgeColor}`}>
+                <i className="bi bi-database me-1" />
+                {formatBytes(cacheTotalSize)} cached
+              </span>
+            );
+          })()}
         </div>
         <div className="d-flex gap-2 align-items-center">
           {!isOffline && pinnedPlaylists.size > 0 && (

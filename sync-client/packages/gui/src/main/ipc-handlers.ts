@@ -333,9 +333,9 @@ export function registerIPCHandlers(): void {
     return configStore.preferences.pinnedPlaylists;
   });
 
-  ipcMain.handle('cache:getStatus', (): { totalSize: number; playlists: PlaylistCacheStatus[] } => {
+  ipcMain.handle('cache:getStatus', (): { totalSize: number; maxCacheBytes: number; playlists: PlaylistCacheStatus[] } => {
     const cm = getCacheManager();
-    if (!cm) return { totalSize: 0, playlists: [] };
+    if (!cm) return { totalSize: 0, maxCacheBytes: 0, playlists: [] };
 
     const pinned = configStore.preferences.pinnedPlaylists;
     const cachedPlaylists = cm.getCachedPlaylists();
@@ -351,7 +351,7 @@ export function registerIPCHandlers(): void {
       };
     });
 
-    return { totalSize: cm.getTotalSize(), playlists };
+    return { totalSize: cm.getTotalSize(), maxCacheBytes: configStore.preferences.maxCacheBytes, playlists };
   });
 
   ipcMain.handle('cache:hasData', (): boolean => {
@@ -418,6 +418,10 @@ export function registerIPCHandlers(): void {
         const pinnedSet = new Set(configStore.preferences.pinnedPlaylists);
         cm.evictToLimit(maxBytes, pinnedSet);
       }
+    }
+    // Trigger a prefetch so the cache adjusts to the new limit
+    if (bgPrefetchService) {
+      bgPrefetchService.runOnce();
     }
   });
 

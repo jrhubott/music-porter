@@ -62,6 +62,8 @@ interface AppState {
   setCacheStatuses: (statuses: Record<string, PlaylistCacheStatus>) => void;
   cacheTotalSize: number;
   setCacheTotalSize: (size: number) => void;
+  cacheMaxBytes: number;
+  setCacheMaxBytes: (max: number) => void;
   isPrefetching: boolean;
   setIsPrefetching: (prefetching: boolean) => void;
   prefetchProgress: SyncProgress | null;
@@ -148,6 +150,8 @@ export const useAppState = create<AppState>((set) => ({
   setCacheStatuses: (cacheStatuses) => set({ cacheStatuses }),
   cacheTotalSize: 0,
   setCacheTotalSize: (cacheTotalSize) => set({ cacheTotalSize }),
+  cacheMaxBytes: 0,
+  setCacheMaxBytes: (cacheMaxBytes) => set({ cacheMaxBytes }),
   isPrefetching: false,
   setIsPrefetching: (isPrefetching) => set({ isPrefetching }),
   prefetchProgress: null,

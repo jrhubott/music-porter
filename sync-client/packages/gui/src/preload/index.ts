@@ -83,7 +83,7 @@ const electronAPI = {
   cachePin: (playlist: string): Promise<void> => ipcRenderer.invoke('cache:pin', playlist),
   cacheUnpin: (playlist: string): Promise<void> => ipcRenderer.invoke('cache:unpin', playlist),
   cacheGetPinnedPlaylists: (): Promise<string[]> => ipcRenderer.invoke('cache:getPinnedPlaylists'),
-  cacheGetStatus: (): Promise<{ totalSize: number; playlists: PlaylistCacheStatus[] }> =>
+  cacheGetStatus: (): Promise<{ totalSize: number; maxCacheBytes: number; playlists: PlaylistCacheStatus[] }> =>
     ipcRenderer.invoke('cache:getStatus'),
   cacheHasData: (): Promise<boolean> => ipcRenderer.invoke('cache:hasData'),
   cacheGetCachedPlaylists: (): Promise<{ key: string; fileCount: number }[]> =>

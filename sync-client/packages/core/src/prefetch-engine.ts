@@ -67,12 +67,53 @@ export class PrefetchEngine {
       }
     }
 
-    // Filter out already-cached files (include stale files for re-download)
+    const hasLimit = options.maxCacheBytes !== undefined && options.maxCacheBytes > 0;
+    const maxCacheBytes = options.maxCacheBytes ?? 0;
+
+    // Pre-filter: determine which files would be evicted anyway due to capacity
+    const capacityExcluded = new Set<string>();
+
+    if (hasLimit) {
+      // Deduplicate server files by UUID (a file may appear in multiple playlists)
+      const seenUuids = new Set<string>();
+      const allFiles: { uuid: string; size: number; createdAt: number }[] = [];
+      for (const { files } of playlistFileList) {
+        for (const file of files) {
+          if (!seenUuids.has(file.uuid)) {
+            seenUuids.add(file.uuid);
+            allFiles.push({
+              uuid: file.uuid,
+              size: file.size,
+              createdAt: file.created_at ?? 0,
+            });
+          }
+        }
+      }
+
+      // Sort newest first (inverse of eviction order)
+      allFiles.sort((a, b) => b.createdAt - a.createdAt);
+
+      // Files whose cumulative size exceeds the limit would be evicted anyway
+      let cumulative = 0;
+      for (const f of allFiles) {
+        cumulative += f.size;
+        if (cumulative > maxCacheBytes) {
+          capacityExcluded.add(f.uuid);
+        }
+      }
+    }
+
+    // Filter out already-cached files and capacity-excluded files
     const toDownload: { key: string; file: FileInfo }[] = [];
     let totalSkipped = 0;
+    let capacityCapped = 0;
 
     for (const { key, files } of playlistFileList) {
       for (const file of files) {
+        if (capacityExcluded.has(file.uuid)) {
+          capacityCapped++;
+          continue;
+        }
         const cached = this.cacheManager.isCached(file.uuid);
         const stale = cached && this.cacheManager.isStale(file.uuid, file.updated_at);
         if (cached && !stale) {
@@ -83,20 +124,17 @@ export class PrefetchEngine {
       }
     }
 
-    const hasLimit = options.maxCacheBytes !== undefined && options.maxCacheBytes > 0;
-    const maxCacheBytes = options.maxCacheBytes ?? 0;
-
     if (hasLimit) {
       const currentSize = this.cacheManager.getTotalSize();
       const available = maxCacheBytes - currentSize;
       log('info', `Cache: ${formatBytes(currentSize)} used / ${formatBytes(maxCacheBytes)} limit (${formatBytes(Math.max(0, available))} available)`);
     }
 
-    log('info', `Prefetch: ${toDownload.length} to download, ${totalSkipped} already cached`);
+    log('info', `Prefetch: ${toDownload.length} to download, ${totalSkipped} already cached` + (capacityCapped > 0 ? `, ${capacityCapped} exceeded cache capacity` : ''));
 
     onProgress({
       phase: 'syncing',
-      processed: totalSkipped,
+      processed: totalSkipped + capacityCapped,
       total: grandTotal,
       copied: 0,
       skipped: totalSkipped,
@@ -106,8 +144,7 @@ export class PrefetchEngine {
     // Download with concurrency limit — stop when cache is full
     let downloaded = 0;
     let failed = 0;
-    let capacityCapped = 0;
-    let processed = totalSkipped;
+    let processed = totalSkipped + capacityCapped;
     let aborted = false;
     let capacityReached = false;
     let index = 0;
@@ -151,7 +188,7 @@ export class PrefetchEngine {
               capacityReached = true;
               const remaining = toDownload.length - index;
               if (remaining > 0) {
-                capacityCapped = remaining;
+                capacityCapped += remaining;
                 processed += remaining;
                 log('info', `Cache limit reached — skipping ${remaining} remaining files`);
               }
