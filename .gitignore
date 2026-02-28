@@ -1,10 +1,9 @@
 data/*
 design/
 __pycache__/
-export/
 gamdl_temp_*/
+library/
 logs/
-music/
 .DS_Store
 .ruff_cache/
 .venv/

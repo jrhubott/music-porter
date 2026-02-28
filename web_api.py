@@ -12,7 +12,7 @@ import json
 import queue
 import re
 import time
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from flask import (
@@ -34,6 +34,18 @@ api_bp = Blueprint('api', __name__)
 def _ctx():
     """Convenience accessor for the shared AppContext."""
     return current_app.config['CTX']
+
+
+def _build_display_filename(track):
+    """Build a human-readable filename from track metadata.
+
+    Returns 'Artist - Title.mp3' or 'Title.mp3' if artist is empty.
+    """
+    artist = track.get('artist', '')
+    title = track.get('title', '') or track.get('filename', 'Unknown')
+    if artist:
+        return f"{mp.sanitize_filename(artist)} - {mp.sanitize_filename(title)}.mp3"
+    return f"{mp.sanitize_filename(title)}.mp3"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -105,11 +117,13 @@ def api_status():
         playlist_count = 0
         if library_path.exists():
             for subdir in library_path.iterdir():
-                if subdir.is_dir() and subdir.name != 'artwork':
-                    playlist_count += 1
-                    for f in subdir.glob('*.mp3'):
-                        total_files += 1
-                        total_size += f.stat().st_size
+                if subdir.is_dir() and not subdir.name.startswith('.'):
+                    output_dir = subdir / mp.OUTPUT_SUBDIR
+                    if output_dir.exists():
+                        playlist_count += 1
+                        for f in output_dir.glob('*.mp3'):
+                            total_files += 1
+                            total_size += f.stat().st_size
 
     scheduler_data = None
     if ctx.scheduler:
@@ -211,11 +225,11 @@ def api_summary():
         total_files += ps['track_count']
         total_size += ps['total_size']
 
-        # Get last modified from library directory
-        library_path = Path(mp.get_library_dir(ps['playlist']))
+        # Get last modified from library output directory
+        output_path = Path(mp.get_output_dir(ps['playlist']))
         last_modified = None
-        if library_path.exists():
-            mp3s = list(library_path.glob('*.mp3'))
+        if output_path.exists():
+            mp3s = list(output_path.glob('*.mp3'))
             if mp3s:
                 last_mod_ts = max(f.stat().st_mtime for f in mp3s)
                 last_modified = datetime.fromtimestamp(last_mod_ts)
@@ -253,17 +267,9 @@ def api_summary():
 
 @api_bp.route('/api/library-stats')
 def api_library_stats():
-    ctx = _ctx()
-    config = ctx.get_config()
-    profile = ctx.get_output_profile(config)
-
     quiet_logger = mp.Logger(verbose=False)
     mgr = mp.SummaryManager(logger=quiet_logger)
-    stats = mgr.scan_music_library(
-        music_dir=mp.DEFAULT_MUSIC_DIR,
-        export_profile=profile.name,
-        output_profile=profile,
-    )
+    stats = mgr.scan_music_library()
 
     if stats is None:
         return jsonify({
@@ -282,76 +288,6 @@ def api_library_stats():
         'scan_duration': round(stats.scan_duration, 2),
         'playlists': stats.playlists,
     })
-
-
-@api_bp.route('/api/library-stats/<playlist_key>/unconverted')
-def api_library_stats_unconverted(playlist_key):
-    """Return file-level unconverted details for one playlist."""
-    if '/' in playlist_key or '..' in playlist_key:
-        return jsonify({'error': 'Invalid playlist key'}), 400
-
-    music_path = Path(mp.DEFAULT_MUSIC_DIR) / playlist_key
-    if not music_path.exists():
-        return jsonify({'error': 'Playlist not found in music/'}), 404
-
-    ctx = _ctx()
-    config = ctx.get_config()
-    profile = ctx.get_output_profile(config)
-    quiet_logger = mp.Logger(verbose=False)
-    mgr = mp.SummaryManager(logger=quiet_logger)
-    files = mgr.get_unconverted_files(
-        playlist_key, mp.DEFAULT_MUSIC_DIR, profile.name, profile,
-    )
-
-    return jsonify({
-        'playlist': playlist_key,
-        'unconverted_count': len(files),
-        'files': files,
-    })
-
-
-@api_bp.route('/api/list/unconverted')
-def api_list_unconverted():
-    """List unconverted M4A files across playlists."""
-    ctx = _ctx()
-    config = ctx.get_config()
-    profile = ctx.get_output_profile(config)
-    quiet_logger = mp.Logger(verbose=False)
-    mgr = mp.SummaryManager(logger=quiet_logger)
-
-    playlist_filter = request.args.get('playlist')
-    if playlist_filter and ('/' in playlist_filter or '..' in playlist_filter):
-        return jsonify({'error': 'Invalid playlist name'}), 400
-
-    result = mgr.list_unconverted(
-        music_dir=mp.DEFAULT_MUSIC_DIR,
-        export_profile=profile.name,
-        output_profile=profile,
-        playlist_filter=playlist_filter,
-    )
-    return jsonify(result.to_dict())
-
-
-@api_bp.route('/api/list/diff')
-def api_list_diff():
-    """List unconverted and orphaned files across playlists."""
-    ctx = _ctx()
-    config = ctx.get_config()
-    profile = ctx.get_output_profile(config)
-    quiet_logger = mp.Logger(verbose=False)
-    mgr = mp.SummaryManager(logger=quiet_logger)
-
-    playlist_filter = request.args.get('playlist')
-    if playlist_filter and ('/' in playlist_filter or '..' in playlist_filter):
-        return jsonify({'error': 'Invalid playlist name'}), 400
-
-    result = mgr.list_diff(
-        music_dir=mp.DEFAULT_MUSIC_DIR,
-        export_profile=profile.name,
-        output_profile=profile,
-        playlist_filter=playlist_filter,
-    )
-    return jsonify(result.to_dict())
 
 
 @api_bp.route('/api/convert/batch', methods=['POST'])
@@ -375,7 +311,7 @@ def api_convert_batch():
     for key in playlists:
         if '/' in key or '..' in key:
             return jsonify({'error': f'Invalid playlist key: {key}'}), 400
-        input_path = ctx.project_root / mp.DEFAULT_MUSIC_DIR / key
+        input_path = ctx.project_root / mp.get_source_dir(key)
         if not input_path.exists():
             return jsonify({'error': f'Playlist not found: {key}'}), 404
 
@@ -402,8 +338,8 @@ def api_convert_batch():
             if task.cancel_event.is_set():
                 break
             logger.info(f"[{i+1}/{len(playlists)}] Converting {key}...")
-            input_dir = str(ctx.project_root / mp.DEFAULT_MUSIC_DIR / key)
-            out = mp.get_library_dir(key)
+            input_dir = str(ctx.project_root / mp.get_source_dir(key))
+            out = mp.get_output_dir(key)
 
             # Resolve EQ per playlist
             if no_eq:
@@ -498,14 +434,14 @@ def api_playlist_delete_data(key):
     ctx = _ctx()
     data = request.get_json(force=True) if request.data else {}
     delete_source = data.get('delete_source', True)
-    delete_export = data.get('delete_export', True)
+    delete_library = data.get('delete_library', data.get('delete_export', True))
     remove_config = data.get('remove_config', False)
     dry_run = data.get('dry_run', False)
 
     config = ctx.get_config()
 
     # Validate playlist exists in config or has data on disk
-    source_dir = ctx.project_root / mp.DEFAULT_MUSIC_DIR / key
+    source_dir = ctx.project_root / mp.get_source_dir(key)
     library_dir = ctx.project_root / mp.get_library_dir(key)
     playlist_exists = config.get_playlist_by_key(key) is not None
     data_exists = source_dir.exists() or library_dir.exists()
@@ -521,7 +457,7 @@ def api_playlist_delete_data(key):
     result = data_manager.delete_playlist_data(
         key,
         delete_source=delete_source,
-        delete_export=delete_export,
+        delete_library=delete_library,
         remove_config=remove_config,
         dry_run=dry_run,
     )
@@ -713,19 +649,22 @@ def api_scheduler_run_now():
 
 @api_bp.route('/api/directories/music')
 def api_dirs_music():
+    """List playlist keys that have source M4A files."""
     ctx = _ctx()
-    music_dir = ctx.project_root / mp.DEFAULT_MUSIC_DIR
+    library_dir = ctx.project_root / mp.get_library_dir()
     dirs = []
-    if music_dir.exists():
-        for d in sorted(music_dir.iterdir()):
+    if library_dir.exists():
+        for d in sorted(library_dir.iterdir()):
             if d.is_dir() and not d.name.startswith('.'):
-                dirs.append(d.name)
+                source_dir = d / mp.SOURCE_SUBDIR
+                if source_dir.exists():
+                    dirs.append(d.name)
     return jsonify(dirs)
 
 
 @api_bp.route('/api/directories/export')
 def api_dirs_export():
-    """List library playlist directories (replaces old export/<profile>/)."""
+    """List library playlist directories with output MP3 counts."""
     ctx = _ctx()
     config = ctx.get_config()
     library_dir = ctx.project_root / mp.get_library_dir()
@@ -734,7 +673,8 @@ def api_dirs_export():
     if library_dir.exists():
         for d in sorted(library_dir.iterdir()):
             if d.is_dir() and not d.name.startswith('.'):
-                file_count = len(list(d.glob('*.mp3')))
+                output_dir = d / mp.OUTPUT_SUBDIR
+                file_count = len(list(output_dir.glob('*.mp3'))) if output_dir.exists() else 0
                 dirs.append({
                     'name': d.name,
                     'display_name': playlist_map.get(d.name, d.name),
@@ -960,11 +900,14 @@ def api_convert_run():
         elif eq_data and any(eq_data.values()):
             eq_config = mp.EQConfig.from_dict(eq_data)
         else:
-            playlist_key = Path(input_dir).name
+            # input_dir is library/<key>/source — extract the playlist key
+            input_parts = Path(input_dir).parts
+            playlist_key = input_parts[-2] if len(input_parts) >= 2 else input_parts[-1]
             eq_config = eq_mgr.get_eq(mp.DEFAULT_OUTPUT_TYPE, playlist_key)
 
-        playlist_key = Path(input_dir).name
-        out = output_dir if output_dir else mp.get_library_dir(playlist_key)
+        input_parts = Path(input_dir).parts
+        playlist_key = input_parts[-2] if len(input_parts) >= 2 else input_parts[-1]
+        out = output_dir if output_dir else mp.get_output_dir(playlist_key)
         display = ctx.make_display_handler(task_id)
         task = ctx.task_manager.get(task_id)
         converter = mp.Converter(
@@ -998,8 +941,8 @@ def api_convert_run():
 def api_files_list(playlist_key):
     """List MP3 files in a playlist with metadata from TrackDB."""
     ctx = _ctx()
-    playlist_dir = ctx.project_root / mp.get_library_dir(playlist_key)
-    safe = ctx.safe_dir(playlist_dir)
+    output_dir = ctx.project_root / mp.get_output_dir(playlist_key)
+    safe = ctx.safe_dir(output_dir)
     if not safe or not Path(safe).is_dir():
         return jsonify({'error': f'Playlist directory not found: {playlist_key}'}), 404
 
@@ -1014,6 +957,7 @@ def api_files_list(playlist_key):
         if track:
             entry = {
                 'filename': f.name,
+                'display_filename': _build_display_filename(track),
                 'size': track['file_size_bytes'] or f.stat().st_size,
                 'duration': round(track['duration_s'], 1) if track['duration_s'] else 0,
                 'title': track['title'],
@@ -1025,6 +969,7 @@ def api_files_list(playlist_key):
         else:
             entry = {
                 'filename': f.name,
+                'display_filename': f.name,
                 'size': f.stat().st_size,
                 'duration': 0,
                 'title': f.stem,
@@ -1069,8 +1014,8 @@ def api_files_download(playlist_key, filename):
     With ``?profile=X``: streams a tagged copy using TagApplicator.
     """
     ctx = _ctx()
-    playlist_dir = ctx.project_root / mp.get_library_dir(playlist_key)
-    safe = ctx.safe_dir(playlist_dir)
+    output_dir = ctx.project_root / mp.get_output_dir(playlist_key)
+    safe = ctx.safe_dir(output_dir)
     if not safe:
         return jsonify({'error': 'Invalid directory'}), 400
 
@@ -1082,10 +1027,16 @@ def api_files_download(playlist_key, filename):
     if not str(file_path.resolve()).startswith(str(Path(safe).resolve())):
         return jsonify({'error': 'Invalid path'}), 400
 
+    # Look up track metadata from DB for human-readable download name
+    rel_path = str(file_path.relative_to(ctx.project_root))
+    track_meta = ctx.track_db.get_track_by_path(rel_path)
+    download_name = _build_display_filename(track_meta) if track_meta else filename
+
     profile_name = request.args.get('profile')
     if not profile_name:
         return send_from_directory(safe, filename, mimetype='audio/mpeg',
-                                   conditional=True)
+                                   conditional=True,
+                                   download_name=download_name)
 
     # Serve with profile-specific tags applied on-the-fly
     config = ctx.get_config()
@@ -1094,14 +1045,16 @@ def api_files_download(playlist_key, filename):
         return jsonify({'error': f'Unknown profile: {profile_name}'}), 400
     profile = mp.OUTPUT_PROFILES[profile_name]
 
-    # Look up track metadata from DB
-    rel_path = str(file_path.relative_to(ctx.project_root))
-    track_meta = ctx.track_db.get_track_by_path(rel_path)
     if not track_meta:
         return jsonify({'error': 'Track not found in database'}), 404
 
     tag_applicator = mp.TagApplicator(ctx.track_db,
                                       project_root=str(ctx.project_root))
+
+    # Use profile-formatted filename for Content-Disposition
+    profile_download_name = tag_applicator.build_output_filename(
+        track_meta, profile, playlist_key)
+
     id3_bytes, audio_offset, total_size = tag_applicator.build_tagged_stream(
         str(file_path), track_meta, profile, playlist_key)
 
@@ -1118,7 +1071,11 @@ def api_files_download(playlist_key, filename):
     return Response(
         _generate(),
         mimetype='audio/mpeg',
-        headers={'Content-Length': str(total_size)},
+        headers={
+            'Content-Length': str(total_size),
+            'Content-Disposition': (
+                f'attachment; filename="{profile_download_name}"'),
+        },
     )
 
 
@@ -1126,8 +1083,8 @@ def api_files_download(playlist_key, filename):
 def api_files_artwork(playlist_key, filename):
     """Serve cover art from the library artwork directory."""
     ctx = _ctx()
-    playlist_dir = ctx.project_root / mp.get_library_dir(playlist_key)
-    safe = ctx.safe_dir(playlist_dir)
+    output_dir = ctx.project_root / mp.get_output_dir(playlist_key)
+    safe = ctx.safe_dir(output_dir)
     if not safe:
         return jsonify({'error': 'Invalid directory'}), 400
 
@@ -1291,8 +1248,8 @@ def _streaming_zip_size(file_entries):
 def api_files_download_all(playlist_key):
     """Stream a ZIP archive of all MP3s in a playlist."""
     ctx = _ctx()
-    playlist_dir = ctx.project_root / mp.get_library_dir(playlist_key)
-    safe = ctx.safe_dir(playlist_dir)
+    output_dir = ctx.project_root / mp.get_output_dir(playlist_key)
+    safe = ctx.safe_dir(output_dir)
     if not safe or not Path(safe).is_dir():
         return jsonify({'error': f'Playlist directory not found: {playlist_key}'}), 404
 
@@ -1300,7 +1257,14 @@ def api_files_download_all(playlist_key):
     if not mp3_files:
         return jsonify({'error': 'No MP3 files found'}), 404
 
-    file_entries = [(f.name, f) for f in mp3_files]
+    # Build UUID→display_filename map from TrackDB
+    tracks = ctx.track_db.get_tracks_by_playlist(playlist_key)
+    display_map = {}
+    for t in tracks:
+        stored = Path(t['file_path']).name
+        display_map[stored] = _build_display_filename(t)
+
+    file_entries = [(display_map.get(f.name, f.name), f) for f in mp3_files]
     content_length, _ = _streaming_zip_size(file_entries)
 
     zip_name = f"{playlist_key}.zip"
@@ -1327,8 +1291,8 @@ def api_files_download_zip():
     playlist_files = []  # [(playlist_key, [Path, ...])]
     total_count = 0
     for key in playlists:
-        playlist_dir = ctx.project_root / mp.get_library_dir(key)
-        safe = ctx.safe_dir(playlist_dir)
+        output_dir = ctx.project_root / mp.get_output_dir(key)
+        safe = ctx.safe_dir(output_dir)
         if not safe or not Path(safe).is_dir():
             continue  # skip missing playlists silently
         mp3s = sorted(Path(safe).glob('*.mp3'))
@@ -1342,10 +1306,22 @@ def api_files_download_zip():
     if not playlist_files:
         return jsonify({'error': 'No MP3 files found in selected playlists'}), 404
 
+    # Build display_filename maps from TrackDB
+    display_maps = {}
+    for key, _ in playlist_files:
+        tracks = ctx.track_db.get_tracks_by_playlist(key)
+        dm = {}
+        for t in tracks:
+            stored = Path(t['file_path']).name
+            dm[stored] = _build_display_filename(t)
+        display_maps[key] = dm
+
     file_entries = []
     for key, files in playlist_files:
+        dm = display_maps.get(key, {})
         for f in files:
-            file_entries.append((f'{key}/{f.name}', f))
+            arc_name = f'{key}/{dm.get(f.name, f.name)}'
+            file_entries.append((arc_name, f))
 
     content_length, _ = _streaming_zip_size(file_entries)
 
@@ -1533,7 +1509,9 @@ def api_sync_run():
     if dest.is_web_client:
         return jsonify({'error': 'web-client destinations can only be synced from the browser'}), 400
 
-    desc = f'Sync: {Path(source_dir).name} → {dest.name}'
+    source_parts = Path(source_dir).parts
+    sync_playlist = source_parts[-2] if len(source_parts) >= 2 else source_parts[-1]
+    desc = f'Sync: {sync_playlist} → {dest.name}'
 
     def _run(task_id):
         logger = ctx.make_logger(task_id, verbose=verbose)
@@ -1543,8 +1521,9 @@ def api_sync_run():
         tag_applicator = mp.TagApplicator(ctx.track_db,
                                           project_root=str(ctx.project_root))
 
-        # Derive playlist name from source_dir (last path component)
-        playlist_name = Path(source_dir).name
+        # Derive playlist name from source_dir (library/<key>/output)
+        source_parts = Path(source_dir).parts
+        playlist_name = source_parts[-2] if len(source_parts) >= 2 else source_parts[-1]
 
         sync_mgr = mp.SyncManager(logger, display_handler=display,
                                   cancel_event=task.cancel_event,

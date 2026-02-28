@@ -21,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, ClassVar, Protocol, runtime_checkable
+from typing import ClassVar, Protocol, runtime_checkable
 
 # ══════════════════════════════════════════════════════════════════
 # Section 0: Platform Detection
@@ -50,8 +50,9 @@ def get_os_display_name():
 VERSION = "2.36.1-server-only-architecture"
 
 DEFAULT_DATA_DIR = "data"
-DEFAULT_MUSIC_DIR = "music"
 DEFAULT_LIBRARY_DIR = "library"
+SOURCE_SUBDIR = "source"
+OUTPUT_SUBDIR = "output"
 DEFAULT_LOG_DIR = "logs"
 DEFAULT_LOG_RETENTION_DAYS = 7
 DEFAULT_CONFIG_FILE = "data/config.yaml"
@@ -65,7 +66,7 @@ TXXX_TRACK_UUID = "TrackUUID"
 # Schema version constants — increment and add a migration case when changing
 # the config.yaml structure or DB tables/columns.
 CONFIG_SCHEMA_VERSION = 2
-DB_SCHEMA_VERSION = 4
+DB_SCHEMA_VERSION = 5
 
 # Excluded USB volumes by OS
 if IS_MACOS:
@@ -524,6 +525,16 @@ def get_library_dir(playlist_key=None):
     if playlist_key:
         return f"{DEFAULT_LIBRARY_DIR}/{playlist_key}"
     return DEFAULT_LIBRARY_DIR
+
+
+def get_source_dir(playlist_key):
+    """Build source M4A path: library/<playlist>/source/"""
+    return f"{DEFAULT_LIBRARY_DIR}/{playlist_key}/{SOURCE_SUBDIR}"
+
+
+def get_output_dir(playlist_key):
+    """Build output MP3 path: library/<playlist>/output/"""
+    return f"{DEFAULT_LIBRARY_DIR}/{playlist_key}/{OUTPUT_SUBDIR}"
 
 
 class SafeTemplateDict(dict):
@@ -1073,6 +1084,16 @@ def migrate_db_schema(logger=None):
             changes.append("added tracks table for library metadata storage")
             if logger:
                 logger.info("DB migration 3→4: added tracks table")
+
+        # ── Version 4 → 5: index on source_m4a_path ──────────────────
+        if current < 5:
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_tracks_source_m4a
+                ON tracks(source_m4a_path)""")
+            conn.execute("PRAGMA user_version = 5")
+            conn.commit()
+            changes.append("added index on tracks.source_m4a_path")
+            if logger:
+                logger.info("DB migration 4→5: added source_m4a_path index")
 
         return [MigrationEvent(
             'schema_migrate',
@@ -2405,6 +2426,18 @@ class TrackDB:
         finally:
             conn.close()
 
+    def get_track_by_source_m4a(self, source_m4a_path):
+        """Return a track by its source M4A path, or None."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM tracks WHERE source_m4a_path = ?",
+                (source_m4a_path,),
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
     def get_tracks_by_playlist(self, playlist):
         """Return all tracks for a playlist, ordered by title."""
         conn = self._connect()
@@ -3672,45 +3705,6 @@ USBSyncResult = SyncResult
 USBSyncStatusResult = SyncStatusResult
 
 
-@dataclass
-class LibrarySummaryResult:
-    """Result of SummaryManager.generate_summary()."""
-    success: bool
-    export_dir: str
-    scan_duration: float
-    mode: str  # "quick", "default", "detailed"
-    total_playlists: int = 0
-    total_files: int = 0
-    total_size_bytes: int = 0
-    avg_file_size: float = 0.0
-    files_with_protection_tags: int = 0
-    files_missing_protection_tags: int = 0
-    sample_size: int = 0
-    files_with_cover_art: int = 0
-    files_without_cover_art: int = 0
-    files_with_original_cover_art: int = 0
-    files_with_resized_cover_art: int = 0
-    playlist_summaries: list = field(default_factory=list)
-    music_library_stats: Any = None  # MusicLibraryStats or None
-
-    def to_dict(self) -> dict:
-        d = asdict(self)
-        # PlaylistSummary objects need manual conversion
-        d['playlist_summaries'] = [
-            {
-                'name': p.name, 'path': p.path,
-                'file_count': p.file_count,
-                'total_size_bytes': p.total_size_bytes,
-                'avg_file_size_mb': p.avg_file_size_mb,
-                'files_with_cover_art': p.files_with_cover_art,
-                'files_without_cover_art': p.files_without_cover_art,
-            } if hasattr(p, 'name') else p
-            for p in self.playlist_summaries
-        ]
-        return d
-
-
-
 
 @dataclass
 class DeleteResult:
@@ -3718,7 +3712,7 @@ class DeleteResult:
     success: bool
     playlist_key: str
     source_deleted: bool = False
-    export_deleted: bool = False
+    library_deleted: bool = False
     config_removed: bool = False
     files_deleted: int = 0
     bytes_freed: int = 0
@@ -3780,38 +3774,6 @@ class DependencyCheckResult:
     all_ok: bool = False
     missing_packages: list = field(default_factory=list)
     playlists_loaded: int = 0
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-
-@dataclass
-class UnconvertedListResult:
-    """Result of listing unconverted files across playlists."""
-    success: bool
-    profile: str
-    playlists: list = field(default_factory=list)
-    total_unconverted: int = 0
-    total_playlists_with_unconverted: int = 0
-    total_playlists_scanned: int = 0
-    scan_duration: float = 0.0
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-
-@dataclass
-class DiffListResult:
-    """Result of diff listing showing unconverted and orphaned files."""
-    success: bool
-    profile: str
-    playlists: list = field(default_factory=list)
-    total_unconverted: int = 0
-    total_orphaned: int = 0
-    total_duplicates: int = 0
-    total_playlists_scanned: int = 0
-    total_playlists_with_differences: int = 0
-    scan_duration: float = 0.0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -4112,9 +4074,9 @@ class Converter:
         """Remove invalid filename characters."""
         return sanitize_filename(name)
 
-    def _build_output_filename(self, artist: str, title: str) -> str:
-        """Build library output filename: 'Artist - Title.mp3'."""
-        return f"{artist} - {title}.mp3"
+    def _build_output_filename(self, track_uuid: str) -> str:
+        """Build library output filename: '<uuid>.mp3'."""
+        return f"{track_uuid}.mp3"
 
     def _build_output_path(self, base_path: Path, filename: str) -> Path:
         """Build library output path — always flat: base_path/filename."""
@@ -4159,18 +4121,18 @@ class Converter:
         try:
             # Read M4A tags
             title, artist, album = read_m4a_tags(input_file)
+            human_label = f"{artist} - {title}"
 
-            # Build output filename — always "Artist - Title.mp3" (flat)
-            safe_title = self._sanitize_filename(title)
-            safe_artist = self._sanitize_filename(artist)
-            output_filename = self._build_output_filename(safe_artist, safe_title)
-            output_file = self._build_output_path(output_path, output_filename)
-            already_exists = output_file.exists()
+            # Check TrackDB for existing conversion of this source M4A
+            existing_track = None
+            if self.track_db:
+                existing_track = self.track_db.get_track_by_source_m4a(
+                    str(input_file))
 
-            if already_exists and not force:
+            if existing_track and not force:
                 self.stats.increment('skipped')
                 msg = (f"[{count}/{self.stats.total_found}] "
-                       f"Skipping (already exists): {output_filename}")
+                       f"Skipping (already converted): {human_label}")
                 if progress_bar and not verbose:
                     self.logger.file_info(msg)
                 else:
@@ -4179,13 +4141,33 @@ class Converter:
                     progress_bar.update(1)
                 return
 
+            # Generate UUID first — used for both filename and DB record
+            track_uuid = _uuid.uuid4().hex
+            output_filename = self._build_output_filename(track_uuid)
+            output_file = self._build_output_path(output_path, output_filename)
+
+            # If force re-converting, delete old file + DB entry
+            if existing_track and force:
+                old_path = Path(existing_track['file_path'])
+                if not old_path.is_absolute():
+                    old_path = Path('.') / old_path
+                if old_path.exists():
+                    old_path.unlink()
+                # Clean up old cover art
+                if existing_track.get('cover_art_path'):
+                    old_art = output_path / existing_track['cover_art_path']
+                    if old_art.exists():
+                        old_art.unlink()
+                if self.track_db:
+                    self.track_db.delete_track(existing_track['uuid'])
+
             if verbose:
                 self.logger.debug(f"Source file:  '{input_file}'")
                 self.logger.debug(
                     f"File size:    {input_file.stat().st_size / 1024:.1f} KB")
-                if already_exists and force:
+                if existing_track and force:
                     self.logger.debug(
-                        f"Force flag set — overwriting: '{output_filename}'")
+                        f"Force flag set — re-converting: {human_label}")
                 quality_desc = f"{self.quality_settings['mode'].upper()}"
                 if self.quality_settings['mode'] == 'vbr':
                     quality_desc += f" quality {self.quality_settings['value']}"
@@ -4206,13 +4188,13 @@ class Converter:
                 self.logger.debug(f"  → Album:  '{album}'")
 
             if dry_run:
-                if already_exists and force:
+                if existing_track and force:
                     self.logger.dry_run(
-                        f"Would overwrite: '{output_filename}'")
+                        f"Would re-convert: {human_label}")
                 else:
                     self.logger.dry_run(
                         f"Would convert:   '{display_name}'")
-                self.logger.dry_run(f"  → Output:     '{output_filename}'")
+                self.logger.dry_run(f"  → Output:     {output_filename}")
                 self.logger.dry_run(f"  → Title:      '{title}'")
                 self.logger.dry_run(f"  → Artist:     '{artist}'")
                 self.logger.dry_run(f"  → Album:      '{album}'")
@@ -4258,9 +4240,6 @@ class Converter:
                 raise Exception(
                     f"FFmpeg conversion failed: {error_msg}") from e
 
-            # Generate track UUID
-            track_uuid = _uuid.uuid4().hex
-
             # Write ONLY the TrackUUID identifier tag (no TIT2/TPE1/TALB/APIC)
             try:
                 tags = ID3(str(output_file))
@@ -4274,14 +4253,14 @@ class Converter:
                           text=[track_uuid]))
             tags.save(str(output_file), v2_version=4, v1=0)
 
-            # Extract cover art to disk
-            artwork_dir = output_path / "artwork"
+            # Extract cover art to disk (artwork/ is sibling of output/)
+            artwork_dir = output_path.parent / "artwork"
             cover_art_path, cover_art_hash = self._extract_cover_art_to_disk(
                 input_file, artwork_dir, track_uuid)
 
             if verbose and cover_art_path:
-                art_file = artwork_dir / f"{track_uuid}.*"
-                self.logger.debug(f"  → Cover art: extracted to {cover_art_path}")
+                self.logger.debug(
+                    f"  → Cover art: extracted to {cover_art_path}")
 
             # Get MP3 duration and file size
             mp3_info = MP3(str(output_file))
@@ -4293,8 +4272,9 @@ class Converter:
                 self.track_db.insert_track(
                     uuid=track_uuid,
                     playlist=playlist_key,
-                    file_path=str(output_file.relative_to(
-                        Path(get_library_dir()))),
+                    file_path=str(
+                        get_output_dir(playlist_key)
+                        + "/" + output_filename),
                     title=title,
                     artist=artist,
                     album=album,
@@ -4310,14 +4290,14 @@ class Converter:
                 self.logger.debug(
                     f"Output size: {file_size_bytes / 1024:.1f} KB")
 
-            if already_exists and force:
+            if existing_track and force:
                 self.stats.increment('overwritten')
                 msg = (f"[{count}/{self.stats.total_found}] "
-                       f"Overwritten: {output_filename}")
+                       f"Converted: {human_label} → {output_filename}")
             else:
                 self.stats.increment('converted')
                 msg = (f"[{count}/{self.stats.total_found}] "
-                       f"Converted: {output_filename}")
+                       f"Converted: {human_label} → {output_filename}")
             if progress_bar and not verbose:
                 self.logger.file_info(msg)
             else:
@@ -5697,13 +5677,19 @@ class SyncManager:
         return False
 
     def _extract_sync_info(self, src_file, source_path):
-        """Extract playlist name and file name from a source file path."""
+        """Extract playlist name and file name from a source file path.
+
+        With the consolidated directory layout, source_path is typically
+        library/<playlist>/output/.  We use the parent's name (the playlist
+        key) rather than source_path.name (which would be 'output').
+        """
         if source_path.is_dir():
             rel = src_file.relative_to(source_path)
             parts = rel.parts
             if len(parts) > 1:
                 return parts[0], str(Path(*parts[1:]))
-            return source_path.name, parts[0]
+            # source_path.name may be 'output' — use parent for playlist key
+            return source_path.parent.name, parts[0]
         return source_path.parent.name, src_file.name
 
     def select_destination(self, config=None, output_profile=None):
@@ -5864,9 +5850,11 @@ class SyncManager:
             if not tag_applicator or not tag_applicator.track_db:
                 return None
             # Build the file_path key as stored in TrackDB
+            # DB stores paths like library/<playlist>/output/<uuid>.mp3
             try:
                 rel = src_file.relative_to(Path(get_library_dir()))
-                return tag_applicator.track_db.get_track_by_path(str(rel))
+                db_path = f"{DEFAULT_LIBRARY_DIR}/{rel}"
+                return tag_applicator.track_db.get_track_by_path(db_path)
             except ValueError:
                 return None
 
@@ -6094,30 +6082,8 @@ USBManager = SyncManager
 # Section 8A: Library Summary Management
 # ══════════════════════════════════════════════════════════════════
 
-class PlaylistSummary:
-    """Statistics for a single playlist."""
-
-    def __init__(self, name, path):
-        self.name = name
-        self.path = path
-        self.file_count = 0
-        self.total_size_bytes = 0
-        self.avg_file_size_mb = 0.0
-        self.last_modified = None  # datetime
-
-        # Tag integrity (from sampling)
-        self.sample_files_checked = 0
-        self.sample_files_with_tags = 0
-
-        # Cover art stats
-        self.files_with_cover_art = 0
-        self.files_without_cover_art = 0
-        self.files_with_original_cover_art = 0
-        self.files_with_resized_cover_art = 0
-
-
 class MusicLibraryStats:
-    """Statistics for the source music/ directory (M4A library)."""
+    """Statistics for the source M4A library (library/<playlist>/source/)."""
 
     def __init__(self):
         self.total_playlists = 0
@@ -6129,322 +6095,64 @@ class MusicLibraryStats:
         self.playlists = []  # List of dicts: {name, m4a_count, size_bytes, exported_count, unconverted_count}
 
 
-class LibrarySummaryStatistics:
-    """Statistics for the entire export library."""
-
-    def __init__(self):
-        # Aggregate stats
-        self.total_playlists = 0
-        self.total_files = 0
-        self.total_size_bytes = 0
-        self.scan_duration = 0.0
-
-        # Tag integrity (from sampling)
-        self.sample_size = 0
-        self.files_with_protection_tags = 0
-        self.files_missing_protection_tags = 0
-
-        # Cover art stats
-        self.files_with_cover_art = 0
-        self.files_without_cover_art = 0
-        self.files_with_original_cover_art = 0
-        self.files_with_resized_cover_art = 0
-
-        # Per-playlist breakdown
-        self.playlists = []  # List of PlaylistSummary objects
-
-
 class SummaryManager:
-    """Generates summary statistics for the export directory."""
+    """Scans library directories for source/output statistics."""
 
     def __init__(self, logger=None):
         self.logger = logger or Logger()
-        self.stats = LibrarySummaryStatistics()
 
-    def generate_summary(self, export_dir='export/', detailed=False, quick=False,
-                         dry_run=False, music_dir=None, export_profile=None,
-                         no_library=False, output_profile=None):
-        """
-        Generate and display library stats and playlist summary.
+    def scan_music_library(self):
+        """Scan library/<playlist>/source/ for M4A stats and conversion status.
 
-        Args:
-            export_dir: Directory to analyze
-            detailed: Show detailed statistics
-            quick: Show only aggregate statistics
-            dry_run: Preview mode (not applicable for summary)
-            music_dir: Music source directory for library stats
-            export_profile: Profile name for conversion status comparison
-            no_library: Skip music directory scan
-            output_profile: OutputProfile for accurate file-level matching
+        Compares M4A count in source/ against MP3 count in output/ for each
+        playlist to determine unconverted counts.
 
         Returns:
-            LibrarySummaryResult
+            MusicLibraryStats or None if library directory doesn't exist
         """
-        # Scan music library stats (unless skipped)
-        music_stats = None
-        if not no_library:
-            music_stats = self.scan_music_library(
-                music_dir=music_dir,
-                export_profile=export_profile,
-                output_profile=output_profile,
-            )
-
-        start_time = time.time()
-
-        # Check if directory exists
-        export_path = Path(export_dir)
-        if not export_path.exists():
-            mode = "quick" if quick else ("detailed" if detailed else "default")
-            return LibrarySummaryResult(
-                success=True, export_dir=str(export_dir), scan_duration=0,
-                mode=mode, music_library_stats=music_stats)
-
-        # Scan playlists
-        playlist_dirs = self._scan_playlists(export_path)
-
-        if not playlist_dirs:
-            mode = "quick" if quick else ("detailed" if detailed else "default")
-            return LibrarySummaryResult(
-                success=True, export_dir=str(export_dir), scan_duration=0,
-                mode=mode, music_library_stats=music_stats)
-
-        # Analyze each playlist
-        for playlist_dir in playlist_dirs:
-            playlist_summary = self._analyze_playlist(playlist_dir)
-            if playlist_summary:
-                self.stats.playlists.append(playlist_summary)
-
-        # Calculate aggregate statistics
-        self.stats.total_playlists = len(self.stats.playlists)
-        self.stats.total_files = sum(p.file_count for p in self.stats.playlists)
-        self.stats.total_size_bytes = sum(p.total_size_bytes for p in self.stats.playlists)
-
-        # Check tag integrity (always checks all files)
-        self._check_tag_integrity()
-
-        # Record scan duration
-        self.stats.scan_duration = time.time() - start_time
-
-        mode = "quick" if quick else ("detailed" if detailed else "default")
-        avg_size = (self.stats.total_size_bytes / self.stats.total_files
-                    if self.stats.total_files > 0 else 0.0)
-        return LibrarySummaryResult(
-            success=True,
-            export_dir=str(export_dir),
-            scan_duration=self.stats.scan_duration,
-            mode=mode,
-            total_playlists=self.stats.total_playlists,
-            total_files=self.stats.total_files,
-            total_size_bytes=self.stats.total_size_bytes,
-            avg_file_size=avg_size,
-            files_with_protection_tags=self.stats.files_with_protection_tags,
-            files_missing_protection_tags=self.stats.files_missing_protection_tags,
-            sample_size=self.stats.sample_size,
-            files_with_cover_art=self.stats.files_with_cover_art,
-            files_without_cover_art=self.stats.files_without_cover_art,
-            files_with_original_cover_art=self.stats.files_with_original_cover_art,
-            files_with_resized_cover_art=self.stats.files_with_resized_cover_art,
-            playlist_summaries=[p for p in self.stats.playlists],
-            music_library_stats=music_stats,
-        )
-
-    def _scan_playlists(self, export_path):
-        """Discover playlist directories in export directory."""
-        playlist_dirs = []
-
-        try:
-            for item in export_path.iterdir():
-                # Skip files, only process directories
-                if item.is_dir() and not item.name.startswith('.'):
-                    playlist_dirs.append(item)
-        except PermissionError as e:
-            self.logger.warn(f"Permission denied accessing export directory: {e}")
-        except Exception as e:
-            self.logger.warn(f"Error scanning export directory: {e}")
-
-        # Sort by name for consistent output
-        return sorted(playlist_dirs, key=lambda p: p.name)
-
-    def _analyze_playlist(self, playlist_dir):
-        """Analyze statistics for a single playlist directory."""
-        try:
-            mp3_files = list(playlist_dir.rglob("*.mp3"))
-
-            if not mp3_files:
-                return None  # Skip empty playlists
-
-            summary = PlaylistSummary(playlist_dir.name, str(playlist_dir))
-            summary.file_count = len(mp3_files)
-
-            # Calculate total size and find most recent modification
-            total_size = 0
-            latest_mtime = 0
-
-            for mp3_file in mp3_files:
-                try:
-                    stat = mp3_file.stat()
-                    total_size += stat.st_size
-                    if stat.st_mtime > latest_mtime:
-                        latest_mtime = stat.st_mtime
-                except Exception as e:
-                    self.logger.debug(f"Error reading stats for {mp3_file}: {e}")
-
-            summary.total_size_bytes = total_size
-            if summary.file_count > 0:
-                summary.avg_file_size_mb = (total_size / summary.file_count) / (1024 * 1024)
-
-            if latest_mtime > 0:
-                summary.last_modified = datetime.fromtimestamp(latest_mtime)
-
-            return summary
-
-        except PermissionError as e:
-            self.logger.warn(f"Permission denied accessing playlist '{playlist_dir.name}': {e}")
-            return None
-        except Exception as e:
-            self.logger.warn(f"Error analyzing playlist '{playlist_dir.name}': {e}")
-            return None
-
-    def _check_tag_integrity(self):
-        """Check all files for TXXX protection tags and cover art."""
-        import hashlib
-
-        from mutagen.id3 import ID3, ID3NoHeaderError
-
-        for playlist in self.stats.playlists:
-            playlist_path = Path(playlist.path)
-            mp3_files = list(playlist_path.rglob("*.mp3"))
-
-            # Check all files in this playlist
-            for mp3_file in mp3_files:
-                playlist.sample_files_checked += 1
-
-                try:
-                    tags = ID3(mp3_file)
-
-                    # Check for TXXX protection frames
-                    has_original_title = _txxx_exists(tags, TXXX_ORIGINAL_TITLE)
-                    has_original_artist = _txxx_exists(tags, TXXX_ORIGINAL_ARTIST)
-                    has_original_album = _txxx_exists(tags, TXXX_ORIGINAL_ALBUM)
-
-                    if has_original_title and has_original_artist and has_original_album:
-                        playlist.sample_files_with_tags += 1
-                        self.stats.files_with_protection_tags += 1
-                    else:
-                        self.stats.files_missing_protection_tags += 1
-
-                    # Check for cover art (APIC frame)
-                    apic_frame = None
-                    for key in tags:
-                        if key.startswith("APIC"):
-                            apic_frame = tags[key]
-                            break
-
-                    if apic_frame is not None:
-                        playlist.files_with_cover_art += 1
-                        self.stats.files_with_cover_art += 1
-
-                        # Check if cover art is original or resized
-                        original_hash = _get_txxx(tags, TXXX_ORIGINAL_COVER_ART_HASH)
-                        if original_hash:
-                            current_hash = hashlib.sha256(apic_frame.data).hexdigest()[:16]
-                            if current_hash == original_hash:
-                                playlist.files_with_original_cover_art += 1
-                                self.stats.files_with_original_cover_art += 1
-                            else:
-                                playlist.files_with_resized_cover_art += 1
-                                self.stats.files_with_resized_cover_art += 1
-                    else:
-                        playlist.files_without_cover_art += 1
-                        self.stats.files_without_cover_art += 1
-
-                except ID3NoHeaderError:
-                    self.logger.debug(f"No ID3 tags found in {mp3_file}")
-                    self.stats.files_missing_protection_tags += 1
-                    playlist.files_without_cover_art += 1
-                    self.stats.files_without_cover_art += 1
-                except Exception as e:
-                    self.logger.debug(f"Error reading tags from {mp3_file}: {e}")
-                    self.stats.files_missing_protection_tags += 1
-                    playlist.files_without_cover_art += 1
-                    self.stats.files_without_cover_art += 1
-
-        # Calculate aggregate sample size
-        self.stats.sample_size = sum(p.sample_files_checked for p in self.stats.playlists)
-
-
-    def scan_music_library(self, music_dir=None, export_profile=None,
-                           output_profile=None):
-        """
-        Scan the music/ directory for source M4A library stats.
-
-        Args:
-            music_dir: Path to music directory (default: DEFAULT_MUSIC_DIR)
-            export_profile: Profile name to check export status against
-            output_profile: OutputProfile for file-level unconverted matching
-
-        Returns:
-            MusicLibraryStats or None if directory doesn't exist
-        """
-        music_dir = music_dir or DEFAULT_MUSIC_DIR
-        music_path = Path(music_dir)
-
-        if not music_path.exists():
+        library_path = Path(DEFAULT_LIBRARY_DIR)
+        if not library_path.exists():
             return None
 
         stats = MusicLibraryStats()
         start_time = time.time()
 
         try:
-            for item in sorted(music_path.iterdir(), key=lambda p: p.name):
+            for item in sorted(library_path.iterdir(), key=lambda p: p.name):
                 if not item.is_dir() or item.name.startswith('.'):
                     continue
 
                 playlist_name = item.name
+                source_dir = item / SOURCE_SUBDIR
+                output_dir = item / OUTPUT_SUBDIR
+
+                if not source_dir.exists():
+                    continue
+
                 m4a_count = 0
                 size_bytes = 0
-                m4a_files = []
 
-                # Walk recursively — music/ has nested Artist/Album/Track.m4a structure
-                for root, _dirs, files in os.walk(item):
+                # Walk recursively — source/ has nested Artist/Album/Track.m4a structure
+                for root, _dirs, files in os.walk(source_dir):
                     for f in files:
                         if f.lower().endswith('.m4a'):
                             m4a_count += 1
-                            m4a_files.append(Path(root) / f)
                             try:
-                                size_bytes += os.path.getsize(os.path.join(root, f))
+                                size_bytes += os.path.getsize(
+                                    os.path.join(root, f))
                             except OSError:
                                 pass
 
                 if m4a_count == 0:
                     continue
 
-                # Check export status using file-level matching
+                # Simple count-based comparison for conversion status
                 exported_count = 0
-                unconverted_count = 0
-                if export_profile and output_profile:
-                    export_dir = get_export_dir(export_profile, playlist_name)
-                    seen_paths = set()
-                    for m4a_path in m4a_files:
-                        try:
-                            expected = build_expected_mp3_path(
-                                m4a_path, export_dir, output_profile,
-                            )
-                            if expected in seen_paths:
-                                continue  # duplicate mapping, already counted
-                            seen_paths.add(expected)
-                            if expected.exists():
-                                exported_count += 1
-                            else:
-                                unconverted_count += 1
-                        except Exception:
-                            unconverted_count += 1
-                elif export_profile:
-                    # Fallback: simple count when no output_profile given
-                    export_path = Path(get_export_dir(export_profile, playlist_name))
-                    if export_path.exists():
-                        exported_count = len(list(export_path.rglob('*.mp3')))
-                    unconverted_count = max(0, m4a_count - exported_count)
+                if output_dir.exists():
+                    exported_count = sum(
+                        1 for f in output_dir.glob('*.mp3')
+                        if not f.name.startswith('._'))
+                unconverted_count = max(0, m4a_count - exported_count)
 
                 stats.playlists.append({
                     'name': playlist_name,
@@ -6460,278 +6168,15 @@ class SummaryManager:
                 stats.total_unconverted += unconverted_count
 
         except PermissionError as e:
-            self.logger.warn(f"Permission denied accessing music directory: {e}")
+            self.logger.warn(
+                f"Permission denied accessing library directory: {e}")
         except Exception as e:
-            self.logger.warn(f"Error scanning music directory: {e}")
+            self.logger.warn(f"Error scanning library directory: {e}")
 
         stats.total_playlists = len(stats.playlists)
         stats.scan_duration = time.time() - start_time
 
         return stats
-
-    def get_unconverted_files(self, playlist_name, music_dir, export_profile, output_profile):
-        """Return list of unconverted M4A files for a playlist.
-
-        Each entry: {filename, artist, title, album, expected_mp3}
-        """
-        music_path = Path(music_dir) / playlist_name
-        if not music_path.exists():
-            return []
-
-        export_dir = get_export_dir(export_profile, playlist_name)
-        unconverted = []
-
-        for root, _dirs, files in os.walk(music_path):
-            for f in files:
-                if not f.lower().endswith('.m4a'):
-                    continue
-                m4a_path = Path(root) / f
-                try:
-                    expected = build_expected_mp3_path(m4a_path, export_dir, output_profile)
-                    if not expected.exists():
-                        title, artist, album = read_m4a_tags(m4a_path)
-                        unconverted.append({
-                            'filename': f,
-                            'artist': artist,
-                            'title': title,
-                            'album': album,
-                            'expected_mp3': expected.name,
-                        })
-                except Exception:
-                    unconverted.append({
-                        'filename': f,
-                        'artist': 'Unknown',
-                        'title': f,
-                        'album': 'Unknown',
-                        'expected_mp3': f.replace('.m4a', '.mp3'),
-                    })
-
-        return unconverted
-
-    def get_orphaned_files(self, playlist_name, music_dir, export_profile, output_profile):
-        """Return list of orphaned MP3 files with no source M4A.
-
-        Each entry: {filename}
-        """
-        export_dir = get_export_dir(export_profile, playlist_name)
-        export_path = Path(export_dir)
-        if not export_path.exists():
-            return []
-
-        # Collect all MP3 files in the export directory
-        mp3_files = sorted(export_path.rglob("*.mp3"))
-        if not mp3_files:
-            return []
-
-        # Build set of expected MP3 paths from all M4A source files
-        music_path = Path(music_dir) / playlist_name
-        expected_paths = set()
-        if music_path.exists():
-            for root, _dirs, files in os.walk(music_path):
-                for f in files:
-                    if not f.lower().endswith('.m4a'):
-                        continue
-                    m4a_path = Path(root) / f
-                    try:
-                        expected = build_expected_mp3_path(
-                            m4a_path, export_dir, output_profile,
-                        )
-                        expected_paths.add(expected.resolve())
-                    except Exception:
-                        pass
-
-        # Any MP3 not in the expected set is orphaned
-        orphaned = []
-        for mp3 in mp3_files:
-            if mp3.resolve() not in expected_paths:
-                orphaned.append({'filename': mp3.name})
-
-        return orphaned
-
-    def get_duplicate_files(self, playlist_name, music_dir, export_profile, output_profile):
-        """Return list of duplicate M4A-to-MP3 collisions for a playlist.
-
-        Multiple M4A files that resolve to the same expected MP3 path.
-        Each entry: {expected_mp3, sources: [{filename, artist, title, album}]}
-        """
-        music_path = Path(music_dir) / playlist_name
-        if not music_path.exists():
-            return []
-
-        export_dir = get_export_dir(export_profile, playlist_name)
-        # Group M4A files by their expected MP3 path
-        path_groups = {}
-        for root, _dirs, files in os.walk(music_path):
-            for f in files:
-                if not f.lower().endswith('.m4a'):
-                    continue
-                m4a_path = Path(root) / f
-                try:
-                    expected = build_expected_mp3_path(
-                        m4a_path, export_dir, output_profile,
-                    )
-                    key = expected.resolve()
-                    if key not in path_groups:
-                        path_groups[key] = {'expected_mp3': expected.name, 'sources': []}
-                    title, artist, album = read_m4a_tags(m4a_path)
-                    rel = m4a_path.relative_to(Path(music_dir))
-                    path_groups[key]['sources'].append({
-                        'filename': str(rel),
-                        'artist': artist,
-                        'title': title,
-                        'album': album,
-                    })
-                except Exception:
-                    pass
-
-        # Return only groups with more than one source file
-        return [group for group in path_groups.values() if len(group['sources']) > 1]
-
-    def list_unconverted(self, music_dir, export_profile, output_profile,
-                         playlist_filter=None):
-        """List unconverted M4A files across playlists.
-
-        Args:
-            music_dir: Music source directory
-            export_profile: Profile name for export paths
-            output_profile: Output profile object
-            playlist_filter: Optional playlist name to scope to
-
-        Returns:
-            UnconvertedListResult
-        """
-        start_time = time.time()
-        music_path = Path(music_dir)
-        result_playlists = []
-
-        if not music_path.exists():
-            return UnconvertedListResult(
-                success=True, profile=export_profile,
-                scan_duration=time.time() - start_time,
-            )
-
-        # Determine which playlists to scan
-        if playlist_filter:
-            playlist_dirs = [music_path / playlist_filter]
-        else:
-            playlist_dirs = sorted(
-                [d for d in music_path.iterdir() if d.is_dir() and not d.name.startswith('.')],
-                key=lambda p: p.name,
-            )
-
-        total_unconverted = 0
-        playlists_with_unconverted = 0
-
-        for pdir in playlist_dirs:
-            if not pdir.exists():
-                continue
-            name = pdir.name
-            files = self.get_unconverted_files(name, music_dir, export_profile, output_profile)
-            if files:
-                playlists_with_unconverted += 1
-                total_unconverted += len(files)
-            result_playlists.append({
-                'name': name,
-                'unconverted': files,
-            })
-
-        return UnconvertedListResult(
-            success=True,
-            profile=export_profile,
-            playlists=result_playlists,
-            total_unconverted=total_unconverted,
-            total_playlists_with_unconverted=playlists_with_unconverted,
-            total_playlists_scanned=len(result_playlists),
-            scan_duration=time.time() - start_time,
-        )
-
-    def list_diff(self, music_dir, export_profile, output_profile,
-                  playlist_filter=None):
-        """List unconverted and orphaned files across playlists.
-
-        Args:
-            music_dir: Music source directory
-            export_profile: Profile name for export paths
-            output_profile: Output profile object
-            playlist_filter: Optional playlist name to scope to
-
-        Returns:
-            DiffListResult
-        """
-        start_time = time.time()
-        music_path = Path(music_dir)
-        export_base = Path(get_export_dir(export_profile))
-
-        # Collect playlist names from both music/ and export/ (union)
-        playlist_names = set()
-        if music_path.exists():
-            for d in music_path.iterdir():
-                if d.is_dir() and not d.name.startswith('.'):
-                    playlist_names.add(d.name)
-        if export_base.exists():
-            for d in export_base.iterdir():
-                if d.is_dir() and not d.name.startswith('.'):
-                    playlist_names.add(d.name)
-
-        if playlist_filter:
-            playlist_names = {playlist_filter} & playlist_names
-            if not playlist_names:
-                # Include even if not found, to report empty
-                playlist_names = {playlist_filter}
-
-        result_playlists = []
-        total_unconverted = 0
-        total_orphaned = 0
-        total_duplicates = 0
-        playlists_with_differences = 0
-
-        for name in sorted(playlist_names):
-            unconverted = self.get_unconverted_files(
-                name, music_dir, export_profile, output_profile,
-            )
-            orphaned = self.get_orphaned_files(
-                name, music_dir, export_profile, output_profile,
-            )
-            duplicates = self.get_duplicate_files(
-                name, music_dir, export_profile, output_profile,
-            )
-            in_sync = (len(unconverted) == 0 and len(orphaned) == 0
-                       and len(duplicates) == 0)
-            if not in_sync:
-                playlists_with_differences += 1
-            total_unconverted += len(unconverted)
-            total_orphaned += len(orphaned)
-            total_duplicates += len(duplicates)
-            result_playlists.append({
-                'name': name,
-                'unconverted': unconverted,
-                'orphaned': orphaned,
-                'duplicates': duplicates,
-                'in_sync': in_sync,
-            })
-
-        return DiffListResult(
-            success=True,
-            profile=export_profile,
-            playlists=result_playlists,
-            total_unconverted=total_unconverted,
-            total_orphaned=total_orphaned,
-            total_duplicates=total_duplicates,
-            total_playlists_scanned=len(result_playlists),
-            total_playlists_with_differences=playlists_with_differences,
-            scan_duration=time.time() - start_time,
-        )
-
-    def _format_size(self, bytes_size):
-        """Format bytes to human-readable size."""
-        if bytes_size < 1024:
-            return f"{bytes_size} B"
-        elif bytes_size < 1024 * 1024:
-            return f"{bytes_size / 1024:.1f} KB"
-        elif bytes_size < 1024 * 1024 * 1024:
-            return f"{bytes_size / (1024 * 1024):.1f} MB"
-        else:
-            return f"{bytes_size / (1024 * 1024 * 1024):.1f} GB"
 
 
 
@@ -6751,41 +6196,41 @@ class DataManager:
         self.audit_logger = audit_logger
         self._audit_source = audit_source
 
-    def delete_playlist_data(self, playlist_key, delete_source=True, delete_export=True,
+    def delete_playlist_data(self, playlist_key, delete_source=True, delete_library=True,
                              remove_config=False, dry_run=False):
-        """Delete source M4A and/or export MP3 directories for a playlist.
+        """Delete source M4A and/or library MP3 directories for a playlist.
 
         Returns DeleteResult with stats about what was deleted.
         """
-        source_dir = Path(DEFAULT_MUSIC_DIR) / playlist_key
-        export_dir = Path(get_export_dir(self.output_profile.name, playlist_key))
+        source_dir = Path(get_source_dir(playlist_key))
+        library_dir = Path(get_output_dir(playlist_key))
 
         errors = []
         files_deleted = 0
         bytes_freed = 0
         source_deleted = False
-        export_deleted = False
+        library_deleted = False
         config_removed = False
 
         # Count files and sizes for each directory
         source_files = 0
         source_bytes = 0
-        export_files = 0
-        export_bytes = 0
+        lib_files = 0
+        lib_bytes = 0
 
         if delete_source and source_dir.exists():
             for f in source_dir.rglob('*'):
                 if f.is_file():
                     source_files += 1
                     source_bytes += f.stat().st_size
-        if delete_export and export_dir.exists():
-            for f in export_dir.rglob('*'):
+        if delete_library and library_dir.exists():
+            for f in library_dir.rglob('*'):
                 if f.is_file():
-                    export_files += 1
-                    export_bytes += f.stat().st_size
+                    lib_files += 1
+                    lib_bytes += f.stat().st_size
 
-        total_files = source_files + export_files
-        total_bytes = source_bytes + export_bytes
+        total_files = source_files + lib_files
+        total_bytes = source_bytes + lib_bytes
 
         if total_files == 0 and not remove_config:
             self.logger.info(f"Nothing to delete for '{playlist_key}'")
@@ -6795,8 +6240,8 @@ class DataManager:
         parts = []
         if source_files > 0:
             parts.append(f"{source_files} source files ({_format_bytes(source_bytes)})")
-        if export_files > 0:
-            parts.append(f"{export_files} export files ({_format_bytes(export_bytes)})")
+        if lib_files > 0:
+            parts.append(f"{lib_files} library files ({_format_bytes(lib_bytes)})")
         if remove_config:
             parts.append("config entry")
 
@@ -6806,8 +6251,8 @@ class DataManager:
         if dry_run:
             if delete_source and source_dir.exists():
                 self.logger.info(f"  [DRY-RUN] Would delete: {source_dir}/ ({source_files} files, {_format_bytes(source_bytes)})")
-            if delete_export and export_dir.exists():
-                self.logger.info(f"  [DRY-RUN] Would delete: {export_dir}/ ({export_files} files, {_format_bytes(export_bytes)})")
+            if delete_library and library_dir.exists():
+                self.logger.info(f"  [DRY-RUN] Would delete: {library_dir}/ ({lib_files} files, {_format_bytes(lib_bytes)})")
             if remove_config:
                 self.logger.info(f"  [DRY-RUN] Would remove config entry for '{playlist_key}'")
             return DeleteResult(
@@ -6832,16 +6277,16 @@ class DataManager:
                 errors.append(f"Failed to delete {source_dir}: {e}")
                 self.logger.error(errors[-1])
 
-        # Delete export directory
-        if delete_export and export_dir.exists():
+        # Delete library directory
+        if delete_library and library_dir.exists():
             try:
-                shutil.rmtree(export_dir)
-                export_deleted = True
-                files_deleted += export_files
-                bytes_freed += export_bytes
-                self.logger.info(f"  Deleted export: {export_dir}/ ({export_files} files, {_format_bytes(export_bytes)})")
+                shutil.rmtree(library_dir)
+                library_deleted = True
+                files_deleted += lib_files
+                bytes_freed += lib_bytes
+                self.logger.info(f"  Deleted library: {library_dir}/ ({lib_files} files, {_format_bytes(lib_bytes)})")
             except OSError as e:
-                errors.append(f"Failed to delete {export_dir}: {e}")
+                errors.append(f"Failed to delete {library_dir}: {e}")
                 self.logger.error(errors[-1])
 
         # Remove config entry
@@ -6856,7 +6301,7 @@ class DataManager:
             success=len(errors) == 0,
             playlist_key=playlist_key,
             source_deleted=source_deleted,
-            export_deleted=export_deleted,
+            library_deleted=library_deleted,
             config_removed=config_removed,
             files_deleted=files_deleted,
             bytes_freed=bytes_freed,
@@ -7109,8 +6554,8 @@ class PipelineOrchestrator:
 
         # ── Stage 2: Convert M4A → clean library MP3 ─────────────────
         self.logger.info("\n=== STAGE 2: Convert M4A → MP3 ===")
-        music_dir = f"{DEFAULT_MUSIC_DIR}/{self.stats.playlist_key}"
-        library_dir = get_library_dir(self.stats.playlist_key)
+        music_dir = get_source_dir(self.stats.playlist_key)
+        library_dir = get_output_dir(self.stats.playlist_key)
 
         preset = (quality_preset if quality_preset is not None
                   else self.quality_preset)
@@ -7217,7 +6662,7 @@ class PipelineOrchestrator:
             self.stats.stages_failed.append("download")
             return False
 
-        output_dir = f"{DEFAULT_MUSIC_DIR}/{key}"
+        output_dir = get_source_dir(key)
 
         # Ask to save to config BEFORE download (only if not dry-run and not auto)
         if not dry_run and not auto:
@@ -7272,7 +6717,7 @@ class PipelineOrchestrator:
         self.stats.playlist_key = playlist.key
         self.stats.playlist_name = playlist.name
 
-        output_dir = f"{DEFAULT_MUSIC_DIR}/{playlist.key}"
+        output_dir = get_source_dir(playlist.key)
 
         downloader = Downloader(self.logger, self.deps.venv_python,
                                cookie_path=self.cookie_path,
@@ -7309,76 +6754,5 @@ class PipelineOrchestrator:
         """Ask user if they want to save a new playlist to config."""
         if self.prompt_handler.confirm(f"Save '{album_name}' to {DEFAULT_CONFIG_FILE}?", default=False):
             self.config.add_playlist(key, url, album_name)
-
-    def _check_and_embed_cover_art(self, export_dir, auto, dry_run, verbose):
-        """Check for missing cover art and embed if needed."""
-        from mutagen.id3 import ID3, ID3NoHeaderError
-
-        export_path = Path(export_dir)
-        if not export_path.exists():
-            return
-
-        mp3_files = list(export_path.rglob("*.mp3"))
-        if not mp3_files:
-            return
-
-        # Scan for missing cover art
-        missing = 0
-        for mp3_file in mp3_files:
-            try:
-                tags = ID3(str(mp3_file))
-                if not any(k.startswith("APIC") for k in tags):
-                    missing += 1
-            except (ID3NoHeaderError, Exception):
-                missing += 1
-
-        total = len(mp3_files)
-
-        if missing == 0:
-            self.stats.cover_art_embedded = total
-            return
-        playlist_name = export_path.name
-
-        if dry_run:
-            self.logger.dry_run(
-                f"{playlist_name}: {missing}/{total} files missing cover art — would embed from source"
-            )
-            self.stats.cover_art_missing = missing
-            return
-
-        should_embed = False
-        if auto:
-            self.logger.info(f"\n  {playlist_name}: {missing}/{total} files missing cover art — auto-embedding")
-            should_embed = True
-        else:
-            self.logger.info(f"\n  {playlist_name}: {missing}/{total} files missing cover art")
-            should_embed = self.prompt_handler.confirm(
-                "Embed cover art from source files?", default=True)
-
-        if should_embed:
-            cam = CoverArtManager(self.logger, output_profile=self.output_profile,
-                                  display_handler=self.display_handler,
-                                  cancel_event=self.cancel_event)
-            cam.embed(export_dir, dry_run=False, verbose=verbose)
-            # Resize newly-embedded art if profile specifies a max dimension
-            artwork_size = self.output_profile.artwork_size
-            if artwork_size > 0:
-                cam.resize(export_dir, artwork_size, dry_run=False, verbose=verbose)
-            # Re-scan to get accurate counts
-            embedded_count = 0
-            still_missing = 0
-            for mp3_file in mp3_files:
-                try:
-                    tags = ID3(str(mp3_file))
-                    if any(k.startswith("APIC") for k in tags):
-                        embedded_count += 1
-                    else:
-                        still_missing += 1
-                except (ID3NoHeaderError, Exception):
-                    still_missing += 1
-            self.stats.cover_art_embedded = embedded_count
-            self.stats.cover_art_missing = still_missing
-        else:
-            self.stats.cover_art_missing = missing
 
 

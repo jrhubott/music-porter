@@ -4,6 +4,7 @@ import Foundation
 struct Track: Identifiable, Codable, Hashable {
     var id: String { filename }
     let filename: String
+    var displayFilename: String?
     let size: Int
     var duration: Double?
     var title: String?
@@ -14,11 +15,13 @@ struct Track: Identifiable, Codable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case filename, size, duration, title, artist, album, uuid
+        case displayFilename = "display_filename"
         case hasCoverArt = "has_cover_art"
     }
 
-    /// Display title (falls back to filename stem).
+    /// Display title (falls back to display filename stem, then filename stem).
     var displayTitle: String {
-        title ?? filename.replacingOccurrences(of: ".mp3", with: "")
+        title ?? displayFilename?.replacingOccurrences(of: ".mp3", with: "")
+            ?? filename.replacingOccurrences(of: ".mp3", with: "")
     }
 }

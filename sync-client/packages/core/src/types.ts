@@ -42,6 +42,7 @@ export interface Playlist {
 
 export interface FileInfo {
   filename: string;
+  display_filename?: string;
   size: number;
   duration: number;
   title: string;

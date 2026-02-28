@@ -147,16 +147,19 @@ export class SyncEngine {
           break;
         }
 
-        const manifestSize = manifestFiles[file.filename];
+        // Use display_filename for disk/manifest keys (human-readable on disk)
+        const diskName = file.display_filename || file.filename;
+
+        const manifestSize = manifestFiles[diskName];
         if (manifestSize !== undefined && manifestSize === file.size) {
           // Skip — manifest says this file is current
           totalSkipped++;
           processed++;
-          syncedFiles[file.filename] = file.size;
+          syncedFiles[diskName] = file.size;
           onProgress({
             phase: 'syncing',
             playlist: key,
-            file: file.filename,
+            file: diskName,
             processed,
             total: grandTotal,
             copied: totalCopied,
@@ -167,18 +170,18 @@ export class SyncEngine {
         }
 
         // Check disk
-        const filePath = join(playlistDir, file.filename);
+        const filePath = join(playlistDir, diskName);
         if (existsSync(filePath)) {
           try {
             const stat = statSync(filePath);
             if (stat.size === file.size) {
               totalSkipped++;
               processed++;
-              syncedFiles[file.filename] = file.size;
+              syncedFiles[diskName] = file.size;
               onProgress({
                 phase: 'syncing',
                 playlist: key,
-                file: file.filename,
+                file: diskName,
                 processed,
                 total: grandTotal,
                 copied: totalCopied,
@@ -215,17 +218,18 @@ export class SyncEngine {
           options.profile,
           options.signal,
           (file, success) => {
+            const dn = file.display_filename || file.filename;
             processed++;
             if (success) {
               totalCopied++;
-              syncedFiles[file.filename] = file.size;
+              syncedFiles[dn] = file.size;
             } else {
               totalFailed++;
             }
             onProgress({
               phase: 'syncing',
               playlist: key,
-              file: file.filename,
+              file: dn,
               processed,
               total: grandTotal,
               copied: totalCopied,
@@ -242,13 +246,14 @@ export class SyncEngine {
       } else {
         // Dry run — count as would-be copies
         for (const file of filesToDownload) {
+          const dn = file.display_filename || file.filename;
           processed++;
           totalCopied++;
-          log('info', `[dry-run] Would download: ${key}/${file.filename}`);
+          log('info', `[dry-run] Would download: ${key}/${dn}`);
           onProgress({
             phase: 'syncing',
             playlist: key,
-            file: file.filename,
+            file: dn,
             processed,
             total: grandTotal,
             copied: totalCopied,
@@ -312,10 +317,11 @@ export class SyncEngine {
         const success = await this.downloadFile(playlistKey, file, destDir, profile, signal, log);
         onFile(file, success);
 
-        // Record to server (fire-and-forget)
+        // Record to server (fire-and-forget) — use display name (what's on disk)
         if (success) {
+          const dn = file.display_filename || file.filename;
           this.client
-            .recordSync(syncKey, playlistKey, [file.filename])
+            .recordSync(syncKey, playlistKey, [dn])
             .catch(() => {});
         }
       }
@@ -335,7 +341,9 @@ export class SyncEngine {
     signal: AbortSignal | undefined,
     log: LogCallback,
   ): Promise<boolean> {
-    const filePath = join(destDir, file.filename);
+    // Use display_filename for disk (human-readable), filename (UUID) for API
+    const diskName = file.display_filename || file.filename;
+    const filePath = join(destDir, diskName);
     const tmpPath = filePath + TEMP_SUFFIX;
 
     try {

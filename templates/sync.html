@@ -357,8 +357,8 @@ function loadSources() {
     fetch('/api/status').then(r => r.json()).then(status => {
       const profile = status.profile;
       cachedProfile = profile;
-      let opts = `<option value="export/${profile}">All (export/${profile}/)</option>`;
-      opts += dirs.map(d => `<option value="export/${profile}/${d.name}">${d.name} (${d.files} files)</option>`).join('');
+      let opts = `<option value="library">All playlists</option>`;
+      opts += dirs.map(d => `<option value="library/${d.name}/output">${d.name} (${d.files} files)</option>`).join('');
       sel.innerHTML = opts;
     });
   });
@@ -470,7 +470,7 @@ function loadSyncStatusData() {
         <td class="text-end">${lastSync}</td>
         <td class="text-center">
           ${csyncHasFSA ? `<button class="btn btn-outline-success btn-sm py-0 px-1 me-1" onclick="clientSyncToKey('${k.key_name}', null)" title="Sync via browser (File System Access)"><i class="bi bi-pc-display"></i></button>` : ''}
-          <button class="btn btn-outline-primary btn-sm py-0 px-1 me-1" onclick="syncToKey('${k.key_name}', 'export/${cachedProfile}')" title="${syncTitle}" ${syncDisabled}>
+          <button class="btn btn-outline-primary btn-sm py-0 px-1 me-1" onclick="syncToKey('${k.key_name}', 'library')" title="${syncTitle}" ${syncDisabled}>
             <i class="bi bi-arrow-repeat"></i>
           </button>
           <button class="btn btn-outline-warning btn-sm py-0 px-1 me-1" onclick="promptRenameKey('${k.key_name}')" title="Rename key">
@@ -525,7 +525,7 @@ function showDetail(keyName) {
         <td class="text-center">${statusBadge}</td>
         <td class="text-center">
           ${csyncHasFSA ? `<button class="btn btn-outline-success btn-sm py-0 px-1 me-1" onclick="clientSyncToKey('${keyName}', ['${p.name}'])" title="Sync playlist via browser"><i class="bi bi-pc-display"></i></button>` : ''}
-          <button class="btn btn-outline-primary btn-sm py-0 px-1 me-1" onclick="syncToKey('${keyName}', 'export/${cachedProfile}/${p.name}')" title="${detailSyncTitle}" ${detailSyncDisabled}>
+          <button class="btn btn-outline-primary btn-sm py-0 px-1 me-1" onclick="syncToKey('${keyName}', 'library/${p.name}/output')" title="${detailSyncTitle}" ${detailSyncDisabled}>
             <i class="bi bi-arrow-repeat"></i>
           </button>
           <button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="deletePlaylist('${keyName}', '${p.name}')" title="Delete playlist tracking">
