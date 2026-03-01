@@ -363,10 +363,12 @@ export function registerIPCHandlers(): void {
 
   ipcMain.handle('cache:pin', (_event, playlist: string): void => {
     configStore.pinPlaylist(playlist);
+    bgPrefetchService?.triggerPinChange();
   });
 
   ipcMain.handle('cache:unpin', (_event, playlist: string): void => {
     configStore.unpinPlaylist(playlist);
+    bgPrefetchService?.triggerPinChange();
   });
 
   ipcMain.handle('cache:getPinnedPlaylists', (): string[] => {

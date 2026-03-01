@@ -31,6 +31,9 @@ export class BackgroundPrefetchService {
   private readonly configStore: ConfigStore;
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private running = false;
+  private runType: 'periodic' | 'pin-change' | null = null;
+  private activeAbort: AbortController | null = null;
+  private pendingPinChange = false;
   private status: BackgroundPrefetchStatus = { running: false };
   private mainWindow: BrowserWindow | null = null;
 
@@ -64,8 +67,34 @@ export class BackgroundPrefetchService {
     return { ...this.status };
   }
 
+  /**
+   * Trigger a prefetch in response to a pin/unpin change.
+   * - If idle: starts a pin-change prefetch immediately.
+   * - If a pin-change run is active: aborts it and starts a fresh one.
+   * - If a periodic run is active: sets pendingPinChange so a pin-change run
+   *   starts automatically after the periodic run completes.
+   */
+  triggerPinChange(): void {
+    if (!this.running) {
+      // Idle — start immediately
+      this.runOnce('pin-change');
+      return;
+    }
+
+    if (this.runType === 'pin-change') {
+      // Abort the in-flight pin-change run; the cleanup in runOnce will
+      // detect pendingPinChange and start a fresh run.
+      this.pendingPinChange = true;
+      this.activeAbort?.abort();
+      return;
+    }
+
+    // Periodic run in progress — queue a pin-change run for after it finishes
+    this.pendingPinChange = true;
+  }
+
   /** Run a single prefetch cycle. Skips if already running, offline, or no pinned playlists. */
-  async runOnce(): Promise<PrefetchResult | null> {
+  async runOnce(type: 'periodic' | 'pin-change' = 'periodic'): Promise<PrefetchResult | null> {
     if (this.running) {
       console.log('[prefetch] Skipped — already running');
       return null;
@@ -85,9 +114,29 @@ export class BackgroundPrefetchService {
     }
 
     this.running = true;
+    this.runType = type;
+    this.activeAbort = new AbortController();
     this.updateStatus({ running: true });
-    console.log('[prefetch] Starting prefetch cycle (profile: %s)', profile);
+    console.log('[prefetch] Starting %s prefetch cycle (profile: %s)', type, profile);
 
+    const result = await this.executeRunOnce(profile);
+
+    // Cleanup
+    this.running = false;
+    this.runType = null;
+    this.activeAbort = null;
+
+    // If a pin change arrived while we were running, start a fresh pin-change cycle
+    if (this.pendingPinChange) {
+      this.pendingPinChange = false;
+      this.runOnce('pin-change');
+    }
+
+    return result;
+  }
+
+  /** Internal: execute the prefetch logic (separated for cleanup handling). */
+  private async executeRunOnce(profile: string): Promise<PrefetchResult | null> {
     try {
       // Step 1: Discover and auto-pin new playlists
       if (this.configStore.autoPinNewPlaylists) {
@@ -103,7 +152,6 @@ export class BackgroundPrefetchService {
       const pinned = this.configStore.preferences.pinnedPlaylists;
       if (pinned.length === 0) {
         console.log('[prefetch] Skipped — no pinned playlists');
-        this.running = false;
         this.updateStatus({ running: false });
         return null;
       }
@@ -120,6 +168,7 @@ export class BackgroundPrefetchService {
         maxCacheBytes: this.configStore.preferences.maxCacheBytes,
         pinnedPlaylists: pinnedSet,
         metadataCache,
+        signal: this.activeAbort!.signal,
         onProgress: (progress: SyncProgress) => {
           this.updateStatus({
             running: true,
@@ -136,7 +185,6 @@ export class BackgroundPrefetchService {
 
       this.status.lastRunAt = new Date().toISOString();
       this.status.lastResult = result;
-      this.running = false;
       this.updateStatus({ running: false, lastRunAt: this.status.lastRunAt, lastResult: result });
 
       const totalSize = cacheManager.getTotalSize();
@@ -158,8 +206,12 @@ export class BackgroundPrefetchService {
       );
       return result;
     } catch (err) {
-      console.error('[prefetch] Error during prefetch cycle:', err);
-      this.running = false;
+      // Aborted runs are expected — don't log as errors
+      if (err instanceof Error && err.name === 'AbortError') {
+        console.log('[prefetch] Run aborted (%s)', this.runType);
+      } else {
+        console.error('[prefetch] Error during prefetch cycle:', err);
+      }
       this.updateStatus({ running: false });
       return null;
     }

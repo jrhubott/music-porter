@@ -194,11 +194,6 @@ export function SyncPage() {
     }
   }
 
-  async function handlePrefetchNow() {
-    // Trigger the background prefetch service (handles auto-pin sync, stale detection, etc.)
-    await ipc.cacheTriggerPrefetch();
-  }
-
   async function toggleAutoSync(driveName: string) {
     const isEnabled = autoSyncDrives.includes(driveName);
     const updated = isEnabled
@@ -371,25 +366,6 @@ export function SyncPage() {
           })()}
         </div>
         <div className="d-flex gap-2 align-items-center">
-          {!isOffline && pinnedPlaylists.size > 0 && (
-            <button
-              className="btn btn-sm btn-outline-info"
-              onClick={handlePrefetchNow}
-              disabled={backgroundPrefetchStatus?.running || isSyncing}
-            >
-              {backgroundPrefetchStatus?.running ? (
-                <>
-                  <span className="spinner-border spinner-border-sm me-1" />
-                  Prefetching...
-                </>
-              ) : (
-                <>
-                  <i className="bi bi-cloud-download me-1" />
-                  Prefetch Now
-                </>
-              )}
-            </button>
-          )}
           <button className="btn btn-sm btn-outline-secondary" onClick={isOffline ? loadOfflineData : loadData}>
             <i className="bi bi-arrow-clockwise me-1" />
             Refresh
