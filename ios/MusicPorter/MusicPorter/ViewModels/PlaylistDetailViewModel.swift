@@ -4,14 +4,14 @@ import Foundation
 final class PlaylistDetailViewModel {
     var tracks: [Track] = []
     var playlistKey: String = ""
-    var localFilenames: Set<String> = []
+    var cachedUUIDs: Set<String> = []
     var isLoading = false
     var error: String?
 
     func load(
         api: APIClient,
         playlist: String,
-        downloadManager: FileDownloadManager,
+        audioCacheManager: AudioCacheManager? = nil,
         metadataCache: MetadataCache? = nil,
         profile: String? = nil
     ) async {
@@ -27,7 +27,12 @@ final class PlaylistDetailViewModel {
                 response = try await api.getFiles(playlist: playlist)
             }
             tracks = response.files
-            localFilenames = Set(downloadManager.localFiles(playlist: playlist).map(\.lastPathComponent))
+            if let audioCacheManager {
+                let cachedInfos = await audioCacheManager.getCachedFileInfos(playlist)
+                cachedUUIDs = Set(cachedInfos.map(\.uuid))
+            } else {
+                cachedUUIDs = []
+            }
         } catch {
             self.error = error.localizedDescription
         }

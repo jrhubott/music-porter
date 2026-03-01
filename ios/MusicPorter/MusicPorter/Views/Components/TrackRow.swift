@@ -21,7 +21,7 @@ struct TrackRow: View {
     let playlist: String
     let api: APIClient
     var isNowPlaying: Bool = false
-    var isLocal: Bool = false
+    var isCached: Bool = false
 
     @State private var artwork: UIImage?
 
@@ -59,9 +59,9 @@ struct TrackRow: View {
                             .lineLimit(1)
                     }
                     Spacer()
-                    Image(systemName: isLocal ? "iphone" : "cloud")
+                    Image(systemName: isCached ? "internaldrive" : "cloud")
                         .font(.caption2)
-                        .foregroundStyle(isLocal ? .green : .secondary)
+                        .foregroundStyle(isCached ? .blue : .secondary)
                     Text(ByteCountFormatter.string(fromByteCount: Int64(track.size), countStyle: .file))
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)

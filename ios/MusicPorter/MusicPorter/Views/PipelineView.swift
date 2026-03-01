@@ -248,23 +248,18 @@ struct PipelineView: View {
     }
 
     private func exportToFolder(_ destDir: URL) async {
-        guard let playlist = selectedPlaylist else { return }
+        guard let playlist = selectedPlaylist,
+              let cacheManager = appState.audioCacheManager else { return }
 
         // Append profile's USB directory if configured
         let usbDir = appState.usbDir
         let targetDir = usbDir.isEmpty ? destDir : destDir.appendingPathComponent(usbDir)
 
-        var fileURLs = appState.downloadManager.localFiles(playlist: playlist.key)
-
-        // Supplement with cached files not already in local downloads
-        if let cacheManager = appState.audioCacheManager {
-            let localNames = Set(fileURLs.map(\.lastPathComponent))
-            let cachedEntries = await cacheManager.getCachedFileInfos(playlist.key)
-            for entry in cachedEntries {
-                if localNames.contains(entry.displayFilename) { continue }
-                if let cachedURL = await cacheManager.isCached(entry.uuid) {
-                    fileURLs.append(cachedURL)
-                }
+        var fileURLs: [URL] = []
+        let cachedEntries = await cacheManager.getCachedFileInfos(playlist.key)
+        for entry in cachedEntries {
+            if let cachedURL = await cacheManager.isCached(entry.uuid) {
+                fileURLs.append(cachedURL)
             }
         }
 

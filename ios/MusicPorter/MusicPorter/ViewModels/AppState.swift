@@ -15,7 +15,6 @@ final class AppState {
     let apiClient = APIClient()
     let discovery = ServerDiscovery()
     let musicKit = MusicKitService()
-    let downloadManager = FileDownloadManager()
     let usbExport = USBExportService()
     let audioPlayer = AudioPlayerService()
 
@@ -82,7 +81,6 @@ final class AppState {
 
     func connect(server: ServerConnection, apiKey: String) async throws {
         apiClient.configure(server: server, apiKey: apiKey)
-        downloadManager.configure(apiClient: apiClient)
         audioPlayer.configure(apiClient: apiClient)
         let response = try await resolveConnection(server: server)
         if response.valid {
@@ -205,8 +203,7 @@ final class AppState {
         audioCacheManager = audioCache
         prefetchEngine = PrefetchEngine(apiClient: apiClient, cacheManager: audioCache)
 
-        // Wire cache into download manager and audio player
-        downloadManager.configure(apiClient: apiClient, audioCacheManager: audioCache)
+        // Wire cache into audio player
         audioPlayer.configure(apiClient: apiClient, audioCacheManager: audioCache)
 
         // Start background prefetch service

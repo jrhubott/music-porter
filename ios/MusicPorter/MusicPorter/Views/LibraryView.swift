@@ -1,28 +1,19 @@
 import SwiftUI
 import MusicKit
 
+enum ExportScope {
+    case all
+    case playlist(String)
+}
+
 /// Combined Library tab with segmented control for "My Playlists" and "Apple Music".
 struct LibraryView: View {
     @Environment(AppState.self) private var appState
-    @Environment(\.scenePhase) private var scenePhase
     @State private var vm = PlaylistsViewModel()
     @State private var selectedSegment = 0
 
-    // Download state
-    @State private var downloadingPlaylist: String?
-    @State private var isDownloadingAll = false
-    @State private var storageUsed = 0
-    @State private var playlistToDelete: String?
     @State private var showExportPicker = false
     @State private var exportScope: ExportScope = .all
-    @State private var downloadTask: Task<Void, Never>?
-    @State private var downloadError: String?
-    @State private var backgroundedAt: Date?
-    @State private var downloadGeneration = 0
-
-    /// Minimum seconds in background before considering a download stalled.
-    /// iOS reclaims sockets after suspension; connections are dead after this threshold.
-    private let backgroundStallThreshold: TimeInterval = 3
 
     // Cache state
     @State private var playlistCacheStatus: [String: PlaylistCacheStatus] = [:]
@@ -95,21 +86,6 @@ struct LibraryView: View {
                     }
                 }
             }
-            .alert("Delete Local Files?", isPresented: Binding(
-                get: { playlistToDelete != nil },
-                set: { if !$0 { playlistToDelete = nil } }
-            )) {
-                Button("Delete", role: .destructive) {
-                    if let name = playlistToDelete {
-                        deleteLocal(name)
-                    }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                if let name = playlistToDelete {
-                    Text("All downloaded files for \"\(name)\" will be removed from this device.")
-                }
-            }
             .sheet(isPresented: Binding(
                 get: { serverDeleteKey != nil },
                 set: { if !$0 { serverDeleteKey = nil } }
@@ -143,14 +119,6 @@ struct LibraryView: View {
             .task {
                 await load()
             }
-            .onChange(of: scenePhase) { _, newPhase in
-                if newPhase == .active {
-                    resumeIfStalled()
-                    backgroundedAt = nil
-                } else if newPhase == .background {
-                    backgroundedAt = Date()
-                }
-            }
         }
     }
 
@@ -159,7 +127,6 @@ struct LibraryView: View {
     private var playlistsContent: some View {
         List {
             actionBar
-            bulkProgressSection
             exportProgressSection
             exportResultSection
             playlistsSection
@@ -227,21 +194,6 @@ struct LibraryView: View {
     private var actionBar: some View {
         Section {
             HStack(spacing: 12) {
-                if isDownloadingAll || downloadingPlaylist != nil {
-                    Button(role: .destructive) {
-                        cancelDownload()
-                    } label: {
-                        Label("Cancel", systemImage: "xmark.circle")
-                    }
-                } else {
-                    Button {
-                        startDownloadAll()
-                    } label: {
-                        Label("Download All", systemImage: "arrow.down.circle")
-                    }
-                    .disabled(vm.exportDirs.isEmpty)
-                }
-
                 Spacer()
 
                 Button {
@@ -264,14 +216,14 @@ struct LibraryView: View {
 
     @ViewBuilder
     private var exportSourceSummary: some View {
-        let localCount = vm.exportDirs.reduce(0) { $0 + appState.downloadManager.localFiles(playlist: $1.name).count }
         let serverTotal = vm.exportDirs.reduce(0) { $0 + $1.files }
-        let serverOnly = max(0, serverTotal - localCount)
+        let cachedTotal = playlistCacheStatus.values.reduce(0) { $0 + $1.cached }
+        let serverOnly = max(0, serverTotal - cachedTotal)
         if serverTotal > 0 {
             HStack(spacing: 4) {
-                Image(systemName: "iphone")
+                Image(systemName: "internaldrive")
                     .imageScale(.small)
-                Text("\(localCount) local")
+                Text("\(cachedTotal) cached")
                 if serverOnly > 0 {
                     Text("·")
                     Image(systemName: "cloud")
@@ -281,47 +233,6 @@ struct LibraryView: View {
             }
             .font(.caption2)
             .foregroundStyle(.secondary)
-        }
-    }
-
-    // MARK: - Bulk Download Progress
-
-    @ViewBuilder
-    private var bulkProgressSection: some View {
-        if isDownloadingAll, let bulk = appState.downloadManager.bulkProgress {
-            Section("Download All") {
-                VStack(alignment: .leading, spacing: 6) {
-                    if bulk.completedPlaylists < bulk.totalPlaylists {
-                        Text("Playlist \(bulk.completedPlaylists + 1) of \(bulk.totalPlaylists): \(bulk.currentPlaylistName)")
-                            .font(.subheadline)
-
-                        ProgressView(
-                            value: Double(bulk.completedPlaylists),
-                            total: Double(bulk.totalPlaylists)
-                        )
-                        .tint(.blue)
-
-                        if let fileProgress = appState.downloadManager.downloadProgress {
-                            HStack {
-                                Text("File \(fileProgress.completed + 1) of \(fileProgress.total)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                Text(fileProgress.currentFile)
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                            }
-                            ProgressView(value: fileProgress.fraction)
-                                .tint(.cyan)
-                        }
-                    } else {
-                        Label("All playlists downloaded", systemImage: "checkmark.circle")
-                            .foregroundStyle(.green)
-                    }
-                }
-            }
         }
     }
 
@@ -385,9 +296,6 @@ struct LibraryView: View {
 
     private func playlistRow(_ playlist: Playlist) -> some View {
         let serverCount = vm.fileCount(for: playlist.key)
-        let localCount = appState.downloadManager.localFiles(playlist: playlist.key).count
-        let hasLocal = localCount > 0
-        let isDownloadingThis = downloadingPlaylist == playlist.key && !isDownloadingAll
         let isPinned = appState.cachePreferences.isPinned(playlist.key)
         let status = playlistCacheStatus[playlist.key]
 
@@ -399,21 +307,13 @@ struct LibraryView: View {
                     HStack(spacing: 4) {
                         if serverCount > 0 {
                             Text("\(serverCount)")
-                                .foregroundStyle(localCount >= serverCount && serverCount > 0 ? .green : .secondary)
+                                .foregroundStyle(.secondary)
                             Image(systemName: "cloud")
                                 .imageScale(.small)
-                                .foregroundStyle(localCount >= serverCount && serverCount > 0 ? .green : .secondary)
-                        }
-                        if localCount > 0 {
-                            if serverCount > 0 { Text("·") }
-                            Text("\(localCount)")
-                                .foregroundStyle(.green)
-                            Image(systemName: "iphone")
-                                .imageScale(.small)
-                                .foregroundStyle(.green)
+                                .foregroundStyle(.secondary)
                         }
                         if let status, status.cached > 0 {
-                            Text("·")
+                            if serverCount > 0 { Text("·") }
                             if status.cached >= status.total && status.total > 0 {
                                 Image(systemName: "checkmark")
                                     .imageScale(.small)
@@ -443,33 +343,6 @@ struct LibraryView: View {
                         .foregroundStyle(isPinned ? .blue : .secondary)
                 }
                 .buttonStyle(.borderless)
-
-                Button {
-                    startDownloadPlaylist(playlist.key)
-                } label: {
-                    Image(systemName: "arrow.down.circle")
-                }
-                .buttonStyle(.borderless)
-                .disabled(downloadingPlaylist != nil || isDownloadingAll)
-            }
-
-            if isDownloadingThis, let progress = appState.downloadManager.downloadProgress {
-                VStack(alignment: .leading, spacing: 4) {
-                    ProgressView(value: progress.fraction)
-                        .tint(.blue)
-                    HStack {
-                        Text("Downloading \(progress.completed + 1) of \(progress.total)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(progress.currentFile)
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                }
-                .transition(.opacity)
             }
         }
         .swipeActions(edge: .trailing) {
@@ -481,16 +354,9 @@ struct LibraryView: View {
             } label: {
                 Label("Delete Server Data", systemImage: "server.rack")
             }
-            if hasLocal {
-                Button(role: .destructive) {
-                    playlistToDelete = playlist.key
-                } label: {
-                    Label("Delete Local", systemImage: "trash")
-                }
-            }
         }
         .swipeActions(edge: .leading) {
-            if hasLocal || serverCount > 0 {
+            if serverCount > 0 {
                 Button {
                     exportScope = .playlist(playlist.key)
                     showExportPicker = true
@@ -584,10 +450,11 @@ struct LibraryView: View {
 
     private var localStorageSection: some View {
         Section("Local Storage") {
-            LabeledContent("Downloads", value: ByteCountFormatter.string(
-                fromByteCount: Int64(storageUsed), countStyle: .file))
             if cacheSize > 0 {
                 LabeledContent("Cache", value: CacheUtils.formatBytes(cacheSize))
+            } else {
+                Text("No cached files")
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -596,7 +463,7 @@ struct LibraryView: View {
 
     @ViewBuilder
     private var errorSection: some View {
-        if let error = vm.error ?? downloadError {
+        if let error = vm.error {
             Section {
                 Label(error, systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.red)
@@ -614,7 +481,6 @@ struct LibraryView: View {
 
     private func load() async {
         await vm.load(api: appState.apiClient)
-        storageUsed = appState.downloadManager.localStorageUsed()
         await loadCacheStatus()
     }
 
@@ -632,90 +498,6 @@ struct LibraryView: View {
         playlistCacheStatus = statuses
     }
 
-    private func startDownloadPlaylist(_ name: String) {
-        downloadTask?.cancel()
-        downloadGeneration += 1
-        let generation = downloadGeneration
-        downloadTask = Task {
-            downloadingPlaylist = name
-            downloadError = nil
-            do {
-                try await appState.downloadManager.downloadAll(playlist: name)
-            } catch is CancellationError {
-                // User cancelled or replaced by resumeIfStalled
-            } catch {
-                downloadError = error.localizedDescription
-            }
-            // Only clean up if we're still the active download generation.
-            // A newer task (from resumeIfStalled) may have replaced us.
-            guard downloadGeneration == generation else { return }
-            storageUsed = appState.downloadManager.localStorageUsed()
-            appState.downloadManager.clearProgress()
-            downloadingPlaylist = nil
-            downloadTask = nil
-        }
-    }
-
-    private func startDownloadAll() {
-        downloadTask?.cancel()
-        downloadGeneration += 1
-        let generation = downloadGeneration
-        downloadTask = Task {
-            isDownloadingAll = true
-            downloadError = nil
-            appState.usbExport.reset()
-            do {
-                try await appState.downloadManager.downloadAllPlaylists(dirs: vm.exportDirs)
-            } catch is CancellationError {
-                // User cancelled or replaced by resumeIfStalled
-            } catch {
-                downloadError = error.localizedDescription
-            }
-            guard downloadGeneration == generation else { return }
-            storageUsed = appState.downloadManager.localStorageUsed()
-            appState.downloadManager.clearProgress()
-            isDownloadingAll = false
-            downloadTask = nil
-        }
-    }
-
-    /// Resume a stalled download after returning from background.
-    /// iOS reclaims sockets after suspension; this uses background duration
-    /// to distinguish brief app switches from real stalls.
-    private func resumeIfStalled() {
-        guard appState.downloadManager.stalledDownloadPlaylist() != nil else { return }
-
-        if downloadTask == nil {
-            // App was relaunched or previous download completed/failed — restart
-            if isDownloadingAll {
-                startDownloadAll()
-            } else if let playlist = appState.downloadManager.stalledDownloadPlaylist() {
-                startDownloadPlaylist(playlist)
-            }
-            return
-        }
-
-        // Download task exists. Only intervene if backgrounded long enough for
-        // the OS to reclaim sockets. Brief app switches don't interrupt.
-        guard let bgTime = backgroundedAt,
-              Date().timeIntervalSince(bgTime) > backgroundStallThreshold else { return }
-
-        // Connections are dead after suspension — cancel stale task, start fresh
-        downloadTask?.cancel()
-        downloadTask = nil
-
-        if isDownloadingAll {
-            startDownloadAll()
-        } else if let playlist = appState.downloadManager.stalledDownloadPlaylist() {
-            startDownloadPlaylist(playlist)
-        }
-    }
-
-    private func cancelDownload() {
-        downloadTask?.cancel()
-        appState.downloadManager.cancelDownloads()
-    }
-
     private func exportToFolder(_ destDir: URL) async {
         appState.usbExport.reset()
 
@@ -731,34 +513,54 @@ struct LibraryView: View {
             playlistKeys = [name]
         }
 
+        guard let cacheManager = appState.audioCacheManager else { return }
         for key in playlistKeys {
-            var fileURLs = appState.downloadManager.localFiles(playlist: key)
-
-            // Supplement with cached files not already in local downloads
-            if let cacheManager = appState.audioCacheManager {
-                let localNames = Set(fileURLs.map(\.lastPathComponent))
-                let cachedEntries = await cacheManager.getCachedFileInfos(key)
-                for entry in cachedEntries {
-                    // Skip files already in local downloads
-                    if localNames.contains(entry.displayFilename) { continue }
-                    if let cachedURL = await cacheManager.isCached(entry.uuid) {
-                        fileURLs.append(cachedURL)
-                    }
+            var fileURLs: [URL] = []
+            let cachedEntries = await cacheManager.getCachedFileInfos(key)
+            for entry in cachedEntries {
+                if let cachedURL = await cacheManager.isCached(entry.uuid) {
+                    fileURLs.append(cachedURL)
                 }
             }
-
             guard !fileURLs.isEmpty else { continue }
             _ = await appState.usbExport.exportFiles(
                 urls: fileURLs, to: targetDir, subdirectory: key)
         }
     }
+}
 
-    private func deleteLocal(_ name: String) {
-        do {
-            try appState.downloadManager.deletePlaylist(playlist: name)
-            storageUsed = appState.downloadManager.localStorageUsed()
-        } catch {
-            downloadError = error.localizedDescription
+struct AddPlaylistSheet: View {
+    @Environment(AppState.self) private var appState
+    @Environment(\.dismiss) private var dismiss
+    @Bindable var vm: PlaylistsViewModel
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("Key (e.g. Pop_Workout)", text: $vm.newKey)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                TextField("Apple Music URL", text: $vm.newURL)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+                TextField("Display Name", text: $vm.newName)
+            }
+            .navigationTitle("Add Playlist")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        Task {
+                            await vm.addPlaylist(api: appState.apiClient)
+                        }
+                    }
+                    .disabled(vm.newKey.isEmpty || vm.newURL.isEmpty || vm.newName.isEmpty)
+                }
+            }
         }
     }
 }
