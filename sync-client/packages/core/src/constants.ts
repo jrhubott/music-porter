@@ -98,6 +98,9 @@ export const CONNECTION_RECONNECT_INTERVAL_MS = 15_000;
 /** Timeout (ms) for a single health-check ping. */
 export const HEALTH_CHECK_TIMEOUT_MS = 5_000;
 
+/** Timeout (ms) for the local URL probe during a dual-URL health check. */
+export const HEALTH_CHECK_LOCAL_TIMEOUT_MS = 3_000;
+
 /** Number of consecutive health-check failures before declaring the connection lost. */
 export const HEALTH_CHECK_FAILURE_THRESHOLD = 2;
 

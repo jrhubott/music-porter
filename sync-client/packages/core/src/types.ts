@@ -16,6 +16,12 @@ export interface ConnectionState {
   serverVersion?: string;
 }
 
+export interface HealthCheckResult {
+  reachable: boolean;
+  type?: ConnectionType;
+  typeChanged: boolean;
+}
+
 // ── API Responses ──
 
 export interface AuthValidateResponse {

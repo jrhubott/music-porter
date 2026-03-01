@@ -1,5 +1,6 @@
 import {
   AUTH_HEADER_PREFIX,
+  HEALTH_CHECK_LOCAL_TIMEOUT_MS,
   HEALTH_CHECK_TIMEOUT_MS,
   LOCAL_TIMEOUT_MS,
   STANDARD_TIMEOUT_MS,
@@ -20,6 +21,7 @@ import type {
   CookieStatus,
   CookieUploadResponse,
   FileListResponse,
+  HealthCheckResult,
   Playlist,
   ServerInfoResponse,
   SettingsResponse,
@@ -325,6 +327,56 @@ export class APIClient {
     }
   }
 
+  /**
+   * Dual-URL health check — tries local first (short timeout), then external.
+   * Updates activeURL/connType when a different URL succeeds.
+   * Does NOT clear activeURL on failure (let the monitor's threshold logic handle that).
+   */
+  async resolveHealthCheck(): Promise<HealthCheckResult> {
+    const hasLocal = this.localURL !== undefined;
+    const hasExternal = this.externalURL !== undefined;
+
+    if (!hasLocal && !hasExternal) {
+      return { reachable: false, typeChanged: false };
+    }
+
+    // Try local first (preferred)
+    if (hasLocal) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), HEALTH_CHECK_LOCAL_TIMEOUT_MS);
+      try {
+        await this.getFrom(this.localURL!, '/api/status', controller.signal);
+        const changed = this.connType !== 'local';
+        this.activeURL = this.localURL;
+        this.connType = 'local';
+        return { reachable: true, type: 'local', typeChanged: changed };
+      } catch {
+        // Local unreachable — try external
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    // Fall back to external
+    if (hasExternal) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
+      try {
+        await this.getFrom(this.externalURL!, '/api/status', controller.signal);
+        const changed = this.connType !== 'external';
+        this.activeURL = this.externalURL;
+        this.connType = 'external';
+        return { reachable: true, type: 'external', typeChanged: changed };
+      } catch {
+        // External also unreachable
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    return { reachable: false, type: this.connType, typeChanged: false };
+  }
+
   // ── HTTP Helpers ──
 
   private buildURL(path: string): string {
@@ -389,6 +441,20 @@ export class APIClient {
       method: 'POST',
       headers: this.authHeaders(),
       body: JSON.stringify(body),
+      signal,
+    });
+    this.checkResponse(response);
+    return (await response.json()) as T;
+  }
+
+  /** GET from a specific base URL (for health checks against explicit URLs). */
+  private async getFrom<T>(baseURL: string, path: string, signal?: AbortSignal): Promise<T> {
+    const base = baseURL.replace(/\/$/, '');
+    const p = path.startsWith('/') ? path : `/${path}`;
+    const url = `${base}${p}`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: this.authHeaders(),
       signal,
     });
     this.checkResponse(response);
