@@ -13,9 +13,11 @@ mac:
   icon: build/icon.icns
   category: public.app-category.music
   hardenedRuntime: true
+  artifactName: "MusicPorterSync-${version}-${arch}.${ext}"
 win:
   target:
     - nsis
+  artifactName: "MusicPorterSync-${version}-Setup.${ext}"
 linux:
   target:
     - AppImage
