@@ -67,7 +67,7 @@ Process separation:
 
 State management: Zustand store (`app-state.ts`).
 
-Pages: ConnectPage, PlaylistsPage, SyncPage, DestinationsPage, SettingsPage.
+Pages: ConnectPage, SyncPage, SourcesPage, DestinationsPage, SettingsPage.
 
 ## Versioning
 

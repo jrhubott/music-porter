@@ -13,6 +13,7 @@ export type {
   DriveInfo,
   FileInfo,
   FileListResponse,
+  FreshnessLevel,
   OkResponse,
   PipelineEventType,
   PipelineProgress,

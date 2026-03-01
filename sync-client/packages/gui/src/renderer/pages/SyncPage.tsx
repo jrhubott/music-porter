@@ -367,8 +367,7 @@ export function SyncPage() {
         </div>
         <div className="d-flex gap-2 align-items-center">
           <button className="btn btn-sm btn-outline-secondary" onClick={isOffline ? loadOfflineData : loadData}>
-            <i className="bi bi-arrow-clockwise me-1" />
-            Refresh
+            <i className="bi bi-arrow-clockwise" />
           </button>
         </div>
       </div>

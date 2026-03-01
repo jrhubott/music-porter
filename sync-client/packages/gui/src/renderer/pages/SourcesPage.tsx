@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useIPC } from '../hooks/useIPC.js';
 import { useAppState } from '../store/app-state.js';
-import type { Playlist, PipelineProgress } from '@mporter/core';
+import type { FreshnessLevel, Playlist, PipelineProgress } from '@mporter/core';
 
 // ── Constants ──
 
@@ -39,6 +39,21 @@ function parseAppleMusicURL(url: string): { key: string; name: string } | null {
     .join(' ');
   const key = slug.replace(/-/g, '_').toLowerCase();
   return { key, name };
+}
+
+function freshnessBadge(level?: FreshnessLevel): { className: string; label: string } {
+  switch (level) {
+    case 'current':
+      return { className: 'bg-success', label: 'Current' };
+    case 'recent':
+      return { className: 'bg-info', label: 'Recent' };
+    case 'stale':
+      return { className: 'bg-warning text-dark', label: 'Stale' };
+    case 'outdated':
+      return { className: 'bg-danger', label: 'Outdated' };
+    default:
+      return { className: 'bg-secondary', label: 'Unknown' };
+  }
 }
 
 function logLevelClass(level?: string): string {
@@ -361,6 +376,14 @@ export function SourcesPage() {
                           {p.file_count} files
                           {(p.size_bytes ?? 0) > 0 && ` · ${formatSize(p.size_bytes!)}`}
                           {(p.duration_s ?? 0) > 0 && ` · ${formatDuration(p.duration_s!)}`}
+                        </>
+                      )}
+                      {p.freshness && (
+                        <>
+                          {' '}
+                          <span className={`badge ${freshnessBadge(p.freshness).className}`} style={{ fontSize: '0.65em' }}>
+                            {freshnessBadge(p.freshness).label}
+                          </span>
                         </>
                       )}
                     </small>

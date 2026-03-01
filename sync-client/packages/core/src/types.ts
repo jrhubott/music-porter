@@ -40,6 +40,8 @@ export interface ServerInfoResponse {
   external_url?: string;
 }
 
+export type FreshnessLevel = 'current' | 'recent' | 'stale' | 'outdated';
+
 export interface Playlist {
   key: string;
   url: string;
@@ -47,6 +49,7 @@ export interface Playlist {
   file_count?: number;
   size_bytes?: number;
   duration_s?: number;
+  freshness?: FreshnessLevel;
 }
 
 export interface FileInfo {
