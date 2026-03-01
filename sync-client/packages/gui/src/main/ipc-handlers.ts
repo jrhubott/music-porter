@@ -22,6 +22,9 @@ import type {
   CookieUploadResponse,
   DiscoveredServer,
   DriveInfo,
+  OkResponse,
+  PipelineProgress,
+  PipelineStartResult,
   PlaylistCacheStatus,
   PrefetchResult,
   ServerConfig,
@@ -47,6 +50,7 @@ export const apiClient = new APIClient();
 const driveManager = new DriveManager();
 let activeSyncAbort: AbortController | null = null;
 let activePrefetchAbort: AbortController | null = null;
+let activePipelineAbort: AbortController | null = null;
 let bgPrefetchService: BackgroundPrefetchService | null = null;
 let connectionMonitor: ConnectionMonitor | null = null;
 
@@ -218,6 +222,67 @@ export function registerIPCHandlers(): void {
 
   ipcMain.handle('data:getAbout', async () => {
     return apiClient.getAbout();
+  });
+
+  ipcMain.handle(
+    'data:addPlaylist',
+    async (_event, key: string, url: string, name: string): Promise<OkResponse> => {
+      return apiClient.addPlaylist(key, url, name);
+    },
+  );
+
+  ipcMain.handle(
+    'data:updatePlaylist',
+    async (_event, key: string, url?: string, name?: string): Promise<OkResponse> => {
+      return apiClient.updatePlaylist(key, url, name);
+    },
+  );
+
+  // ── Pipeline ──
+
+  ipcMain.handle(
+    'pipeline:start',
+    async (
+      event,
+      opts?: { playlist?: string; auto?: boolean; preset?: string },
+    ): Promise<PipelineStartResult> => {
+      const result = await apiClient.startPipeline(opts);
+      if (!result) {
+        throw new Error('Server is busy with another operation');
+      }
+
+      activePipelineAbort = new AbortController();
+      const { signal } = activePipelineAbort;
+
+      // Stream SSE events in the background, relaying to renderer
+      (async () => {
+        try {
+          for await (const progress of apiClient.streamTask(result.task_id, signal)) {
+            event.sender.send('pipeline:progress', progress);
+            if ((progress as PipelineProgress).type === 'done') break;
+          }
+        } catch {
+          // Aborted or connection lost — renderer handles cleanup
+        } finally {
+          activePipelineAbort = null;
+        }
+      })();
+
+      return result;
+    },
+  );
+
+  ipcMain.handle('pipeline:cancel', async (_event, taskId?: string): Promise<void> => {
+    activePipelineAbort?.abort();
+    activePipelineAbort = null;
+    // Also cancel on the server side if we have a task ID
+    if (taskId) {
+      try {
+        await apiClient.cancelTask(taskId);
+      } catch {
+        // Best-effort server-side cancel
+      }
+    }
   });
 
   // ── Sync ──

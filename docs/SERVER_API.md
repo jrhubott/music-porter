@@ -1,0 +1,1576 @@
+# Server API Reference
+
+All endpoints are defined in `web_api.py` as a Flask Blueprint. Base URL: `http://<host>:<port>`.
+
+---
+
+## Common Patterns
+
+### Authentication
+
+All protected endpoints require a Bearer token:
+
+```
+Authorization: Bearer <api_key>
+```
+
+The API key is generated via `secrets.token_urlsafe(32)` and persisted in `config.yaml`. The `GET /api/server-info` endpoint is the only unauthenticated endpoint.
+
+### Background Task Model
+
+Long-running operations (pipeline, convert, sync, cookie refresh, backfill, audit) use a one-at-a-time task model:
+
+1. `POST` endpoint returns `{"task_id": "<uuid>"}` (HTTP 200)
+2. HTTP 409 if another task is already running: `{"error": "Another operation is already running"}`
+3. Client streams progress via `GET /api/stream/<task_id>` (Server-Sent Events)
+4. SSE event types: `log`, `progress`, `overall_progress`, `heartbeat` (30s keepalive), `done`
+
+### ETag Caching
+
+Supported on `GET /api/playlists` and `GET /api/files/<key>`:
+
+- Response includes `ETag` header (MD5-based fingerprint)
+- Client sends `If-None-Match: <etag>` on subsequent requests
+- Server returns HTTP 304 Not Modified if unchanged
+
+### Pagination
+
+Used by task history and audit endpoints:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | integer | `50` | Maximum entries per page |
+| `offset` | integer | `0` | Number of entries to skip |
+| `operation` | string | — | Filter by operation type |
+| `status` | string | — | Filter by status |
+| `from` | string | — | Start date filter (ISO format) |
+| `to` | string | — | End date filter (ISO format) |
+
+Response shape: `{"entries": [...], "total": N, "limit": N, "offset": N}`
+
+### Error Responses
+
+All errors return JSON with an `error` field and appropriate HTTP status:
+
+```json
+{"error": "descriptive message"}
+```
+
+| Status | Meaning |
+|--------|---------|
+| 400 | Validation error or missing required fields |
+| 404 | Resource not found |
+| 409 | Conflict — server busy or duplicate resource |
+| 413 | Payload too large (e.g., ZIP file limit exceeded) |
+| 503 | Service unavailable (e.g., missing dependency) |
+
+---
+
+## Auth and Server Info
+
+### POST /api/auth/validate
+
+Validate an API key and return server identity.
+
+**Request:** No body required. Authentication is validated from the `Authorization` header.
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `valid` | boolean | Always `true` if the request reaches this endpoint (auth middleware rejects invalid keys) |
+| `version` | string | Server version (e.g., `"2.37.0"`) |
+| `server_name` | string | Human-readable server name from config |
+| `api_version` | integer | API version number (currently `2`) |
+
+```json
+{
+  "valid": true,
+  "version": "2.37.0",
+  "server_name": "My Server",
+  "api_version": 2
+}
+```
+
+---
+
+### GET /api/server-info
+
+Server metadata for client discovery. **No authentication required.**
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Server name from config |
+| `version` | string | Server version |
+| `platform` | string | OS display name (e.g., `"macOS"`, `"Linux"`, `"Windows"`) |
+| `profiles` | string[] | Available output profile names |
+| `api_version` | integer | API version number (currently `2`) |
+| `external_url` | string? | External URL if configured (omitted if not set) |
+
+```json
+{
+  "name": "My Server",
+  "version": "2.37.0",
+  "platform": "macOS",
+  "profiles": ["ride-command", "basic"],
+  "api_version": 2,
+  "external_url": "https://music.example.com:5555"
+}
+```
+
+---
+
+## Status and Dashboard
+
+### GET /api/status
+
+Dashboard status snapshot with cookie health, library size, and scheduler state.
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `version` | string | Server version |
+| `cookies` | object | Cookie health status |
+| `cookies.valid` | boolean | Whether cookies are valid for Apple Music |
+| `cookies.exists` | boolean | Whether cookies file exists on disk |
+| `cookies.reason` | string | Human-readable status explanation |
+| `cookies.days_remaining` | integer? | Days until cookie expiration, or `null` |
+| `library` | object | Library size summary |
+| `library.playlists` | integer | Number of playlists in library |
+| `library.files` | integer | Total MP3 files in library |
+| `library.size_mb` | number | Total library size in megabytes |
+| `busy` | boolean | Whether a background task is currently running |
+| `scheduler` | object? | Scheduler status, or `null` if scheduler unavailable |
+
+```json
+{
+  "version": "2.37.0",
+  "cookies": {
+    "valid": true,
+    "exists": true,
+    "reason": "Valid (30 days remaining)",
+    "days_remaining": 30
+  },
+  "library": {
+    "playlists": 5,
+    "files": 120,
+    "size_mb": 450.5
+  },
+  "busy": false,
+  "scheduler": {
+    "enabled": true,
+    "next_run": "2026-03-02T03:00:00"
+  }
+}
+```
+
+---
+
+### GET /api/summary
+
+Detailed library summary from TrackDB with per-playlist breakdowns.
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `total_playlists` | integer | Number of playlists |
+| `total_files` | integer | Total tracks across all playlists |
+| `total_size_bytes` | integer | Total library size in bytes |
+| `scan_duration` | number | Time to generate summary (seconds) |
+| `freshness` | object | Counts by freshness level |
+| `freshness.current` | integer | Playlists updated today |
+| `freshness.recent` | integer | Playlists updated within 7 days |
+| `freshness.stale` | integer | Playlists updated within 30 days |
+| `freshness.outdated` | integer | Playlists not updated in 30+ days |
+| `tag_integrity` | object | Tag protection stats |
+| `tag_integrity.protected` | integer | Tracks with UUID tag |
+| `tag_integrity.checked` | integer | Total tracks checked |
+| `tag_integrity.missing` | integer | Tracks missing UUID tag |
+| `cover_art` | object | Cover art stats |
+| `cover_art.with_art` | integer | Tracks with cover art |
+| `cover_art.without_art` | integer | Tracks without cover art |
+| `cover_art.original` | integer | Original-size cover art count |
+| `cover_art.resized` | integer | Resized cover art count |
+| `playlists` | object[] | Per-playlist details |
+
+**Playlist object fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Playlist key |
+| `file_count` | integer | Number of tracks |
+| `size_bytes` | integer | Total size in bytes |
+| `avg_size_mb` | number | Average file size in MB |
+| `last_modified` | string? | ISO timestamp of most recent update, or `null` |
+| `freshness` | string | One of: `"current"`, `"recent"`, `"stale"`, `"outdated"` |
+| `tags_checked` | integer | Tracks checked for tag integrity |
+| `tags_protected` | integer | Tracks with valid UUID tag |
+| `cover_with` | integer | Tracks with cover art |
+| `cover_without` | integer | Tracks without cover art |
+
+---
+
+### GET /api/library-stats
+
+Music source directory (M4A) statistics scanned from disk.
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `total_playlists` | integer | Number of source directories |
+| `total_files` | integer | Total M4A files found |
+| `total_size_bytes` | integer | Total size of source files |
+| `total_exported` | integer | Files already converted to MP3 |
+| `total_unconverted` | integer | Files not yet converted |
+| `scan_duration` | number | Scan time in seconds |
+| `playlists` | object[] | Per-playlist source stats |
+
+---
+
+### GET /api/library-stats/\<key\>/unconverted
+
+List M4A source files that have no matching TrackDB record (not yet converted).
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `key` | string | Playlist key |
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `files` | object[] | List of unconverted files |
+| `files[].artist` | string | Artist name (from directory structure) |
+| `files[].title` | string | Track title (from filename stem) |
+| `files[].display_name` | string | Formatted as `"Artist - Title"` |
+
+**Status codes:** 400 if key contains invalid characters
+
+---
+
+## Cookie Management
+
+### GET /api/cookies/browsers
+
+List installed browsers available for cookie extraction.
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `default` | string | Default browser name (e.g., `"chrome"`) |
+| `installed` | string[] | All installed browser names |
+
+```json
+{
+  "default": "chrome",
+  "installed": ["chrome", "firefox", "safari"]
+}
+```
+
+---
+
+### POST /api/cookies/refresh
+
+Background task: refresh cookies via Selenium browser automation.
+
+**Request body:**
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `browser` | string | No | `"auto"` | Browser to use: `"auto"`, `"chrome"`, `"firefox"`, `"safari"`, `"edge"` |
+| `verbose` | boolean | No | `false` | Enable verbose logging |
+
+**Response:** `{"task_id": "..."}` — see [Background Task Model](#background-task-model)
+
+**Status codes:** 409 if another task is running
+
+---
+
+### POST /api/cookies/upload
+
+Accept Netscape-format cookies from a remote client. Backs up existing cookies before overwriting, then cleans non-Apple cookies and validates.
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `cookies` | string | Yes | Full Netscape-format cookie text |
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `valid` | boolean | Whether uploaded cookies are valid for Apple Music |
+| `reason` | string | Validation result explanation |
+| `days_remaining` | integer? | Days until expiration, or `null` |
+
+**Status codes:** 400 if cookies field is empty
+
+---
+
+## Playlists CRUD
+
+### GET /api/playlists
+
+List all playlists with aggregate stats from TrackDB. Supports ETag caching.
+
+**Response headers:** `ETag` (accepts `If-None-Match`, returns 304 if unchanged)
+
+**Response:** Array of playlist objects.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `key` | string | Unique playlist identifier |
+| `url` | string | Apple Music playlist URL |
+| `name` | string | Human-readable playlist name |
+| `file_count` | integer | Number of converted MP3 tracks |
+| `size_bytes` | integer | Total size of MP3 files in bytes |
+| `duration_s` | number | Total duration in seconds |
+| `freshness` | string | One of: `"current"`, `"recent"`, `"stale"`, `"outdated"` |
+
+```json
+[
+  {
+    "key": "my_playlist",
+    "url": "https://music.apple.com/us/playlist/my-playlist/pl.abc123",
+    "name": "My Playlist",
+    "file_count": 15,
+    "size_bytes": 52428800,
+    "duration_s": 3600,
+    "freshness": "current"
+  }
+]
+```
+
+---
+
+### POST /api/playlists
+
+Add a new playlist to the config.
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `key` | string | Yes | Unique playlist key (used as directory name) |
+| `url` | string | Yes | Apple Music playlist URL |
+| `name` | string | Yes | Human-readable display name |
+
+**Response:** `{"ok": true}`
+
+**Status codes:** 400 if missing fields, 409 if key already exists
+
+---
+
+### PUT /api/playlists/\<key\>
+
+Update a playlist's name and/or URL.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `key` | string | Playlist key to update |
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `url` | string | No | New Apple Music URL |
+| `name` | string | No | New display name |
+
+**Response:** `{"ok": true}`
+
+**Status codes:** 404 if key not found
+
+---
+
+### DELETE /api/playlists/\<key\>
+
+Remove a playlist from the config. Does not delete source or library files.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `key` | string | Playlist key to remove |
+
+**Response:** `{"ok": true}`
+
+**Status codes:** 404 if key not found
+
+---
+
+### POST /api/playlists/\<key\>/delete-data
+
+Delete source M4A and/or library MP3 data for a playlist. Optionally removes the playlist from config.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `key` | string | Playlist key |
+
+**Request body:**
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `delete_source` | boolean | No | `true` | Delete source M4A files |
+| `delete_library` | boolean | No | `true` | Delete converted MP3 files and TrackDB records |
+| `remove_config` | boolean | No | `false` | Also remove playlist from config |
+| `dry_run` | boolean | No | `false` | Preview deletion without actually deleting |
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `success` | boolean | Whether the operation completed |
+| `files_deleted` | integer | Number of files deleted |
+| `bytes_freed` | integer | Total bytes freed |
+| `source_deleted` | boolean | Whether source directory was deleted |
+| `library_deleted` | boolean | Whether library data was deleted |
+
+**Status codes:** 404 if playlist not found and has no data on disk
+
+---
+
+## Settings and Configuration
+
+### GET /api/settings
+
+Get all settings, output profile definitions, and available quality presets.
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `settings` | object | Current settings from config.yaml |
+| `settings.output_type` | string | Active output profile name |
+| `settings.workers` | integer | Number of concurrent workers |
+| `settings.server_name` | string | Server display name |
+| `settings.quality_preset` | string | Default quality preset |
+| `profiles` | object | Map of profile name to profile definition |
+| `quality_presets` | string[] | Available preset names: `["lossless", "high", "medium", "low"]` |
+
+**Profile definition fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `description` | string | Human-readable profile description |
+| `id3_title` | string | Title tag template (e.g., `"{title}"`) |
+| `id3_artist` | string | Artist tag template |
+| `id3_album` | string | Album tag template |
+| `id3_genre` | string | Genre tag template |
+| `id3_extra` | object | Additional ID3 tag mappings |
+| `filename` | string | Output filename template |
+| `directory` | string | Output directory template |
+| `id3_versions` | string[] | ID3 tag versions (e.g., `["2.3"]`) |
+| `artwork_size` | integer | Cover art size in pixels (0 = original, -1 = strip) |
+| `usb_dir` | string | USB sync subdirectory |
+
+---
+
+### POST /api/settings
+
+Update one or more settings values.
+
+**Request body:** Key-value pairs to update.
+
+```json
+{"output_type": "basic", "workers": 2}
+```
+
+**Response:** `{"ok": true}`
+
+---
+
+### GET /api/config/verify
+
+Validate config.yaml structure and values. Returns a structured report.
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `results` | object[] | Validation results |
+| `results[].level` | string | Severity: `"error"`, `"warning"`, or `"info"` |
+| `results[].message` | string | Description of the issue |
+| `errors` | integer | Total error count |
+| `warnings` | integer | Total warning count |
+| `valid` | boolean | `true` if no errors found |
+
+---
+
+### POST /api/config/reset
+
+Back up current config.yaml and recreate with default values.
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ok` | boolean | Always `true` on success |
+| `backup` | string? | Path to backup file, or `null` if no existing config |
+
+---
+
+## Scheduler
+
+### GET /api/scheduler/status
+
+Get current scheduler configuration and next run time.
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `enabled` | boolean | Whether scheduler is active |
+| `interval_hours` | number | Hours between pipeline runs |
+| `playlists` | string[] | Playlist keys to process (empty = all) |
+| `preset` | string? | Quality preset override, or `null` for default |
+| `retry_minutes` | integer | Minutes between retry attempts |
+| `max_retries` | integer | Maximum retry attempts |
+| `run_at` | string? | Fixed daily run time (HH:MM), or `null` for interval mode |
+| `on_missed` | string | Missed run behavior: `"run"` or `"skip"` |
+| `next_run_time` | string? | ISO timestamp of next scheduled run |
+| `last_run_time` | string? | ISO timestamp of last run |
+| `last_run_status` | string? | Status of last run |
+
+**Status codes:** 404 if scheduler unavailable
+
+---
+
+### POST /api/scheduler/config
+
+Update scheduler configuration. All fields are optional — only provided fields are updated.
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `enabled` | boolean | No | Enable or disable scheduler |
+| `interval_hours` | number | No | Hours between runs (minimum `0.5`) |
+| `playlists` | string[] | No | Playlist keys to process |
+| `preset` | string | No | Quality preset name |
+| `retry_minutes` | integer | No | Minutes between retries |
+| `max_retries` | integer | No | Maximum retry count |
+| `run_at` | string | No | Fixed daily time (HH:MM format, `""` to clear) |
+| `on_missed` | string | No | `"run"` or `"skip"` |
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ok` | boolean | Always `true` on success |
+| `status` | object | Updated scheduler status (same shape as GET) |
+
+**Status codes:** 400 if validation fails, 404 if scheduler unavailable
+
+---
+
+### POST /api/scheduler/run-now
+
+Trigger an immediate scheduled pipeline execution.
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ok` | boolean | Always `true` on success |
+| `status` | object | Current scheduler status |
+
+**Status codes:** 400 if scheduler disabled, 404 if scheduler unavailable, 409 if busy
+
+---
+
+## Directories
+
+### GET /api/directories/music
+
+List playlist keys that have source M4A files on disk.
+
+**Response:** Array of strings (playlist keys).
+
+```json
+["playlist_key_1", "playlist_key_2"]
+```
+
+---
+
+### GET /api/directories/export
+
+List library playlists with converted MP3 file counts from TrackDB.
+
+**Response:** Array of directory objects.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Playlist key |
+| `display_name` | string | Human-readable playlist name from config |
+| `files` | integer | Number of converted MP3 files |
+
+```json
+[
+  {"name": "my_playlist", "display_name": "My Playlist", "files": 15}
+]
+```
+
+---
+
+## Pipeline
+
+### POST /api/pipeline/run
+
+Background task: full pipeline (download + convert + optional sync) for one or all playlists.
+
+**Request body:**
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `playlist` | string | No* | — | Single playlist key to process |
+| `url` | string | No* | — | Apple Music URL (creates playlist if new) |
+| `auto` | boolean | No* | `false` | Process all configured playlists |
+| `dry_run` | boolean | No | `false` | Preview without making changes |
+| `verbose` | boolean | No | `false` | Enable verbose logging |
+| `preset` | string | No | config default | Quality preset: `"lossless"`, `"high"`, `"medium"`, `"low"` |
+| `sync_destination` | string | No | — | Destination name to sync after pipeline |
+| `eq` | object | No | — | EQ config override: `{loudnorm, bass_boost, treble_boost, compressor}` |
+| `no_eq` | boolean | No | `false` | Disable all EQ processing |
+
+*At least one of `playlist`, `url`, or `auto` is required.
+
+**Response:** `{"task_id": "..."}` — see [Background Task Model](#background-task-model)
+
+**Status codes:** 400 if no target specified, 409 if busy
+
+---
+
+## Conversion
+
+### POST /api/convert/run
+
+Background task: convert M4A files to MP3 for a single directory.
+
+**Request body:**
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `input_dir` | string | Yes | — | Source directory path (relative to project root) |
+| `output_dir` | string | No | `library/audio/` | Output directory for MP3 files |
+| `force` | boolean | No | `false` | Re-convert already converted files |
+| `dry_run` | boolean | No | `false` | Preview without converting |
+| `verbose` | boolean | No | `false` | Enable verbose logging |
+| `preset` | string | No | `"lossless"` | Quality preset |
+| `eq` | object | No | — | EQ config override |
+| `no_eq` | boolean | No | `false` | Disable all EQ processing |
+
+**Response:** `{"task_id": "..."}` — see [Background Task Model](#background-task-model)
+
+**Status codes:** 400 if `input_dir` missing or invalid, 409 if busy
+
+---
+
+### POST /api/convert/batch
+
+Background task: convert multiple playlists in a single operation.
+
+**Request body:**
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `playlists` | string[] | Yes | — | List of playlist keys to convert |
+| `force` | boolean | No | `false` | Re-convert already converted files |
+| `dry_run` | boolean | No | `false` | Preview without converting |
+| `verbose` | boolean | No | `false` | Enable verbose logging |
+| `preset` | string | No | `"lossless"` | Quality preset |
+| `eq` | object | No | — | EQ config override |
+| `no_eq` | boolean | No | `false` | Disable all EQ processing |
+
+**Response:** `{"task_id": "..."}` — see [Background Task Model](#background-task-model)
+
+**Status codes:** 400 if playlists empty, 404 if playlist source directory not found, 409 if busy
+
+---
+
+## Library Maintenance
+
+### POST /api/library/backfill-metadata
+
+Background task: re-read M4A source tags into TrackDB for existing tracks. Populates extended metadata columns (genre, track number, composer, etc.) that may have been missed during initial conversion.
+
+**Request:** No body required.
+
+**Response:** `{"task_id": "..."}` — see [Background Task Model](#background-task-model)
+
+**Status codes:** 409 if busy
+
+---
+
+### POST /api/library/audit
+
+Background task: verify DB records match filesystem and clean up orphans.
+
+**Request body:**
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `allow_updates` | boolean | No | `false` | Allow the audit to fix issues (delete orphans, update records) |
+
+**Response:** `{"task_id": "..."}` — see [Background Task Model](#background-task-model)
+
+**Status codes:** 409 if busy
+
+---
+
+## File Serving
+
+### GET /api/files/\<key\>
+
+List MP3 files in a playlist with metadata from TrackDB. Supports ETag caching.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `key` | string | Playlist key |
+
+**Query parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `profile` | string | — | Output profile name for display filename/subdir resolution |
+| `include_sync` | boolean | `false` | Include per-file sync status (`synced_to` array) |
+
+**Response headers:** `ETag` (accepts `If-None-Match`, returns 304 if unchanged)
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `playlist` | string | Playlist key |
+| `name` | string | Playlist display name (only present when `profile` is set) |
+| `file_count` | integer | Number of files returned |
+| `files` | object[] | File metadata entries |
+
+**File object fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `filename` | string | UUID-based filename on disk (e.g., `"abc123.mp3"`) |
+| `display_filename` | string | Human-readable name (e.g., `"Artist - Title.mp3"`) |
+| `output_subdir` | string? | Output subdirectory (only when `profile` is set) |
+| `size` | integer | File size in bytes |
+| `duration` | number | Duration in seconds |
+| `title` | string | Track title |
+| `artist` | string | Track artist |
+| `album` | string | Album name |
+| `uuid` | string | Unique track identifier |
+| `has_cover_art` | boolean | Whether cover art exists |
+| `synced_to` | string[]? | Sync keys this file has been synced to (only when `include_sync=true`) |
+| `created_at` | number | Unix timestamp when track was added |
+| `updated_at` | number | Unix timestamp of last metadata update |
+
+**Status codes:** 404 if no tracks found for playlist
+
+---
+
+### GET /api/files/\<key\>/\<filename\>
+
+Download a single MP3 file. Without `?profile`, serves the clean library MP3 (UUID-only tags). With `?profile`, streams a copy with profile-specific ID3 tags applied on-the-fly.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `key` | string | Playlist key |
+| `filename` | string | UUID-based filename (e.g., `"abc123.mp3"`) |
+
+**Query parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `profile` | string | — | Output profile name for on-the-fly tagging |
+
+**Response:** Binary MP3 data with headers:
+
+- `Content-Type: audio/mpeg`
+- `Content-Disposition: attachment; filename="Artist - Title.mp3"`
+- `Content-Length: <bytes>` (when profile tagging is used)
+
+**Status codes:** 400 if invalid path, 404 if file or track not found
+
+---
+
+### GET /api/files/\<key\>/\<filename\>/artwork
+
+Serve cover art for a track. Optionally resize to a target dimension.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `key` | string | Playlist key |
+| `filename` | string | UUID-based filename (e.g., `"abc123.mp3"`) |
+
+**Query parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `size` | integer | — | Resize to N x N pixels (omit for original size) |
+
+**Response:** Binary JPEG or PNG image.
+
+**Status codes:** 404 if no cover art found or file missing
+
+---
+
+### GET /api/files/\<key\>/sync-status
+
+Per-file sync status map for a playlist. Lightweight endpoint with no ID3 reads.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `key` | string | Playlist key |
+
+**Response:** Object mapping filenames to arrays of sync key names.
+
+```json
+{
+  "abc123.mp3": ["usbkey-Drive1", "client-MyFolder"],
+  "def456.mp3": []
+}
+```
+
+---
+
+### GET /api/files/\<key\>/download-all
+
+Stream a ZIP archive of all MP3s in a playlist. Files are stored uncompressed (ZIP_STORED) for streaming efficiency. Archive entries use human-readable display filenames.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `key` | string | Playlist key |
+
+**Response:** Binary ZIP archive with headers:
+
+- `Content-Type: application/zip`
+- `Content-Disposition: attachment; filename="<key>.zip"`
+- `Content-Length: <bytes>`
+
+**Status codes:** 404 if no MP3 files found
+
+---
+
+### POST /api/files/download-zip
+
+Stream a ZIP archive of MP3s from multiple playlists. Files are organized into subdirectories by playlist key. Maximum 2000 files.
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `playlists` | string[] | Yes | Playlist keys to include |
+
+**Response:** Binary ZIP archive with headers:
+
+- `Content-Type: application/zip`
+- `Content-Disposition: attachment; filename="music-porter-export.zip"`
+- `Content-Length: <bytes>`
+
+**Status codes:** 400 if playlists empty, 404 if no files found, 413 if total files exceed 2000
+
+---
+
+## Sync Destinations
+
+### GET /api/sync/destinations
+
+List all sync destinations (saved from config + auto-detected USB drives in web mode).
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `destinations` | object[] | Destination list |
+| `destinations[].name` | string | Destination name |
+| `destinations[].path` | string | Destination path with scheme (e.g., `"usb:///Volumes/Drive/Music"`, `"folder:///path"`) |
+| `destinations[].scheme` | string | Path scheme: `"usb"`, `"folder"`, or `"web-client"` |
+| `destinations[].sync_key` | string? | Linked sync key, or `null` |
+
+---
+
+### POST /api/sync/destinations
+
+Add a saved sync destination.
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Destination display name |
+| `path` | string | Yes | Destination path with scheme |
+| `sync_key` | string | No | Sync key to link |
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ok` | boolean | Always `true` on success |
+| `name` | string | Destination name |
+| `path` | string | Destination path |
+| `sync_key` | string? | Linked sync key (if provided) |
+
+**Status codes:** 400 if name or path missing, or if add fails
+
+---
+
+### DELETE /api/sync/destinations/\<name\>
+
+Remove a saved sync destination.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `name` | string | Destination name |
+
+**Response:** `{"ok": true}`
+
+**Status codes:** 404 if destination not found
+
+---
+
+### PUT /api/sync/destinations/\<name\>/link
+
+Link or unlink a sync key to a destination. When linking and the destination previously had tracking data under a different key, the old tracking data is merged into the new key.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `name` | string | Destination name |
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `sync_key` | string | No | Sync key to link (empty string or omit to unlink) |
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ok` | boolean | Always `true` on success |
+| `sync_key` | string? | The linked sync key, or `null` if unlinked |
+| `merge_stats` | object? | Merge statistics if tracking data was merged |
+
+**Status codes:** 404 if destination not found
+
+---
+
+### POST /api/sync/destinations/\<name\>/rename
+
+Rename a saved destination. If the destination had no explicit sync key, its tracking data is also renamed.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `name` | string | Current destination name |
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `new_name` | string | Yes | New name (alphanumeric, hyphens, underscores only) |
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ok` | boolean | Always `true` on success |
+| `old_name` | string | Previous destination name |
+| `new_name` | string | New destination name |
+| `tracking_renamed` | boolean | Whether tracking data was also renamed |
+
+**Status codes:** 400 if name invalid or same as current, 404 if not found, 409 if new name already exists
+
+---
+
+## Sync Operations
+
+### POST /api/sync/run
+
+Background task: sync MP3s to a destination with profile-specific tags applied on-the-fly.
+
+**Request body:**
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `destination` | string | Yes | — | Destination name from config |
+| `source_dir` | string | No | `library/audio/` | Source directory for MP3 files |
+| `playlist_key` | string | No | — | Playlist key for display name resolution |
+| `profile` | string | No | config default | Output profile for tagging |
+| `dry_run` | boolean | No | `false` | Preview without syncing |
+| `verbose` | boolean | No | `false` | Enable verbose logging |
+
+**Response:** `{"task_id": "..."}` — see [Background Task Model](#background-task-model)
+
+**Status codes:** 400 if destination missing or is a web-client, 404 if destination not found, 409 if busy
+
+---
+
+### GET /api/sync/status
+
+Summary of all tracked sync keys with file counts.
+
+**Response:** Array of sync key summaries.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `key_name` | string | Sync key identifier |
+| `last_sync_at` | number | Unix timestamp of last sync |
+| `total_files` | integer | Total files in library |
+| `synced_files` | integer | Files synced to this key |
+| `new_files` | integer | Files not yet synced |
+| `new_playlists` | integer | Playlists with no synced files |
+
+---
+
+### GET /api/sync/status/\<key\>
+
+Per-playlist breakdown for a specific sync key.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `key` | string | Sync key name |
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `sync_key` | string | Sync key name |
+| `last_sync_at` | number | Unix timestamp of last sync |
+| `playlists` | object[] | Per-playlist sync details |
+| `playlists[].name` | string | Playlist key |
+| `playlists[].total_files` | integer | Total files in playlist |
+| `playlists[].synced_files` | integer | Files synced to this key |
+| `playlists[].new_files` | integer | Files not yet synced |
+| `playlists[].is_new_playlist` | boolean | `true` if no files synced yet |
+| `total_files` | integer | Total files across all playlists |
+| `synced_files` | integer | Total synced files |
+| `new_files` | integer | Total unsynced files |
+| `new_playlists` | integer | Count of new (unsynced) playlists |
+
+---
+
+## Sync Keys
+
+### GET /api/sync/keys
+
+List all tracked sync keys.
+
+**Response:** Array of sync key objects.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `key_name` | string | Sync key identifier |
+| `last_sync_at` | number | Unix timestamp of last sync |
+| `created_at` | number | Unix timestamp when key was created |
+
+---
+
+### DELETE /api/sync/keys/\<key\>
+
+Delete a sync key and all its tracking data.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `key` | string | Sync key to delete |
+
+**Response:** `{"ok": true}`
+
+---
+
+### DELETE /api/sync/keys/\<key\>/playlists/\<playlist\>
+
+Delete tracking records for one playlist on a sync key.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `key` | string | Sync key name |
+| `playlist` | string | Playlist key |
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ok` | boolean | Always `true` |
+| `deleted` | integer | Number of tracking records deleted |
+
+---
+
+### POST /api/sync/keys/\<key\>/prune
+
+Prune stale tracking records for files no longer in the library.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `key` | string | Sync key name |
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `pruned_count` | integer | Number of stale records removed |
+
+---
+
+### POST /api/sync/keys/\<key\>/rename
+
+Rename a sync key, moving all tracking data to the new name. Also updates any destination config references.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `key` | string | Current sync key name |
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `new_key` | string | Yes | New key name (alphanumeric, hyphens, underscores only) |
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ok` | boolean | Always `true` on success |
+| `old_key` | string | Previous key name |
+| `new_key` | string | New key name |
+| `stats` | object | Migration statistics (records moved, playlists affected) |
+| `destinations_updated` | integer | Number of destination configs updated |
+
+**Status codes:** 400 if new_key invalid or same as current, 409 if new_key already exists
+
+---
+
+### POST /api/sync/client-record
+
+Record files synced via client-side (browser or sync-client) sync for server-side tracking. Automatically registers a `web-client://` destination if `folder_name` is provided.
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `sync_key` | string | Yes | Sync key for the destination |
+| `playlist` | string | Yes | Playlist key |
+| `files` | string[] | Yes | List of filenames that were synced |
+| `folder_name` | string | No | Folder name for auto-registering web-client destination |
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ok` | boolean | Always `true` on success |
+| `recorded` | integer | Number of file records saved |
+
+**Status codes:** 400 if required fields missing or sync tracker unavailable
+
+---
+
+## Tasks and Operations
+
+### GET /api/tasks
+
+List all active (in-memory) background tasks.
+
+**Response:** Array of task objects.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Task UUID |
+| `operation` | string | Operation type (e.g., `"pipeline"`, `"convert"`, `"sync"`) |
+| `description` | string | Human-readable description |
+| `status` | string | `"pending"`, `"running"`, `"completed"`, `"failed"`, `"cancelled"` |
+| `started_at` | number | Unix timestamp when task started |
+| `progress` | object? | Current progress data (if available) |
+
+---
+
+### GET /api/tasks/\<id\>
+
+Get details for a single task. Checks in-memory tasks first, then falls back to task history DB.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | string | Task UUID |
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Task UUID |
+| `operation` | string | Operation type |
+| `description` | string | Task description |
+| `status` | string | Task status |
+| `started_at` | number | Unix timestamp when started |
+| `finished_at` | number? | Unix timestamp when finished |
+| `result` | object? | Task result data (on completion) |
+| `error` | string? | Error message (on failure) |
+| `elapsed` | number? | Elapsed time in seconds (for running tasks) |
+
+**Status codes:** 404 if task not found
+
+---
+
+### POST /api/tasks/\<id\>/cancel
+
+Cancel a running background task.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | string | Task UUID |
+
+**Response:** `{"ok": true}`
+
+**Status codes:** 404 if task not found or not running
+
+---
+
+### GET /api/tasks/history
+
+Paginated task history with optional filters. See [Pagination](#pagination) for query parameters.
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `entries` | object[] | Task history entries |
+| `entries[].id` | string | Task UUID |
+| `entries[].operation` | string | Operation type |
+| `entries[].description` | string | Task description |
+| `entries[].status` | string | Final status |
+| `entries[].started_at` | string | ISO timestamp |
+| `entries[].finished_at` | string? | ISO timestamp |
+| `entries[].result` | object? | Task result data |
+| `entries[].error` | string? | Error message |
+| `entries[].elapsed` | number? | Elapsed seconds (live for running tasks) |
+| `total` | integer | Total matching entries |
+| `limit` | integer | Page size |
+| `offset` | integer | Current offset |
+
+---
+
+### GET /api/tasks/stats
+
+Aggregate task history statistics.
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `total` | integer | Total task history entries |
+| `today` | integer | Tasks run today |
+| `by_operation` | object | Counts keyed by operation type |
+| `by_status` | object | Counts keyed by status |
+
+---
+
+### POST /api/tasks/clear
+
+Delete old task history entries.
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `confirm` | boolean | Yes | Must be `true` to confirm deletion |
+| `before_date` | string | No | Delete entries before this ISO date (omit for all) |
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `deleted` | integer | Number of entries deleted |
+
+**Status codes:** 400 if `confirm` not set, 503 if task history DB unavailable
+
+---
+
+## SSE Stream
+
+### GET /api/stream/\<task\_id\>
+
+Server-Sent Events stream for a background task. The connection stays open until the task completes or is cancelled. Each event is a JSON object on a `data:` line.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `task_id` | string | Task UUID from a background task endpoint |
+
+**Response headers:**
+
+- `Content-Type: text/event-stream`
+- `Cache-Control: no-cache`
+- `X-Accel-Buffering: no`
+
+**Event format:** `data: {"type": "...", ...}\n\n`
+
+**Event types:**
+
+| Type | Fields | Description |
+|------|--------|-------------|
+| `log` | `level`, `message` | Log message. Level: `"INFO"`, `"OK"`, `"WARN"`, `"ERROR"`, `"SKIP"` |
+| `progress` | `current`, `total`, `label` | Item-level progress (e.g., current file in conversion) |
+| `overall_progress` | `current`, `total`, `label` | Multi-item overall progress (e.g., playlist 2 of 5) |
+| `heartbeat` | *(none)* | Keep-alive sent every 30 seconds of inactivity |
+| `done` | `status`, `result?`, `error?` | Task finished. Status: `"completed"`, `"failed"`, `"cancelled"` |
+
+**Status codes:** 404 if task not found
+
+---
+
+## EQ Presets
+
+### GET /api/eq
+
+List EQ configurations, optionally filtered by profile.
+
+**Query parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `profile` | string | — | Filter by profile name (omit for all profiles) |
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `eq_presets` | object[] | List of EQ configurations |
+| `eq_presets[].profile` | string | Profile name |
+| `eq_presets[].playlist` | string? | Playlist key (null for profile default) |
+| `eq_presets[].loudnorm` | boolean | Loudness normalization enabled |
+| `eq_presets[].bass_boost` | boolean | Bass boost enabled |
+| `eq_presets[].treble_boost` | boolean | Treble boost enabled |
+| `eq_presets[].compressor` | boolean | Compressor enabled |
+
+---
+
+### POST /api/eq
+
+Set EQ config for a profile default or a profile+playlist override.
+
+**Request body:**
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `profile` | string | Yes | — | Profile name |
+| `playlist` | string | No | — | Playlist key (omit for profile default) |
+| `loudnorm` | boolean | No | `false` | Enable loudness normalization |
+| `bass_boost` | boolean | No | `false` | Enable bass boost |
+| `treble_boost` | boolean | No | `false` | Enable treble boost |
+| `compressor` | boolean | No | `false` | Enable compressor |
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `success` | boolean | Always `true` on success |
+| `eq` | object | The saved EQ config (same fields as above) |
+
+**Status codes:** 400 if profile missing
+
+---
+
+### DELETE /api/eq
+
+Delete an EQ config for a profile default or playlist override.
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `profile` | string | Yes | Profile name |
+| `playlist` | string | No | Playlist key (omit to delete profile default) |
+
+**Response:** `{"success": true}`
+
+**Status codes:** 400 if profile missing
+
+---
+
+### GET /api/eq/resolve
+
+Resolve the effective EQ config for a profile+playlist combination. If a playlist-specific override exists, it is used; otherwise the profile default is returned.
+
+**Query parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `profile` | string | Yes | Profile name |
+| `playlist` | string | No | Playlist key |
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `eq` | object | Resolved EQ config (`loudnorm`, `bass_boost`, `treble_boost`, `compressor`) |
+| `any_enabled` | boolean | Whether any EQ effect is enabled |
+| `filter_chain` | string | FFmpeg filter chain string |
+| `effects` | string[] | List of enabled effect names |
+
+---
+
+### GET /api/eq/effects
+
+List available EQ effects with descriptions.
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `effects` | object[] | Available effects |
+| `effects[].name` | string | Effect identifier |
+| `effects[].description` | string | Human-readable description |
+
+---
+
+## Pairing
+
+### GET /api/pairing-qr
+
+Generate a QR code (SVG) for iOS companion app pairing. Contains the server's host, port, and API key. Only available in API mode (not web mode).
+
+**Response:** SVG image
+
+- `Content-Type: image/svg+xml`
+- `Cache-Control: no-store`
+
+**Status codes:** 404 if in web mode, 500 if server info unavailable, 503 if `segno` not installed
+
+---
+
+### GET /api/pairing-info
+
+JSON server pairing details for programmatic access. Only available in API mode.
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `api_key` | string | Server API key |
+| `host` | string | Server hostname/IP |
+| `port` | integer | Server port |
+| `address` | string | Full address (external URL if configured, otherwise `host:port`) |
+
+**Status codes:** 404 if in web mode, 500 if server info unavailable
+
+---
+
+## Audit Log
+
+### GET /api/audit
+
+Paginated audit entries with optional filters. See [Pagination](#pagination) for query parameters.
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `entries` | object[] | Audit log entries |
+| `entries[].id` | integer | Entry ID |
+| `entries[].timestamp` | string | ISO timestamp |
+| `entries[].operation` | string | Operation type |
+| `entries[].description` | string | Human-readable description |
+| `entries[].params` | object? | Operation parameters (JSON) |
+| `entries[].status` | string | Result status |
+| `entries[].duration_s` | number? | Operation duration in seconds |
+| `entries[].source` | string | Source: `"web"`, `"ios"`, or `"api"` |
+| `total` | integer | Total matching entries |
+| `limit` | integer | Page size |
+| `offset` | integer | Current offset |
+
+---
+
+### GET /api/audit/stats
+
+Aggregate audit log statistics.
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `total` | integer | Total audit entries |
+| `today` | integer | Entries from today |
+| `by_operation` | object | Counts keyed by operation type |
+| `by_status` | object | Counts keyed by status |
+
+---
+
+### POST /api/audit/clear
+
+Delete old audit entries. Logs the clear action itself as a new audit entry.
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `confirm` | boolean | Yes | Must be `true` to confirm deletion |
+| `before_date` | string | No | Delete entries before this ISO date (omit for all) |
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `deleted` | integer | Number of entries deleted |
+
+**Status codes:** 400 if `confirm` not set
+
+---
+
+## About
+
+### GET /api/about
+
+Server version and release notes.
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `version` | string | Server version (e.g., `"2.37.0"`) |
+| `release_notes` | string | Full release notes text from `release-notes.txt` |
+
+```json
+{
+  "version": "2.37.0",
+  "release_notes": "Version 2.37.0 (2026-03-01):\n• Added Sources page\n..."
+}
+```

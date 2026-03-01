@@ -191,7 +191,7 @@ Version defined in `porter_core.py` line 50. Uses semantic versioning (MAJOR.MIN
 
 ### Common Gotchas
 
-**Cookies:** Requires `cookies.txt` with Apple Music session cookies. Auto-validates at startup; expired cookies trigger interactive refresh via Selenium (Chrome/Firefox/Safari/Edge). Backup at `cookies.txt.backup`. See `COOKIE-MANAGEMENT-GUIDE.md`.
+**Cookies:** Requires `cookies.txt` with Apple Music session cookies. Auto-validates at startup; expired cookies trigger interactive refresh via Selenium (Chrome/Firefox/Safari/Edge). Backup at `cookies.txt.backup`. See `docs/COOKIE-MANAGEMENT-GUIDE.md`.
 
 **Virtual Environment:** Must activate before running: `source .venv/bin/activate` (macOS/Linux) or `.venv\Scripts\activate` (Windows).
 
@@ -437,5 +437,13 @@ Organized by concern (dataclasses, DB classes, business logic):
 ## Additional Resources
 
 - **README.md** - Project overview, quick start guide, and future features roadmap
-- **COOKIE-MANAGEMENT-GUIDE.md** - Cookie validation, auto-refresh, and troubleshooting
-- **IOS-COMPANION-GUIDE.md** - iOS companion app setup, pairing, and usage guide
+- **docs/COOKIE-MANAGEMENT-GUIDE.md** - Cookie validation, auto-refresh, and troubleshooting
+- **docs/IOS-COMPANION-GUIDE.md** - iOS companion app setup, pairing, and usage guide
+- **docs/DB_SCHEMA.md** - SQLite database schema reference (tables, columns, indexes, migrations)
+- **docs/SERVER_API.md** - REST API endpoint reference (~60 endpoints)
+
+### Keeping Docs in Sync
+
+- When modifying the database schema, update `docs/DB_SCHEMA.md` to reflect the current state.
+- When modifying API endpoints in `web_api.py`, update `docs/SERVER_API.md` to reflect the current state.
+- When planning implementation work, consult `docs/DB_SCHEMA.md` and `docs/SERVER_API.md` as references for the current database schema and API surface.
