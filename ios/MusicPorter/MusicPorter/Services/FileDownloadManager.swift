@@ -57,6 +57,7 @@ final class FileDownloadManager {
     var bulkProgress: BulkDownloadProgress?
 
     @ObservationIgnored private var apiClient: APIClient?
+    @ObservationIgnored private var audioCacheManager: AudioCacheManager?
     @ObservationIgnored private let backgroundManager = BackgroundDownloadManager.shared
     @ObservationIgnored private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
 
@@ -69,8 +70,9 @@ final class FileDownloadManager {
         return URLSession(configuration: config)
     }()
 
-    func configure(apiClient: APIClient) {
+    func configure(apiClient: APIClient, audioCacheManager: AudioCacheManager? = nil) {
         self.apiClient = apiClient
+        self.audioCacheManager = audioCacheManager
         wireBackgroundCallbacks()
     }
 
@@ -107,22 +109,36 @@ final class FileDownloadManager {
     }
 
     /// Download a single MP3 file using the foreground session (fast, immediate).
-    func downloadFile(playlist: String, filename: String) async throws -> URL {
+    /// When a track is provided, checks the cache first and writes through on download.
+    func downloadFile(playlist: String, filename: String, track: Track? = nil) async throws -> URL {
         guard let apiClient, let url = apiClient.fileDownloadURL(playlist: playlist, filename: filename) else {
             throw FileDownloadError.notConfigured
         }
 
-        let request = apiClient.authenticatedRequest(for: url)
         let destDir = getPlaylistDirectory(playlist: playlist)
         try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
+        let destFile = destDir.appendingPathComponent(filename)
 
+        // Cache hit: copy from cache instead of downloading
+        if let track, let uuid = track.uuid, let cacheManager = audioCacheManager {
+            let copied = await cacheManager.copyToDestination(uuid, destPath: destFile)
+            if copied { return destFile }
+        }
+
+        let request = apiClient.authenticatedRequest(for: url)
         let (tempURL, _) = try await downloadSession.download(for: request)
 
-        let destFile = destDir.appendingPathComponent(filename)
         if FileManager.default.fileExists(atPath: destFile.path) {
             try FileManager.default.removeItem(at: destFile)
         }
         try FileManager.default.moveItem(at: tempURL, to: destFile)
+
+        // Write-through: store in cache for offline access
+        if let track, let cacheManager = audioCacheManager {
+            await cacheManager.storeFromFile(
+                destFile, file: track, playlistKey: playlist,
+                serverCreatedAt: track.createdAt, serverUpdatedAt: track.updatedAt)
+        }
 
         return destFile
     }
@@ -139,7 +155,20 @@ final class FileDownloadManager {
         let tracks = response.files
 
         let existingFiles = Set(localFiles(playlist: playlist).map { $0.lastPathComponent })
-        let toDownload = tracks.filter { !existingFiles.contains($0.filename) }
+        var toDownload: [Track] = []
+
+        // Filter: skip local files, copy from cache if available
+        for track in tracks {
+            if existingFiles.contains(track.filename) { continue }
+            if let uuid = track.uuid, let cacheManager = audioCacheManager {
+                let destDir = getPlaylistDirectory(playlist: playlist)
+                try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
+                let destFile = destDir.appendingPathComponent(track.filename)
+                let copied = await cacheManager.copyToDestination(uuid, destPath: destFile)
+                if copied { continue }
+            }
+            toDownload.append(track)
+        }
 
         let total = toDownload.count
         guard total > 0 else { return }
@@ -193,18 +222,19 @@ final class FileDownloadManager {
         }
 
         // Prepare all authenticated requests on @MainActor before entering TaskGroup
-        var downloadItems: [(filename: String, request: URLRequest)] = []
+        var downloadItems: [(filename: String, request: URLRequest, track: Track)] = []
         for track in toDownload {
             guard let url = apiClient.fileDownloadURL(playlist: playlist, filename: track.filename) else {
                 continue
             }
             let request = apiClient.authenticatedRequest(for: url)
-            downloadItems.append((filename: track.filename, request: request))
+            downloadItems.append((filename: track.filename, request: request, track: track))
         }
 
         // Concurrent foreground downloads — fast on LAN
         let limiter = ConcurrencyLimiter(limit: 6)
         let session = downloadSession
+        let cacheManager = audioCacheManager
 
         try await withThrowingTaskGroup(of: Void.self) { group in
             for item in downloadItems {
@@ -222,6 +252,14 @@ final class FileDownloadManager {
                             try FileManager.default.removeItem(at: destFile)
                         }
                         try FileManager.default.moveItem(at: tempURL, to: destFile)
+
+                        // Write-through: store in cache for offline access
+                        if let cacheManager {
+                            await cacheManager.storeFromFile(
+                                destFile, file: item.track, playlistKey: playlist,
+                                serverCreatedAt: item.track.createdAt,
+                                serverUpdatedAt: item.track.updatedAt)
+                        }
 
                         await self?.fileCompleted(
                             playlist: playlist, filename: item.filename, failed: false)

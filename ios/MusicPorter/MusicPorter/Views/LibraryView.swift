@@ -24,6 +24,10 @@ struct LibraryView: View {
     /// iOS reclaims sockets after suspension; connections are dead after this threshold.
     private let backgroundStallThreshold: TimeInterval = 3
 
+    // Cache state
+    @State private var playlistCacheStatus: [String: PlaylistCacheStatus] = [:]
+    @State private var cacheSize: Int64 = 0
+
     // Delete server data state
     @State private var serverDeleteKey: String?
     @State private var serverDeleteSource = true
@@ -384,6 +388,8 @@ struct LibraryView: View {
         let localCount = appState.downloadManager.localFiles(playlist: playlist.key).count
         let hasLocal = localCount > 0
         let isDownloadingThis = downloadingPlaylist == playlist.key && !isDownloadingAll
+        let isPinned = appState.cachePreferences.isPinned(playlist.key)
+        let status = playlistCacheStatus[playlist.key]
 
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -406,11 +412,37 @@ struct LibraryView: View {
                                 .imageScale(.small)
                                 .foregroundStyle(.green)
                         }
+                        if let status, status.cached > 0 {
+                            Text("·")
+                            if status.cached >= status.total && status.total > 0 {
+                                Image(systemName: "checkmark")
+                                    .imageScale(.small)
+                                    .foregroundStyle(.blue)
+                            } else {
+                                Text("\(status.cached)/\(status.total)")
+                                    .foregroundStyle(.blue)
+                            }
+                            Image(systemName: "internaldrive")
+                                .imageScale(.small)
+                                .foregroundStyle(.blue)
+                        }
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 }
                 Spacer()
+
+                Button {
+                    if isPinned {
+                        appState.cachePreferences.unpinPlaylist(playlist.key)
+                    } else {
+                        appState.cachePreferences.pinPlaylist(playlist.key)
+                    }
+                } label: {
+                    Image(systemName: isPinned ? "pin.fill" : "pin")
+                        .foregroundStyle(isPinned ? .blue : .secondary)
+                }
+                .buttonStyle(.borderless)
 
                 Button {
                     startDownloadPlaylist(playlist.key)
@@ -466,6 +498,17 @@ struct LibraryView: View {
                     Label("Export", systemImage: "externaldrive")
                 }
                 .tint(.orange)
+            }
+            if status != nil && (status?.cached ?? 0) > 0 {
+                Button {
+                    Task {
+                        await appState.audioCacheManager?.clearPlaylist(playlist.key)
+                        await loadCacheStatus()
+                    }
+                } label: {
+                    Label("Clear Cache", systemImage: "internaldrive")
+                }
+                .tint(.purple)
             }
         }
     }
@@ -541,8 +584,11 @@ struct LibraryView: View {
 
     private var localStorageSection: some View {
         Section("Local Storage") {
-            LabeledContent("Used", value: ByteCountFormatter.string(
+            LabeledContent("Downloads", value: ByteCountFormatter.string(
                 fromByteCount: Int64(storageUsed), countStyle: .file))
+            if cacheSize > 0 {
+                LabeledContent("Cache", value: CacheUtils.formatBytes(cacheSize))
+            }
         }
     }
 
@@ -569,6 +615,21 @@ struct LibraryView: View {
     private func load() async {
         await vm.load(api: appState.apiClient)
         storageUsed = appState.downloadManager.localStorageUsed()
+        await loadCacheStatus()
+    }
+
+    private func loadCacheStatus() async {
+        guard let cacheManager = appState.audioCacheManager else { return }
+        cacheSize = await cacheManager.getTotalSize()
+        var statuses: [String: PlaylistCacheStatus] = [:]
+        for playlist in vm.playlists {
+            let serverCount = vm.fileCount(for: playlist.key)
+            let pinned = appState.cachePreferences.isPinned(playlist.key)
+            let status = await cacheManager.getPlaylistCacheStatus(
+                key: playlist.key, totalFiles: serverCount, pinned: pinned)
+            statuses[playlist.key] = status
+        }
+        playlistCacheStatus = statuses
     }
 
     private func startDownloadPlaylist(_ name: String) {
@@ -671,10 +732,24 @@ struct LibraryView: View {
         }
 
         for key in playlistKeys {
-            let localFiles = appState.downloadManager.localFiles(playlist: key)
-            guard !localFiles.isEmpty else { continue }
+            var fileURLs = appState.downloadManager.localFiles(playlist: key)
+
+            // Supplement with cached files not already in local downloads
+            if let cacheManager = appState.audioCacheManager {
+                let localNames = Set(fileURLs.map(\.lastPathComponent))
+                let cachedEntries = await cacheManager.getCachedFileInfos(key)
+                for entry in cachedEntries {
+                    // Skip files already in local downloads
+                    if localNames.contains(entry.displayFilename) { continue }
+                    if let cachedURL = await cacheManager.isCached(entry.uuid) {
+                        fileURLs.append(cachedURL)
+                    }
+                }
+            }
+
+            guard !fileURLs.isEmpty else { continue }
             _ = await appState.usbExport.exportFiles(
-                urls: localFiles, to: targetDir, subdirectory: key)
+                urls: fileURLs, to: targetDir, subdirectory: key)
         }
     }
 

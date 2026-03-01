@@ -19,10 +19,14 @@ final class AppState {
     let usbExport = USBExportService()
     let audioPlayer = AudioPlayerService()
 
+    // Cache preferences (always available, not tied to connection)
+    let cachePreferences = CachePreferencesStore()
+
     // Cache services (initialized on connect, per-profile)
     var metadataCache: MetadataCache?
     var audioCacheManager: AudioCacheManager?
     var prefetchEngine: PrefetchEngine?
+    var backgroundPrefetchService: BackgroundPrefetchService?
 
     // Connection state
     var isConnected: Bool { apiClient.isConnected }
@@ -181,6 +185,8 @@ final class AppState {
 
     func disconnect() {
         audioPlayer.stop()
+        backgroundPrefetchService?.stop()
+        backgroundPrefetchService = nil
         apiClient.disconnect()
         savedServer = nil
         apiVersionWarning = nil
@@ -198,6 +204,16 @@ final class AppState {
         metadataCache = cache
         audioCacheManager = audioCache
         prefetchEngine = PrefetchEngine(apiClient: apiClient, cacheManager: audioCache)
+
+        // Wire cache into download manager and audio player
+        downloadManager.configure(apiClient: apiClient, audioCacheManager: audioCache)
+        audioPlayer.configure(apiClient: apiClient, audioCacheManager: audioCache)
+
+        // Start background prefetch service
+        let prefetchService = BackgroundPrefetchService(appState: self)
+        backgroundPrefetchService = prefetchService
+        prefetchService.start()
+        prefetchService.notifyConnected()
     }
 
     /// Switch to a different profile and reinitialize cache services.

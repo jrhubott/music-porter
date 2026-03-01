@@ -254,11 +254,24 @@ struct PipelineView: View {
         let usbDir = appState.usbDir
         let targetDir = usbDir.isEmpty ? destDir : destDir.appendingPathComponent(usbDir)
 
-        let localFiles = appState.downloadManager.localFiles(playlist: playlist.key)
-        guard !localFiles.isEmpty else { return }
+        var fileURLs = appState.downloadManager.localFiles(playlist: playlist.key)
+
+        // Supplement with cached files not already in local downloads
+        if let cacheManager = appState.audioCacheManager {
+            let localNames = Set(fileURLs.map(\.lastPathComponent))
+            let cachedEntries = await cacheManager.getCachedFileInfos(playlist.key)
+            for entry in cachedEntries {
+                if localNames.contains(entry.displayFilename) { continue }
+                if let cachedURL = await cacheManager.isCached(entry.uuid) {
+                    fileURLs.append(cachedURL)
+                }
+            }
+        }
+
+        guard !fileURLs.isEmpty else { return }
 
         _ = await appState.usbExport.exportFiles(
-            urls: localFiles, to: targetDir, subdirectory: playlist.name)
+            urls: fileURLs, to: targetDir, subdirectory: playlist.name)
     }
 
     private func statusColor(_ status: String) -> Color {

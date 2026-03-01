@@ -38,7 +38,19 @@ struct PlaylistDetailView: View {
             }
         }
         .navigationTitle(playlist.name)
-        .refreshable { await vm.load(api: appState.apiClient, playlist: playlist.key, downloadManager: appState.downloadManager) }
-        .task { await vm.load(api: appState.apiClient, playlist: playlist.key, downloadManager: appState.downloadManager) }
+        .refreshable {
+            await vm.load(
+                api: appState.apiClient, playlist: playlist.key,
+                downloadManager: appState.downloadManager,
+                metadataCache: appState.metadataCache,
+                profile: appState.activeProfile)
+        }
+        .task {
+            await vm.load(
+                api: appState.apiClient, playlist: playlist.key,
+                downloadManager: appState.downloadManager,
+                metadataCache: appState.metadataCache,
+                profile: appState.activeProfile)
+        }
     }
 }

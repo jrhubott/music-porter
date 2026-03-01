@@ -46,6 +46,7 @@ final class AudioPlayerService {
     // MARK: - Private State
 
     @ObservationIgnored private var apiClient: APIClient?
+    @ObservationIgnored private var audioCacheManager: AudioCacheManager?
     @ObservationIgnored private var avPlayer: AVPlayer?
     @ObservationIgnored private var timeObserver: Any?
     @ObservationIgnored private var endObserver: NSObjectProtocol?
@@ -66,8 +67,9 @@ final class AudioPlayerService {
 
     // MARK: - Configuration
 
-    func configure(apiClient: APIClient) {
+    func configure(apiClient: APIClient, audioCacheManager: AudioCacheManager? = nil) {
         self.apiClient = apiClient
+        self.audioCacheManager = audioCacheManager
         configureAudioSession()
         configureRemoteCommands()
     }
@@ -85,25 +87,45 @@ final class AudioPlayerService {
         serverQueuePlaylist = playlist
         serverQueueIndex = tracks.firstIndex(where: { $0.filename == track.filename }) ?? 0
 
-        // Determine URL: local file if downloaded, otherwise stream from server
+        // Priority 1: local file
         let localFiles = downloadManager.localFiles(playlist: playlist)
-        let localFile = localFiles.first { $0.lastPathComponent == track.filename }
-
-        let asset: AVURLAsset
-        if let localFile {
-            asset = AVURLAsset(url: localFile)
-        } else {
-            guard let streamURL = apiClient.fileDownloadURL(playlist: playlist, filename: track.filename) else { return }
-            let headers = ["Authorization": "Bearer \(apiClient.apiKey ?? "")"]
-            asset = AVURLAsset(url: streamURL, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
+        if let localFile = localFiles.first(where: { $0.lastPathComponent == track.filename }) {
+            let asset = AVURLAsset(url: localFile)
+            beginPlayback(asset: asset, track: track, playlist: playlist)
+            return
         }
 
+        // Priority 2: cache — requires async check, then fall back to server stream
+        let cacheManager = audioCacheManager
+        let uuid = track.uuid
+
+        Task {
+            var cachedURL: URL?
+            if let uuid, let cacheManager {
+                cachedURL = await cacheManager.isCached(uuid)
+            }
+
+            if let cachedURL {
+                let asset = AVURLAsset(url: cachedURL)
+                beginPlayback(asset: asset, track: track, playlist: playlist)
+            } else {
+                // Priority 3: server stream
+                guard let streamURL = apiClient.fileDownloadURL(playlist: playlist, filename: track.filename) else { return }
+                let headers = ["Authorization": "Bearer \(apiClient.apiKey ?? "")"]
+                let asset = AVURLAsset(url: streamURL, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
+                beginPlayback(asset: asset, track: track, playlist: playlist)
+            }
+        }
+    }
+
+    /// Start playback with a resolved asset.
+    private func beginPlayback(asset: AVURLAsset, track: Track, playlist: String) {
         let item = AVPlayerItem(asset: asset)
         let player = AVPlayer(playerItem: item)
         self.avPlayer = player
 
         // Artwork URL
-        let artworkURL = apiClient.artworkURL(playlist: playlist, filename: track.filename)
+        let artworkURL = apiClient?.artworkURL(playlist: playlist, filename: track.filename)
 
         nowPlaying = NowPlayingInfo(
             title: track.displayTitle,
@@ -123,7 +145,7 @@ final class AudioPlayerService {
             let cacheKey = "\(artworkPlaylist)/\(artworkFilename)"
             if let cached = ArtworkCache.shared.get(cacheKey) {
                 self.artworkImage = cached
-            } else if let image = await apiClient.fetchArtwork(playlist: artworkPlaylist, filename: artworkFilename) {
+            } else if let image = await apiClient?.fetchArtwork(playlist: artworkPlaylist, filename: artworkFilename) {
                 ArtworkCache.shared.set(cacheKey, image: image)
                 self.artworkImage = image
             }
