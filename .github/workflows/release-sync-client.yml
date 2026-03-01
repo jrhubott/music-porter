@@ -102,17 +102,36 @@ jobs:
 
       # ── GUI installers ──
 
+      - name: Resolve electron version
+        id: electron
+        shell: bash
+        run: |
+          ELECTRON_VER=$(node -e "console.log(require('electron/package.json').version)")
+          echo "version=$ELECTRON_VER" >> "$GITHUB_OUTPUT"
+
       - name: Build GUI — macOS arm64
         if: matrix.os == 'macos'
-        run: npx electron-builder --mac dmg zip --arm64 --project packages/gui --publish never
+        run: >-
+          npx electron-builder --mac dmg zip --arm64
+          --project packages/gui
+          --publish never
+          --electron-version ${{ steps.electron.outputs.version }}
 
       - name: Build GUI — macOS x64
         if: matrix.os == 'macos'
-        run: npx electron-builder --mac dmg zip --x64 --project packages/gui --publish never
+        run: >-
+          npx electron-builder --mac dmg zip --x64
+          --project packages/gui
+          --publish never
+          --electron-version ${{ steps.electron.outputs.version }}
 
       - name: Build GUI — Windows x64
         if: matrix.os == 'windows'
-        run: npx electron-builder --win nsis --x64 --project packages/gui --publish never
+        run: >-
+          npx electron-builder --win nsis --x64
+          --project packages/gui
+          --publish never
+          --electron-version ${{ steps.electron.outputs.version }}
 
       # ── Upload artifacts ──
 
