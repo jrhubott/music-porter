@@ -516,12 +516,15 @@ def api_playlists_list():
     stats = {s['playlist']: s
              for s in ctx.track_db.get_playlist_stats()} if ctx.track_db else {}
 
-    # Build ETag from playlist config + file counts + size + duration
+    today = date.today()
+
+    # Build ETag from playlist config + file counts + size + duration + freshness
     etag_parts = [
         (p.key, p.name,
          stats.get(p.key, {}).get('track_count', 0),
          stats.get(p.key, {}).get('total_size_bytes', 0),
-         stats.get(p.key, {}).get('total_duration_s', 0))
+         stats.get(p.key, {}).get('total_duration_s', 0),
+         stats.get(p.key, {}).get('max_updated_at', 0))
         for p in config.playlists
     ]
     etag_hash = hashlib.md5(
@@ -533,11 +536,17 @@ def api_playlists_list():
     if if_none_match == etag:
         return Response(status=304)
 
+    def _playlist_freshness(key):
+        max_ts = stats.get(key, {}).get('max_updated_at', 0)
+        last_mod = datetime.fromtimestamp(max_ts) if max_ts > 0 else None
+        return _get_freshness_level(last_mod, today)
+
     resp = jsonify([
         {'key': p.key, 'url': p.url, 'name': p.name,
          'file_count': stats.get(p.key, {}).get('track_count', 0),
          'size_bytes': stats.get(p.key, {}).get('total_size_bytes', 0),
-         'duration_s': stats.get(p.key, {}).get('total_duration_s', 0)}
+         'duration_s': stats.get(p.key, {}).get('total_duration_s', 0),
+         'freshness': _playlist_freshness(p.key)}
         for p in config.playlists
     ])
     resp.headers['ETag'] = etag
