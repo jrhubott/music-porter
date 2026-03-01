@@ -2800,7 +2800,8 @@ class TrackDB:
         """Return per-playlist aggregate stats.
 
         Returns list of dicts with keys: playlist, track_count,
-        total_size_bytes, total_duration_s, cover_with, cover_without.
+        total_size_bytes, total_duration_s, max_updated_at,
+        cover_with, cover_without.
         """
         conn = self._connect()
         try:
@@ -2809,6 +2810,7 @@ class TrackDB:
                        COUNT(*) AS track_count,
                        COALESCE(SUM(file_size_bytes), 0) AS total_size_bytes,
                        COALESCE(SUM(duration_s), 0) AS total_duration_s,
+                       COALESCE(MAX(updated_at), 0) AS max_updated_at,
                        SUM(CASE WHEN cover_art_path IS NOT NULL
                            THEN 1 ELSE 0 END) AS cover_with,
                        SUM(CASE WHEN cover_art_path IS NULL
