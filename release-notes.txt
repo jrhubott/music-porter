@@ -1,3 +1,9 @@
+Version 2.37.3 (2026-02-28):
+• iOS connection health monitor — auto-detects server loss via periodic pings, transitions to offline mode after 2 consecutive failures, auto-reconnects every 15s
+• iOS manual offline mode — "Go Offline" button in Settings enters offline mode without auto-reconnect, "Reconnect" button with spinner to restore connection
+• Fix iOS OfflineBanner blocking navigation bar back button — switch from safeAreaInset to VStack layout
+• iOS app version bumped to 1.6.1
+
 Version 2.37.2 (2026-02-28):
 • iOS offline mode — tri-state connection model (connected/offline-with-cache/disconnected) shows cached playlists, tracks, and playback when server is unreachable
 • Replace iOS download system with cache-only model — unified prefetch and pin-based caching replaces per-file download manager

@@ -60,6 +60,8 @@
 		A1000003C /* CachePreferencesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003C /* CachePreferencesStore.swift */; };
 		A1000003D /* BackgroundPrefetchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003D /* BackgroundPrefetchService.swift */; };
 		A1000003E /* OfflineBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003E /* OfflineBanner.swift */; };
+		A1000003F /* ConnectionConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003F /* ConnectionConstants.swift */; };
+		A10000040 /* ConnectionMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000040 /* ConnectionMonitor.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -118,6 +120,8 @@
 		A2000003C /* CachePreferencesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CachePreferencesStore.swift; sourceTree = "<group>"; };
 		A2000003D /* BackgroundPrefetchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundPrefetchService.swift; sourceTree = "<group>"; };
 		A2000003E /* OfflineBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineBanner.swift; sourceTree = "<group>"; };
+		A2000003F /* ConnectionConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionConstants.swift; sourceTree = "<group>"; };
+		A20000040 /* ConnectionMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionMonitor.swift; sourceTree = "<group>"; };
 		A30000001 /* MusicPorter.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MusicPorter.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -183,6 +187,8 @@
 				A2000001E /* MusicKitService.swift */,
 				A20000020 /* USBExportService.swift */,
 				A20000029 /* AudioPlayerService.swift */,
+				A2000003F /* ConnectionConstants.swift */,
+				A20000040 /* ConnectionMonitor.swift */,
 				A50000011 /* Cache */,
 			);
 			path = Services;
@@ -387,6 +393,8 @@
 				A1000003D /* BackgroundPrefetchService.swift in Sources */,
 				A1000003B /* DeleteServerDataSheet.swift in Sources */,
 				A1000003E /* OfflineBanner.swift in Sources */,
+				A1000003F /* ConnectionConstants.swift in Sources */,
+				A10000040 /* ConnectionMonitor.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

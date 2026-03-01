@@ -78,6 +78,27 @@ final class APIClient {
         try await get("/api/status")
     }
 
+    /// Lightweight health check: returns true if the server responds within the timeout.
+    func ping(timeoutSeconds: Int) async -> Bool {
+        await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                do {
+                    let _: ServerStatus = try await self.getStatus()
+                    return true
+                } catch {
+                    return false
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(timeoutSeconds))
+                return false
+            }
+            let result = await group.next() ?? false
+            group.cancelAll()
+            return result
+        }
+    }
+
     func getServerInfo() async throws -> ServerInfoResponse {
         try await get("/api/server-info")
     }

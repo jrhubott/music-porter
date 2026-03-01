@@ -102,31 +102,31 @@ struct MainTabView: View {
 
     var body: some View {
         @Bindable var state = appState
-        TabView(selection: $state.selectedTab) {
-            LibraryView()
-                .safeAreaInset(edge: .bottom) { miniPlayerSpacer }
-                .tabItem { Label("Library", systemImage: "music.note.list") }
-                .tag(0)
-
-            PipelineView()
-                .safeAreaInset(edge: .bottom) { miniPlayerSpacer }
-                .tabItem { Label("Process", systemImage: "arrow.triangle.2.circlepath") }
-                .tag(1)
-
-            SettingsView()
-                .safeAreaInset(edge: .bottom) { miniPlayerSpacer }
-                .tabItem { Label("Settings", systemImage: "gear") }
-                .tag(2)
-        }
-        .overlay(alignment: .bottom) {
-            if appState.audioPlayer.hasCurrentTrack {
-                MiniPlayerView()
-                    .padding(.bottom, 49) // standard tab bar height
-            }
-        }
-        .safeAreaInset(edge: .top) {
+        VStack(spacing: 0) {
             if appState.isOfflineMode {
                 OfflineBanner()
+            }
+            TabView(selection: $state.selectedTab) {
+                LibraryView()
+                    .safeAreaInset(edge: .bottom) { miniPlayerSpacer }
+                    .tabItem { Label("Library", systemImage: "music.note.list") }
+                    .tag(0)
+
+                PipelineView()
+                    .safeAreaInset(edge: .bottom) { miniPlayerSpacer }
+                    .tabItem { Label("Process", systemImage: "arrow.triangle.2.circlepath") }
+                    .tag(1)
+
+                SettingsView()
+                    .safeAreaInset(edge: .bottom) { miniPlayerSpacer }
+                    .tabItem { Label("Settings", systemImage: "gear") }
+                    .tag(2)
+            }
+            .overlay(alignment: .bottom) {
+                if appState.audioPlayer.hasCurrentTrack {
+                    MiniPlayerView()
+                        .padding(.bottom, 49) // standard tab bar height
+                }
             }
         }
         .animation(.easeInOut(duration: 0.25), value: appState.audioPlayer.hasCurrentTrack)

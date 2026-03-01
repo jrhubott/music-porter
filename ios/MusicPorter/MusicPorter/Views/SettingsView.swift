@@ -5,6 +5,7 @@ struct SettingsView: View {
     @State private var error: String?
     @State private var cacheSize: Int64 = 0
     @State private var showClearCacheConfirmation = false
+    @State private var isReconnecting = false
 
     /// Max cache size options in bytes. 0 = unlimited.
     private static let cacheSizeOptions: [(label: String, bytes: Int64)] = [
@@ -37,18 +38,35 @@ struct SettingsView: View {
                             LabeledContent("External URL", value: server.externalURL!)
                         }
                         Button {
+                            isReconnecting = true
                             Task {
-                                let success = await appState.attemptAutoReconnect()
-                                if success {
-                                    appState.isOfflineMode = false
+                                if let savedServer = appState.savedServer,
+                                   let apiKey = KeychainService.load() {
+                                    do {
+                                        try await appState.connect(server: savedServer, apiKey: apiKey)
+                                        appState.isOfflineMode = false
+                                    } catch {
+                                        self.error = "Reconnect failed: \(error.localizedDescription)"
+                                    }
                                 }
+                                isReconnecting = false
                             }
                         } label: {
-                            Label("Reconnect", systemImage: "arrow.clockwise")
+                            HStack {
+                                if isReconnecting {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                    Text("Reconnecting...")
+                                } else {
+                                    Label("Reconnect", systemImage: "wifi")
+                                }
+                            }
                         }
+                        .disabled(isReconnecting)
                         Button("Disconnect", role: .destructive) {
                             appState.disconnect(explicit: true)
                         }
+                        .disabled(isReconnecting)
                     } else if let server = appState.currentServer {
                         HStack(spacing: 12) {
                             connectionIcon
@@ -67,6 +85,11 @@ struct SettingsView: View {
                             LabeledContent("External URL", value: server.externalURL!)
                         }
                         LabeledContent("Local URL", value: server.localURL?.absoluteString ?? "\(server.host):\(server.port)")
+                        Button {
+                            appState.goOffline()
+                        } label: {
+                            Label("Go Offline", systemImage: "cloud.slash")
+                        }
                         Button("Disconnect", role: .destructive) {
                             appState.disconnect()
                         }

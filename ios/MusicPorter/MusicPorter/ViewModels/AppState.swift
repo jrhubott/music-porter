@@ -27,6 +27,9 @@ final class AppState {
     var prefetchEngine: PrefetchEngine?
     var backgroundPrefetchService: BackgroundPrefetchService?
 
+    // Connection health monitoring
+    var connectionMonitor: ConnectionMonitor?
+
     // Connection state
     var isConnected: Bool { apiClient.isConnected }
     var currentServer: ServerConnection? { apiClient.server }
@@ -78,6 +81,7 @@ final class AppState {
         autoReconnectTask = nil
         isReconnecting = false
         reconnectAttempt = 0
+        connectionMonitor?.notifyManualOffline()
         Task { await checkAndEnterOfflineMode() }
     }
 
@@ -96,6 +100,12 @@ final class AppState {
             checkAPIVersion(response.apiVersion)
             await fetchProfiles()
             initializeCacheServices()
+
+            // Start or restart connection health monitoring
+            if connectionMonitor == nil {
+                connectionMonitor = ConnectionMonitor(appState: self)
+            }
+            connectionMonitor?.notifyConnected()
         } else {
             throw APIError.unauthorized
         }
@@ -195,6 +205,8 @@ final class AppState {
         apiVersionWarning = nil
 
         if explicit {
+            connectionMonitor?.notifyDisconnected()
+            connectionMonitor = nil
             savedServer = nil
             isOfflineMode = false
             metadataCache = nil
@@ -231,6 +243,8 @@ final class AppState {
     // MARK: - Offline Mode
 
     /// Enter offline mode: show cached content without a server connection.
+    /// Does not manage connection monitor — callers handle that based on context
+    /// (manual vs auto-detected offline).
     func enterOfflineMode() {
         isOfflineMode = true
         isReconnecting = false
@@ -238,6 +252,15 @@ final class AppState {
         autoReconnectTask = nil
         reconnectAttempt = 0
         initializeCacheServicesForOffline()
+    }
+
+    /// Go offline while connected: keeps cache alive, stops server calls, no auto-reconnect.
+    /// Called from Settings "Go Offline" button.
+    func goOffline() {
+        isOfflineMode = true
+        apiClient.isConnected = false
+        backgroundPrefetchService?.stop()
+        connectionMonitor?.notifyManualOffline()
     }
 
     /// Initialize cache services for offline use — only needs a profile string, no server.
