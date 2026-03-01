@@ -218,7 +218,7 @@ export function SourcesPage() {
     setIsPipelining(true);
     try {
       const result = await ipc.startPipeline(
-        playlistKey ? { playlist: playlistKey } : undefined,
+        playlistKey ? { playlist: playlistKey } : { auto: true },
       );
       setPipelineTaskId(result.task_id);
     } catch (err) {
