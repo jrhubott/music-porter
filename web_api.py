@@ -513,11 +513,17 @@ def api_convert_batch():
 def api_playlists_list():
     ctx = _ctx()
     config = ctx.get_config()
-    stats = {s['playlist']: s['track_count']
+    stats = {s['playlist']: s
              for s in ctx.track_db.get_playlist_stats()} if ctx.track_db else {}
 
-    # Build ETag from playlist config + file counts
-    etag_parts = [(p.key, p.name, stats.get(p.key, 0)) for p in config.playlists]
+    # Build ETag from playlist config + file counts + size + duration
+    etag_parts = [
+        (p.key, p.name,
+         stats.get(p.key, {}).get('track_count', 0),
+         stats.get(p.key, {}).get('total_size_bytes', 0),
+         stats.get(p.key, {}).get('total_duration_s', 0))
+        for p in config.playlists
+    ]
     etag_hash = hashlib.md5(
         json.dumps(etag_parts, sort_keys=True).encode()
     ).hexdigest()
@@ -529,7 +535,9 @@ def api_playlists_list():
 
     resp = jsonify([
         {'key': p.key, 'url': p.url, 'name': p.name,
-         'file_count': stats.get(p.key, 0)}
+         'file_count': stats.get(p.key, {}).get('track_count', 0),
+         'size_bytes': stats.get(p.key, {}).get('total_size_bytes', 0),
+         'duration_s': stats.get(p.key, {}).get('total_duration_s', 0)}
         for p in config.playlists
     ])
     resp.headers['ETag'] = etag
