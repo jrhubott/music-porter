@@ -46,6 +46,7 @@ final class AudioPlayerService {
     // MARK: - Private State
 
     @ObservationIgnored private var apiClient: APIClient?
+    @ObservationIgnored private var audioCacheManager: AudioCacheManager?
     @ObservationIgnored private var avPlayer: AVPlayer?
     @ObservationIgnored private var timeObserver: Any?
     @ObservationIgnored private var endObserver: NSObjectProtocol?
@@ -57,7 +58,6 @@ final class AudioPlayerService {
     @ObservationIgnored private var serverQueue: [Track] = []
     @ObservationIgnored private var serverQueuePlaylist: String?
     @ObservationIgnored private var serverQueueIndex: Int = 0
-    @ObservationIgnored private var serverQueueDownloadManager: FileDownloadManager?
 
     @ObservationIgnored private var appleMusicQueue: [MusicKit.Track] = []
     @ObservationIgnored private var appleMusicQueueIndex: Int = 0
@@ -66,44 +66,57 @@ final class AudioPlayerService {
 
     // MARK: - Configuration
 
-    func configure(apiClient: APIClient) {
+    func configure(apiClient: APIClient, audioCacheManager: AudioCacheManager? = nil) {
         self.apiClient = apiClient
+        self.audioCacheManager = audioCacheManager
         configureAudioSession()
         configureRemoteCommands()
     }
 
     // MARK: - Server Track Playback
 
-    func playServerTrack(track: Track, in tracks: [Track], playlist: String, downloadManager: FileDownloadManager) {
+    func playServerTrack(track: Track, in tracks: [Track], playlist: String) {
         stopInternal()
 
         guard let apiClient else { return }
-        self.serverQueueDownloadManager = downloadManager
 
         // Build queue
         serverQueue = tracks
         serverQueuePlaylist = playlist
         serverQueueIndex = tracks.firstIndex(where: { $0.filename == track.filename }) ?? 0
 
-        // Determine URL: local file if downloaded, otherwise stream from server
-        let localFiles = downloadManager.localFiles(playlist: playlist)
-        let localFile = localFiles.first { $0.lastPathComponent == track.filename }
+        // Priority 1: cache — requires async check, then fall back to server stream
+        let cacheManager = audioCacheManager
+        let uuid = track.uuid
 
-        let asset: AVURLAsset
-        if let localFile {
-            asset = AVURLAsset(url: localFile)
-        } else {
-            guard let streamURL = apiClient.fileDownloadURL(playlist: playlist, filename: track.filename) else { return }
-            let headers = ["Authorization": "Bearer \(apiClient.apiKey ?? "")"]
-            asset = AVURLAsset(url: streamURL, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
+        Task {
+            var cachedURL: URL?
+            if let uuid, let cacheManager {
+                cachedURL = await cacheManager.isCached(uuid)
+            }
+
+            if let cachedURL {
+                let asset = AVURLAsset(url: cachedURL)
+                beginPlayback(asset: asset, track: track, playlist: playlist)
+            } else {
+                // Priority 2: server stream — skip if server is unreachable
+                guard apiClient.isConnected else { return }
+                guard let streamURL = apiClient.fileDownloadURL(playlist: playlist, filename: track.filename) else { return }
+                let headers = ["Authorization": "Bearer \(apiClient.apiKey ?? "")"]
+                let asset = AVURLAsset(url: streamURL, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
+                beginPlayback(asset: asset, track: track, playlist: playlist)
+            }
         }
+    }
 
+    /// Start playback with a resolved asset.
+    private func beginPlayback(asset: AVURLAsset, track: Track, playlist: String) {
         let item = AVPlayerItem(asset: asset)
         let player = AVPlayer(playerItem: item)
         self.avPlayer = player
 
         // Artwork URL
-        let artworkURL = apiClient.artworkURL(playlist: playlist, filename: track.filename)
+        let artworkURL = apiClient?.artworkURL(playlist: playlist, filename: track.filename)
 
         nowPlaying = NowPlayingInfo(
             title: track.displayTitle,
@@ -123,7 +136,7 @@ final class AudioPlayerService {
             let cacheKey = "\(artworkPlaylist)/\(artworkFilename)"
             if let cached = ArtworkCache.shared.get(cacheKey) {
                 self.artworkImage = cached
-            } else if let image = await apiClient.fetchArtwork(playlist: artworkPlaylist, filename: artworkFilename) {
+            } else if let image = await apiClient?.fetchArtwork(playlist: artworkPlaylist, filename: artworkFilename) {
                 ArtworkCache.shared.set(cacheKey, image: image)
                 self.artworkImage = image
             }
@@ -206,10 +219,9 @@ final class AudioPlayerService {
         switch nowPlaying.source {
         case .serverTrack:
             guard serverQueueIndex < serverQueue.count - 1,
-                  let playlist = serverQueuePlaylist,
-                  let dm = serverQueueDownloadManager else { return }
+                  let playlist = serverQueuePlaylist else { return }
             serverQueueIndex += 1
-            playServerTrack(track: serverQueue[serverQueueIndex], in: serverQueue, playlist: playlist, downloadManager: dm)
+            playServerTrack(track: serverQueue[serverQueueIndex], in: serverQueue, playlist: playlist)
 
         case .appleMusic:
             guard appleMusicQueueIndex < appleMusicQueue.count - 1 else { return }
@@ -232,10 +244,9 @@ final class AudioPlayerService {
         switch nowPlaying.source {
         case .serverTrack:
             guard serverQueueIndex > 0,
-                  let playlist = serverQueuePlaylist,
-                  let dm = serverQueueDownloadManager else { return }
+                  let playlist = serverQueuePlaylist else { return }
             serverQueueIndex -= 1
-            playServerTrack(track: serverQueue[serverQueueIndex], in: serverQueue, playlist: playlist, downloadManager: dm)
+            playServerTrack(track: serverQueue[serverQueueIndex], in: serverQueue, playlist: playlist)
 
         case .appleMusic:
             guard appleMusicQueueIndex > 0 else { return }

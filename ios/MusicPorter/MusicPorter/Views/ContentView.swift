@@ -8,6 +8,8 @@ struct ContentView: View {
         Group {
             if appState.isConnected {
                 MainTabView()
+            } else if appState.isOfflineMode {
+                MainTabView()
             } else if appState.isReconnecting, let server = appState.savedServer {
                 ReconnectingView(server: server)
             } else {
@@ -15,7 +17,10 @@ struct ContentView: View {
             }
         }
         .task {
-            _ = await appState.attemptAutoReconnect()
+            let connected = await appState.attemptAutoReconnect()
+            if !connected {
+                await appState.checkAndEnterOfflineMode()
+            }
         }
     }
 }
@@ -64,6 +69,18 @@ struct ReconnectingView: View {
                     .foregroundStyle(.secondary)
             }
 
+            if appState.reconnectAttempt >= 2 {
+                Button {
+                    appState.enterOfflineMode()
+                } label: {
+                    Label("Use Offline", systemImage: "wifi.slash")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.secondary)
+                .padding(.horizontal, 40)
+            }
+
             Spacer()
 
             Button(role: .destructive) {
@@ -107,7 +124,13 @@ struct MainTabView: View {
                     .padding(.bottom, 49) // standard tab bar height
             }
         }
+        .safeAreaInset(edge: .top) {
+            if appState.isOfflineMode {
+                OfflineBanner()
+            }
+        }
         .animation(.easeInOut(duration: 0.25), value: appState.audioPlayer.hasCurrentTrack)
+        .animation(.easeInOut(duration: 0.25), value: appState.isOfflineMode)
     }
 
     /// Invisible spacer that reserves scroll space so list content

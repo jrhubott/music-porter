@@ -72,13 +72,15 @@ actor AudioCacheManager {
                 size: data.count,
                 cachedAt: CacheUtils.isoNow()
             )
+            let isoFormatter = ISO8601DateFormatter()
+            isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
             if let serverCreatedAt {
-                entry.serverCreatedAt = ISO8601DateFormatter().string(
+                entry.serverCreatedAt = isoFormatter.string(
                     from: Date(timeIntervalSince1970: serverCreatedAt)
                 )
             }
             if let serverUpdatedAt {
-                entry.serverUpdatedAt = ISO8601DateFormatter().string(
+                entry.serverUpdatedAt = isoFormatter.string(
                     from: Date(timeIntervalSince1970: serverUpdatedAt)
                 )
             }
@@ -127,13 +129,15 @@ actor AudioCacheManager {
                 size: fileSize,
                 cachedAt: CacheUtils.isoNow()
             )
+            let isoFormatter = ISO8601DateFormatter()
+            isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
             if let serverCreatedAt {
-                entry.serverCreatedAt = ISO8601DateFormatter().string(
+                entry.serverCreatedAt = isoFormatter.string(
                     from: Date(timeIntervalSince1970: serverCreatedAt)
                 )
             }
             if let serverUpdatedAt {
-                entry.serverUpdatedAt = ISO8601DateFormatter().string(
+                entry.serverUpdatedAt = isoFormatter.string(
                     from: Date(timeIntervalSince1970: serverUpdatedAt)
                 )
             }
@@ -220,8 +224,10 @@ actor AudioCacheManager {
               let cachedUpdatedAt = entry.serverUpdatedAt else { return false }
         let formatter = ISO8601DateFormatter()
         guard let cachedDate = formatter.date(from: cachedUpdatedAt) else { return false }
-        let serverTime = Date(timeIntervalSince1970: serverUpdatedAt)
-        return serverTime > cachedDate
+        // Compare at integer-second precision to match ISO8601 storage format.
+        // Sub-second differences between the Double timestamp and the truncated
+        // ISO8601 string would otherwise make every file appear stale.
+        return Int(serverUpdatedAt) > Int(cachedDate.timeIntervalSince1970)
     }
 
     // MARK: - Eviction

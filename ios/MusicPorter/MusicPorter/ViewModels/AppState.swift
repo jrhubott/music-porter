@@ -15,18 +15,22 @@ final class AppState {
     let apiClient = APIClient()
     let discovery = ServerDiscovery()
     let musicKit = MusicKitService()
-    let downloadManager = FileDownloadManager()
     let usbExport = USBExportService()
     let audioPlayer = AudioPlayerService()
+
+    // Cache preferences (always available, not tied to connection)
+    let cachePreferences = CachePreferencesStore()
 
     // Cache services (initialized on connect, per-profile)
     var metadataCache: MetadataCache?
     var audioCacheManager: AudioCacheManager?
     var prefetchEngine: PrefetchEngine?
+    var backgroundPrefetchService: BackgroundPrefetchService?
 
     // Connection state
     var isConnected: Bool { apiClient.isConnected }
     var currentServer: ServerConnection? { apiClient.server }
+    var isOfflineMode = false
 
     // Tab coordination for guided flow
     var selectedTab: Int = 0
@@ -74,11 +78,11 @@ final class AppState {
         autoReconnectTask = nil
         isReconnecting = false
         reconnectAttempt = 0
+        Task { await checkAndEnterOfflineMode() }
     }
 
     func connect(server: ServerConnection, apiKey: String) async throws {
         apiClient.configure(server: server, apiKey: apiKey)
-        downloadManager.configure(apiClient: apiClient)
         audioPlayer.configure(apiClient: apiClient)
         let response = try await resolveConnection(server: server)
         if response.valid {
@@ -179,14 +183,23 @@ final class AppState {
         }
     }
 
-    func disconnect() {
+    /// Disconnect from the server.
+    /// - Parameter explicit: When `true` (user tapped Disconnect), clears everything.
+    ///   When `false` (connection lost), keeps `savedServer` and cache services alive for offline mode.
+    func disconnect(explicit: Bool = true) {
         audioPlayer.stop()
-        apiClient.disconnect()
-        savedServer = nil
-        apiVersionWarning = nil
-        metadataCache = nil
-        audioCacheManager = nil
+        backgroundPrefetchService?.stop()
+        backgroundPrefetchService = nil
         prefetchEngine = nil
+        apiClient.disconnect()
+        apiVersionWarning = nil
+
+        if explicit {
+            savedServer = nil
+            isOfflineMode = false
+            metadataCache = nil
+            audioCacheManager = nil
+        }
     }
 
     /// Initialize cache services for the active profile.
@@ -198,12 +211,58 @@ final class AppState {
         metadataCache = cache
         audioCacheManager = audioCache
         prefetchEngine = PrefetchEngine(apiClient: apiClient, cacheManager: audioCache)
+
+        // Wire cache into audio player
+        audioPlayer.configure(apiClient: apiClient, audioCacheManager: audioCache)
+
+        // Start background prefetch service
+        let prefetchService = BackgroundPrefetchService(appState: self)
+        backgroundPrefetchService = prefetchService
+        prefetchService.start()
+        prefetchService.notifyConnected()
     }
 
     /// Switch to a different profile and reinitialize cache services.
     func switchProfile(_ newProfile: String) {
         activeProfile = newProfile
         initializeCacheServices()
+    }
+
+    // MARK: - Offline Mode
+
+    /// Enter offline mode: show cached content without a server connection.
+    func enterOfflineMode() {
+        isOfflineMode = true
+        isReconnecting = false
+        autoReconnectTask?.cancel()
+        autoReconnectTask = nil
+        reconnectAttempt = 0
+        initializeCacheServicesForOffline()
+    }
+
+    /// Initialize cache services for offline use — only needs a profile string, no server.
+    /// Does NOT create PrefetchEngine or BackgroundPrefetchService (those need server).
+    private func initializeCacheServicesForOffline() {
+        let profile = activeProfile
+        guard !profile.isEmpty else { return }
+        // Only create if not already initialized (may still exist from previous connection)
+        if metadataCache == nil {
+            metadataCache = MetadataCache(profile: profile)
+        }
+        if audioCacheManager == nil {
+            let audioCache = AudioCacheManager(profile: profile)
+            audioCacheManager = audioCache
+            audioPlayer.configure(apiClient: apiClient, audioCacheManager: audioCache)
+        }
+    }
+
+    /// Check if offline mode is viable and enter it if so.
+    func checkAndEnterOfflineMode() async {
+        guard !activeProfile.isEmpty, savedServer != nil else { return }
+        guard let cache = metadataCache ?? MetadataCache(profile: activeProfile) as MetadataCache? else { return }
+        let cachedPlaylists = await cache.getCachedPlaylists()
+        guard !cachedPlaylists.isEmpty else { return }
+        enterOfflineMode()
     }
 
     /// Try to reconnect using saved server and keychain API key.

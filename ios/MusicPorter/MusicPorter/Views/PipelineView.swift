@@ -20,17 +20,21 @@ struct PipelineView: View {
     var body: some View {
         NavigationStack {
             Form {
-                if !vm.isRunning {
-                    sourceSection
-                    advancedSection
-                    processButton
-                }
+                if appState.isOfflineMode {
+                    offlineSection
+                } else {
+                    if !vm.isRunning {
+                        sourceSection
+                        advancedSection
+                        processButton
+                    }
 
-                if vm.isRunning || !vm.logMessages.isEmpty {
-                    ProgressPanel(vm: vm)
-                }
+                    if vm.isRunning || !vm.logMessages.isEmpty {
+                        ProgressPanel(vm: vm)
+                    }
 
-                postProcessSection
+                    postProcessSection
+                }
                 taskHistorySection
             }
             .navigationTitle("Process")
@@ -46,7 +50,10 @@ struct PipelineView: View {
                     }
                 }
             }
-            .task { await loadData() }
+            .task {
+                guard !appState.isOfflineMode else { return }
+                await loadData()
+            }
             .onChange(of: selectedPlaylist) { _, newPlaylist in
                 if let key = newPlaylist?.key {
                     Task { await loadEQForPlaylist(key) }
@@ -68,6 +75,24 @@ struct PipelineView: View {
                     }
                 }
             }
+        }
+    }
+
+    // MARK: - Offline
+
+    private var offlineSection: some View {
+        Section {
+            VStack(spacing: 12) {
+                Image(systemName: "wifi.slash")
+                    .font(.system(size: 36))
+                    .foregroundStyle(.secondary)
+                Text("Processing requires a server connection")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 20)
         }
     }
 
@@ -248,17 +273,25 @@ struct PipelineView: View {
     }
 
     private func exportToFolder(_ destDir: URL) async {
-        guard let playlist = selectedPlaylist else { return }
+        guard let playlist = selectedPlaylist,
+              let cacheManager = appState.audioCacheManager else { return }
 
         // Append profile's USB directory if configured
         let usbDir = appState.usbDir
         let targetDir = usbDir.isEmpty ? destDir : destDir.appendingPathComponent(usbDir)
 
-        let localFiles = appState.downloadManager.localFiles(playlist: playlist.key)
-        guard !localFiles.isEmpty else { return }
+        var fileURLs: [URL] = []
+        let cachedEntries = await cacheManager.getCachedFileInfos(playlist.key)
+        for entry in cachedEntries {
+            if let cachedURL = await cacheManager.isCached(entry.uuid) {
+                fileURLs.append(cachedURL)
+            }
+        }
+
+        guard !fileURLs.isEmpty else { return }
 
         _ = await appState.usbExport.exportFiles(
-            urls: localFiles, to: targetDir, subdirectory: playlist.name)
+            urls: fileURLs, to: targetDir, subdirectory: playlist.name)
     }
 
     private func statusColor(_ status: String) -> Color {

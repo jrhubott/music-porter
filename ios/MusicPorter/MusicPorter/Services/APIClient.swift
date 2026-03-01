@@ -62,12 +62,13 @@ final class APIClient {
     // MARK: - URL Construction
 
     /// Build a full API URL from a path using the active base URL.
-    func buildURL(path: String) -> URL? {
+    func buildURL(path: String, queryItems: [URLQueryItem]? = nil) -> URL? {
         guard let baseURL = activeBaseURL else { return nil }
         guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
             return nil
         }
         components.path = path.hasPrefix("/") ? path : "/" + path
+        if let queryItems { components.queryItems = queryItems }
         return components.url
     }
 
@@ -147,10 +148,13 @@ final class APIClient {
         metadataCache: MetadataCache
     ) async throws -> FileListResponse {
         let cachedETag = await metadataCache.getETag(playlist)
-        var path = "/api/files/\(playlist)"
-        if let profile, !profile.isEmpty { path += "?profile=\(profile)" }
+        let path = "/api/files/\(playlist)"
+        var queryItems: [URLQueryItem]?
+        if let profile, !profile.isEmpty {
+            queryItems = [URLQueryItem(name: "profile", value: profile)]
+        }
 
-        let result: ETagResult<FileListResponse> = try await getWithETag(path, etag: cachedETag)
+        let result: ETagResult<FileListResponse> = try await getWithETag(path, etag: cachedETag, queryItems: queryItems)
         switch result {
         case .fresh(let response, let etag):
             let cachedFiles = response.files.map { CachedFileInfo(from: $0) }
@@ -224,9 +228,9 @@ final class APIClient {
     // MARK: - EQ Presets
 
     func getEQPresets(profile: String? = nil) async throws -> EQPresetsResponse {
-        var path = "/api/eq"
-        if let profile { path += "?profile=\(profile)" }
-        return try await get(path)
+        var queryItems: [URLQueryItem]?
+        if let profile { queryItems = [URLQueryItem(name: "profile", value: profile)] }
+        return try await get("/api/eq", queryItems: queryItems)
     }
 
     func setEQPreset(profile: String, playlist: String? = nil, eq: EQConfig) async throws {
@@ -248,9 +252,9 @@ final class APIClient {
     }
 
     func resolveEQ(profile: String, playlist: String? = nil) async throws -> EQResolveResponse {
-        var path = "/api/eq/resolve?profile=\(profile)"
-        if let playlist { path += "&playlist=\(playlist)" }
-        return try await get(path)
+        var queryItems = [URLQueryItem(name: "profile", value: profile)]
+        if let playlist { queryItems.append(URLQueryItem(name: "playlist", value: playlist)) }
+        return try await get("/api/eq/resolve", queryItems: queryItems)
     }
 
     // MARK: - Operations
@@ -386,8 +390,8 @@ final class APIClient {
 
     // MARK: - HTTP Helpers
 
-    private func makeRequest(_ path: String, method: String) throws -> URLRequest {
-        guard let url = buildURL(path: path) else { throw APIError.notConfigured }
+    private func makeRequest(_ path: String, method: String, queryItems: [URLQueryItem]? = nil) throws -> URLRequest {
+        guard let url = buildURL(path: path, queryItems: queryItems) else { throw APIError.notConfigured }
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -397,16 +401,20 @@ final class APIClient {
         return request
     }
 
-    private func get<T: Decodable>(_ path: String) async throws -> T {
-        let request = try makeRequest(path, method: "GET")
+    private func get<T: Decodable>(_ path: String, queryItems: [URLQueryItem]? = nil) async throws -> T {
+        let request = try makeRequest(path, method: "GET", queryItems: queryItems)
         let (data, response) = try await session.data(for: request)
         try checkResponse(response, data: data)
         return try decodeResponse(data, response: response)
     }
 
     /// GET with If-None-Match header for ETag-based conditional requests.
-    private func getWithETag<T: Decodable>(_ path: String, etag: String?) async throws -> ETagResult<T> {
-        var request = try makeRequest(path, method: "GET")
+    private func getWithETag<T: Decodable>(
+        _ path: String,
+        etag: String?,
+        queryItems: [URLQueryItem]? = nil
+    ) async throws -> ETagResult<T> {
+        var request = try makeRequest(path, method: "GET", queryItems: queryItems)
         if let etag {
             request.setValue(etag, forHTTPHeaderField: "If-None-Match")
         }
