@@ -19,20 +19,24 @@ struct LibraryView: View {
     @State private var playlistCacheStatus: [String: PlaylistCacheStatus] = [:]
     @State private var cacheSize: Int64 = 0
 
+    private var isOffline: Bool { appState.isOfflineMode }
+
     var body: some View {
         @Bindable var vmBindable = vm
         NavigationStack {
             VStack(spacing: 0) {
-                Picker("", selection: $selectedSegment) {
-                    Text("My Playlists").tag(0)
-                    Text("Apple Music").tag(1)
+                if !isOffline {
+                    Picker("", selection: $selectedSegment) {
+                        Text("My Playlists").tag(0)
+                        Text("Apple Music").tag(1)
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
                 }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-                .padding(.vertical, 8)
 
                 Group {
-                    if selectedSegment == 0 {
+                    if selectedSegment == 0 || isOffline {
                         playlistsContent
                     } else {
                         appleMusicContent
@@ -40,18 +44,6 @@ struct LibraryView: View {
                 }
             }
             .navigationTitle("Library")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    if !appState.activeProfile.isEmpty {
-                        Text(appState.activeProfile)
-                            .font(.caption)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(.ultraThinMaterial)
-                            .clipShape(Capsule())
-                    }
-                }
-            }
             .navigationDestination(for: Playlist.self) { playlist in
                 PlaylistDetailView(playlist: playlist)
             }
@@ -60,7 +52,7 @@ struct LibraryView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    if selectedSegment == 0 {
+                    if selectedSegment == 0 && !isOffline {
                         Button {
                             vm.showAddSheet = true
                         } label: {
@@ -82,13 +74,27 @@ struct LibraryView: View {
             }
             .refreshable {
                 await load()
-                if selectedSegment == 1 {
+                if selectedSegment == 1 && !isOffline {
                     await vm.loadAppleMusic(musicKit: appState.musicKit)
                 }
             }
             .task {
                 await load()
-                appState.backgroundPrefetchService?.runNow()
+                if !isOffline {
+                    appState.backgroundPrefetchService?.runNow()
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    if !appState.activeProfile.isEmpty {
+                        Text(appState.activeProfile)
+                            .font(.caption)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Capsule())
+                    }
+                }
             }
         }
     }
@@ -115,18 +121,42 @@ struct LibraryView: View {
     // MARK: - Apple Music Content
 
     private var appleMusicContent: some View {
-        List {
-            guidedFlowBanner
-            appleMusicSection
-            errorSection
-        }
-        .searchable(text: Binding(
-            get: { vm.searchQuery },
-            set: { newValue in
-                vm.searchQuery = newValue
-                Task { await vm.searchAppleMusic(query: newValue, musicKit: appState.musicKit) }
+        VStack(spacing: 0) {
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Search Apple Music", text: Binding(
+                    get: { vm.searchQuery },
+                    set: { newValue in
+                        vm.searchQuery = newValue
+                        Task { await vm.searchAppleMusic(query: newValue, musicKit: appState.musicKit) }
+                    }
+                ))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                if !vm.searchQuery.isEmpty {
+                    Button {
+                        vm.searchQuery = ""
+                        Task { await vm.loadAppleMusic(musicKit: appState.musicKit) }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-        ), prompt: "Search Apple Music")
+            .padding(10)
+            .background(.quaternary.opacity(0.5))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+
+            List {
+                guidedFlowBanner
+                appleMusicSection
+                errorSection
+            }
+        }
         .task {
             await vm.loadAppleMusic(musicKit: appState.musicKit)
         }
@@ -282,7 +312,7 @@ struct LibraryView: View {
     // MARK: - Playlists Section
 
     private var playlistsSection: some View {
-        Section("Server Playlists") {
+        Section(isOffline ? "Cached Playlists" : "Server Playlists") {
             if vm.isLoading {
                 ProgressView()
             }
@@ -292,11 +322,13 @@ struct LibraryView: View {
                 }
             }
             .onDelete { indexSet in
+                guard !isOffline else { return }
                 for index in indexSet {
                     let key = vm.playlists[index].key
                     Task { await vm.deletePlaylist(api: appState.apiClient, key: key) }
                 }
             }
+            .deleteDisabled(isOffline)
         }
     }
 
@@ -344,7 +376,9 @@ struct LibraryView: View {
                     } else {
                         appState.cachePreferences.pinPlaylist(playlist.key)
                     }
-                    appState.backgroundPrefetchService?.runNow()
+                    if !isOffline {
+                        appState.backgroundPrefetchService?.runNow()
+                    }
                 } label: {
                     Image(systemName: isPinned ? "pin.fill" : "pin")
                         .foregroundStyle(isPinned ? .blue : .secondary)
@@ -365,7 +399,8 @@ struct LibraryView: View {
             }
         }
         .swipeActions(edge: .leading) {
-            if serverCount > 0 {
+            let hasFiles = isOffline ? (status?.cached ?? 0) > 0 : serverCount > 0
+            if hasFiles {
                 Button {
                     exportScope = .playlist(playlist.key)
                     showExportPicker = true
@@ -478,7 +513,10 @@ struct LibraryView: View {
     // MARK: - Actions
 
     private func load() async {
-        await vm.load(api: appState.apiClient)
+        await vm.load(
+            api: appState.apiClient,
+            metadataCache: appState.metadataCache,
+            isOffline: isOffline)
         await loadCacheStatus()
     }
 
@@ -487,10 +525,10 @@ struct LibraryView: View {
         cacheSize = await cacheManager.getTotalSize()
         var statuses: [String: PlaylistCacheStatus] = [:]
         for playlist in vm.playlists {
-            let serverCount = vm.fileCount(for: playlist.key)
+            let totalFiles = vm.fileCount(for: playlist.key)
             let pinned = appState.cachePreferences.isPinned(playlist.key)
             let status = await cacheManager.getPlaylistCacheStatus(
-                key: playlist.key, totalFiles: serverCount, pinned: pinned)
+                key: playlist.key, totalFiles: totalFiles, pinned: pinned)
             statuses[playlist.key] = status
         }
         playlistCacheStatus = statuses

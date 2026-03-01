@@ -19,7 +19,37 @@ struct SettingsView: View {
         NavigationStack {
             List {
                 Section("Server") {
-                    if let server = appState.currentServer {
+                    if appState.isOfflineMode, let server = appState.savedServer {
+                        HStack(spacing: 12) {
+                            Image(systemName: "wifi.slash")
+                                .font(.title2)
+                                .foregroundStyle(.orange)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(server.name.isEmpty ? "Server" : server.name)
+                                    .font(.headline)
+                                Text("Offline")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        LabeledContent("Local URL", value: server.localURL?.absoluteString ?? "\(server.host):\(server.port)")
+                        if server.hasExternalURL {
+                            LabeledContent("External URL", value: server.externalURL!)
+                        }
+                        Button {
+                            Task {
+                                let success = await appState.attemptAutoReconnect()
+                                if success {
+                                    appState.isOfflineMode = false
+                                }
+                            }
+                        } label: {
+                            Label("Reconnect", systemImage: "arrow.clockwise")
+                        }
+                        Button("Disconnect", role: .destructive) {
+                            appState.disconnect(explicit: true)
+                        }
+                    } else if let server = appState.currentServer {
                         HStack(spacing: 12) {
                             connectionIcon
                                 .font(.title2)
@@ -37,33 +67,39 @@ struct SettingsView: View {
                             LabeledContent("External URL", value: server.externalURL!)
                         }
                         LabeledContent("Local URL", value: server.localURL?.absoluteString ?? "\(server.host):\(server.port)")
-                    }
-                    Button("Disconnect", role: .destructive) {
-                        appState.disconnect()
-                    }
-                }
-
-                Section("Sync & Status") {
-                    NavigationLink {
-                        SyncStatusView()
-                    } label: {
-                        Label("Sync Status", systemImage: "arrow.left.arrow.right")
-                    }
-                    NavigationLink {
-                        DashboardView()
-                    } label: {
-                        Label("Server Dashboard", systemImage: "gauge.medium")
+                        Button("Disconnect", role: .destructive) {
+                            appState.disconnect()
+                        }
                     }
                 }
 
-                if !appState.profiles.isEmpty {
+                if !appState.isOfflineMode {
+                    Section("Sync & Status") {
+                        NavigationLink {
+                            SyncStatusView()
+                        } label: {
+                            Label("Sync Status", systemImage: "arrow.left.arrow.right")
+                        }
+                        NavigationLink {
+                            DashboardView()
+                        } label: {
+                            Label("Server Dashboard", systemImage: "gauge.medium")
+                        }
+                    }
+                }
+
+                if !appState.profiles.isEmpty || (appState.isOfflineMode && !appState.activeProfile.isEmpty) {
                     Section("Output Profile") {
-                        Picker("Profile", selection: Binding(
-                            get: { appState.activeProfile },
-                            set: { appState.switchProfile($0) }
-                        )) {
-                            ForEach(Array(appState.profiles.keys.sorted()), id: \.self) { name in
-                                Text(name).tag(name)
+                        if appState.isOfflineMode {
+                            LabeledContent("Profile", value: appState.activeProfile)
+                        } else {
+                            Picker("Profile", selection: Binding(
+                                get: { appState.activeProfile },
+                                set: { appState.switchProfile($0) }
+                            )) {
+                                ForEach(Array(appState.profiles.keys.sorted()), id: \.self) { name in
+                                    Text(name).tag(name)
+                                }
                             }
                         }
                         if let profile = appState.profiles[appState.activeProfile] {
@@ -138,7 +174,8 @@ struct SettingsView: View {
                     if enabled {
                         // Add current unpinned playlists to exclusion before enabling
                         Task {
-                            if let playlists = try? await appState.apiClient.getPlaylists() {
+                            if !appState.isOfflineMode,
+                               let playlists = try? await appState.apiClient.getPlaylists() {
                                 appState.cachePreferences.excludeUnpinnedPlaylists(playlists.map(\.key))
                             }
                             appState.cachePreferences.setAutoPinNewPlaylists(true)
@@ -149,8 +186,10 @@ struct SettingsView: View {
                 }
             ))
 
-            // Prefetch status and button
-            prefetchControls
+            // Prefetch status and button (not available offline)
+            if !appState.isOfflineMode {
+                prefetchControls
+            }
 
             // Clear cache
             Button("Clear All Cache", role: .destructive) {
@@ -242,6 +281,7 @@ struct SettingsView: View {
     }
 
     private func loadSettings() async {
+        guard !appState.isOfflineMode else { return }
         // Profiles are fetched by AppState on connect; refresh if empty
         if appState.profiles.isEmpty {
             if let settings = try? await appState.apiClient.getSettings() {

@@ -99,7 +99,8 @@ final class AudioPlayerService {
                 let asset = AVURLAsset(url: cachedURL)
                 beginPlayback(asset: asset, track: track, playlist: playlist)
             } else {
-                // Priority 2: server stream
+                // Priority 2: server stream — skip if server is unreachable
+                guard apiClient.isConnected else { return }
                 guard let streamURL = apiClient.fileDownloadURL(playlist: playlist, filename: track.filename) else { return }
                 let headers = ["Authorization": "Bearer \(apiClient.apiKey ?? "")"]
                 let asset = AVURLAsset(url: streamURL, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])

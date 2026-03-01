@@ -90,7 +90,6 @@ final class BackgroundPrefetchService {
 
         let cachePrefs = appState.cachePreferences
 
-        isRunning = true
         progressCurrent = 0
         progressTotal = 0
         currentPlaylist = nil
@@ -109,8 +108,6 @@ final class BackgroundPrefetchService {
 
             let pinnedPlaylists = cachePrefs.pinnedPlaylists
             guard !pinnedPlaylists.isEmpty else {
-                // Only reset if we weren't cancelled — runNow() owns state on cancel
-                if !Task.isCancelled { self.isRunning = false }
                 return
             }
 
@@ -126,9 +123,14 @@ final class BackgroundPrefetchService {
                 metadataCache: metadataCache
             ) { [weak self] progress in
                 Task { @MainActor [weak self] in
-                    self?.currentPlaylist = progress.playlist
-                    self?.progressCurrent = progress.processed
-                    self?.progressTotal = progress.total
+                    guard let self else { return }
+                    // Only show progress UI when there are files to download
+                    if progress.total > progress.skipped {
+                        self.isRunning = true
+                    }
+                    self.currentPlaylist = progress.playlist
+                    self.progressCurrent = progress.processed
+                    self.progressTotal = progress.total
                 }
             }
 

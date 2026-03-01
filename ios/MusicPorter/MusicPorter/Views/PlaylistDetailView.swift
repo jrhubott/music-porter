@@ -42,14 +42,16 @@ struct PlaylistDetailView: View {
                 api: appState.apiClient, playlist: playlist.key,
                 audioCacheManager: appState.audioCacheManager,
                 metadataCache: appState.metadataCache,
-                profile: appState.activeProfile)
+                profile: appState.activeProfile,
+                isOffline: appState.isOfflineMode)
         }
         .task {
             await vm.load(
                 api: appState.apiClient, playlist: playlist.key,
                 audioCacheManager: appState.audioCacheManager,
                 metadataCache: appState.metadataCache,
-                profile: appState.activeProfile)
+                profile: appState.activeProfile,
+                isOffline: appState.isOfflineMode)
         }
     }
 }
