@@ -102,36 +102,26 @@ jobs:
 
       # ── GUI installers ──
 
-      - name: Resolve electron version
-        id: electron
+      - name: Inject electronVersion into electron-builder config
         shell: bash
         run: |
           ELECTRON_VER=$(node -e "console.log(require('electron/package.json').version)")
-          echo "version=$ELECTRON_VER" >> "$GITHUB_OUTPUT"
+          echo "electronVersion: \"$ELECTRON_VER\"" >> packages/gui/electron-builder.yml
 
       - name: Build GUI — macOS arm64
         if: matrix.os == 'macos'
-        run: >-
-          npx electron-builder --mac dmg zip --arm64
-          --project packages/gui
-          --publish never
-          -c.electronVersion=${{ steps.electron.outputs.version }}
+        working-directory: sync-client/packages/gui
+        run: npx electron-builder --mac dmg zip --arm64 --publish never
 
       - name: Build GUI — macOS x64
         if: matrix.os == 'macos'
-        run: >-
-          npx electron-builder --mac dmg zip --x64
-          --project packages/gui
-          --publish never
-          -c.electronVersion=${{ steps.electron.outputs.version }}
+        working-directory: sync-client/packages/gui
+        run: npx electron-builder --mac dmg zip --x64 --publish never
 
       - name: Build GUI — Windows x64
         if: matrix.os == 'windows'
-        run: >-
-          npx electron-builder --win nsis --x64
-          --project packages/gui
-          --publish never
-          -c.electronVersion=${{ steps.electron.outputs.version }}
+        working-directory: sync-client/packages/gui
+        run: npx electron-builder --win nsis --x64 --publish never
 
       # ── Upload artifacts ──
 
