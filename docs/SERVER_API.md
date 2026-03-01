@@ -150,7 +150,8 @@ List all playlists with aggregate stats. Supports ETag caching.
 ```json
 [
   {"key": "my_playlist", "url": "https://...", "name": "My Playlist",
-   "file_count": 15, "size_bytes": 52428800, "duration_s": 3600}
+   "file_count": 15, "size_bytes": 52428800, "duration_s": 3600,
+   "freshness": "current"}
 ]
 ```
 
