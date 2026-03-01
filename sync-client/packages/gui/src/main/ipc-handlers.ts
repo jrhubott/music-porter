@@ -29,7 +29,7 @@ import type {
   SyncProgress,
   SyncResult,
 } from '@mporter/core';
-import { openCookieRefreshWindow } from './cookie-refresh.js';
+import { openCookieRefreshWindow, cancelCookieRefresh } from './cookie-refresh.js';
 import type { BackgroundPrefetchService } from './background-prefetch.js';
 import type { ConnectionMonitor } from './connection-monitor.js';
 
@@ -357,6 +357,10 @@ export function registerIPCHandlers(): void {
       days_remaining: uploadResult.days_remaining,
       error: uploadResult.valid ? undefined : uploadResult.reason,
     };
+  });
+
+  ipcMain.handle('cookies:cancelRefresh', (): void => {
+    cancelCookieRefresh();
   });
 
   // ── Cache ──

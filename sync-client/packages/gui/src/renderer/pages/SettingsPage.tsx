@@ -384,22 +384,22 @@ export function SettingsPage() {
             </div>
           )}
 
-          <button
-            className="btn btn-outline-primary btn-sm"
-            onClick={handleCookieRefresh}
-            disabled={cookieRefreshing}
-          >
-            {cookieRefreshing ? (
-              <>
-                <span className="spinner-border spinner-border-sm me-2" role="status" />
-                Waiting for login...
-              </>
-            ) : cookieStatus?.valid ? (
-              'Refresh Cookies'
-            ) : (
-              'Sign In to Apple Music'
-            )}
-          </button>
+          {cookieRefreshing ? (
+            <button
+              className="btn btn-outline-danger btn-sm"
+              onClick={() => ipc.cancelCookieRefresh()}
+            >
+              <i className="bi bi-x-circle me-1" />
+              Cancel
+            </button>
+          ) : (
+            <button
+              className="btn btn-outline-primary btn-sm"
+              onClick={handleCookieRefresh}
+            >
+              {cookieStatus?.valid ? 'Refresh Cookies' : 'Sign In to Apple Music'}
+            </button>
+          )}
         </div>
       </div>
       )}

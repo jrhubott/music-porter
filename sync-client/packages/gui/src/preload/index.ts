@@ -73,6 +73,7 @@ const electronAPI = {
     days_remaining?: number | null;
     error?: string;
   }> => ipcRenderer.invoke('cookies:refresh'),
+  cancelCookieRefresh: (): Promise<void> => ipcRenderer.invoke('cookies:cancelRefresh'),
 
   // Preferences
   getPreferences: (): Promise<SyncPreferences> => ipcRenderer.invoke('prefs:get'),
