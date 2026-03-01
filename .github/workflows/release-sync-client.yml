@@ -104,18 +104,15 @@ jobs:
 
       - name: Build GUI — macOS arm64
         if: matrix.os == 'macos'
-        working-directory: sync-client/packages/gui
-        run: npx electron-builder --mac dmg zip --arm64
+        run: npx electron-builder --mac dmg zip --arm64 --project packages/gui --publish never
 
       - name: Build GUI — macOS x64
         if: matrix.os == 'macos'
-        working-directory: sync-client/packages/gui
-        run: npx electron-builder --mac dmg zip --x64
+        run: npx electron-builder --mac dmg zip --x64 --project packages/gui --publish never
 
       - name: Build GUI — Windows x64
         if: matrix.os == 'windows'
-        working-directory: sync-client/packages/gui
-        run: npx electron-builder --win nsis --x64
+        run: npx electron-builder --win nsis --x64 --project packages/gui --publish never
 
       # ── Upload artifacts ──
 
