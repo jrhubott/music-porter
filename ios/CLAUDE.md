@@ -47,11 +47,11 @@ Codable structs matching server JSON responses:
 - `TaskInfo` — Task id, operation, description, status, result, error, elapsed; computed `isRunning`, `isCompleted`, `isFailed`
 - `USBSyncStatus` — `SyncKeySummary`, `SyncPlaylistInfo`, `SyncStatusDetail`, `SyncPruneResult`, `SyncDestination`, `SyncDestinationsResponse`
 
-### Services (8 files)
+### Services (9 files + Cache module)
 
 Network and platform services:
 
-- `APIClient` — `@MainActor @Observable` REST client; all endpoint methods (status, playlists CRUD, pipeline/convert operations, file downloads with optional profile for tagged output, settings, sync destinations/status); `APIError` enum with `.notConfigured`, `.unauthorized`, `.serverBusy`, `.serverError`
+- `APIClient` — `@MainActor @Observable` REST client; all endpoint methods (status, playlists CRUD, pipeline/convert operations, file downloads with optional profile for tagged output, settings, sync destinations/status); ETag support for conditional requests (`getWithETag`, `getFilesWithETag`); `downloadFileData` for raw file downloads; `APIError` enum with `.notConfigured`, `.unauthorized`, `.serverBusy`, `.serverError`
 - `SSEClient` — Swift actor; `events(taskId:)` returns `AsyncStream<SSEEvent>` from `GET /api/stream/<task_id>`; parses `"data: {json}"` lines
 - `ServerDiscovery` — `@MainActor @Observable`; uses `NWBrowser` for `_music-porter._tcp` Bonjour browsing; resolves endpoints to IP:port; 10-second auto-stop
 - `MusicKitService` — `@MainActor @Observable`; `requestAuthorization()`, `fetchLibraryPlaylists()`, `searchPlaylists(query:)` (limit 25); read-only due to DRM
@@ -59,6 +59,21 @@ Network and platform services:
 - `USBExportService` — `@Observable`; `exportFiles(groups:to:profile:)` creates playlist subdirectories matching server sync behavior; passes profile for tagged server downloads; `PlaylistExportGroup` struct for grouped export; security-scoped URL access
 - `AudioPlayerService` — `@MainActor @Observable`; dual-engine playback (AVPlayer for server tracks, ApplicationMusicPlayer for Apple Music); queue management, skip, seek; Now Playing Info Center integration
 - `KeychainService` — Static methods: `save(apiKey:)`, `load()`, `delete()`; service ID: `com.musicporter.apikey`
+
+### Cache Module (6 files in `Services/Cache/`)
+
+Offline audio file caching and API response metadata caching. All cache classes are Swift actors (not `@MainActor`) for thread-safe file I/O off the main thread. Wired into `AppState` — initialized per-profile on connect.
+
+- `CacheConstants` — Named constants matching sync client's `cache/constants.ts` (cache dir names, filenames, schema version, size limits, concurrency)
+- `CacheTypes` — Codable structs for JSON serialization: `CacheEntry` (snake\_case, cache-index.json), `CachedFileInfo`/`CachedPlaylistData`/`MetadataCacheData` (camelCase, metadata-cache.json), `ETagResult<T>`, `PrefetchResult`, `PrefetchOptions`, `PrefetchProgress`, `PlaylistCacheStatus`
+- `CacheUtils` — Static utility methods: `loadJsonIndex`/`saveJsonIndex` (atomic JSON read/write with fallback), `removeEmptyDirs`, `atomicCopyFile`, `cacheBaseDirectory`/`cacheDirectory(profile:)`, `isoNow`, `formatBytes`
+- `MetadataCache` — Actor managing `metadata-cache.json` (playlist file lists + ETags). Methods: `getPlaylistFiles`, `getCachedPlaylists`, `getETag`, `storePlaylistFiles`, `removePlaylist`, `clearAll`
+- `AudioCacheManager` — Actor managing `cache-index.json` + audio files at `<cacheDir>/<profile>/<playlist>/<display_filename>.mp3`. Store/retrieve cached audio, staleness detection, eviction (unpinned first, then oldest), playlist/full cache clearing
+- `PrefetchEngine` — Actor for background prefetching. Prunes stale entries, fetches file lists with ETag, filters cached entries, downloads concurrently via TaskGroup, mid/post-download eviction, cancellable via structured concurrency
+
+**Storage:** `<Application Support>/MusicPorter/cache/<profile>/` — one directory per output profile, containing `metadata-cache.json`, `cache-index.json`, and `<playlist>/<display_filename>.mp3` audio files.
+
+**JSON format compatibility:** This cache module mirrors the sync client's implementation (`sync-client/packages/core/src/cache/`). Both must use identical JSON formats, schema versions, and cache invalidation behavior. When modifying cache logic here, update the sync client implementation to match.
 
 ### ViewModels (5 files)
 

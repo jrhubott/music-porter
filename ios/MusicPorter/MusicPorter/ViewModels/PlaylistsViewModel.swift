@@ -28,23 +28,45 @@ final class PlaylistsViewModel {
     var lastAddedPlaylist: Playlist?
     var showProcessPrompt = false
 
-    func load(api: APIClient) async {
+    func load(api: APIClient, metadataCache: MetadataCache? = nil, isOffline: Bool = false) async {
         isLoading = true
         error = nil
-        do {
-            async let p = api.getPlaylists()
-            async let e = api.getExportDirectories()
-            playlists = try await p
-            exportDirs = try await e
-        } catch {
-            self.error = error.localizedDescription
-        }
-        // Fetch usb_dir from server settings (best-effort)
-        if let settings = try? await api.getSettings(),
-           case .string(let dir) = settings.settings["usb_dir"] {
-            defaultUsbDir = dir
+
+        if isOffline {
+            await loadFromCache(metadataCache: metadataCache)
+        } else {
+            do {
+                async let p = api.getPlaylists()
+                async let e = api.getExportDirectories()
+                playlists = try await p
+                exportDirs = try await e
+            } catch {
+                // Graceful degradation: fall back to cache on API failure
+                await loadFromCache(metadataCache: metadataCache)
+            }
+            // Fetch usb_dir from server settings (best-effort)
+            if let settings = try? await api.getSettings(),
+               case .string(let dir) = settings.settings["usb_dir"] {
+                defaultUsbDir = dir
+            }
         }
         isLoading = false
+    }
+
+    private func loadFromCache(metadataCache: MetadataCache?) async {
+        guard let metadataCache else { return }
+        let cachedKeys = await metadataCache.getCachedPlaylists()
+        var cachedPlaylists: [Playlist] = []
+        var cachedExportDirs: [ExportDirectory] = []
+        for key in cachedKeys.sorted() {
+            if let data = await metadataCache.getPlaylistFiles(key) {
+                let name = data.playlistName ?? key
+                cachedPlaylists.append(Playlist(key: key, url: "", name: name))
+                cachedExportDirs.append(ExportDirectory(name: key, displayName: name, files: data.fileCount))
+            }
+        }
+        playlists = cachedPlaylists
+        exportDirs = cachedExportDirs
     }
 
     func addPlaylist(api: APIClient) async {

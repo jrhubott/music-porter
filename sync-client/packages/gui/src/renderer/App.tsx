@@ -17,7 +17,7 @@ const CACHE_UPDATED_DISMISS_MS = 5000;
 
 export function App() {
   const {
-    connection, setConnection, activePage, setActivePage, setDrives, activeProfile, isOffline,
+    connection, setConnection, activePage, setActivePage, setDrives, activeProfile, isOffline, setIsOffline,
     setPrefetchProgress, setBackgroundPrefetchStatus, backgroundPrefetchStatus,
     pinnedPlaylists, playlists, cacheStatuses, setCacheStatuses, setCacheTotalSize,
   } = useAppState();
@@ -79,7 +79,19 @@ export function App() {
         loadCacheStatuses();
       }
     });
-    return () => { cleanupDrives(); cleanupPrefetch(); cleanupBgStatus(); };
+    // Connection monitor status listener
+    const cleanupConnStatus = ipc.onConnectionStatusChange((data) => {
+      if (data.offline) {
+        setIsOffline(true);
+        setConnection({ connected: false });
+      } else if (data.connection) {
+        setIsOffline(false);
+        setConnection(data.connection);
+        // Reload data after reconnection
+        loadCacheStatuses();
+      }
+    });
+    return () => { cleanupDrives(); cleanupPrefetch(); cleanupBgStatus(); cleanupConnStatus(); };
   }, []);
 
   async function autoConnect() {
@@ -111,12 +123,6 @@ export function App() {
           <h6 className="text-light mb-0">Music Porter Sync</h6>
           {connection.serverName && (
             <small className="text-secondary d-block">{connection.serverName}</small>
-          )}
-          {activeProfile && (
-            <small className="text-info">
-              <i className="bi bi-layers me-1" />
-              {activeProfile}
-            </small>
           )}
         </div>
 
@@ -185,7 +191,7 @@ export function App() {
               <span className="dot" />
               <span>
                 <i className="bi bi-database-check me-1" />
-                Cache good
+                Cache
               </span>
             </div>
           )}
@@ -229,6 +235,15 @@ export function App() {
               )}
             </span>
           </div>
+          {activeProfile && (
+            <div className="connection-badge">
+              <span className="dot" />
+              <span>
+                <i className="bi bi-layers me-1" />
+                {activeProfile}
+              </span>
+            </div>
+          )}
         </div>
       </nav>
 

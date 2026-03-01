@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import type { SyncPreferences, ServerConfig, CookieStatus, BackgroundPrefetchStatus, PlaylistCacheStatus } from '@mporter/core';
+import type { AboutResponse, SyncPreferences, ServerConfig, CookieStatus, BackgroundPrefetchStatus, PlaylistCacheStatus } from '@mporter/core';
 import { useIPC } from '../hooks/useIPC.js';
 import { useAppState } from '../store/app-state.js';
 
@@ -15,6 +15,33 @@ const CACHE_SIZE_OPTIONS = [
   { label: '50 GB', value: 50 * BYTES_PER_GB },
   { label: 'Unlimited', value: 0 },
 ];
+
+const VERSION_HEADER_REGEX = /^Version\s+(.+):$/;
+
+interface ParsedVersion {
+  header: string;
+  bullets: string[];
+}
+
+function parseReleaseNotes(text: string): ParsedVersion[] {
+  const lines = text.split('\n');
+  const versions: ParsedVersion[] = [];
+  let current: ParsedVersion | null = null;
+
+  for (const line of lines) {
+    const match = line.match(VERSION_HEADER_REGEX);
+    if (match) {
+      if (current) versions.push(current);
+      current = { header: match[1]!, bullets: [] };
+    } else if (line.startsWith('\u2022 ')) {
+      current?.bullets.push(line.substring(2));
+    } else if (line.trim() !== '') {
+      current?.bullets.push(line);
+    }
+  }
+  if (current) versions.push(current);
+  return versions;
+}
 
 function formatCacheSize(bytes: number): string {
   if (bytes >= BYTES_PER_GB) return `${(bytes / BYTES_PER_GB).toFixed(1)} GB`;
@@ -48,6 +75,9 @@ export function SettingsPage() {
   const [bgPrefetchStatus, setBgPrefetchStatus] = useState<BackgroundPrefetchStatus | null>(null);
   const [cachePlaylistStatuses, setCachePlaylistStatuses] = useState<PlaylistCacheStatus[]>([]);
   const [autoPinEnabled, setAutoPinEnabled] = useState(false);
+  const [availableDiskSpace, setAvailableDiskSpace] = useState<number | null>(null);
+  const [releaseNotes, setReleaseNotes] = useState<AboutResponse | null>(null);
+  const [notesLoading, setNotesLoading] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -69,15 +99,17 @@ export function SettingsPage() {
 
     // Load cache size and playlist breakdown (always available, even offline)
     try {
-      const [cacheStatus, bgStatus, autoPin] = await Promise.all([
+      const [cacheStatus, bgStatus, autoPin, diskSpace] = await Promise.all([
         ipc.cacheGetStatus(),
         ipc.cacheGetBackgroundPrefetchStatus(),
         ipc.cacheGetAutoPinNewPlaylists(),
+        ipc.getDiskSpace(),
       ]);
       setCacheTotalSize(cacheStatus.totalSize);
       setCachePlaylistStatuses(cacheStatus.playlists);
       setBgPrefetchStatus(bgStatus);
       setAutoPinEnabled(autoPin);
+      setAvailableDiskSpace(diskSpace);
     } catch {
       // Non-critical
     }
@@ -103,6 +135,16 @@ export function SettingsPage() {
       } catch {
         // Non-critical
       }
+
+      // Fetch release notes (non-critical)
+      setNotesLoading(true);
+      try {
+        const about = await ipc.getAbout();
+        setReleaseNotes(about);
+      } catch {
+        // Non-critical — release notes are optional
+      }
+      setNotesLoading(false);
     }
   }
 
@@ -164,6 +206,7 @@ export function SettingsPage() {
   async function goOffline() {
     setIsOffline(true);
     setConnection({ connected: false });
+    await ipc.goOffline();
   }
 
   async function reconnect() {
@@ -595,6 +638,11 @@ export function SettingsPage() {
                   </option>
                 ))}
               </select>
+              {availableDiskSpace != null && (
+                <small className="text-secondary mt-1 d-block">
+                  {formatCacheSize(availableDiskSpace)} available on disk
+                </small>
+              )}
             </div>
           )}
         </div>
@@ -609,11 +657,46 @@ export function SettingsPage() {
             <div>{version}</div>
           </div>
           {connection.serverVersion && (
-            <div>
+            <div className="mb-3">
               <small className="text-secondary">Server Version</small>
               <div>{connection.serverVersion}</div>
             </div>
           )}
+
+          {/* Release Notes */}
+          {notesLoading && (
+            <div className="text-secondary small">
+              <span className="spinner-border spinner-border-sm me-1" />
+              Loading release notes...
+            </div>
+          )}
+          {releaseNotes?.release_notes && (() => {
+            const versions = parseReleaseNotes(releaseNotes.release_notes);
+            if (versions.length === 0) return null;
+            return (
+              <div>
+                <small className="text-secondary fw-bold d-block mb-2">
+                  Server Release Notes
+                  <span className="ms-1 fw-normal">({versions.length} versions)</span>
+                </small>
+                <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                  {versions.map((ver, i) => (
+                    <div key={i} className="mb-2">
+                      <div className="text-info small fw-bold">
+                        <i className="bi bi-tag me-1" />
+                        Version {ver.header}
+                      </div>
+                      {ver.bullets.map((bullet, j) => (
+                        <div key={j} className="ms-3 small text-secondary">
+                          &bull; {bullet}
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       </div>
     </div>

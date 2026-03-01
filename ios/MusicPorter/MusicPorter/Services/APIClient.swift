@@ -23,6 +23,10 @@ final class APIClient {
         return URLSession(configuration: config)
     }()
 
+    // In-memory ETag cache for playlists list (matching sync client pattern)
+    private var playlistsETag: String?
+    private var playlistsCache: [Playlist]?
+
     // MARK: - Connection
 
     func configure(server: ServerConnection, apiKey: String) {
@@ -50,18 +54,21 @@ final class APIClient {
         isConnected = false
         activeBaseURL = nil
         connectionType = nil
+        playlistsETag = nil
+        playlistsCache = nil
         KeychainService.delete()
     }
 
     // MARK: - URL Construction
 
     /// Build a full API URL from a path using the active base URL.
-    func buildURL(path: String) -> URL? {
+    func buildURL(path: String, queryItems: [URLQueryItem]? = nil) -> URL? {
         guard let baseURL = activeBaseURL else { return nil }
         guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
             return nil
         }
         components.path = path.hasPrefix("/") ? path : "/" + path
+        if let queryItems { components.queryItems = queryItems }
         return components.url
     }
 
@@ -78,7 +85,16 @@ final class APIClient {
     // MARK: - Playlists
 
     func getPlaylists() async throws -> [Playlist] {
-        try await get("/api/playlists")
+        let result: ETagResult<[Playlist]> = try await getWithETag("/api/playlists", etag: playlistsETag)
+        switch result {
+        case .fresh(let playlists, let etag):
+            playlistsETag = etag
+            playlistsCache = playlists
+            return playlists
+        case .notModified:
+            if let cached = playlistsCache { return cached }
+            return try await get("/api/playlists")
+        }
     }
 
     func addPlaylist(key: String, url: String, name: String) async throws {
@@ -124,6 +140,60 @@ final class APIClient {
         try await get("/api/files/\(playlist)")
     }
 
+    /// Fetch a playlist's file list with ETag support via MetadataCache.
+    /// Returns cached data on 304, stores fresh data with its ETag.
+    func getFilesWithETag(
+        playlist: String,
+        profile: String?,
+        metadataCache: MetadataCache
+    ) async throws -> FileListResponse {
+        let cachedETag = await metadataCache.getETag(playlist)
+        let path = "/api/files/\(playlist)"
+        var queryItems: [URLQueryItem]?
+        if let profile, !profile.isEmpty {
+            queryItems = [URLQueryItem(name: "profile", value: profile)]
+        }
+
+        let result: ETagResult<FileListResponse> = try await getWithETag(path, etag: cachedETag, queryItems: queryItems)
+        switch result {
+        case .fresh(let response, let etag):
+            let cachedFiles = response.files.map { CachedFileInfo(from: $0) }
+            await metadataCache.storePlaylistFiles(
+                playlist,
+                files: cachedFiles,
+                etag: etag,
+                name: response.playlist
+            )
+            return response
+        case .notModified:
+            if let cached = await metadataCache.getPlaylistFiles(playlist) {
+                let tracks = cached.files.map { $0.toTrack() }
+                return FileListResponse(
+                    playlist: cached.playlistName ?? playlist,
+                    fileCount: cached.fileCount,
+                    files: tracks
+                )
+            }
+            // Fallback if metadata cache is empty despite 304
+            return try await get(path)
+        }
+    }
+
+    /// Download raw file data for cache storage.
+    func downloadFileData(
+        playlist: String,
+        filename: String,
+        profile: String? = nil
+    ) async throws -> Data {
+        guard let url = fileDownloadURL(playlist: playlist, filename: filename, profile: profile) else {
+            throw APIError.notConfigured
+        }
+        let request = authenticatedRequest(for: url)
+        let (data, response) = try await session.data(for: request)
+        try checkResponse(response, data: data)
+        return data
+    }
+
     func fileDownloadURL(playlist: String, filename: String, profile: String? = nil) -> URL? {
         guard let base = buildURL(path: "/api/files/\(playlist)/\(filename)") else { return nil }
         guard let profile, !profile.isEmpty else { return base }
@@ -158,9 +228,9 @@ final class APIClient {
     // MARK: - EQ Presets
 
     func getEQPresets(profile: String? = nil) async throws -> EQPresetsResponse {
-        var path = "/api/eq"
-        if let profile { path += "?profile=\(profile)" }
-        return try await get(path)
+        var queryItems: [URLQueryItem]?
+        if let profile { queryItems = [URLQueryItem(name: "profile", value: profile)] }
+        return try await get("/api/eq", queryItems: queryItems)
     }
 
     func setEQPreset(profile: String, playlist: String? = nil, eq: EQConfig) async throws {
@@ -182,9 +252,9 @@ final class APIClient {
     }
 
     func resolveEQ(profile: String, playlist: String? = nil) async throws -> EQResolveResponse {
-        var path = "/api/eq/resolve?profile=\(profile)"
-        if let playlist { path += "&playlist=\(playlist)" }
-        return try await get(path)
+        var queryItems = [URLQueryItem(name: "profile", value: profile)]
+        if let playlist { queryItems.append(URLQueryItem(name: "playlist", value: playlist)) }
+        return try await get("/api/eq/resolve", queryItems: queryItems)
     }
 
     // MARK: - Operations
@@ -312,10 +382,16 @@ final class APIClient {
         try await get("/api/library-stats")
     }
 
+    // MARK: - About
+
+    func getAbout() async throws -> AboutResponse {
+        try await get("/api/about")
+    }
+
     // MARK: - HTTP Helpers
 
-    private func makeRequest(_ path: String, method: String) throws -> URLRequest {
-        guard let url = buildURL(path: path) else { throw APIError.notConfigured }
+    private func makeRequest(_ path: String, method: String, queryItems: [URLQueryItem]? = nil) throws -> URLRequest {
+        guard let url = buildURL(path: path, queryItems: queryItems) else { throw APIError.notConfigured }
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -325,11 +401,35 @@ final class APIClient {
         return request
     }
 
-    private func get<T: Decodable>(_ path: String) async throws -> T {
-        let request = try makeRequest(path, method: "GET")
+    private func get<T: Decodable>(_ path: String, queryItems: [URLQueryItem]? = nil) async throws -> T {
+        let request = try makeRequest(path, method: "GET", queryItems: queryItems)
         let (data, response) = try await session.data(for: request)
         try checkResponse(response, data: data)
         return try decodeResponse(data, response: response)
+    }
+
+    /// GET with If-None-Match header for ETag-based conditional requests.
+    private func getWithETag<T: Decodable>(
+        _ path: String,
+        etag: String?,
+        queryItems: [URLQueryItem]? = nil
+    ) async throws -> ETagResult<T> {
+        var request = try makeRequest(path, method: "GET", queryItems: queryItems)
+        if let etag {
+            request.setValue(etag, forHTTPHeaderField: "If-None-Match")
+        }
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
+        }
+        let httpNotModifiedStatus = 304
+        if http.statusCode == httpNotModifiedStatus {
+            return .notModified
+        }
+        try checkResponse(response, data: data)
+        let decoded: T = try decodeResponse(data, response: response)
+        let responseETag = http.value(forHTTPHeaderField: "ETag")
+        return .fresh(decoded, etag: responseETag)
     }
 
     private func post<T: Decodable, B: Encodable>(_ path: String, body: B) async throws -> T {
@@ -585,6 +685,16 @@ struct PlaylistSummary: Identifiable, Codable {
         case sizeBytes = "size_bytes"
         case avgSizeMb = "avg_size_mb"
         case lastModified = "last_modified"
+    }
+}
+
+struct AboutResponse: Codable {
+    let version: String
+    let releaseNotes: String?
+
+    enum CodingKeys: String, CodingKey {
+        case version
+        case releaseNotes = "release_notes"
     }
 }
 

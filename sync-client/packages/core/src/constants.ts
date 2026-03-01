@@ -1,5 +1,5 @@
 /** Sync client version — bumped independently from the server. */
-export const VERSION = '1.3.0';
+export const VERSION = '1.4.0';
 
 /** Manifest filename stored in sync destination root. */
 export const MANIFEST_FILENAME = '.music-porter-sync.json';
@@ -87,16 +87,28 @@ export const APPLE_DOMAIN_SUFFIX = 'apple.com';
 /** Fallback expiry (seconds) for session cookies that lack an explicit expiration. */
 export const SESSION_COOKIE_FALLBACK_S = 86400 * 365;
 
-// ── Local Cache ──
+// ── Connection Health Check ──
 
-/** Subdirectory under config dir for cached audio files. */
-export const CACHE_DIRNAME = 'cache';
+/** How often (ms) to ping the server when connected, to detect unexpected disconnection. */
+export const CONNECTION_HEALTH_CHECK_INTERVAL_MS = 30_000;
 
-/** Per-profile cache index filename. */
-export const CACHE_INDEX_FILENAME = 'cache-index.json';
+/** How often (ms) to attempt reconnection when the server was lost unexpectedly. */
+export const CONNECTION_RECONNECT_INTERVAL_MS = 15_000;
 
-/** Default maximum cache size in bytes (10 GB). */
-export const DEFAULT_MAX_CACHE_BYTES = 10 * 1024 * 1024 * 1024;
+/** Timeout (ms) for a single health-check ping. */
+export const HEALTH_CHECK_TIMEOUT_MS = 5_000;
 
-/** Background prefetch interval (ms) — 5 minutes between cycles. */
-export const BACKGROUND_PREFETCH_INTERVAL_MS = 5 * 60 * 1000;
+/** Number of consecutive health-check failures before declaring the connection lost. */
+export const HEALTH_CHECK_FAILURE_THRESHOLD = 2;
+
+/** Maximum number of recent folder destinations to remember. */
+export const MAX_RECENT_DESTINATIONS = 5;
+
+// ── Local Cache (re-exported from cache module for backward compatibility) ──
+
+export {
+  CACHE_DIRNAME,
+  CACHE_INDEX_FILENAME,
+  DEFAULT_MAX_CACHE_BYTES,
+  BACKGROUND_PREFETCH_INTERVAL_MS,
+} from './cache/constants.js';

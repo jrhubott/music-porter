@@ -1,49 +1,42 @@
 import SwiftUI
 import MusicKit
 
+enum ExportScope {
+    case all
+    case playlist(String)
+}
+
 /// Combined Library tab with segmented control for "My Playlists" and "Apple Music".
 struct LibraryView: View {
     @Environment(AppState.self) private var appState
-    @Environment(\.scenePhase) private var scenePhase
     @State private var vm = PlaylistsViewModel()
     @State private var selectedSegment = 0
 
-    // Download state
-    @State private var downloadingPlaylist: String?
-    @State private var isDownloadingAll = false
-    @State private var storageUsed = 0
-    @State private var playlistToDelete: String?
     @State private var showExportPicker = false
     @State private var exportScope: ExportScope = .all
-    @State private var downloadTask: Task<Void, Never>?
-    @State private var downloadError: String?
-    @State private var backgroundedAt: Date?
-    @State private var downloadGeneration = 0
 
-    /// Minimum seconds in background before considering a download stalled.
-    /// iOS reclaims sockets after suspension; connections are dead after this threshold.
-    private let backgroundStallThreshold: TimeInterval = 3
+    // Cache state
+    @State private var playlistCacheStatus: [String: PlaylistCacheStatus] = [:]
+    @State private var cacheSize: Int64 = 0
 
-    // Delete server data state
-    @State private var serverDeleteKey: String?
-    @State private var serverDeleteSource = true
-    @State private var serverDeleteExport = true
-    @State private var serverDeleteConfig = false
+    private var isOffline: Bool { appState.isOfflineMode }
 
     var body: some View {
         @Bindable var vmBindable = vm
         NavigationStack {
             VStack(spacing: 0) {
-                Picker("", selection: $selectedSegment) {
-                    Text("My Playlists").tag(0)
-                    Text("Apple Music").tag(1)
+                if !isOffline {
+                    Picker("", selection: $selectedSegment) {
+                        Text("My Playlists").tag(0)
+                        Text("Apple Music").tag(1)
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
                 }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-                .padding(.vertical, 8)
 
                 Group {
-                    if selectedSegment == 0 {
+                    if selectedSegment == 0 || isOffline {
                         playlistsContent
                     } else {
                         appleMusicContent
@@ -51,18 +44,6 @@ struct LibraryView: View {
                 }
             }
             .navigationTitle("Library")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    if !appState.activeProfile.isEmpty {
-                        Text(appState.activeProfile)
-                            .font(.caption)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(.ultraThinMaterial)
-                            .clipShape(Capsule())
-                    }
-                }
-            }
             .navigationDestination(for: Playlist.self) { playlist in
                 PlaylistDetailView(playlist: playlist)
             }
@@ -71,7 +52,7 @@ struct LibraryView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    if selectedSegment == 0 {
+                    if selectedSegment == 0 && !isOffline {
                         Button {
                             vm.showAddSheet = true
                         } label: {
@@ -91,60 +72,28 @@ struct LibraryView: View {
                     }
                 }
             }
-            .alert("Delete Local Files?", isPresented: Binding(
-                get: { playlistToDelete != nil },
-                set: { if !$0 { playlistToDelete = nil } }
-            )) {
-                Button("Delete", role: .destructive) {
-                    if let name = playlistToDelete {
-                        deleteLocal(name)
-                    }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                if let name = playlistToDelete {
-                    Text("All downloaded files for \"\(name)\" will be removed from this device.")
-                }
-            }
-            .sheet(isPresented: Binding(
-                get: { serverDeleteKey != nil },
-                set: { if !$0 { serverDeleteKey = nil } }
-            )) {
-                DeleteServerDataSheet(
-                    key: serverDeleteKey ?? "",
-                    deleteSource: $serverDeleteSource,
-                    deleteExport: $serverDeleteExport,
-                    removeConfig: $serverDeleteConfig
-                ) {
-                    if let key = serverDeleteKey {
-                        Task {
-                            await vm.deletePlaylistData(
-                                api: appState.apiClient, key: key,
-                                deleteSource: serverDeleteSource,
-                                deleteExport: serverDeleteExport,
-                                removeConfig: serverDeleteConfig)
-                            await load()
-                        }
-                    }
-                    serverDeleteKey = nil
-                }
-                .presentationDetents([.medium])
-            }
             .refreshable {
                 await load()
-                if selectedSegment == 1 {
+                if selectedSegment == 1 && !isOffline {
                     await vm.loadAppleMusic(musicKit: appState.musicKit)
                 }
             }
             .task {
                 await load()
+                if !isOffline {
+                    appState.backgroundPrefetchService?.runNow()
+                }
             }
-            .onChange(of: scenePhase) { _, newPhase in
-                if newPhase == .active {
-                    resumeIfStalled()
-                    backgroundedAt = nil
-                } else if newPhase == .background {
-                    backgroundedAt = Date()
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    if !appState.activeProfile.isEmpty {
+                        Text(appState.activeProfile)
+                            .font(.caption)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Capsule())
+                    }
                 }
             }
         }
@@ -155,30 +104,59 @@ struct LibraryView: View {
     private var playlistsContent: some View {
         List {
             actionBar
-            bulkProgressSection
+            prefetchProgressSection
             exportProgressSection
             exportResultSection
             playlistsSection
             localStorageSection
             errorSection
         }
+        .onChange(of: appState.backgroundPrefetchService?.isRunning) { _, newValue in
+            if newValue == false {
+                Task { await loadCacheStatus() }
+            }
+        }
     }
 
     // MARK: - Apple Music Content
 
     private var appleMusicContent: some View {
-        List {
-            guidedFlowBanner
-            appleMusicSection
-            errorSection
-        }
-        .searchable(text: Binding(
-            get: { vm.searchQuery },
-            set: { newValue in
-                vm.searchQuery = newValue
-                Task { await vm.searchAppleMusic(query: newValue, musicKit: appState.musicKit) }
+        VStack(spacing: 0) {
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Search Apple Music", text: Binding(
+                    get: { vm.searchQuery },
+                    set: { newValue in
+                        vm.searchQuery = newValue
+                        Task { await vm.searchAppleMusic(query: newValue, musicKit: appState.musicKit) }
+                    }
+                ))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                if !vm.searchQuery.isEmpty {
+                    Button {
+                        vm.searchQuery = ""
+                        Task { await vm.loadAppleMusic(musicKit: appState.musicKit) }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-        ), prompt: "Search Apple Music")
+            .padding(10)
+            .background(.quaternary.opacity(0.5))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+
+            List {
+                guidedFlowBanner
+                appleMusicSection
+                errorSection
+            }
+        }
         .task {
             await vm.loadAppleMusic(musicKit: appState.musicKit)
         }
@@ -223,21 +201,6 @@ struct LibraryView: View {
     private var actionBar: some View {
         Section {
             HStack(spacing: 12) {
-                if isDownloadingAll || downloadingPlaylist != nil {
-                    Button(role: .destructive) {
-                        cancelDownload()
-                    } label: {
-                        Label("Cancel", systemImage: "xmark.circle")
-                    }
-                } else {
-                    Button {
-                        startDownloadAll()
-                    } label: {
-                        Label("Download All", systemImage: "arrow.down.circle")
-                    }
-                    .disabled(vm.exportDirs.isEmpty)
-                }
-
                 Spacer()
 
                 Button {
@@ -250,12 +213,6 @@ struct LibraryView: View {
             }
             .buttonStyle(.borderless)
 
-            Toggle("Also save to device", isOn: Binding(
-                get: { appState.usbExport.cacheToDevice },
-                set: { appState.usbExport.cacheToDevice = $0 }
-            ))
-            .font(.subheadline)
-
             Text("Files are organized into playlist folders on USB.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
@@ -266,14 +223,14 @@ struct LibraryView: View {
 
     @ViewBuilder
     private var exportSourceSummary: some View {
-        let localCount = vm.exportDirs.reduce(0) { $0 + appState.downloadManager.localFiles(playlist: $1.name).count }
         let serverTotal = vm.exportDirs.reduce(0) { $0 + $1.files }
-        let serverOnly = max(0, serverTotal - localCount)
+        let cachedTotal = playlistCacheStatus.values.reduce(0) { $0 + $1.cached }
+        let serverOnly = max(0, serverTotal - cachedTotal)
         if serverTotal > 0 {
             HStack(spacing: 4) {
-                Image(systemName: "iphone")
+                Image(systemName: "internaldrive")
                     .imageScale(.small)
-                Text("\(localCount) local")
+                Text("\(cachedTotal) cached")
                 if serverOnly > 0 {
                     Text("·")
                     Image(systemName: "cloud")
@@ -286,41 +243,29 @@ struct LibraryView: View {
         }
     }
 
-    // MARK: - Bulk Download Progress
+    // MARK: - Prefetch Progress
 
     @ViewBuilder
-    private var bulkProgressSection: some View {
-        if isDownloadingAll, let bulk = appState.downloadManager.bulkProgress {
-            Section("Download All") {
+    private var prefetchProgressSection: some View {
+        if appState.backgroundPrefetchService?.isRunning == true {
+            Section("Prefetching") {
                 VStack(alignment: .leading, spacing: 6) {
-                    if bulk.completedPlaylists < bulk.totalPlaylists {
-                        Text("Playlist \(bulk.completedPlaylists + 1) of \(bulk.totalPlaylists): \(bulk.currentPlaylistName)")
-                            .font(.subheadline)
-
-                        ProgressView(
-                            value: Double(bulk.completedPlaylists),
-                            total: Double(bulk.totalPlaylists)
-                        )
+                    let current = appState.backgroundPrefetchService?.progressCurrent ?? 0
+                    let total = appState.backgroundPrefetchService?.progressTotal ?? 0
+                    ProgressView(value: total > 0 ? Double(current) / Double(total) : 0)
                         .tint(.blue)
-
-                        if let fileProgress = appState.downloadManager.downloadProgress {
-                            HStack {
-                                Text("File \(fileProgress.completed + 1) of \(fileProgress.total)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                Text(fileProgress.currentFile)
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                            }
-                            ProgressView(value: fileProgress.fraction)
-                                .tint(.cyan)
+                    HStack {
+                        Text("\(current)/\(total) files")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        if let playlist = appState.backgroundPrefetchService?.currentPlaylist {
+                            Text(playlist)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
                         }
-                    } else {
-                        Label("All playlists downloaded", systemImage: "checkmark.circle")
-                            .foregroundStyle(.green)
                     }
                 }
             }
@@ -337,18 +282,6 @@ struct LibraryView: View {
                     ProgressView(value: appState.usbExport.exportProgress)
                         .tint(.orange)
                     HStack {
-                        if let source = appState.usbExport.currentFileSource {
-                            switch source {
-                            case .local:
-                                Image(systemName: "iphone")
-                                    .imageScale(.small)
-                                    .foregroundStyle(.secondary)
-                            case .server:
-                                Image(systemName: "cloud")
-                                    .imageScale(.small)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
                         Text("Exporting...")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -379,7 +312,7 @@ struct LibraryView: View {
     // MARK: - Playlists Section
 
     private var playlistsSection: some View {
-        Section("Server Playlists") {
+        Section(isOffline ? "Cached Playlists" : "Server Playlists") {
             if vm.isLoading {
                 ProgressView()
             }
@@ -389,19 +322,20 @@ struct LibraryView: View {
                 }
             }
             .onDelete { indexSet in
+                guard !isOffline else { return }
                 for index in indexSet {
                     let key = vm.playlists[index].key
                     Task { await vm.deletePlaylist(api: appState.apiClient, key: key) }
                 }
             }
+            .deleteDisabled(isOffline)
         }
     }
 
     private func playlistRow(_ playlist: Playlist) -> some View {
         let serverCount = vm.fileCount(for: playlist.key)
-        let localCount = appState.downloadManager.localFiles(playlist: playlist.key).count
-        let hasLocal = localCount > 0
-        let isDownloadingThis = downloadingPlaylist == playlist.key && !isDownloadingAll
+        let isPinned = appState.cachePreferences.isPinned(playlist.key)
+        let status = playlistCacheStatus[playlist.key]
 
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -411,18 +345,24 @@ struct LibraryView: View {
                     HStack(spacing: 4) {
                         if serverCount > 0 {
                             Text("\(serverCount)")
-                                .foregroundStyle(localCount >= serverCount && serverCount > 0 ? .green : .secondary)
+                                .foregroundStyle(.secondary)
                             Image(systemName: "cloud")
                                 .imageScale(.small)
-                                .foregroundStyle(localCount >= serverCount && serverCount > 0 ? .green : .secondary)
+                                .foregroundStyle(.secondary)
                         }
-                        if localCount > 0 {
+                        if let status, status.cached > 0 {
                             if serverCount > 0 { Text("·") }
-                            Text("\(localCount)")
-                                .foregroundStyle(.green)
-                            Image(systemName: "iphone")
+                            if status.cached >= status.total && status.total > 0 {
+                                Image(systemName: "checkmark")
+                                    .imageScale(.small)
+                                    .foregroundStyle(.blue)
+                            } else {
+                                Text("\(status.cached)/\(status.total)")
+                                    .foregroundStyle(.blue)
+                            }
+                            Image(systemName: "internaldrive")
                                 .imageScale(.small)
-                                .foregroundStyle(.green)
+                                .foregroundStyle(.blue)
                         }
                     }
                     .font(.caption)
@@ -431,52 +371,36 @@ struct LibraryView: View {
                 Spacer()
 
                 Button {
-                    startDownloadPlaylist(playlist.key)
+                    if isPinned {
+                        appState.cachePreferences.unpinPlaylist(playlist.key)
+                    } else {
+                        appState.cachePreferences.pinPlaylist(playlist.key)
+                    }
+                    if !isOffline {
+                        appState.backgroundPrefetchService?.runNow()
+                    }
                 } label: {
-                    Image(systemName: "arrow.down.circle")
+                    Image(systemName: isPinned ? "pin.fill" : "pin")
+                        .foregroundStyle(isPinned ? .blue : .secondary)
                 }
                 .buttonStyle(.borderless)
-                .disabled(downloadingPlaylist != nil || isDownloadingAll)
-            }
-
-            if isDownloadingThis, let progress = appState.downloadManager.downloadProgress {
-                VStack(alignment: .leading, spacing: 4) {
-                    ProgressView(value: progress.fraction)
-                        .tint(.blue)
-                    HStack {
-                        Text("Downloading \(progress.completed + 1) of \(progress.total)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(progress.currentFile)
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                }
-                .transition(.opacity)
             }
         }
         .swipeActions(edge: .trailing) {
-            Button(role: .destructive) {
-                serverDeleteSource = true
-                serverDeleteExport = true
-                serverDeleteConfig = false
-                serverDeleteKey = playlist.key
-            } label: {
-                Label("Delete Server Data", systemImage: "server.rack")
-            }
-            if hasLocal {
+            if status != nil && (status?.cached ?? 0) > 0 {
                 Button(role: .destructive) {
-                    playlistToDelete = playlist.key
+                    Task {
+                        await appState.audioCacheManager?.clearPlaylist(playlist.key)
+                        await loadCacheStatus()
+                    }
                 } label: {
-                    Label("Delete Local", systemImage: "trash")
+                    Label("Delete Cache", systemImage: "trash")
                 }
             }
         }
         .swipeActions(edge: .leading) {
-            if hasLocal || serverCount > 0 {
+            let hasFiles = isOffline ? (status?.cached ?? 0) > 0 : serverCount > 0
+            if hasFiles {
                 Button {
                     exportScope = .playlist(playlist.key)
                     showExportPicker = true
@@ -559,8 +483,12 @@ struct LibraryView: View {
 
     private var localStorageSection: some View {
         Section("Local Storage") {
-            LabeledContent("Used", value: ByteCountFormatter.string(
-                fromByteCount: Int64(storageUsed), countStyle: .file))
+            if cacheSize > 0 {
+                LabeledContent("Cache", value: CacheUtils.formatBytes(cacheSize))
+            } else {
+                Text("No cached files")
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -568,7 +496,7 @@ struct LibraryView: View {
 
     @ViewBuilder
     private var errorSection: some View {
-        if let error = vm.error ?? downloadError {
+        if let error = vm.error {
             Section {
                 Label(error, systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.red)
@@ -585,92 +513,25 @@ struct LibraryView: View {
     // MARK: - Actions
 
     private func load() async {
-        await vm.load(api: appState.apiClient)
-        storageUsed = appState.downloadManager.localStorageUsed()
+        await vm.load(
+            api: appState.apiClient,
+            metadataCache: appState.metadataCache,
+            isOffline: isOffline)
+        await loadCacheStatus()
     }
 
-    private func startDownloadPlaylist(_ name: String) {
-        downloadTask?.cancel()
-        downloadGeneration += 1
-        let generation = downloadGeneration
-        downloadTask = Task {
-            downloadingPlaylist = name
-            downloadError = nil
-            do {
-                try await appState.downloadManager.downloadAll(playlist: name)
-            } catch is CancellationError {
-                // User cancelled or replaced by resumeIfStalled
-            } catch {
-                downloadError = error.localizedDescription
-            }
-            // Only clean up if we're still the active download generation.
-            // A newer task (from resumeIfStalled) may have replaced us.
-            guard downloadGeneration == generation else { return }
-            storageUsed = appState.downloadManager.localStorageUsed()
-            appState.downloadManager.clearProgress()
-            downloadingPlaylist = nil
-            downloadTask = nil
+    private func loadCacheStatus() async {
+        guard let cacheManager = appState.audioCacheManager else { return }
+        cacheSize = await cacheManager.getTotalSize()
+        var statuses: [String: PlaylistCacheStatus] = [:]
+        for playlist in vm.playlists {
+            let totalFiles = vm.fileCount(for: playlist.key)
+            let pinned = appState.cachePreferences.isPinned(playlist.key)
+            let status = await cacheManager.getPlaylistCacheStatus(
+                key: playlist.key, totalFiles: totalFiles, pinned: pinned)
+            statuses[playlist.key] = status
         }
-    }
-
-    private func startDownloadAll() {
-        downloadTask?.cancel()
-        downloadGeneration += 1
-        let generation = downloadGeneration
-        downloadTask = Task {
-            isDownloadingAll = true
-            downloadError = nil
-            appState.usbExport.reset()
-            do {
-                try await appState.downloadManager.downloadAllPlaylists(dirs: vm.exportDirs)
-            } catch is CancellationError {
-                // User cancelled or replaced by resumeIfStalled
-            } catch {
-                downloadError = error.localizedDescription
-            }
-            guard downloadGeneration == generation else { return }
-            storageUsed = appState.downloadManager.localStorageUsed()
-            appState.downloadManager.clearProgress()
-            isDownloadingAll = false
-            downloadTask = nil
-        }
-    }
-
-    /// Resume a stalled download after returning from background.
-    /// iOS reclaims sockets after suspension; this uses background duration
-    /// to distinguish brief app switches from real stalls.
-    private func resumeIfStalled() {
-        guard appState.downloadManager.stalledDownloadPlaylist() != nil else { return }
-
-        if downloadTask == nil {
-            // App was relaunched or previous download completed/failed — restart
-            if isDownloadingAll {
-                startDownloadAll()
-            } else if let playlist = appState.downloadManager.stalledDownloadPlaylist() {
-                startDownloadPlaylist(playlist)
-            }
-            return
-        }
-
-        // Download task exists. Only intervene if backgrounded long enough for
-        // the OS to reclaim sockets. Brief app switches don't interrupt.
-        guard let bgTime = backgroundedAt,
-              Date().timeIntervalSince(bgTime) > backgroundStallThreshold else { return }
-
-        // Connections are dead after suspension — cancel stale task, start fresh
-        downloadTask?.cancel()
-        downloadTask = nil
-
-        if isDownloadingAll {
-            startDownloadAll()
-        } else if let playlist = appState.downloadManager.stalledDownloadPlaylist() {
-            startDownloadPlaylist(playlist)
-        }
-    }
-
-    private func cancelDownload() {
-        downloadTask?.cancel()
-        appState.downloadManager.cancelDownloads()
+        playlistCacheStatus = statuses
     }
 
     private func exportToFolder(_ destDir: URL) async {
@@ -688,48 +549,54 @@ struct LibraryView: View {
             playlistKeys = [name]
         }
 
-        var groups: [PlaylistExportGroup] = []
-
+        guard let cacheManager = appState.audioCacheManager else { return }
         for key in playlistKeys {
-            let localFiles = appState.downloadManager.localFiles(playlist: key)
-            let localNames = Set(localFiles.map(\.lastPathComponent))
-
-            // Build local entries
-            var entries = localFiles.map { url in
-                ExportManifestEntry(playlist: key, filename: url.lastPathComponent, source: .local(url))
-            }
-
-            // Fetch server file list for files not available locally
-            if let serverFiles = try? await appState.apiClient.getFiles(playlist: key) {
-                for track in serverFiles.files where !localNames.contains(track.filename) {
-                    entries.append(ExportManifestEntry(
-                        playlist: key, filename: track.filename,
-                        source: .server(playlist: key, filename: track.filename)))
+            var fileURLs: [URL] = []
+            let cachedEntries = await cacheManager.getCachedFileInfos(key)
+            for entry in cachedEntries {
+                if let cachedURL = await cacheManager.isCached(entry.uuid) {
+                    fileURLs.append(cachedURL)
                 }
             }
-
-            if !entries.isEmpty {
-                groups.append(PlaylistExportGroup(playlist: key, entries: entries))
-            }
+            guard !fileURLs.isEmpty else { continue }
+            _ = await appState.usbExport.exportFiles(
+                urls: fileURLs, to: targetDir, subdirectory: key)
         }
-
-        guard !groups.isEmpty else {
-            downloadError = "No files to export"
-            return
-        }
-
-        _ = await appState.usbExport.exportFiles(
-            groups: groups, to: targetDir,
-            cacheToDevice: appState.usbExport.cacheToDevice,
-            profile: appState.activeProfile)
     }
+}
 
-    private func deleteLocal(_ name: String) {
-        do {
-            try appState.downloadManager.deletePlaylist(playlist: name)
-            storageUsed = appState.downloadManager.localStorageUsed()
-        } catch {
-            downloadError = error.localizedDescription
+struct AddPlaylistSheet: View {
+    @Environment(AppState.self) private var appState
+    @Environment(\.dismiss) private var dismiss
+    @Bindable var vm: PlaylistsViewModel
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("Key (e.g. Pop_Workout)", text: $vm.newKey)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                TextField("Apple Music URL", text: $vm.newURL)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+                TextField("Display Name", text: $vm.newName)
+            }
+            .navigationTitle("Add Playlist")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        Task {
+                            await vm.addPlaylist(api: appState.apiClient)
+                        }
+                    }
+                    .disabled(vm.newKey.isEmpty || vm.newURL.isEmpty || vm.newName.isEmpty)
+                }
+            }
         }
     }
 }

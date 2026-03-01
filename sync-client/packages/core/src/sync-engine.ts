@@ -4,7 +4,8 @@ import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { CLIENT_SYNC_KEY_PREFIX, DEFAULT_CONCURRENCY, FILE_DOWNLOAD_TIMEOUT_MS, TEMP_SUFFIX, USB_SYNC_KEY_PREFIX } from './constants.js';
 import type { APIClient } from './api-client.js';
-import type { CacheManager } from './cache-manager.js';
+import type { CacheManager } from './cache/cache-manager.js';
+import type { MetadataCache } from './cache/metadata-cache.js';
 import type { FileInfo, SyncManifest, SyncResult } from './types.js';
 import type { LogCallback, ProgressCallback } from './progress.js';
 import {
@@ -38,6 +39,8 @@ export interface SyncOptions {
   onLog?: LogCallback;
   /** Optional local cache for read/write-through. */
   cacheManager?: CacheManager;
+  /** Optional metadata cache for ETag-based conditional requests. */
+  metadataCache?: MetadataCache;
   /** When true, sync exclusively from local cache (no server calls). */
   offlineOnly?: boolean;
 }
@@ -124,7 +127,7 @@ export class SyncEngine {
     for (const key of playlistKeys) {
       if (options.signal?.aborted) break;
       try {
-        const response = await this.client.getFiles(key, false, options.profile);
+        const response = await this.client.getFiles(key, false, options.profile, options.metadataCache);
         playlistFileList.push({ key, files: response.files });
         grandTotal += response.files.length;
       } catch (err) {

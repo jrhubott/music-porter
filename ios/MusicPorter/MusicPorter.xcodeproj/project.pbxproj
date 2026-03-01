@@ -12,7 +12,6 @@
 		A10000003 /* ServerDiscoveryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000003 /* ServerDiscoveryView.swift */; };
 		A10000004 /* PairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000004 /* PairingView.swift */; };
 		A10000005 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000005 /* DashboardView.swift */; };
-		A10000006 /* PlaylistsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000006 /* PlaylistsView.swift */; };
 		A10000007 /* PlaylistDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000007 /* PlaylistDetailView.swift */; };
 		A10000008 /* PipelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000008 /* PipelineView.swift */; };
 		A1000000A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000A /* SettingsView.swift */; };
@@ -34,7 +33,6 @@
 		A1000001C /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001C /* APIClient.swift */; };
 		A1000001D /* SSEClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001D /* SSEClient.swift */; };
 		A1000001E /* MusicKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001E /* MusicKitService.swift */; };
-		A1000001F /* FileDownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001F /* FileDownloadManager.swift */; };
 		A10000020 /* USBExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000020 /* USBExportService.swift */; };
 		A10000021 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000021 /* AppState.swift */; };
 		A10000022 /* DashboardViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000022 /* DashboardViewModel.swift */; };
@@ -51,8 +49,17 @@
 		A1000002D /* SyncStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002D /* SyncStatusView.swift */; };
 		A1000002E /* EQConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002E /* EQConfig.swift */; };
 		A1000002F /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002F /* LibraryView.swift */; };
-		A10000030 /* BackgroundDownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000032 /* BackgroundDownloadManager.swift */; };
-		A10000031 /* DownloadStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000033 /* DownloadStateStore.swift */; };
+		A10000034 /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000034 /* AboutView.swift */; };
+		A10000035 /* CacheConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000035 /* CacheConstants.swift */; };
+		A10000036 /* CacheTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000036 /* CacheTypes.swift */; };
+		A10000037 /* CacheUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000037 /* CacheUtils.swift */; };
+		A10000038 /* MetadataCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000038 /* MetadataCache.swift */; };
+		A10000039 /* AudioCacheManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000039 /* AudioCacheManager.swift */; };
+		A1000003A /* PrefetchEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003A /* PrefetchEngine.swift */; };
+		A1000003B /* DeleteServerDataSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003B /* DeleteServerDataSheet.swift */; };
+		A1000003C /* CachePreferencesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003C /* CachePreferencesStore.swift */; };
+		A1000003D /* BackgroundPrefetchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003D /* BackgroundPrefetchService.swift */; };
+		A1000003E /* OfflineBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003E /* OfflineBanner.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -61,7 +68,6 @@
 		A20000003 /* ServerDiscoveryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDiscoveryView.swift; sourceTree = "<group>"; };
 		A20000004 /* PairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingView.swift; sourceTree = "<group>"; };
 		A20000005 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
-		A20000006 /* PlaylistsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistsView.swift; sourceTree = "<group>"; };
 		A20000007 /* PlaylistDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistDetailView.swift; sourceTree = "<group>"; };
 		A20000008 /* PipelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipelineView.swift; sourceTree = "<group>"; };
 		A2000000A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -83,7 +89,6 @@
 		A2000001C /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		A2000001D /* SSEClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSEClient.swift; sourceTree = "<group>"; };
 		A2000001E /* MusicKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicKitService.swift; sourceTree = "<group>"; };
-		A2000001F /* FileDownloadManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileDownloadManager.swift; sourceTree = "<group>"; };
 		A20000020 /* USBExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = USBExportService.swift; sourceTree = "<group>"; };
 		A20000021 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		A20000022 /* DashboardViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardViewModel.swift; sourceTree = "<group>"; };
@@ -102,8 +107,17 @@
 		A2000002F /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		A20000030 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A20000031 /* MusicPorter.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MusicPorter.entitlements; sourceTree = "<group>"; };
-		A20000032 /* BackgroundDownloadManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundDownloadManager.swift; sourceTree = "<group>"; };
-		A20000033 /* DownloadStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadStateStore.swift; sourceTree = "<group>"; };
+		A20000034 /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
+		A20000035 /* CacheConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheConstants.swift; sourceTree = "<group>"; };
+		A20000036 /* CacheTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheTypes.swift; sourceTree = "<group>"; };
+		A20000037 /* CacheUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheUtils.swift; sourceTree = "<group>"; };
+		A20000038 /* MetadataCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataCache.swift; sourceTree = "<group>"; };
+		A20000039 /* AudioCacheManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCacheManager.swift; sourceTree = "<group>"; };
+		A2000003A /* PrefetchEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrefetchEngine.swift; sourceTree = "<group>"; };
+		A2000003B /* DeleteServerDataSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeleteServerDataSheet.swift; sourceTree = "<group>"; };
+		A2000003C /* CachePreferencesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CachePreferencesStore.swift; sourceTree = "<group>"; };
+		A2000003D /* BackgroundPrefetchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundPrefetchService.swift; sourceTree = "<group>"; };
+		A2000003E /* OfflineBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineBanner.swift; sourceTree = "<group>"; };
 		A30000001 /* MusicPorter.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MusicPorter.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -167,13 +181,26 @@
 				A2000001C /* APIClient.swift */,
 				A2000001D /* SSEClient.swift */,
 				A2000001E /* MusicKitService.swift */,
-				A2000001F /* FileDownloadManager.swift */,
 				A20000020 /* USBExportService.swift */,
 				A20000029 /* AudioPlayerService.swift */,
-				A20000032 /* BackgroundDownloadManager.swift */,
-				A20000033 /* DownloadStateStore.swift */,
+				A50000011 /* Cache */,
 			);
 			path = Services;
+			sourceTree = "<group>";
+		};
+		A50000011 /* Cache */ = {
+			isa = PBXGroup;
+			children = (
+				A20000035 /* CacheConstants.swift */,
+				A20000036 /* CacheTypes.swift */,
+				A20000037 /* CacheUtils.swift */,
+				A20000038 /* MetadataCache.swift */,
+				A20000039 /* AudioCacheManager.swift */,
+				A2000003A /* PrefetchEngine.swift */,
+				A2000003C /* CachePreferencesStore.swift */,
+				A2000003D /* BackgroundPrefetchService.swift */,
+			);
+			path = Cache;
 			sourceTree = "<group>";
 		};
 		A50000005 /* ViewModels */ = {
@@ -196,11 +223,11 @@
 				A20000004 /* PairingView.swift */,
 				A2000002B /* QRScannerView.swift */,
 				A20000005 /* DashboardView.swift */,
-				A20000006 /* PlaylistsView.swift */,
 				A20000007 /* PlaylistDetailView.swift */,
 				A20000008 /* PipelineView.swift */,
 				A20000027 /* AppleMusicView.swift */,
 				A2000000A /* SettingsView.swift */,
+				A20000034 /* AboutView.swift */,
 				A2000000B /* OperationsView.swift */,
 				A2000002D /* SyncStatusView.swift */,
 				A2000002F /* LibraryView.swift */,
@@ -217,6 +244,8 @@
 				A2000000F /* StatusBadge.swift */,
 				A20000010 /* TrackRow.swift */,
 				A2000002A /* MiniPlayerView.swift */,
+				A2000003B /* DeleteServerDataSheet.swift */,
+				A2000003E /* OfflineBanner.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -312,11 +341,11 @@
 				A10000004 /* PairingView.swift in Sources */,
 				A1000002B /* QRScannerView.swift in Sources */,
 				A10000005 /* DashboardView.swift in Sources */,
-				A10000006 /* PlaylistsView.swift in Sources */,
 				A10000007 /* PlaylistDetailView.swift in Sources */,
 				A10000008 /* PipelineView.swift in Sources */,
 				A10000027 /* AppleMusicView.swift in Sources */,
 				A1000000A /* SettingsView.swift in Sources */,
+				A10000034 /* AboutView.swift in Sources */,
 				A1000000B /* OperationsView.swift in Sources */,
 				A10000026 /* DocumentExportPicker.swift in Sources */,
 				A1000000E /* ProgressPanel.swift in Sources */,
@@ -336,7 +365,6 @@
 				A1000001C /* APIClient.swift in Sources */,
 				A1000001D /* SSEClient.swift in Sources */,
 				A1000001E /* MusicKitService.swift in Sources */,
-				A1000001F /* FileDownloadManager.swift in Sources */,
 				A10000020 /* USBExportService.swift in Sources */,
 				A10000021 /* AppState.swift in Sources */,
 				A10000022 /* DashboardViewModel.swift in Sources */,
@@ -349,8 +377,16 @@
 				A1000002D /* SyncStatusView.swift in Sources */,
 				A1000002E /* EQConfig.swift in Sources */,
 				A1000002F /* LibraryView.swift in Sources */,
-				A10000030 /* BackgroundDownloadManager.swift in Sources */,
-				A10000031 /* DownloadStateStore.swift in Sources */,
+				A10000035 /* CacheConstants.swift in Sources */,
+				A10000036 /* CacheTypes.swift in Sources */,
+				A10000037 /* CacheUtils.swift in Sources */,
+				A10000038 /* MetadataCache.swift in Sources */,
+				A10000039 /* AudioCacheManager.swift in Sources */,
+				A1000003A /* PrefetchEngine.swift in Sources */,
+				A1000003C /* CachePreferencesStore.swift in Sources */,
+				A1000003D /* BackgroundPrefetchService.swift in Sources */,
+				A1000003B /* DeleteServerDataSheet.swift in Sources */,
+				A1000003E /* OfflineBanner.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

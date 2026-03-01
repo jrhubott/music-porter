@@ -1,21 +1,22 @@
 import {
   existsSync,
   mkdirSync,
-  readFileSync,
-  writeFileSync,
-  renameSync,
   unlinkSync,
   rmSync,
   statSync,
-  readdirSync,
-  copyFileSync,
   createWriteStream,
+  renameSync,
+  copyFileSync,
 } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
-import { CACHE_DIRNAME, CACHE_INDEX_FILENAME, TEMP_SUFFIX } from './constants.js';
-import type { CacheEntry, CacheIndex, FileInfo, PlaylistCacheStatus } from './types.js';
+import { CACHE_DIRNAME, CACHE_INDEX_FILENAME } from './constants.js';
+import { loadJsonIndex, saveJsonIndex, removeEmptyDirs } from './cache-utils.js';
+import type { CacheEntry, CacheIndex, PlaylistCacheStatus } from './types.js';
+import type { FileInfo } from '../types.js';
+
+const TEMP_SUFFIX = '.tmp';
 
 /**
  * Local audio file cache — stores server-tagged files by profile.
@@ -33,7 +34,11 @@ export class CacheManager {
     this.profile = profile;
     this.cacheDir = join(configDir, CACHE_DIRNAME, profile);
     this.indexPath = join(this.cacheDir, CACHE_INDEX_FILENAME);
-    this.index = this.loadIndex();
+    this.index = loadJsonIndex<CacheIndex>(
+      this.indexPath,
+      { profile: this.profile, entries: {} },
+      (data) => data.profile === this.profile,
+    );
   }
 
   // ── Cache Hit ──
@@ -45,7 +50,7 @@ export class CacheManager {
     const filePath = this.entryPath(entry);
     if (!existsSync(filePath)) {
       delete this.index.entries[uuid];
-      this.saveIndex();
+      this.persistIndex();
       return null;
     }
     return filePath;
@@ -90,7 +95,7 @@ export class CacheManager {
         entry.server_updated_at = new Date(serverUpdatedAt * 1000).toISOString();
       }
       this.index.entries[file.uuid] = entry;
-      this.saveIndex();
+      this.persistIndex();
     } catch {
       try {
         if (existsSync(tmpPath)) unlinkSync(tmpPath);
@@ -136,7 +141,7 @@ export class CacheManager {
         entry.server_updated_at = new Date(serverUpdatedAt * 1000).toISOString();
       }
       this.index.entries[file.uuid] = entry;
-      this.saveIndex();
+      this.persistIndex();
     } catch {
       try {
         if (existsSync(tmpPath)) unlinkSync(tmpPath);
@@ -182,7 +187,7 @@ export class CacheManager {
         size: stat.size,
         cached_at: new Date().toISOString(),
       };
-      this.saveIndex();
+      this.persistIndex();
     } catch {
       // Non-fatal
     }
@@ -252,7 +257,7 @@ export class CacheManager {
         removed++;
       }
     }
-    if (removed > 0) this.saveIndex();
+    if (removed > 0) this.persistIndex();
     return removed;
   }
 
@@ -295,8 +300,8 @@ export class CacheManager {
       delete this.index.entries[entry.uuid];
     }
 
-    this.saveIndex();
-    this.removeEmptyDirs();
+    this.persistIndex();
+    removeEmptyDirs(this.cacheDir);
     return freed;
   }
 
@@ -339,8 +344,8 @@ export class CacheManager {
     }
 
     if (freed > 0) {
-      this.saveIndex();
-      this.removeEmptyDirs();
+      this.persistIndex();
+      removeEmptyDirs(this.cacheDir);
     }
     return freed;
   }
@@ -383,8 +388,8 @@ export class CacheManager {
     }
 
     if (freed > 0) {
-      this.saveIndex();
-      this.removeEmptyDirs();
+      this.persistIndex();
+      removeEmptyDirs(this.cacheDir);
     }
     return freed;
   }
@@ -405,8 +410,8 @@ export class CacheManager {
       }
       delete this.index.entries[uuid];
     }
-    this.saveIndex();
-    this.removeEmptyDirs();
+    this.persistIndex();
+    removeEmptyDirs(this.cacheDir);
   }
 
   /** Delete entire profile cache. */
@@ -419,9 +424,9 @@ export class CacheManager {
       // Best-effort
     }
     this.index = { profile: this.profile, entries: {} };
-    // Recreate the cache dir so saveIndex doesn't fail
+    // Recreate the cache dir so persistIndex doesn't fail
     mkdirSync(this.cacheDir, { recursive: true });
-    this.saveIndex();
+    this.persistIndex();
   }
 
   // ── Internal ──
@@ -430,54 +435,7 @@ export class CacheManager {
     return join(this.cacheDir, entry.playlist, entry.display_filename);
   }
 
-  private loadIndex(): CacheIndex {
-    try {
-      if (!existsSync(this.indexPath)) {
-        return { profile: this.profile, entries: {} };
-      }
-      const raw = readFileSync(this.indexPath, 'utf-8');
-      const parsed = JSON.parse(raw) as CacheIndex;
-      if (parsed.profile !== this.profile) {
-        return { profile: this.profile, entries: {} };
-      }
-      return parsed;
-    } catch {
-      // Corrupt index — start fresh
-      return { profile: this.profile, entries: {} };
-    }
-  }
-
-  private saveIndex(): void {
-    try {
-      if (!existsSync(this.cacheDir)) {
-        mkdirSync(this.cacheDir, { recursive: true });
-      }
-      const tmpPath = this.indexPath + TEMP_SUFFIX;
-      writeFileSync(tmpPath, JSON.stringify(this.index, null, 2), 'utf-8');
-      renameSync(tmpPath, this.indexPath);
-    } catch {
-      // Non-fatal — cache metadata loss is recoverable via pruneStaleEntries
-    }
-  }
-
-  /** Remove empty playlist directories under the cache dir. */
-  private removeEmptyDirs(): void {
-    try {
-      const entries = readdirSync(this.cacheDir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
-        const dirPath = join(this.cacheDir, entry.name);
-        try {
-          const contents = readdirSync(dirPath);
-          if (contents.length === 0) {
-            rmSync(dirPath, { recursive: true });
-          }
-        } catch {
-          // Ignore
-        }
-      }
-    } catch {
-      // Ignore
-    }
+  private persistIndex(): void {
+    saveJsonIndex(this.indexPath, this.index);
   }
 }

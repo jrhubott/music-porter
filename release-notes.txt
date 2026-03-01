@@ -1,3 +1,16 @@
+Version 2.37.2 (2026-02-28):
+• iOS offline mode — tri-state connection model (connected/offline-with-cache/disconnected) shows cached playlists, tracks, and playback when server is unreachable
+• Replace iOS download system with cache-only model — unified prefetch and pin-based caching replaces per-file download manager
+• Background prefetch service with progress UI and pin/unpin triggers
+• Server-side ETag support for playlist and file list endpoints — conditional requests reduce bandwidth
+• Client-side ETag support in APIClient with MetadataCache for persistent API response caching
+• Consolidate cache code into shared cache/ module (iOS Swift actors + sync-client TypeScript)
+• Sync-client GUI improvements — app name, disk space display, sidebar layout, auto-offline mode
+• Add recent destinations dropdown to sync-client Sync page
+• Add server release notes to iOS and sync-client About pages
+• iOS app version bumped to 1.6.0
+• Sync client version bumped to 1.4.0
+
 Version 2.37.1 (2026-02-28):
 • Local audio cache — pin playlists for offline sync with background prefetch, smart eviction, and stale file detection
 • Fix prefetch eviction cycling — pre-filter downloads by cache capacity so files that would be immediately evicted are never downloaded

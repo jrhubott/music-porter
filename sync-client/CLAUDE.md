@@ -33,6 +33,21 @@ Shared library consumed by both CLI and GUI:
 - `config-store.ts` — Persistent JSON config with secure API key storage
 - `progress.ts` — Callback types for progress reporting
 
+### Cache Module (`packages/core/src/cache/`)
+
+Offline audio file caching and API response metadata caching:
+
+- `constants.ts` — Named constants (cache dir names, filenames, size limits)
+- `types.ts` — TypeScript interfaces for cache data structures: `CacheEntry` (snake\_case JSON for cache-index.json), `CachedPlaylistData`/`MetadataCacheData` (camelCase JSON for metadata-cache.json), `PrefetchResult`, `PlaylistCacheStatus`, `BackgroundPrefetchStatus`
+- `cache-utils.ts` — Utility functions: `loadJsonIndex`/`saveJsonIndex` (atomic JSON read/write with fallback), `removeEmptyDirs`, `atomicCopyFile`
+- `metadata-cache.ts` — `MetadataCache` class managing `metadata-cache.json` (playlist file lists + ETags). Schema versioned (`METADATA_CACHE_VERSION = 1`)
+- `cache-manager.ts` — `CacheManager` class managing `cache-index.json` + audio files at `<configDir>/cache/<profile>/<playlist>/<display_filename>`. Store/retrieve cached audio (streaming or file-based), staleness detection, eviction (unpinned first, then oldest), playlist/full cache clearing
+- `prefetch-engine.ts` — `PrefetchEngine` class for background prefetching with concurrent workers, capacity-aware eviction, and AbortSignal cancellation
+
+**Storage:** `<configDir>/cache/<profile>/` — one directory per output profile, containing `metadata-cache.json`, `cache-index.json`, and `<playlist>/<display_filename>` audio files.
+
+**JSON format compatibility:** The iOS companion app (`ios/`) implements an equivalent cache module in Swift. Both must use identical JSON formats, schema versions, and cache invalidation behavior. When modifying cache logic, types, or file formats here, update the iOS implementation in `ios/MusicPorter/MusicPorter/Services/Cache/` to match.
+
 ### CLI (@mporter/cli)
 
 Binary: `mporter-sync`. Uses commander for subcommand parsing.

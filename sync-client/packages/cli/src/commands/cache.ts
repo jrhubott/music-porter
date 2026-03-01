@@ -4,6 +4,7 @@ import chalk from 'chalk';
 import {
   CacheManager,
   ConfigStore,
+  MetadataCache,
   PrefetchEngine,
   getConfigDir,
   DEFAULT_CONCURRENCY,
@@ -173,6 +174,7 @@ export function registerCacheCommand(program: Command): void {
       let barStarted = false;
 
       const engine = new PrefetchEngine(client, cm);
+      const mc = profile ? new MetadataCache(getConfigDir(), profile) : undefined;
 
       try {
         const result = await engine.prefetch({
@@ -182,6 +184,7 @@ export function registerCacheCommand(program: Command): void {
           maxCacheBytes: configStore.preferences.maxCacheBytes,
           pinnedPlaylists: new Set(pinned),
           signal: abortController.signal,
+          metadataCache: mc,
           onProgress: (progress: SyncProgress) => {
             if (!barStarted && progress.total > 0) {
               progressBar.start(progress.total, 0, { status: 'Starting...' });

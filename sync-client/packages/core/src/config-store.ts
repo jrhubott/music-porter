@@ -3,7 +3,7 @@ import { join, dirname } from 'node:path';
 import { getConfigDir } from './platform.js';
 import { ConfigError } from './errors.js';
 import type { AppConfig, ServerConfig, SyncPreferences, WindowState } from './types.js';
-import { DEFAULT_CONCURRENCY, DEFAULT_MAX_CACHE_BYTES } from './constants.js';
+import { DEFAULT_CONCURRENCY, DEFAULT_MAX_CACHE_BYTES, MAX_RECENT_DESTINATIONS } from './constants.js';
 
 const CONFIG_FILENAME = 'config.json';
 const API_KEY_FILENAME = 'api-key';
@@ -18,6 +18,7 @@ const DEFAULT_PREFERENCES: SyncPreferences = {
   maxCacheBytes: DEFAULT_MAX_CACHE_BYTES,
   autoPinNewPlaylists: false,
   unpinnedPlaylists: [],
+  recentDestinations: [],
 };
 
 /** Legacy preferences shape for migration from autoSyncOnUSB. */
@@ -97,6 +98,19 @@ export class ConfigStore {
 
   isAutoSyncDrive(name: string): boolean {
     return this.config.preferences.autoSyncDrives.includes(name);
+  }
+
+  // ── Recent Destination Helpers ──
+
+  addRecentDestination(path: string): void {
+    const recent = this.config.preferences.recentDestinations;
+    const idx = recent.indexOf(path);
+    if (idx !== -1) recent.splice(idx, 1);
+    recent.unshift(path);
+    if (recent.length > MAX_RECENT_DESTINATIONS) {
+      recent.length = MAX_RECENT_DESTINATIONS;
+    }
+    this.save();
   }
 
   // ── Playlist Pin Helpers ──

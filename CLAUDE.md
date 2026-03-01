@@ -277,6 +277,17 @@ See `sync-client/CLAUDE.md` for full sync client documentation (architecture, co
 
 **Quick reference:** Cross-platform standalone sync client (`sync-client/` subdirectory) connecting to `./music-porter server` via API. Provides both a CLI tool (`mporter-sync`) and an Electron desktop app. Built with TypeScript as an npm workspaces monorepo (`@mporter/core`, `@mporter/cli`, `@mporter/gui`). The sync client has its own independent version (`VERSION` in `sync-client/packages/core/src/constants.ts`) — `/merge-dev-to-main` automatically detects `sync-client/` changes and prompts for a sync client version bump.
 
+## Shared Cache Model
+
+Both the iOS companion app and the sync client implement the same cache model for offline audio file caching and API response metadata. JSON file formats, schema versions, and cache invalidation behavior must stay in sync between the two implementations.
+
+- **iOS implementation:** `ios/MusicPorter/MusicPorter/Services/Cache/` (Swift actors)
+- **Sync client implementation:** `sync-client/packages/core/src/cache/` (TypeScript classes)
+- **JSON formats:** `metadata-cache.json` (camelCase), `cache-index.json` (snake\_case)
+- **Schema version:** `metadataCacheVersion = 1` (shared constant)
+
+When modifying cache logic, types, or file formats in either implementation, update the other to match.
+
 ## Important Implementation Notes
 
 ### File Naming

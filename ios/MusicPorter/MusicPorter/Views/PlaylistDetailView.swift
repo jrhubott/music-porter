@@ -12,8 +12,7 @@ struct PlaylistDetailView: View {
                     appState.audioPlayer.playServerTrack(
                         track: track,
                         in: vm.tracks,
-                        playlist: playlist.key,
-                        downloadManager: appState.downloadManager
+                        playlist: playlist.key
                     )
                 } label: {
                     TrackRow(
@@ -21,7 +20,7 @@ struct PlaylistDetailView: View {
                         playlist: playlist.key,
                         api: appState.apiClient,
                         isNowPlaying: appState.audioPlayer.currentServerTrackID == track.filename,
-                        isLocal: vm.localFilenames.contains(track.filename)
+                        isCached: vm.cachedUUIDs.contains(track.uuid ?? "")
                     )
                 }
                 .buttonStyle(.plain)
@@ -38,7 +37,21 @@ struct PlaylistDetailView: View {
             }
         }
         .navigationTitle(playlist.name)
-        .refreshable { await vm.load(api: appState.apiClient, playlist: playlist.key, downloadManager: appState.downloadManager) }
-        .task { await vm.load(api: appState.apiClient, playlist: playlist.key, downloadManager: appState.downloadManager) }
+        .refreshable {
+            await vm.load(
+                api: appState.apiClient, playlist: playlist.key,
+                audioCacheManager: appState.audioCacheManager,
+                metadataCache: appState.metadataCache,
+                profile: appState.activeProfile,
+                isOffline: appState.isOfflineMode)
+        }
+        .task {
+            await vm.load(
+                api: appState.apiClient, playlist: playlist.key,
+                audioCacheManager: appState.audioCacheManager,
+                metadataCache: appState.metadataCache,
+                profile: appState.activeProfile,
+                isOffline: appState.isOfflineMode)
+        }
     }
 }
