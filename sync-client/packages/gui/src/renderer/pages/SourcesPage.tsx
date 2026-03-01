@@ -237,6 +237,12 @@ export function SourcesPage() {
     } catch {
       // Best-effort
     }
+    // Aborting the SSE stream prevents the 'done' event from arriving,
+    // so reset UI state directly after cancel.
+    setIsPipelining(false);
+    setPipelineTaskId(null);
+    setPipelineProgress(null);
+    setPipelineDone({ type: 'done', status: 'cancelled' });
   }
 
   // ── Render ──
