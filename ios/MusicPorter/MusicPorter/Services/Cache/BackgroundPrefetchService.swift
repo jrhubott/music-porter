@@ -56,13 +56,32 @@ final class BackgroundPrefetchService {
         Task {
             try? await Task.sleep(for: .seconds(Self.initialDelaySeconds))
             guard !Task.isCancelled else { return }
-            runOnce()
+            runNow()
         }
     }
 
-    /// Run a single prefetch cycle. Can also be triggered manually.
+    /// Cancel any running prefetch and start a new one immediately.
+    /// Use this for user-initiated actions (pin/unpin, app startup).
+    func runNow() {
+        if isRunning {
+            logger.info("Interrupting running prefetch for restart")
+            prefetchTask?.cancel()
+            prefetchTask = nil
+            isRunning = false
+        }
+        startPrefetch()
+    }
+
+    /// Run a single prefetch cycle. Skips if one is already running.
+    /// Used by the periodic timer — never interrupts a running prefetch.
     func runOnce() {
         guard !isRunning else { return }
+        startPrefetch()
+    }
+
+    // MARK: - Internal
+
+    private func startPrefetch() {
         guard let appState, appState.isConnected else { return }
         guard let prefetchEngine = appState.prefetchEngine,
               let metadataCache = appState.metadataCache else { return }
@@ -70,9 +89,6 @@ final class BackgroundPrefetchService {
         guard !profile.isEmpty else { return }
 
         let cachePrefs = appState.cachePreferences
-
-        // Sync pins with server if auto-pin is on
-        // (deferred to the task below since we may need async API call)
 
         isRunning = true
         progressCurrent = 0
@@ -93,7 +109,8 @@ final class BackgroundPrefetchService {
 
             let pinnedPlaylists = cachePrefs.pinnedPlaylists
             guard !pinnedPlaylists.isEmpty else {
-                self.isRunning = false
+                // Only reset if we weren't cancelled — runNow() owns state on cancel
+                if !Task.isCancelled { self.isRunning = false }
                 return
             }
 
@@ -114,6 +131,9 @@ final class BackgroundPrefetchService {
                     self?.progressTotal = progress.total
                 }
             }
+
+            // If cancelled (by runNow()), don't reset state — the new task owns it
+            guard !Task.isCancelled else { return }
 
             self.lastResult = result
             self.lastRunAt = Date()

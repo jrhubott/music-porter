@@ -19,12 +19,6 @@ struct LibraryView: View {
     @State private var playlistCacheStatus: [String: PlaylistCacheStatus] = [:]
     @State private var cacheSize: Int64 = 0
 
-    // Delete server data state
-    @State private var serverDeleteKey: String?
-    @State private var serverDeleteSource = true
-    @State private var serverDeleteExport = true
-    @State private var serverDeleteConfig = false
-
     var body: some View {
         @Bindable var vmBindable = vm
         NavigationStack {
@@ -86,30 +80,6 @@ struct LibraryView: View {
                     }
                 }
             }
-            .sheet(isPresented: Binding(
-                get: { serverDeleteKey != nil },
-                set: { if !$0 { serverDeleteKey = nil } }
-            )) {
-                DeleteServerDataSheet(
-                    key: serverDeleteKey ?? "",
-                    deleteSource: $serverDeleteSource,
-                    deleteExport: $serverDeleteExport,
-                    removeConfig: $serverDeleteConfig
-                ) {
-                    if let key = serverDeleteKey {
-                        Task {
-                            await vm.deletePlaylistData(
-                                api: appState.apiClient, key: key,
-                                deleteSource: serverDeleteSource,
-                                deleteExport: serverDeleteExport,
-                                removeConfig: serverDeleteConfig)
-                            await load()
-                        }
-                    }
-                    serverDeleteKey = nil
-                }
-                .presentationDetents([.medium])
-            }
             .refreshable {
                 await load()
                 if selectedSegment == 1 {
@@ -118,6 +88,7 @@ struct LibraryView: View {
             }
             .task {
                 await load()
+                appState.backgroundPrefetchService?.runNow()
             }
         }
     }
@@ -127,11 +98,17 @@ struct LibraryView: View {
     private var playlistsContent: some View {
         List {
             actionBar
+            prefetchProgressSection
             exportProgressSection
             exportResultSection
             playlistsSection
             localStorageSection
             errorSection
+        }
+        .onChange(of: appState.backgroundPrefetchService?.isRunning) { _, newValue in
+            if newValue == false {
+                Task { await loadCacheStatus() }
+            }
         }
     }
 
@@ -233,6 +210,35 @@ struct LibraryView: View {
             }
             .font(.caption2)
             .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - Prefetch Progress
+
+    @ViewBuilder
+    private var prefetchProgressSection: some View {
+        if appState.backgroundPrefetchService?.isRunning == true {
+            Section("Prefetching") {
+                VStack(alignment: .leading, spacing: 6) {
+                    let current = appState.backgroundPrefetchService?.progressCurrent ?? 0
+                    let total = appState.backgroundPrefetchService?.progressTotal ?? 0
+                    ProgressView(value: total > 0 ? Double(current) / Double(total) : 0)
+                        .tint(.blue)
+                    HStack {
+                        Text("\(current)/\(total) files")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        if let playlist = appState.backgroundPrefetchService?.currentPlaylist {
+                            Text(playlist)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -338,6 +344,7 @@ struct LibraryView: View {
                     } else {
                         appState.cachePreferences.pinPlaylist(playlist.key)
                     }
+                    appState.backgroundPrefetchService?.runNow()
                 } label: {
                     Image(systemName: isPinned ? "pin.fill" : "pin")
                         .foregroundStyle(isPinned ? .blue : .secondary)
@@ -346,13 +353,15 @@ struct LibraryView: View {
             }
         }
         .swipeActions(edge: .trailing) {
-            Button(role: .destructive) {
-                serverDeleteSource = true
-                serverDeleteExport = true
-                serverDeleteConfig = false
-                serverDeleteKey = playlist.key
-            } label: {
-                Label("Delete Server Data", systemImage: "server.rack")
+            if status != nil && (status?.cached ?? 0) > 0 {
+                Button(role: .destructive) {
+                    Task {
+                        await appState.audioCacheManager?.clearPlaylist(playlist.key)
+                        await loadCacheStatus()
+                    }
+                } label: {
+                    Label("Delete Cache", systemImage: "trash")
+                }
             }
         }
         .swipeActions(edge: .leading) {
@@ -364,17 +373,6 @@ struct LibraryView: View {
                     Label("Export", systemImage: "externaldrive")
                 }
                 .tint(.orange)
-            }
-            if status != nil && (status?.cached ?? 0) > 0 {
-                Button {
-                    Task {
-                        await appState.audioCacheManager?.clearPlaylist(playlist.key)
-                        await loadCacheStatus()
-                    }
-                } label: {
-                    Label("Clear Cache", systemImage: "internaldrive")
-                }
-                .tint(.purple)
             }
         }
     }
