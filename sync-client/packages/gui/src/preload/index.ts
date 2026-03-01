@@ -7,6 +7,9 @@ import type {
   DiscoveredServer,
   DriveInfo,
   FileListResponse,
+  OkResponse,
+  PipelineProgress,
+  PipelineStartResult,
   Playlist,
   PlaylistCacheStatus,
   PrefetchResult,
@@ -43,6 +46,19 @@ const electronAPI = {
   getSyncDestinations: (): Promise<SyncDestinationsResponse> =>
     ipcRenderer.invoke('data:getSyncDestinations'),
   getAbout: (): Promise<AboutResponse> => ipcRenderer.invoke('data:getAbout'),
+  addPlaylist: (key: string, url: string, name: string): Promise<OkResponse> =>
+    ipcRenderer.invoke('data:addPlaylist', key, url, name),
+  updatePlaylist: (key: string, url?: string, name?: string): Promise<OkResponse> =>
+    ipcRenderer.invoke('data:updatePlaylist', key, url, name),
+
+  // Pipeline
+  startPipeline: (opts?: {
+    playlist?: string;
+    auto?: boolean;
+    preset?: string;
+  }): Promise<PipelineStartResult> => ipcRenderer.invoke('pipeline:start', opts),
+  cancelPipeline: (taskId?: string): Promise<void> =>
+    ipcRenderer.invoke('pipeline:cancel', taskId),
 
   // Sync
   startSync: (opts: {
@@ -153,6 +169,12 @@ const electronAPI = {
       callback(data);
     ipcRenderer.on('drives:autoSync', handler);
     return () => ipcRenderer.removeListener('drives:autoSync', handler);
+  },
+  onPipelineProgress: (callback: (progress: PipelineProgress) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, progress: PipelineProgress) =>
+      callback(progress);
+    ipcRenderer.on('pipeline:progress', handler);
+    return () => ipcRenderer.removeListener('pipeline:progress', handler);
   },
   onBackgroundPrefetchStatus: (callback: (status: BackgroundPrefetchStatus) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, status: BackgroundPrefetchStatus) =>

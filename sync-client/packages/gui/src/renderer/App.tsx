@@ -4,11 +4,13 @@ import { useIPC } from './hooks/useIPC.js';
 import { ConnectPage } from './pages/ConnectPage.js';
 import { SyncPage } from './pages/SyncPage.js';
 import { DestinationsPage } from './pages/DestinationsPage.js';
+import { SourcesPage } from './pages/SourcesPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
 import type { SyncProgress } from '@mporter/core';
 
 const NAV_ITEMS = [
   { id: 'sync', label: 'Sync', icon: 'bi-arrow-repeat' },
+  { id: 'sources', label: 'Sources', icon: 'bi-music-note-beamed' },
   { id: 'destinations', label: 'Destinations', icon: 'bi-hdd' },
   { id: 'settings', label: 'Settings', icon: 'bi-gear' },
 ];
@@ -250,6 +252,7 @@ export function App() {
       {/* Content */}
       <main className="app-content">
         {activePage === 'sync' && <SyncPage />}
+        {activePage === 'sources' && <SourcesPage />}
         {activePage === 'destinations' && <DestinationsPage />}
         {activePage === 'settings' && <SettingsPage />}
       </main>

@@ -45,6 +45,8 @@ export interface Playlist {
   url: string;
   name: string;
   file_count?: number;
+  size_bytes?: number;
+  duration_s?: number;
 }
 
 export interface FileInfo {
@@ -237,6 +239,30 @@ export type {
   PlaylistCacheStatus,
   BackgroundPrefetchStatus,
 } from './cache/types.js';
+
+// ── Pipeline ──
+
+export type PipelineEventType = 'log' | 'progress' | 'overall_progress' | 'done' | 'heartbeat';
+
+export interface PipelineProgress {
+  type: PipelineEventType;
+  // log events
+  level?: string;    // INFO, OK, WARN, ERROR, SKIP
+  message?: string;
+  // progress events
+  current?: number;
+  total?: number;
+  percent?: number;
+  stage?: string;
+  // done events
+  status?: string;   // completed, failed, cancelled
+  result?: Record<string, unknown>;
+  error?: string;
+}
+
+export interface PipelineStartResult {
+  task_id: string;
+}
 
 // ── Window State ──
 

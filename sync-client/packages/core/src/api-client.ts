@@ -22,6 +22,9 @@ import type {
   CookieUploadResponse,
   FileListResponse,
   HealthCheckResult,
+  OkResponse,
+  PipelineProgress,
+  PipelineStartResult,
   Playlist,
   ServerInfoResponse,
   SettingsResponse,
@@ -177,6 +180,119 @@ export class APIClient {
     this.playlistsETag = result.etag;
     this.playlistsCache = result.body;
     return result.body!;
+  }
+
+  /** Add a new playlist to the server. Uses custom fetch to distinguish duplicate-key 409 from busy 409. */
+  async addPlaylist(key: string, url: string, name: string): Promise<OkResponse> {
+    const fetchURL = this.buildURL('/api/playlists');
+    const response = await fetch(fetchURL, {
+      method: 'POST',
+      headers: this.authHeaders(),
+      body: JSON.stringify({ key, url, name }),
+    });
+    if (response.status === HTTP_UNAUTHORIZED) throw new AuthError();
+    if (response.status < SUCCESS_RANGE_START || response.status > SUCCESS_RANGE_END) {
+      const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+      throw new ServerError(response.status, (body['error'] as string) ?? response.statusText);
+    }
+    this.clearETagCache();
+    return (await response.json()) as OkResponse;
+  }
+
+  /** Update an existing playlist's name and/or URL. */
+  async updatePlaylist(key: string, url?: string, name?: string): Promise<OkResponse> {
+    const fetchURL = this.buildURL(`/api/playlists/${encodeURIComponent(key)}`);
+    const body: Record<string, string> = {};
+    if (url !== undefined) body['url'] = url;
+    if (name !== undefined) body['name'] = name;
+    const response = await fetch(fetchURL, {
+      method: 'PUT',
+      headers: this.authHeaders(),
+      body: JSON.stringify(body),
+    });
+    if (response.status === HTTP_UNAUTHORIZED) throw new AuthError();
+    if (response.status < SUCCESS_RANGE_START || response.status > SUCCESS_RANGE_END) {
+      const respBody = await response.json().catch(() => ({})) as Record<string, unknown>;
+      throw new ServerError(response.status, (respBody['error'] as string) ?? response.statusText);
+    }
+    this.clearETagCache();
+    return (await response.json()) as OkResponse;
+  }
+
+  // ── Pipeline ──
+
+  /** Start a server pipeline run. Returns task_id on success, null if server is busy. */
+  async startPipeline(opts?: {
+    playlist?: string;
+    auto?: boolean;
+    preset?: string;
+  }): Promise<PipelineStartResult | null> {
+    const fetchURL = this.buildURL('/api/pipeline/run');
+    const response = await fetch(fetchURL, {
+      method: 'POST',
+      headers: this.authHeaders(),
+      body: JSON.stringify(opts ?? {}),
+    });
+    if (response.status === HTTP_CONFLICT) return null;
+    if (response.status === HTTP_UNAUTHORIZED) throw new AuthError();
+    if (response.status < SUCCESS_RANGE_START || response.status > SUCCESS_RANGE_END) {
+      throw new ServerError(response.status, response.statusText);
+    }
+    return (await response.json()) as PipelineStartResult;
+  }
+
+  /** Stream SSE events from a server task. Yields parsed PipelineProgress objects. */
+  async *streamTask(taskId: string, signal?: AbortSignal): AsyncGenerator<PipelineProgress> {
+    const url = this.buildURL(`/api/stream/${taskId}`);
+    const headers: Record<string, string> = {};
+    if (this.apiKey) {
+      headers['Authorization'] = `${AUTH_HEADER_PREFIX} ${this.apiKey}`;
+    }
+    const response = await fetch(url, { headers, signal });
+    if (!response.body) return;
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // Parse SSE lines: "data: {...}\n\n"
+        const parts = buffer.split('\n\n');
+        // Keep the last incomplete chunk in the buffer
+        buffer = parts.pop() ?? '';
+
+        for (const part of parts) {
+          for (const line of part.split('\n')) {
+            if (line.startsWith('data: ')) {
+              try {
+                const event = JSON.parse(line.slice('data: '.length)) as PipelineProgress;
+                yield event;
+              } catch {
+                // Skip malformed JSON
+              }
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  /** Cancel a running server task. */
+  async cancelTask(taskId: string): Promise<void> {
+    const url = this.buildURL(`/api/tasks/${taskId}/cancel`);
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: this.authHeaders(),
+    });
+    // Best-effort — ignore errors (task may have already finished)
+    if (response.status === HTTP_UNAUTHORIZED) throw new AuthError();
   }
 
   // ── Files ──
