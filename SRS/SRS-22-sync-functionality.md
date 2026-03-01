@@ -124,7 +124,7 @@ All sync clients (web dashboard, desktop app, iOS app) share core sync capabilit
 | 22.7.18 | 1.0 | As a user, I can expect background prefetch to automatically cache pinned playlists during idle time so that they are ready when I need them. Acceptance: when the client is idle and connected to the server, pinned playlists are downloaded in the background without user action. |
 | 22.7.19 | 1.0 | As a user, I can manage cache by setting a maximum cache size, clearing individual playlists, or clearing all cached files so that I can control disk usage. Acceptance: cache settings allow setting a size limit; clearing a playlist removes its cached files; clearing all removes the entire cache. |
 
-### Destination Selection (Desktop)
+### Destination Selection
 
 | ID | Version | Requirement |
 |----|---------|-------------|
