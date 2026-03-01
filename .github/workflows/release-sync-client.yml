@@ -66,10 +66,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Clear quarantine attributes (macOS)
-        if: matrix.os == 'macos'
-        run: xattr -cr node_modules/app-builder-bin/
-
       - name: Build all packages
         run: npm run build
 
@@ -105,12 +101,6 @@ jobs:
             --output mporter-sync-win-x64.exe
 
       # ── GUI installers ──
-
-      - name: Inject electronVersion into electron-builder config
-        shell: bash
-        run: |
-          ELECTRON_VER=$(node -e "console.log(require('electron/package.json').version)")
-          echo "electronVersion: \"$ELECTRON_VER\"" >> packages/gui/electron-builder.yml
 
       - name: Build GUI — macOS arm64
         if: matrix.os == 'macos'

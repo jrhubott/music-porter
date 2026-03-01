@@ -1,5 +1,6 @@
 appId: com.musicporter.sync
 productName: Music Porter Sync
+npmRebuild: false
 directories:
   buildResources: build
   output: out
