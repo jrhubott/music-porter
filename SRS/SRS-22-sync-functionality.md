@@ -57,12 +57,15 @@
 
 ## 22.5 Destination Linking
 
+Sync keys track which files have been synced to a physical device. Some devices (e.g., USB drives on macOS/Linux/Windows) are detected directly, but others (e.g., a USB drive connected via an iOS device) appear only as a folder path. Destination linking allows a folder destination to share a sync key with a USB destination so that the system knows they refer to the same physical device and tracks them together.
+
 | ID | Version | Tested | Requirement |
 |----|---------|--------|-------------|
-| 22.5.1 | 1.0 | [ ] | As a user, I can link a destination to an existing sync key so that multiple destinations share the same tracking data. Acceptance: the destination is associated with the specified sync key; syncing to this destination uses the shared key's records. |
-| 22.5.2 | 1.0 | [ ] | As a user, I can unlink a destination from a shared sync key so that it gets its own independent tracking. Acceptance: the destination is disassociated from the shared key; a new independent sync key is created or the destination has no key until next sync. |
-| 22.5.3 | 1.0 | [ ] | As a user, I can expect that when linking, existing tracking data merges automatically so that no sync history is lost. Acceptance: if the destination already had its own sync records, those records are combined with the shared key's records. |
-| 22.5.4 | 1.0 | [ ] | As a user, I can expect that shared tracking means syncing to one linked destination updates the sync status for all destinations sharing that key. Acceptance: after syncing to destination A, destinations B and C (sharing the same key) also show those files as synced. |
+| 22.5.1 | 1.0 | [ ] | As a user, when I sync to a new folder destination for the first time, I am prompted to either create a new sync key or associate this destination with an existing sync key so that I can indicate whether this folder is a new device or the same device already tracked under another name. Acceptance: a prompt appears with two choices — "Create new sync key" or "Use existing sync key"; if I choose existing, I see a list of all available sync keys to select from. |
+| 22.5.2 | 1.0 | [ ] | As a user, I can link a destination to an existing sync key so that multiple destinations (e.g., a USB drive and a folder path on the same physical device) share the same tracking data. Acceptance: the destination is associated with the specified sync key; syncing to this destination uses the shared key's records. |
+| 22.5.3 | 1.0 | [ ] | As a user, I can unlink a destination from a shared sync key so that it gets its own independent tracking. Acceptance: the destination is disassociated from the shared key; a new independent sync key is created or the destination has no key until next sync. |
+| 22.5.4 | 1.0 | [ ] | As a user, I can expect that when linking, existing tracking data merges automatically so that no sync history is lost. Acceptance: if the destination already had its own sync records, those records are combined with the shared key's records. |
+| 22.5.5 | 1.0 | [ ] | As a user, I can expect that shared tracking means syncing to one linked destination updates the sync status for all destinations sharing that key. Acceptance: after syncing to destination A (USB drive) and then syncing to destination B (folder on the same device), the files synced via A are recognized and skipped. |
 
 ---
 
