@@ -115,7 +115,7 @@ jobs:
           npx electron-builder --mac dmg zip --arm64
           --project packages/gui
           --publish never
-          --electron-version ${{ steps.electron.outputs.version }}
+          -c.electronVersion=${{ steps.electron.outputs.version }}
 
       - name: Build GUI — macOS x64
         if: matrix.os == 'macos'
@@ -123,7 +123,7 @@ jobs:
           npx electron-builder --mac dmg zip --x64
           --project packages/gui
           --publish never
-          --electron-version ${{ steps.electron.outputs.version }}
+          -c.electronVersion=${{ steps.electron.outputs.version }}
 
       - name: Build GUI — Windows x64
         if: matrix.os == 'windows'
@@ -131,7 +131,7 @@ jobs:
           npx electron-builder --win nsis --x64
           --project packages/gui
           --publish never
-          --electron-version ${{ steps.electron.outputs.version }}
+          -c.electronVersion=${{ steps.electron.outputs.version }}
 
       # ── Upload artifacts ──
 
