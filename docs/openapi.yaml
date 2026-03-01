@@ -1,0 +1,2713 @@
+openapi: 3.1.0
+info:
+  title: Music Porter API
+  version: "2.37.4"
+  description: >
+    REST API for Music Porter — a server-based music playlist management and
+    conversion tool. Downloads Apple Music playlists, converts to MP3, stores
+    metadata in SQLite, and syncs to destinations with profile-specific tags.
+  license:
+    name: MIT
+
+servers:
+  - url: http://{host}:{port}
+    description: Music Porter server
+    variables:
+      host:
+        default: localhost
+      port:
+        default: "5555"
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Auth
+    description: Authentication and server identity
+  - name: Status
+    description: Dashboard status and library statistics
+  - name: Cookies
+    description: Apple Music cookie management
+  - name: Playlists
+    description: Playlist CRUD operations
+  - name: Settings
+    description: Server settings and config management
+  - name: Scheduler
+    description: Automated pipeline scheduling
+  - name: Directories
+    description: Source and library directory listings
+  - name: Pipeline
+    description: Full download + convert + sync pipeline
+  - name: Conversion
+    description: M4A to MP3 conversion
+  - name: Library
+    description: Library maintenance operations
+  - name: Files
+    description: File listing, download, and artwork serving
+  - name: Sync Destinations
+    description: Sync destination management
+  - name: Sync Operations
+    description: Sync execution and status
+  - name: Sync Keys
+    description: Sync key tracking management
+  - name: Tasks
+    description: Background task management and history
+  - name: SSE
+    description: Server-Sent Events for task progress
+  - name: EQ
+    description: EQ preset management
+  - name: Pairing
+    description: iOS companion app pairing
+  - name: Audit
+    description: Audit log
+  - name: About
+    description: Server version and release notes
+
+paths:
+  # ── Auth ──────────────────────────────────────────────────────────
+  /api/auth/validate:
+    post:
+      operationId: validateAuth
+      summary: Validate API key
+      description: Validate an API key and return server identity.
+      tags: [Auth]
+      responses:
+        "200":
+          description: Valid API key
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [valid, version, server_name, api_version]
+                properties:
+                  valid:
+                    type: boolean
+                    description: Always true if request succeeds
+                  version:
+                    type: string
+                    examples: ["2.37.0"]
+                  server_name:
+                    type: string
+                  api_version:
+                    type: integer
+                    examples: [2]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/server-info:
+    get:
+      operationId: getServerInfo
+      summary: Server metadata
+      description: >
+        Server metadata for client discovery. No authentication required.
+      tags: [Auth]
+      security: []
+      responses:
+        "200":
+          description: Server info
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, version, platform, profiles, api_version]
+                properties:
+                  name:
+                    type: string
+                  version:
+                    type: string
+                  platform:
+                    type: string
+                    enum: [macOS, Linux, Windows]
+                  profiles:
+                    type: array
+                    items:
+                      type: string
+                  api_version:
+                    type: integer
+                  external_url:
+                    type: string
+                    description: External URL if configured; omitted otherwise
+
+  # ── Status ────────────────────────────────────────────────────────
+  /api/status:
+    get:
+      operationId: getStatus
+      summary: Dashboard status
+      description: >
+        Dashboard status snapshot with cookie health, library size, and
+        scheduler state.
+      tags: [Status]
+      responses:
+        "200":
+          description: Status snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version, cookies, library, busy]
+                properties:
+                  version:
+                    type: string
+                  cookies:
+                    $ref: "#/components/schemas/CookieStatus"
+                  library:
+                    type: object
+                    required: [playlists, files, size_mb]
+                    properties:
+                      playlists:
+                        type: integer
+                      files:
+                        type: integer
+                      size_mb:
+                        type: number
+                  busy:
+                    type: boolean
+                  scheduler:
+                    oneOf:
+                      - $ref: "#/components/schemas/SchedulerStatus"
+                      - type: "null"
+
+  /api/summary:
+    get:
+      operationId: getSummary
+      summary: Library summary
+      description: Detailed library summary from TrackDB with per-playlist breakdowns.
+      tags: [Status]
+      responses:
+        "200":
+          description: Library summary
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - total_playlists
+                  - total_files
+                  - total_size_bytes
+                  - scan_duration
+                  - playlists
+                properties:
+                  total_playlists:
+                    type: integer
+                  total_files:
+                    type: integer
+                  total_size_bytes:
+                    type: integer
+                  scan_duration:
+                    type: number
+                  freshness:
+                    type: object
+                    properties:
+                      current:
+                        type: integer
+                      recent:
+                        type: integer
+                      stale:
+                        type: integer
+                      outdated:
+                        type: integer
+                  tag_integrity:
+                    type: object
+                    properties:
+                      protected:
+                        type: integer
+                      checked:
+                        type: integer
+                      missing:
+                        type: integer
+                  cover_art:
+                    type: object
+                    properties:
+                      with_art:
+                        type: integer
+                      without_art:
+                        type: integer
+                      original:
+                        type: integer
+                      resized:
+                        type: integer
+                  playlists:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        file_count:
+                          type: integer
+                        size_bytes:
+                          type: integer
+                        avg_size_mb:
+                          type: number
+                        last_modified:
+                          type: string
+                          format: date-time
+                          nullable: true
+                        freshness:
+                          type: string
+                          enum: [current, recent, stale, outdated]
+                        tags_checked:
+                          type: integer
+                        tags_protected:
+                          type: integer
+                        cover_with:
+                          type: integer
+                        cover_without:
+                          type: integer
+
+  /api/library-stats:
+    get:
+      operationId: getLibraryStats
+      summary: Source directory statistics
+      description: Music source directory (M4A) statistics scanned from disk.
+      tags: [Status]
+      responses:
+        "200":
+          description: Library stats
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - total_playlists
+                  - total_files
+                  - total_size_bytes
+                  - total_exported
+                  - total_unconverted
+                  - scan_duration
+                  - playlists
+                properties:
+                  total_playlists:
+                    type: integer
+                  total_files:
+                    type: integer
+                  total_size_bytes:
+                    type: integer
+                  total_exported:
+                    type: integer
+                  total_unconverted:
+                    type: integer
+                  scan_duration:
+                    type: number
+                  playlists:
+                    type: array
+                    items:
+                      type: object
+
+  /api/library-stats/{key}/unconverted:
+    get:
+      operationId: getUnconvertedFiles
+      summary: List unconverted files
+      description: >
+        List M4A source files that have no matching TrackDB record
+        (not yet converted).
+      tags: [Status]
+      parameters:
+        - $ref: "#/components/parameters/PlaylistKey"
+      responses:
+        "200":
+          description: Unconverted file list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [files]
+                properties:
+                  files:
+                    type: array
+                    items:
+                      type: object
+                      required: [artist, title, display_name]
+                      properties:
+                        artist:
+                          type: string
+                        title:
+                          type: string
+                        display_name:
+                          type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  # ── Cookies ───────────────────────────────────────────────────────
+  /api/cookies/browsers:
+    get:
+      operationId: getCookieBrowsers
+      summary: List available browsers
+      description: List installed browsers available for cookie extraction.
+      tags: [Cookies]
+      responses:
+        "200":
+          description: Browser list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [default, installed]
+                properties:
+                  default:
+                    type: string
+                  installed:
+                    type: array
+                    items:
+                      type: string
+
+  /api/cookies/refresh:
+    post:
+      operationId: refreshCookies
+      summary: Refresh cookies via browser
+      description: >
+        Background task: refresh cookies via Selenium browser automation.
+      tags: [Cookies]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                browser:
+                  type: string
+                  default: auto
+                  enum: [auto, chrome, firefox, safari, edge]
+                verbose:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          $ref: "#/components/responses/TaskCreated"
+        "409":
+          $ref: "#/components/responses/Busy"
+
+  /api/cookies/upload:
+    post:
+      operationId: uploadCookies
+      summary: Upload cookies
+      description: >
+        Accept Netscape-format cookies from a remote client. Backs up existing
+        cookies before overwriting, then cleans non-Apple cookies and validates.
+      tags: [Cookies]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cookies]
+              properties:
+                cookies:
+                  type: string
+                  description: Full Netscape-format cookie text
+      responses:
+        "200":
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [valid, reason]
+                properties:
+                  valid:
+                    type: boolean
+                  reason:
+                    type: string
+                  days_remaining:
+                    type: integer
+                    nullable: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  # ── Playlists ─────────────────────────────────────────────────────
+  /api/playlists:
+    get:
+      operationId: listPlaylists
+      summary: List playlists
+      description: >
+        List all playlists with aggregate stats from TrackDB. Supports ETag
+        caching.
+      tags: [Playlists]
+      parameters:
+        - name: If-None-Match
+          in: header
+          schema:
+            type: string
+          description: ETag for conditional request
+      responses:
+        "200":
+          description: Playlist list
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Playlist"
+        "304":
+          description: Not Modified
+
+    post:
+      operationId: addPlaylist
+      summary: Add playlist
+      description: Add a new playlist to the config.
+      tags: [Playlists]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key, url, name]
+              properties:
+                key:
+                  type: string
+                url:
+                  type: string
+                name:
+                  type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/playlists/{key}:
+    put:
+      operationId: updatePlaylist
+      summary: Update playlist
+      description: Update a playlist's name and/or URL.
+      tags: [Playlists]
+      parameters:
+        - $ref: "#/components/parameters/PlaylistKey"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url:
+                  type: string
+                name:
+                  type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    delete:
+      operationId: deletePlaylist
+      summary: Delete playlist
+      description: >
+        Remove a playlist from the config. Does not delete source or library
+        files.
+      tags: [Playlists]
+      parameters:
+        - $ref: "#/components/parameters/PlaylistKey"
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/playlists/{key}/delete-data:
+    post:
+      operationId: deletePlaylistData
+      summary: Delete playlist data
+      description: >
+        Delete source M4A and/or library MP3 data for a playlist.
+        Optionally removes the playlist from config.
+      tags: [Playlists]
+      parameters:
+        - $ref: "#/components/parameters/PlaylistKey"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                delete_source:
+                  type: boolean
+                  default: true
+                delete_library:
+                  type: boolean
+                  default: true
+                remove_config:
+                  type: boolean
+                  default: false
+                dry_run:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          description: Deletion result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  files_deleted:
+                    type: integer
+                  bytes_freed:
+                    type: integer
+                  source_deleted:
+                    type: boolean
+                  library_deleted:
+                    type: boolean
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Settings ──────────────────────────────────────────────────────
+  /api/settings:
+    get:
+      operationId: getSettings
+      summary: Get settings
+      description: >
+        Get all settings, output profile definitions, and available quality
+        presets.
+      tags: [Settings]
+      responses:
+        "200":
+          description: Settings and profiles
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [settings, profiles, quality_presets]
+                properties:
+                  settings:
+                    type: object
+                    required:
+                      - output_type
+                      - workers
+                      - server_name
+                      - quality_preset
+                    properties:
+                      output_type:
+                        type: string
+                      workers:
+                        type: integer
+                      server_name:
+                        type: string
+                      quality_preset:
+                        type: string
+                  profiles:
+                    type: object
+                    additionalProperties:
+                      $ref: "#/components/schemas/ProfileInfo"
+                  quality_presets:
+                    type: array
+                    items:
+                      type: string
+                    examples:
+                      - [lossless, high, medium, low]
+
+    post:
+      operationId: updateSettings
+      summary: Update settings
+      description: Update one or more settings values.
+      tags: [Settings]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+
+  /api/config/verify:
+    get:
+      operationId: verifyConfig
+      summary: Verify config
+      description: Validate config.yaml structure and values.
+      tags: [Settings]
+      responses:
+        "200":
+          description: Verification results
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results, errors, warnings, valid]
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      required: [level, message]
+                      properties:
+                        level:
+                          type: string
+                          enum: [error, warning, info]
+                        message:
+                          type: string
+                  errors:
+                    type: integer
+                  warnings:
+                    type: integer
+                  valid:
+                    type: boolean
+
+  /api/config/reset:
+    post:
+      operationId: resetConfig
+      summary: Reset config
+      description: Back up current config.yaml and recreate with defaults.
+      tags: [Settings]
+      responses:
+        "200":
+          description: Config reset
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+                  backup:
+                    type: string
+                    nullable: true
+                    description: Path to backup file, or null if no prior config
+
+  # ── Scheduler ─────────────────────────────────────────────────────
+  /api/scheduler/status:
+    get:
+      operationId: getSchedulerStatus
+      summary: Scheduler status
+      description: Get current scheduler configuration and next run time.
+      tags: [Scheduler]
+      responses:
+        "200":
+          description: Scheduler status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SchedulerStatus"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/scheduler/config:
+    post:
+      operationId: updateSchedulerConfig
+      summary: Update scheduler config
+      description: Update scheduler configuration. All fields optional.
+      tags: [Scheduler]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled:
+                  type: boolean
+                interval_hours:
+                  type: number
+                  minimum: 0.5
+                playlists:
+                  type: array
+                  items:
+                    type: string
+                preset:
+                  type: string
+                retry_minutes:
+                  type: integer
+                max_retries:
+                  type: integer
+                run_at:
+                  type: string
+                  description: "HH:MM format (00:00-23:59), empty string to clear"
+                on_missed:
+                  type: string
+                  enum: [run, skip]
+      responses:
+        "200":
+          description: Updated scheduler status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, status]
+                properties:
+                  ok:
+                    type: boolean
+                  status:
+                    $ref: "#/components/schemas/SchedulerStatus"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/scheduler/run-now:
+    post:
+      operationId: schedulerRunNow
+      summary: Trigger scheduled run
+      description: Trigger an immediate scheduled pipeline execution.
+      tags: [Scheduler]
+      responses:
+        "200":
+          description: Run triggered
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, status]
+                properties:
+                  ok:
+                    type: boolean
+                  status:
+                    $ref: "#/components/schemas/SchedulerStatus"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Busy"
+
+  # ── Directories ───────────────────────────────────────────────────
+  /api/directories/music:
+    get:
+      operationId: listMusicDirs
+      summary: List source directories
+      description: List playlist keys that have source M4A files on disk.
+      tags: [Directories]
+      responses:
+        "200":
+          description: Playlist keys with source files
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+
+  /api/directories/export:
+    get:
+      operationId: listExportDirs
+      summary: List library playlists
+      description: >
+        List library playlists with converted MP3 file counts from TrackDB.
+      tags: [Directories]
+      responses:
+        "200":
+          description: Export directory list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [name, display_name, files]
+                  properties:
+                    name:
+                      type: string
+                      description: Playlist key
+                    display_name:
+                      type: string
+                      description: Human-readable playlist name
+                    files:
+                      type: integer
+
+  # ── Pipeline ──────────────────────────────────────────────────────
+  /api/pipeline/run:
+    post:
+      operationId: runPipeline
+      summary: Run pipeline
+      description: >
+        Background task: full pipeline (download + convert + optional sync) for
+        one or all playlists. At least one of playlist, url, or auto is required.
+      tags: [Pipeline]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                playlist:
+                  type: string
+                  description: Single playlist key to process
+                url:
+                  type: string
+                  description: Apple Music URL (creates playlist if new)
+                auto:
+                  type: boolean
+                  default: false
+                  description: Process all configured playlists
+                dry_run:
+                  type: boolean
+                  default: false
+                verbose:
+                  type: boolean
+                  default: false
+                preset:
+                  type: string
+                  enum: [lossless, high, medium, low]
+                sync_destination:
+                  type: string
+                  description: Destination name to sync after pipeline
+                eq:
+                  $ref: "#/components/schemas/EQConfig"
+                no_eq:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          $ref: "#/components/responses/TaskCreated"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Busy"
+
+  # ── Conversion ────────────────────────────────────────────────────
+  /api/convert/run:
+    post:
+      operationId: runConvert
+      summary: Convert single directory
+      description: >
+        Background task: convert M4A files to MP3 for a single directory.
+      tags: [Conversion]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [input_dir]
+              properties:
+                input_dir:
+                  type: string
+                  description: Source directory path relative to project root
+                output_dir:
+                  type: string
+                  default: library/audio/
+                force:
+                  type: boolean
+                  default: false
+                dry_run:
+                  type: boolean
+                  default: false
+                verbose:
+                  type: boolean
+                  default: false
+                preset:
+                  type: string
+                  default: lossless
+                  enum: [lossless, high, medium, low]
+                eq:
+                  $ref: "#/components/schemas/EQConfig"
+                no_eq:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          $ref: "#/components/responses/TaskCreated"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Busy"
+
+  /api/convert/batch:
+    post:
+      operationId: runConvertBatch
+      summary: Convert multiple playlists
+      description: >
+        Background task: convert multiple playlists in a single operation.
+      tags: [Conversion]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [playlists]
+              properties:
+                playlists:
+                  type: array
+                  items:
+                    type: string
+                  description: Playlist keys to convert
+                force:
+                  type: boolean
+                  default: false
+                dry_run:
+                  type: boolean
+                  default: false
+                verbose:
+                  type: boolean
+                  default: false
+                preset:
+                  type: string
+                  default: lossless
+                  enum: [lossless, high, medium, low]
+                eq:
+                  $ref: "#/components/schemas/EQConfig"
+                no_eq:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          $ref: "#/components/responses/TaskCreated"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Busy"
+
+  # ── Library ───────────────────────────────────────────────────────
+  /api/library/backfill-metadata:
+    post:
+      operationId: backfillMetadata
+      summary: Backfill metadata
+      description: >
+        Background task: re-read M4A source tags into TrackDB for existing
+        tracks. Populates extended metadata columns that may have been missed
+        during initial conversion.
+      tags: [Library]
+      responses:
+        "200":
+          $ref: "#/components/responses/TaskCreated"
+        "409":
+          $ref: "#/components/responses/Busy"
+
+  /api/library/audit:
+    post:
+      operationId: auditLibrary
+      summary: Audit library
+      description: >
+        Background task: verify DB records match filesystem and clean up
+        orphans.
+      tags: [Library]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                allow_updates:
+                  type: boolean
+                  default: false
+                  description: Allow audit to fix issues (delete orphans, update records)
+      responses:
+        "200":
+          $ref: "#/components/responses/TaskCreated"
+        "409":
+          $ref: "#/components/responses/Busy"
+
+  # ── Files ─────────────────────────────────────────────────────────
+  /api/files/{key}:
+    get:
+      operationId: listFiles
+      summary: List playlist files
+      description: >
+        List MP3 files in a playlist with metadata from TrackDB. Supports ETag
+        caching.
+      tags: [Files]
+      parameters:
+        - $ref: "#/components/parameters/PlaylistKey"
+        - name: profile
+          in: query
+          schema:
+            type: string
+          description: Output profile name for display filename/subdir resolution
+        - name: include_sync
+          in: query
+          schema:
+            type: string
+            enum: ["true", "false"]
+          description: Include per-file sync status
+        - name: If-None-Match
+          in: header
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File list
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [playlist, file_count, files]
+                properties:
+                  playlist:
+                    type: string
+                  name:
+                    type: string
+                    description: Playlist display name (only when profile is set)
+                  file_count:
+                    type: integer
+                  files:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/FileInfo"
+        "304":
+          description: Not Modified
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/files/{key}/{filename}:
+    get:
+      operationId: downloadFile
+      summary: Download MP3
+      description: >
+        Download a single MP3 file. Without profile query param, serves the
+        clean library MP3. With profile, streams a copy with profile-specific
+        ID3 tags applied on-the-fly.
+      tags: [Files]
+      parameters:
+        - $ref: "#/components/parameters/PlaylistKey"
+        - name: filename
+          in: path
+          required: true
+          schema:
+            type: string
+          description: UUID-based filename (e.g. abc123.mp3)
+        - name: profile
+          in: query
+          schema:
+            type: string
+          description: Output profile name for on-the-fly tagging
+      responses:
+        "200":
+          description: MP3 file
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+          content:
+            audio/mpeg:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/files/{key}/{filename}/artwork:
+    get:
+      operationId: getArtwork
+      summary: Get cover art
+      description: Serve cover art for a track. Optionally resize.
+      tags: [Files]
+      parameters:
+        - $ref: "#/components/parameters/PlaylistKey"
+        - name: filename
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: size
+          in: query
+          schema:
+            type: integer
+          description: Resize to NxN pixels (omit for original size)
+      responses:
+        "200":
+          description: Cover art image
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/files/{key}/sync-status:
+    get:
+      operationId: getFileSyncStatus
+      summary: Per-file sync status
+      description: >
+        Per-file sync status map for a playlist. Maps filenames to arrays of
+        sync key names.
+      tags: [Files]
+      parameters:
+        - $ref: "#/components/parameters/PlaylistKey"
+      responses:
+        "200":
+          description: Sync status map
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: array
+                  items:
+                    type: string
+
+  /api/files/{key}/download-all:
+    get:
+      operationId: downloadAllFiles
+      summary: Download playlist ZIP
+      description: >
+        Stream a ZIP archive of all MP3s in a playlist. Files are stored
+        uncompressed (ZIP_STORED). Archive entries use human-readable display
+        filenames.
+      tags: [Files]
+      parameters:
+        - $ref: "#/components/parameters/PlaylistKey"
+      responses:
+        "200":
+          description: ZIP archive
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/files/download-zip:
+    post:
+      operationId: downloadMultiPlaylistZip
+      summary: Download multi-playlist ZIP
+      description: >
+        Stream a ZIP archive of MP3s from multiple playlists. Organized into
+        subdirectories by playlist key. Maximum 2000 files.
+      tags: [Files]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [playlists]
+              properties:
+                playlists:
+                  type: array
+                  items:
+                    type: string
+                  description: Playlist keys to include
+      responses:
+        "200":
+          description: ZIP archive
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          description: Too many files (limit 2000)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Sync Destinations ─────────────────────────────────────────────
+  /api/sync/destinations:
+    get:
+      operationId: listSyncDestinations
+      summary: List destinations
+      description: >
+        List all sync destinations (saved from config + auto-detected USB
+        drives in web mode).
+      tags: [Sync Destinations]
+      responses:
+        "200":
+          description: Destination list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [destinations]
+                properties:
+                  destinations:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SyncDestination"
+
+    post:
+      operationId: addSyncDestination
+      summary: Add destination
+      description: Add a saved sync destination.
+      tags: [Sync Destinations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, path]
+              properties:
+                name:
+                  type: string
+                path:
+                  type: string
+                  description: "Path with scheme (e.g. usb:///Volumes/Drive, folder:///path)"
+                sync_key:
+                  type: string
+      responses:
+        "200":
+          description: Destination added
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, name, path]
+                properties:
+                  ok:
+                    type: boolean
+                  name:
+                    type: string
+                  path:
+                    type: string
+                  sync_key:
+                    type: string
+                    nullable: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/sync/destinations/{name}:
+    delete:
+      operationId: deleteSyncDestination
+      summary: Delete destination
+      description: Remove a saved sync destination.
+      tags: [Sync Destinations]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Destination name
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/sync/destinations/{name}/link:
+    put:
+      operationId: linkSyncDestination
+      summary: Link sync key
+      description: >
+        Link or unlink a sync key to a destination. When linking and the
+        destination previously had tracking data under a different key, the
+        old tracking data is merged into the new key.
+      tags: [Sync Destinations]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sync_key:
+                  type: string
+                  description: Sync key to link (empty or omit to unlink)
+      responses:
+        "200":
+          description: Link updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+                  sync_key:
+                    type: string
+                    nullable: true
+                  merge_stats:
+                    type: object
+                    description: Merge statistics if tracking data was merged
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/sync/destinations/{name}/rename:
+    post:
+      operationId: renameSyncDestination
+      summary: Rename destination
+      description: >
+        Rename a saved destination. If the destination had no explicit sync
+        key, its tracking data is also renamed.
+      tags: [Sync Destinations]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Current destination name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [new_name]
+              properties:
+                new_name:
+                  type: string
+                  description: "Alphanumeric, hyphens, underscores only"
+      responses:
+        "200":
+          description: Destination renamed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, old_name, new_name, tracking_renamed]
+                properties:
+                  ok:
+                    type: boolean
+                  old_name:
+                    type: string
+                  new_name:
+                    type: string
+                  tracking_renamed:
+                    type: boolean
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  # ── Sync Operations ───────────────────────────────────────────────
+  /api/sync/run:
+    post:
+      operationId: runSync
+      summary: Run sync
+      description: >
+        Background task: sync MP3s to a destination with profile-specific tags
+        applied on-the-fly.
+      tags: [Sync Operations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [destination]
+              properties:
+                destination:
+                  type: string
+                  description: Destination name from config
+                source_dir:
+                  type: string
+                  default: library/audio/
+                playlist_key:
+                  type: string
+                  description: Playlist key for display name resolution
+                profile:
+                  type: string
+                  description: Output profile for tagging (defaults to config)
+                dry_run:
+                  type: boolean
+                  default: false
+                verbose:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          $ref: "#/components/responses/TaskCreated"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Busy"
+
+  /api/sync/status:
+    get:
+      operationId: getSyncStatus
+      summary: Sync status summary
+      description: Summary of all tracked sync keys with file counts.
+      tags: [Sync Operations]
+      responses:
+        "200":
+          description: Sync key summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SyncKeySummary"
+
+  /api/sync/status/{key}:
+    get:
+      operationId: getSyncStatusDetail
+      summary: Sync status detail
+      description: Per-playlist breakdown for a specific sync key.
+      tags: [Sync Operations]
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Sync key name
+      responses:
+        "200":
+          description: Detailed sync status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncStatusDetail"
+
+  # ── Sync Keys ─────────────────────────────────────────────────────
+  /api/sync/keys:
+    get:
+      operationId: listSyncKeys
+      summary: List sync keys
+      description: List all tracked sync keys.
+      tags: [Sync Keys]
+      responses:
+        "200":
+          description: Sync key list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [key_name, last_sync_at, created_at]
+                  properties:
+                    key_name:
+                      type: string
+                    last_sync_at:
+                      type: number
+                      description: Unix timestamp
+                    created_at:
+                      type: number
+                      description: Unix timestamp
+
+  /api/sync/keys/{key}:
+    delete:
+      operationId: deleteSyncKey
+      summary: Delete sync key
+      description: Delete a sync key and all its tracking data.
+      tags: [Sync Keys]
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+
+  /api/sync/keys/{key}/playlists/{playlist}:
+    delete:
+      operationId: deleteSyncKeyPlaylist
+      summary: Delete playlist tracking
+      description: Delete tracking records for one playlist on a sync key.
+      tags: [Sync Keys]
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: playlist
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Tracking records deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, deleted]
+                properties:
+                  ok:
+                    type: boolean
+                  deleted:
+                    type: integer
+
+  /api/sync/keys/{key}/prune:
+    post:
+      operationId: pruneSyncKey
+      summary: Prune stale records
+      description: Prune stale tracking records for files no longer in the library.
+      tags: [Sync Keys]
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Prune result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pruned_count]
+                properties:
+                  pruned_count:
+                    type: integer
+
+  /api/sync/keys/{key}/rename:
+    post:
+      operationId: renameSyncKey
+      summary: Rename sync key
+      description: >
+        Rename a sync key, moving all tracking data to the new name. Also
+        updates any destination config references.
+      tags: [Sync Keys]
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Current sync key name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [new_key]
+              properties:
+                new_key:
+                  type: string
+                  description: "Alphanumeric, hyphens, underscores only"
+      responses:
+        "200":
+          description: Key renamed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, old_key, new_key, stats, destinations_updated]
+                properties:
+                  ok:
+                    type: boolean
+                  old_key:
+                    type: string
+                  new_key:
+                    type: string
+                  stats:
+                    type: object
+                    description: Migration statistics
+                  destinations_updated:
+                    type: integer
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/sync/client-record:
+    post:
+      operationId: recordClientSync
+      summary: Record client sync
+      description: >
+        Record files synced via client-side (browser or sync-client) sync for
+        server-side tracking. Automatically registers a web-client://
+        destination if folder_name is provided.
+      tags: [Sync Keys]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sync_key, playlist, files]
+              properties:
+                sync_key:
+                  type: string
+                playlist:
+                  type: string
+                files:
+                  type: array
+                  items:
+                    type: string
+                  description: Filenames that were synced
+                folder_name:
+                  type: string
+                  description: Folder name for auto-registering web-client destination
+      responses:
+        "200":
+          description: Records saved
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, recorded]
+                properties:
+                  ok:
+                    type: boolean
+                  recorded:
+                    type: integer
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  # ── Tasks ─────────────────────────────────────────────────────────
+  /api/tasks:
+    get:
+      operationId: listTasks
+      summary: List active tasks
+      description: List all active (in-memory) background tasks.
+      tags: [Tasks]
+      responses:
+        "200":
+          description: Active task list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TaskInfo"
+
+  /api/tasks/{id}:
+    get:
+      operationId: getTask
+      summary: Get task details
+      description: >
+        Get details for a single task. Checks in-memory tasks first, then
+        falls back to task history DB.
+      tags: [Tasks]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Task UUID
+      responses:
+        "200":
+          description: Task details
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, operation, description, status, started_at]
+                properties:
+                  id:
+                    type: string
+                  operation:
+                    type: string
+                  description:
+                    type: string
+                  status:
+                    type: string
+                    enum: [pending, running, completed, failed, cancelled]
+                  started_at:
+                    type: number
+                    description: Unix timestamp
+                  finished_at:
+                    type: number
+                    description: Unix timestamp
+                  result:
+                    type: object
+                  error:
+                    type: string
+                  elapsed:
+                    type: number
+                    description: Seconds (for running tasks)
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/tasks/{id}/cancel:
+    post:
+      operationId: cancelTask
+      summary: Cancel task
+      description: Cancel a running background task.
+      tags: [Tasks]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/tasks/history:
+    get:
+      operationId: getTaskHistory
+      summary: Task history
+      description: Paginated task history with optional filters.
+      tags: [Tasks]
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/OperationFilter"
+        - $ref: "#/components/parameters/StatusFilter"
+        - $ref: "#/components/parameters/FromDate"
+        - $ref: "#/components/parameters/ToDate"
+      responses:
+        "200":
+          description: Paginated task history
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries, total, limit, offset]
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TaskHistoryEntry"
+                  total:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+
+  /api/tasks/stats:
+    get:
+      operationId: getTaskStats
+      summary: Task statistics
+      description: Aggregate task history statistics.
+      tags: [Tasks]
+      responses:
+        "200":
+          description: Task stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AggregateStats"
+
+  /api/tasks/clear:
+    post:
+      operationId: clearTaskHistory
+      summary: Clear task history
+      description: Delete old task history entries.
+      tags: [Tasks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm:
+                  type: boolean
+                  description: Must be true to confirm deletion
+                before_date:
+                  type: string
+                  description: ISO date; omit for all
+      responses:
+        "200":
+          description: Entries deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted]
+                properties:
+                  deleted:
+                    type: integer
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "503":
+          description: Task history DB unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── SSE ───────────────────────────────────────────────────────────
+  /api/stream/{task_id}:
+    get:
+      operationId: streamTaskEvents
+      summary: Task SSE stream
+      description: >
+        Server-Sent Events stream for a background task. The connection stays
+        open until the task completes or is cancelled. Each event is a JSON
+        object on a data: line.
+      tags: [SSE]
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Task UUID
+      responses:
+        "200":
+          description: SSE event stream
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                examples: ["no-cache"]
+            X-Accel-Buffering:
+              schema:
+                type: string
+                examples: ["no"]
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: >
+                  SSE events. Each line is data: followed by a JSON object.
+                  Event types: log (level, message), progress (current, total,
+                  label), overall_progress (current, total, label), heartbeat,
+                  done (status, result?, error?).
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── EQ ────────────────────────────────────────────────────────────
+  /api/eq:
+    get:
+      operationId: listEQPresets
+      summary: List EQ presets
+      description: List EQ configurations, optionally filtered by profile.
+      tags: [EQ]
+      parameters:
+        - name: profile
+          in: query
+          schema:
+            type: string
+          description: Filter by profile name (omit for all)
+      responses:
+        "200":
+          description: EQ presets
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [eq_presets]
+                properties:
+                  eq_presets:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/EQPreset"
+
+    post:
+      operationId: setEQPreset
+      summary: Set EQ preset
+      description: >
+        Set EQ config for a profile default or a profile+playlist override.
+      tags: [EQ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [profile]
+              properties:
+                profile:
+                  type: string
+                playlist:
+                  type: string
+                  description: Playlist key (omit for profile default)
+                loudnorm:
+                  type: boolean
+                  default: false
+                bass_boost:
+                  type: boolean
+                  default: false
+                treble_boost:
+                  type: boolean
+                  default: false
+                compressor:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          description: Preset saved
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, eq]
+                properties:
+                  success:
+                    type: boolean
+                  eq:
+                    $ref: "#/components/schemas/EQConfig"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+    delete:
+      operationId: deleteEQPreset
+      summary: Delete EQ preset
+      description: >
+        Delete an EQ config for a profile default or playlist override.
+      tags: [EQ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [profile]
+              properties:
+                profile:
+                  type: string
+                playlist:
+                  type: string
+                  description: Playlist key (omit to delete profile default)
+      responses:
+        "200":
+          description: Preset deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/eq/resolve:
+    get:
+      operationId: resolveEQ
+      summary: Resolve effective EQ
+      description: >
+        Resolve the effective EQ config for a profile+playlist combination.
+        If a playlist-specific override exists, it is used; otherwise the
+        profile default is returned.
+      tags: [EQ]
+      parameters:
+        - name: profile
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: playlist
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Resolved EQ
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [eq, any_enabled, filter_chain, effects]
+                properties:
+                  eq:
+                    $ref: "#/components/schemas/EQConfig"
+                  any_enabled:
+                    type: boolean
+                  filter_chain:
+                    type: string
+                    description: FFmpeg filter chain string
+                  effects:
+                    type: array
+                    items:
+                      type: string
+                    description: Enabled effect names
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/eq/effects:
+    get:
+      operationId: listEQEffects
+      summary: List EQ effects
+      description: List available EQ effects with descriptions.
+      tags: [EQ]
+      responses:
+        "200":
+          description: Available effects
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [effects]
+                properties:
+                  effects:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, description]
+                      properties:
+                        name:
+                          type: string
+                        description:
+                          type: string
+
+  # ── Pairing ───────────────────────────────────────────────────────
+  /api/pairing-qr:
+    get:
+      operationId: getPairingQR
+      summary: Pairing QR code
+      description: >
+        Generate a QR code (SVG) for iOS companion app pairing. Contains the
+        server's host, port, and API key. Only available in API mode.
+      tags: [Pairing]
+      responses:
+        "200":
+          description: QR code SVG
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                examples: ["no-store"]
+          content:
+            image/svg+xml:
+              schema:
+                type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          description: Server info unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: segno not installed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/pairing-info:
+    get:
+      operationId: getPairingInfo
+      summary: Pairing info
+      description: >
+        JSON server pairing details for programmatic access. Only available in
+        API mode.
+      tags: [Pairing]
+      responses:
+        "200":
+          description: Pairing details
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [api_key, host, port, address]
+                properties:
+                  api_key:
+                    type: string
+                  host:
+                    type: string
+                  port:
+                    type: integer
+                  address:
+                    type: string
+                    description: Full address (external URL if configured, otherwise host:port)
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          description: Server info unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Audit ─────────────────────────────────────────────────────────
+  /api/audit:
+    get:
+      operationId: listAuditEntries
+      summary: Audit log
+      description: Paginated audit entries with optional filters.
+      tags: [Audit]
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/OperationFilter"
+        - $ref: "#/components/parameters/StatusFilter"
+        - $ref: "#/components/parameters/FromDate"
+        - $ref: "#/components/parameters/ToDate"
+      responses:
+        "200":
+          description: Paginated audit entries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries, total, limit, offset]
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AuditEntry"
+                  total:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+
+  /api/audit/stats:
+    get:
+      operationId: getAuditStats
+      summary: Audit statistics
+      description: Aggregate audit log statistics.
+      tags: [Audit]
+      responses:
+        "200":
+          description: Audit stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AggregateStats"
+
+  /api/audit/clear:
+    post:
+      operationId: clearAuditLog
+      summary: Clear audit log
+      description: >
+        Delete old audit entries. Logs the clear action itself as a new audit
+        entry.
+      tags: [Audit]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm:
+                  type: boolean
+                  description: Must be true to confirm deletion
+                before_date:
+                  type: string
+                  description: ISO date; omit for all
+      responses:
+        "200":
+          description: Entries deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted]
+                properties:
+                  deleted:
+                    type: integer
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  # ── About ─────────────────────────────────────────────────────────
+  /api/about:
+    get:
+      operationId: getAbout
+      summary: Server version and release notes
+      description: Server version and release notes.
+      tags: [About]
+      responses:
+        "200":
+          description: Version info
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version, release_notes]
+                properties:
+                  version:
+                    type: string
+                    examples: ["2.37.0"]
+                  release_notes:
+                    type: string
+
+# ════════════════════════════════════════════════════════════════════
+# Components
+# ════════════════════════════════════════════════════════════════════
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: "API key from config.yaml (Authorization: Bearer <api_key>)"
+
+  parameters:
+    PlaylistKey:
+      name: key
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Playlist key
+
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        default: 50
+      description: Max entries per page
+
+    Offset:
+      name: offset
+      in: query
+      schema:
+        type: integer
+        default: 0
+      description: Entries to skip
+
+    OperationFilter:
+      name: operation
+      in: query
+      schema:
+        type: string
+      description: Filter by operation type
+
+    StatusFilter:
+      name: status
+      in: query
+      schema:
+        type: string
+      description: Filter by status
+
+    FromDate:
+      name: from
+      in: query
+      schema:
+        type: string
+      description: ISO date start filter
+
+    ToDate:
+      name: to
+      in: query
+      schema:
+        type: string
+      description: ISO date end filter
+
+  schemas:
+    OkResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    TaskResponse:
+      type: object
+      required: [task_id]
+      properties:
+        task_id:
+          type: string
+
+    Playlist:
+      type: object
+      required: [key, url, name, file_count, size_bytes, duration_s, freshness]
+      properties:
+        key:
+          type: string
+        url:
+          type: string
+        name:
+          type: string
+        file_count:
+          type: integer
+        size_bytes:
+          type: integer
+        duration_s:
+          type: number
+        freshness:
+          type: string
+          enum: [current, recent, stale, outdated]
+
+    FileInfo:
+      type: object
+      required: [filename, display_filename, size, duration, title, artist, album, uuid, has_cover_art, created_at, updated_at]
+      properties:
+        filename:
+          type: string
+          description: UUID-based filename on disk
+        display_filename:
+          type: string
+          description: "Human-readable (e.g. Artist - Title.mp3)"
+        size:
+          type: integer
+          description: File size in bytes
+        duration:
+          type: number
+          description: Duration in seconds
+        title:
+          type: string
+        artist:
+          type: string
+        album:
+          type: string
+        uuid:
+          type: string
+        has_cover_art:
+          type: boolean
+        created_at:
+          type: number
+          description: Unix timestamp
+        updated_at:
+          type: number
+          description: Unix timestamp
+        output_subdir:
+          type: string
+          description: Only present when profile has directory template
+        synced_to:
+          type: array
+          items:
+            type: string
+          description: Only present when include_sync=true
+
+    CookieStatus:
+      type: object
+      required: [valid, exists, reason]
+      properties:
+        valid:
+          type: boolean
+        exists:
+          type: boolean
+        reason:
+          type: string
+        days_remaining:
+          type: integer
+          nullable: true
+
+    SyncDestination:
+      type: object
+      required: [name, path, scheme]
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+          description: "Path with scheme (e.g. usb:///Volumes/Drive, folder:///path)"
+        scheme:
+          type: string
+          enum: [usb, folder, web-client]
+        sync_key:
+          type: string
+          nullable: true
+
+    SyncKeySummary:
+      type: object
+      required: [key_name, last_sync_at, total_files, synced_files, new_files, new_playlists]
+      properties:
+        key_name:
+          type: string
+        last_sync_at:
+          type: number
+          description: Unix timestamp
+        total_files:
+          type: integer
+        synced_files:
+          type: integer
+        new_files:
+          type: integer
+        new_playlists:
+          type: integer
+
+    SyncStatusDetail:
+      type: object
+      required: [sync_key, last_sync_at, playlists, total_files, synced_files, new_files, new_playlists]
+      properties:
+        sync_key:
+          type: string
+        last_sync_at:
+          type: number
+          description: Unix timestamp
+        playlists:
+          type: array
+          items:
+            type: object
+            required: [name, total_files, synced_files, new_files, is_new_playlist]
+            properties:
+              name:
+                type: string
+              total_files:
+                type: integer
+              synced_files:
+                type: integer
+              new_files:
+                type: integer
+              is_new_playlist:
+                type: boolean
+        total_files:
+          type: integer
+        synced_files:
+          type: integer
+        new_files:
+          type: integer
+        new_playlists:
+          type: integer
+
+    ProfileInfo:
+      type: object
+      properties:
+        description:
+          type: string
+        id3_title:
+          type: string
+        id3_artist:
+          type: string
+        id3_album:
+          type: string
+        id3_genre:
+          type: string
+        id3_extra:
+          type: object
+          additionalProperties: true
+        filename:
+          type: string
+        directory:
+          type: string
+        id3_versions:
+          type: array
+          items:
+            type: string
+        artwork_size:
+          type: integer
+          description: "Pixels; 0=original, -1=strip"
+        usb_dir:
+          type: string
+
+    EQConfig:
+      type: object
+      properties:
+        loudnorm:
+          type: boolean
+          default: false
+        bass_boost:
+          type: boolean
+          default: false
+        treble_boost:
+          type: boolean
+          default: false
+        compressor:
+          type: boolean
+          default: false
+
+    EQPreset:
+      type: object
+      required: [profile, loudnorm, bass_boost, treble_boost, compressor]
+      properties:
+        profile:
+          type: string
+        playlist:
+          type: string
+          nullable: true
+          description: Null for profile default
+        loudnorm:
+          type: boolean
+        bass_boost:
+          type: boolean
+        treble_boost:
+          type: boolean
+        compressor:
+          type: boolean
+
+    TaskInfo:
+      type: object
+      required: [id, operation, description, status, started_at]
+      properties:
+        id:
+          type: string
+        operation:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, completed, failed, cancelled]
+        started_at:
+          type: number
+          description: Unix timestamp
+        progress:
+          type: object
+          description: Current progress data (if available)
+
+    TaskHistoryEntry:
+      type: object
+      required: [id, operation, description, status, started_at]
+      properties:
+        id:
+          type: string
+        operation:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+        started_at:
+          type: string
+          description: ISO timestamp
+        finished_at:
+          type: string
+          nullable: true
+          description: ISO timestamp
+        result:
+          type: object
+        error:
+          type: string
+          nullable: true
+        elapsed:
+          type: number
+          description: Seconds (live for running tasks)
+
+    AuditEntry:
+      type: object
+      required: [id, timestamp, operation, description, status, source]
+      properties:
+        id:
+          type: integer
+        timestamp:
+          type: string
+          description: ISO timestamp
+        operation:
+          type: string
+        description:
+          type: string
+        params:
+          type: object
+          nullable: true
+        status:
+          type: string
+        duration_s:
+          type: number
+          nullable: true
+        source:
+          type: string
+          enum: [web, ios, api]
+
+    AggregateStats:
+      type: object
+      required: [total, today, by_operation, by_status]
+      properties:
+        total:
+          type: integer
+        today:
+          type: integer
+        by_operation:
+          type: object
+          additionalProperties:
+            type: integer
+        by_status:
+          type: object
+          additionalProperties:
+            type: integer
+
+    SchedulerStatus:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+        interval_hours:
+          type: number
+        playlists:
+          type: array
+          items:
+            type: string
+        preset:
+          type: string
+          nullable: true
+        retry_minutes:
+          type: integer
+        max_retries:
+          type: integer
+        run_at:
+          type: string
+          nullable: true
+          description: "HH:MM or null for interval mode"
+        on_missed:
+          type: string
+          enum: [run, skip]
+        next_run_time:
+          type: string
+          nullable: true
+          description: ISO timestamp
+        last_run_time:
+          type: string
+          nullable: true
+          description: ISO timestamp
+        last_run_status:
+          type: string
+          nullable: true
+
+  responses:
+    Ok:
+      description: Success
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/OkResponse"
+
+    TaskCreated:
+      description: Background task submitted
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/TaskResponse"
+
+    BadRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Unauthorized:
+      description: Invalid or missing API key
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Conflict:
+      description: Resource conflict
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Busy:
+      description: Another operation is already running
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"

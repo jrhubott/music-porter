@@ -445,5 +445,5 @@ Organized by concern (dataclasses, DB classes, business logic):
 ### Keeping Docs in Sync
 
 - When modifying the database schema, update `docs/DB_SCHEMA.md` to reflect the current state.
-- When modifying API endpoints in `web_api.py`, update `docs/SERVER_API.md` to reflect the current state.
+- When modifying API endpoints in `web_api.py`, update `docs/SERVER_API.md` and `docs/openapi.yaml` to reflect the current state.
 - When planning implementation work, consult `docs/DB_SCHEMA.md` and `docs/SERVER_API.md` as references for the current database schema and API surface.
