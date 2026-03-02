@@ -1,5 +1,5 @@
 import { ipcMain, dialog, safeStorage, BrowserWindow } from 'electron';
-import { statfsSync } from 'node:fs';
+import { existsSync, statfsSync } from 'node:fs';
 import {
   APIClient,
   CacheManager,
@@ -26,6 +26,7 @@ import type {
   PlaylistCacheStatus,
   PrefetchResult,
   ServerConfig,
+  SyncDestination,
   SyncPreferences,
   SyncProgress,
   SyncResult,
@@ -212,6 +213,15 @@ export function registerIPCHandlers(): void {
 
   ipcMain.handle('data:getSyncDestinations', async () => {
     return apiClient.getSyncDestinations();
+  });
+
+  ipcMain.handle('data:getLocalDestinations', async (): Promise<SyncDestination[]> => {
+    const response = await apiClient.getSyncDestinations();
+    return response.destinations.filter((d) => {
+      if (d.type === 'web-client') return false;
+      const rawPath = d.path.replace(/^(usb|folder):\/\//, '');
+      return existsSync(rawPath);
+    });
   });
 
   ipcMain.handle('data:getAbout', async () => {

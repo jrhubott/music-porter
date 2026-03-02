@@ -17,6 +17,7 @@ import type {
   ResetTrackingResponse,
   ServerConfig,
   SettingsResponse,
+  SyncDestination,
   SyncDestinationsResponse,
   SyncPreferences,
   SyncProgress,
@@ -46,6 +47,8 @@ const electronAPI = {
     ipcRenderer.invoke('data:getSyncStatus', destName),
   getSyncDestinations: (): Promise<SyncDestinationsResponse> =>
     ipcRenderer.invoke('data:getSyncDestinations'),
+  getLocalDestinations: (): Promise<SyncDestination[]> =>
+    ipcRenderer.invoke('data:getLocalDestinations'),
   getAbout: (): Promise<AboutResponse> => ipcRenderer.invoke('data:getAbout'),
   getSyncStatusSummary: (): Promise<SyncStatusSummary[]> =>
     ipcRenderer.invoke('data:getSyncStatusSummary'),
