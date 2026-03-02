@@ -4154,7 +4154,7 @@ def read_m4a_tags(input_file):
     """
     from mutagen.mp4 import MP4
     m4a = MP4(str(input_file))
-    tags = m4a.tags or {}
+    tags: Any = m4a.tags or {}
 
     # String tags with defaults
     title = str(tags.get(M4A_TAG_TITLE, ['Unknown Title'])[0])
@@ -4592,7 +4592,7 @@ def read_m4a_cover_art(input_file):
     from mutagen.mp4 import MP4, MP4Cover
     try:
         m4a = MP4(str(input_file))
-        covers = m4a.tags.get(M4A_TAG_COVER)
+        covers = (m4a.tags or {}).get(M4A_TAG_COVER)
         if not covers:
             return None, None
         cover = covers[0]
@@ -4621,7 +4621,7 @@ def resize_cover_art_bytes(image_data, max_size, mime_type="image/jpeg"):
     if width <= max_size and height <= max_size:
         return image_data, mime_type
 
-    img.thumbnail((max_size, max_size), Image.LANCZOS)
+    img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
 
     buf = io.BytesIO()
     if mime_type == APIC_MIME_PNG:
@@ -4990,7 +4990,7 @@ class TagApplicator:
     def _get_frame_constructors(cls):
         """Lazy-init frame constructor mapping."""
         if cls._frame_constructors is None:
-            from mutagen.id3 import COMM, TXXX
+            from mutagen.id3 import COMM, TXXX  # type: ignore[attr-defined]
             cls._frame_constructors = {
                 'TXXX': TXXX,
                 'COMM': COMM,
@@ -5026,7 +5026,7 @@ class TagApplicator:
 
         Returns (tags, v2_version, include_v1) tuple.
         """
-        from mutagen.id3 import APIC, ID3, TALB, TIT2, TPE1, TXXX
+        from mutagen.id3 import APIC, ID3, TALB, TIT2, TPE1, TXXX  # type: ignore[attr-defined]
 
         tvars = self._resolve_template_vars(track_meta, playlist_name)
 
@@ -5042,7 +5042,7 @@ class TagApplicator:
 
         # Genre tag (TCON) — only add if non-empty
         if profile.id3_genre:
-            from mutagen.id3 import TCON
+            from mutagen.id3 import TCON  # type: ignore[attr-defined]
             tags["TCON"] = TCON(encoding=3,
                                 text=apply_template(profile.id3_genre, **tvars))
 
@@ -5286,7 +5286,7 @@ class Converter:
         """Convert a single M4A file to a clean library MP3. Thread-safe."""
         import uuid as _uuid
 
-        from mutagen.id3 import ID3, TXXX, ID3NoHeaderError
+        from mutagen.id3 import ID3, TXXX, ID3NoHeaderError  # type: ignore[attr-defined]
         from mutagen.mp3 import MP3
 
         display_name = input_file.relative_to(input_path)
@@ -5875,6 +5875,7 @@ class Downloader:
             unrecognized_lines = []
 
             try:
+                assert process.stdout is not None  # stdout=PIPE always sets this
                 for line in process.stdout:
                     if _is_cancelled(self.cancel_event):
                         process.terminate()
@@ -6001,9 +6002,9 @@ class CookieStatus:
         self.valid = False
         self.exists = False
         self.has_required_cookie = False
-        self.expiration_timestamp = None
-        self.expiration_date = None
-        self.days_until_expiration = None
+        self.expiration_timestamp: Optional[int] = None
+        self.expiration_date: Optional[datetime] = None
+        self.days_until_expiration: Optional[float] = None
         self.reason = ""  # Human-readable message
 
 
@@ -6150,12 +6151,12 @@ class CookieManager:
 
             elif IS_WINDOWS:
                 # Windows: Check registry
-                import winreg
+                import winreg  # type: ignore[import]
                 try:
-                    key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                    key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,  # type: ignore[attr-defined]
                                         r'Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice')
-                    prog_id = winreg.QueryValueEx(key, 'ProgId')[0].lower()
-                    winreg.CloseKey(key)
+                    prog_id = winreg.QueryValueEx(key, 'ProgId')[0].lower()  # type: ignore[attr-defined]
+                    winreg.CloseKey(key)  # type: ignore[attr-defined]
 
                     if 'chrome' in prog_id:
                         return 'chrome'
@@ -6349,9 +6350,15 @@ class CookieManager:
         from selenium.webdriver.chrome.service import Service as ChromeService
         from selenium.webdriver.edge.service import Service as EdgeService
         from selenium.webdriver.firefox.service import Service as FirefoxService
+        from selenium.webdriver.chrome.webdriver import WebDriver as _ChromeDriver
+        from selenium.webdriver.firefox.webdriver import WebDriver as _FirefoxDriver
+        from selenium.webdriver.edge.webdriver import WebDriver as _EdgeDriver
 
         try:
             # Try to import webdriver-manager
+            ChromeDriverManager: Any = None
+            GeckoDriverManager: Any = None
+            EdgeChromiumDriverManager: Any = None
             try:
                 from webdriver_manager.chrome import ChromeDriverManager
                 from webdriver_manager.firefox import GeckoDriverManager
@@ -6392,12 +6399,12 @@ class CookieManager:
                 def _cached_chrome():
                     path = self._find_cached_driver('chromedriver')
                     if path:
-                        return webdriver.Chrome(service=ChromeService(path), options=options)
+                        return _ChromeDriver(service=ChromeService(path), options=options)
 
                 driver = _try_with_fallbacks(
-                    lambda: webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options),
+                    lambda: _ChromeDriver(service=ChromeService(ChromeDriverManager().install()), options=options),
                     _cached_chrome,
-                    lambda: webdriver.Chrome(options=options),
+                    lambda: _ChromeDriver(options=options),
                 )
 
             elif browser_name == 'firefox':
@@ -6409,12 +6416,12 @@ class CookieManager:
                 def _cached_firefox():
                     path = self._find_cached_driver('geckodriver')
                     if path:
-                        return webdriver.Firefox(service=FirefoxService(path), options=options)
+                        return _FirefoxDriver(service=FirefoxService(path), options=options)
 
                 driver = _try_with_fallbacks(
-                    lambda: webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), options=options),
+                    lambda: _FirefoxDriver(service=FirefoxService(GeckoDriverManager().install()), options=options),
                     _cached_firefox,
-                    lambda: webdriver.Firefox(options=options),
+                    lambda: _FirefoxDriver(options=options),
                 )
 
             elif browser_name == 'edge':
@@ -6428,19 +6435,19 @@ class CookieManager:
                 def _cached_edge():
                     path = self._find_cached_driver('msedgedriver')
                     if path:
-                        return webdriver.Edge(service=EdgeService(path), options=options)
+                        return _EdgeDriver(service=EdgeService(path), options=options)
 
                 driver = _try_with_fallbacks(
-                    lambda: webdriver.Edge(service=EdgeService(EdgeChromiumDriverManager().install()), options=options),
+                    lambda: _EdgeDriver(service=EdgeService(EdgeChromiumDriverManager().install()), options=options),
                     _cached_edge,
-                    lambda: webdriver.Edge(options=options),
+                    lambda: _EdgeDriver(options=options),
                 )
 
             elif browser_name == 'safari':
                 # Safari doesn't support headless mode and doesn't need webdriver-manager
                 if headless:
                     self.logger.info("Safari doesn't support headless mode, launching visible browser")
-                driver = webdriver.Safari()
+                driver = webdriver.Safari()  # type: ignore[attr-defined]
 
             return driver
 
@@ -7588,7 +7595,7 @@ class PipelineStatistics:
         self.download_stats = None  # DownloadStatistics object
 
         # Conversion stats
-        self.conversion_stats = None
+        self.conversion_stats: Optional[ConversionStatistics] = None
 
         # Tagging stats
         self.tagging_stats = None
@@ -7596,7 +7603,7 @@ class PipelineStatistics:
         # Sync stats
         self.sync_success = False
         self.sync_destination = None
-        self.sync_stats = None  # USBSyncStatistics object
+        self.sync_stats: Optional[dict] = None
 
         # Overall
         self.start_time = time.time()

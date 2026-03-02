@@ -212,7 +212,7 @@ class TaskState:
     status: str = 'pending'       # pending | running | completed | failed | cancelled
     result: dict = field(default_factory=dict)
     error: str = ''
-    thread: threading.Thread = field(default=None, repr=False)
+    thread: threading.Thread | None = field(default=None, repr=False)
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
     log_queue: queue.Queue = field(default_factory=queue.Queue, repr=False)
     started_at: float = 0.0
@@ -602,7 +602,7 @@ class PipelineScheduler:
             )
             workers = config.get_setting('workers', mp.DEFAULT_WORKERS)
             quality_preset = preset or config.get_setting(
-                'quality_preset', mp.DEFAULT_QUALITY_PRESET)
+                'quality_preset', mp.DEFAULT_QUALITY_PRESET) or mp.DEFAULT_QUALITY_PRESET
             deps = mp.DependencyChecker(logger)
             display = self._ctx.make_display_handler(task_id)
             task = self._ctx.task_manager.get(task_id)
@@ -747,14 +747,14 @@ class AppContext:
     """
 
     task_manager: TaskManager
-    audit_logger: object  # mp.AuditLogger
-    sync_tracker: object  # mp.SyncTracker
-    track_db: object  # mp.TrackDB
-    playlist_db: object  # mp.PlaylistDB
+    audit_logger: mp.AuditLogger
+    sync_tracker: mp.SyncTracker
+    track_db: mp.TrackDB
+    playlist_db: mp.PlaylistDB
     api_key: str
     project_root: Path
     scheduler: 'PipelineScheduler | None' = None
-    _config_cache: object = field(default=None, repr=False)  # cached ConfigManager
+    _config_cache: mp.ConfigManager | None = field(default=None, repr=False)
 
     # ── Request-scoped helpers ─────────────────────────────────
 
@@ -781,11 +781,13 @@ class AppContext:
     def make_logger(self, task_id, verbose=False):
         """Create a WebLogger wired to the task's SSE queue."""
         task = self.task_manager.get(task_id)
+        assert task is not None
         return WebLogger(task.log_queue, task.cancel_event, verbose=verbose)
 
     def make_display_handler(self, task_id):
         """Create a WebDisplayHandler wired to the task's SSE queue."""
         task = self.task_manager.get(task_id)
+        assert task is not None
         return WebDisplayHandler(task.log_queue, task.cancel_event)
 
     def get_config(self):
