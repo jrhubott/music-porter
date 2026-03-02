@@ -1750,6 +1750,51 @@ def api_sync_destination_rename(name):
                     'tracking_renamed': tracking_renamed})
 
 
+@api_bp.route('/api/sync/destinations/resolve', methods=['POST'])
+def api_sync_destination_resolve():
+    """Server-side destination resolution.
+
+    Finds or creates a destination + sync key from the provided hints.
+    Returns the destination, whether it was created, and sync status.
+    """
+    ctx = _ctx()
+    data = request.get_json(force=True) or {}
+    path = (data.get('path') or '').strip() or None
+    name = (data.get('name') or '').strip() or None
+    drive_name = (data.get('drive_name') or '').strip() or None
+    explicit_key = (data.get('sync_key') or '').strip() or None
+
+    if not path and not name:
+        return jsonify({'error': 'At least path or name is required'}), 400
+
+    result = ctx.sync_tracker.resolve_destination(
+        path=path, name=name, drive_name=drive_name,
+        explicit_key=explicit_key)
+    if not result:
+        return jsonify({'error': 'Failed to resolve destination'}), 500
+
+    dest = result['destination']
+    response = {
+        'destination': dest.to_api_dict(),
+        'created': result['created'],
+    }
+
+    # Include sync status summary
+    sync_key = dest.sync_key
+    export_dir = ctx.get_config().get_setting(
+        'export_dir', mp.get_audio_dir())
+    status = ctx.sync_tracker.get_sync_status(sync_key, export_dir)
+    response['sync_status'] = {
+        'sync_key': sync_key,
+        'total_files': status.total_files,
+        'synced_files': status.synced_files,
+        'new_files': status.new_files,
+        'playlists': status.playlists,
+    }
+
+    return jsonify(response)
+
+
 @api_bp.route('/api/sync/run', methods=['POST'])
 def api_sync_run():
     """Run sync to a named destination.
