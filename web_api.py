@@ -1682,7 +1682,7 @@ def api_sync_destination_link(name):
     """Link or unlink a destination's sync_key."""
     ctx = _ctx()
     data = request.get_json(force=True)
-    new_sync_key = data.get('sync_key', '').strip() or None
+    new_sync_key = (data.get('sync_key') or '').strip() or None
 
     dest = ctx.sync_tracker.get_destination(name)
     if not dest:
