@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useIPC } from '../hooks/useIPC.js';
 import { useAppState } from '../store/app-state.js';
+import { LinkDestinationModal } from '../components/LinkDestinationModal.js';
 import type { DriveInfo, Playlist, SyncProgress } from '@mporter/core';
 
+/** Prefix for client-generated sync keys (mirrors @mporter/core constant). */
+const CLIENT_SYNC_KEY_PREFIX = 'client-';
 const BYTES_PER_KB = 1024;
 const BYTES_PER_MB = 1024 * 1024;
 const BYTES_PER_GB = 1024 * 1024 * 1024;
@@ -71,6 +74,8 @@ export function SyncPage() {
   const [ejectAfterSync, setEjectAfterSync] = useState(false);
   const [ejected, setEjected] = useState(false);
   const [recentDestinations, setRecentDestinations] = useState<string[]>([]);
+  const [linkModalOpen, setLinkModalOpen] = useState(false);
+  const [linkTargetName, setLinkTargetName] = useState('');
 
   useEffect(() => {
     if (isOffline) {
@@ -256,6 +261,24 @@ export function SyncPage() {
       await ipc.addRecentDestination(path);
       const prefs = await ipc.getPreferences();
       setRecentDestinations(prefs.recentDestinations ?? []);
+
+      // First-sync detection: if sync key is auto-generated (client-<basename>)
+      // and doesn't exist on the server, prompt to link
+      try {
+        const resolvedKey = await ipc.resolveSyncKey(path);
+        if (resolvedKey && resolvedKey.startsWith(CLIENT_SYNC_KEY_PREFIX)) {
+          const keys = await ipc.getSyncKeys();
+          const keyExists = keys.some((k) => k.key_name === resolvedKey);
+          if (!keyExists && keys.length > 0) {
+            // Derive a readable destination name from the folder path
+            const folderName = path.split('/').pop() ?? path.split('\\').pop() ?? 'folder';
+            setLinkTargetName(folderName);
+            setLinkModalOpen(true);
+          }
+        }
+      } catch {
+        // Non-critical — skip first-sync prompt on error
+      }
     }
   }
 
@@ -677,6 +700,18 @@ export function SyncPage() {
           )}
         </div>
       )}
+
+      <LinkDestinationModal
+        show={linkModalOpen}
+        destinationName={linkTargetName}
+        onClose={() => setLinkModalOpen(false)}
+        onLinked={() => {
+          // Refresh sync status after linking
+          if (destPath) {
+            loadSyncStatus(destPath, selectedDrive?.name);
+          }
+        }}
+      />
     </div>
   );
 }

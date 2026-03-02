@@ -31,6 +31,9 @@ import type {
   SyncDestinationsResponse,
   SyncKeySummary,
   SyncStatusDetail,
+  SyncStatusSummary,
+  LinkDestinationResponse,
+  PruneResponse,
 } from './types.js';
 import type { MetadataCache } from './cache/metadata-cache.js';
 
@@ -392,6 +395,31 @@ export class APIClient {
     return this.get<SyncDestinationsResponse>('/api/sync/destinations');
   }
 
+  async linkDestination(name: string, syncKey: string | null): Promise<LinkDestinationResponse> {
+    return this.put<LinkDestinationResponse>(
+      `/api/sync/destinations/${encodeURIComponent(name)}/link`,
+      { sync_key: syncKey },
+    );
+  }
+
+  async pruneSyncKey(key: string): Promise<PruneResponse> {
+    return this.post<PruneResponse>(
+      `/api/sync/keys/${encodeURIComponent(key)}/prune`,
+      {},
+    );
+  }
+
+  async renameSyncKey(key: string, newKey: string): Promise<OkResponse> {
+    return this.post<OkResponse>(
+      `/api/sync/keys/${encodeURIComponent(key)}/rename`,
+      { new_key: newKey },
+    );
+  }
+
+  async getSyncStatusSummary(): Promise<SyncStatusSummary[]> {
+    return this.get<SyncStatusSummary[]>('/api/sync/status');
+  }
+
   // ── Cookies ──
 
   /** Fetch cookie validity from the server status endpoint. */
@@ -555,6 +583,18 @@ export class APIClient {
     const url = this.buildURL(path);
     const response = await fetch(url, {
       method: 'POST',
+      headers: this.authHeaders(),
+      body: JSON.stringify(body),
+      signal,
+    });
+    this.checkResponse(response);
+    return (await response.json()) as T;
+  }
+
+  private async put<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+    const url = this.buildURL(path);
+    const response = await fetch(url, {
+      method: 'PUT',
       headers: this.authHeaders(),
       body: JSON.stringify(body),
       signal,

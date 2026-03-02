@@ -44,8 +44,12 @@ After writing or editing code, check LSP diagnostics and fix errors before proce
 
 ### SRS Document Format
 
-- Tables with columns: ID, Version, Tested, Requirement
-- New requirements start with `[ ]` in the Tested column — mark `[x]` when implemented and tested
+- Tables with columns: ID, Web, CLI, GUI, iOS, Requirement
+- Client columns track implementation status: `[x]` = implemented, `[ ]` = not yet implemented, `N/A` = explicitly decided not applicable for that client
+- New requirements start with `[ ]` in all client columns
+- All SRS files use the 4 client columns for consistency
+- Existing SRS files are migrated to the new format gradually (when next touched)
+- Each requirement is written as a **user need** with an **acceptance criteria**: "As a user, I can ... so that .... Acceptance: ..."
 - **IDs must be globally unique** across all SRS documents in `SRS/` — use the entry's sequential number as the first digit (e.g., entry 8 uses IDs `8.1.1`, `8.2.1`, etc.)
 - When creating a new SRS, check existing files in `SRS/` for the highest entry number and use the next one
 - Edge cases are the last subsection under Requirements
@@ -58,14 +62,13 @@ After writing or editing code, check LSP diagnostics and fix errors before proce
 
 ### During Implementation
 
-- Mark Tested cells `[x]` as each requirement is completed
+- Mark the relevant client columns `[x]` as each requirement is completed for that client
 - Add new SRS items if requirements are discovered during design or implementation
 - Update the SRS whenever the user requests changes — keep in sync with the current implementation
 
-### Merge Gate
+### SRS Lifecycle
 
-- **All** Tested cells must be `[x]` before merging to main — `/merge-dev-to-main` enforces this
-- SRS validation is **not** enforced at `/merge-to-dev` time — it is deferred to `/merge-dev-to-main`
+- SRS validation is **not** enforced at merge time — implementation status is tracked by client columns for visibility, not as a gate
 - SRS files remain in `SRS/` permanently — they are **not** archived or deleted after merge
 
 ## Project Overview
@@ -183,9 +186,9 @@ If a branch is created, set the branch version in `porter_core.py` as the first 
 
 **Merging to dev:** Use `/merge-to-dev` skill — fast and fully automatic, no user prompts, no SRS validation, no version bump.
 
-**Merging to main:** Use `/merge-dev-to-main` skill (must be on dev) — full validation: SRS gate, version bump, tagging, release notes, sets next `-dev` version, offers branch cleanup, pushes both main and dev.
+**Merging to main:** Use `/merge-dev-to-main` skill (must be on dev) — full validation: version bump, tagging, release notes, sets next `-dev` version, offers branch cleanup, pushes both main and dev.
 
-**Pre-merge checklist (for main):** Clean working tree, no debug code, up to date with remote, README future features updated, all SRS `[x]`.
+**Pre-merge checklist (for main):** Clean working tree, no debug code, up to date with remote, README future features updated.
 
 ### Version Management
 

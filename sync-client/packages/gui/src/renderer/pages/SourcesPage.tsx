@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useIPC } from '../hooks/useIPC.js';
 import { useAppState } from '../store/app-state.js';
-import type { FreshnessLevel, Playlist, PipelineProgress } from '@mporter/core';
+import type { FileInfo, FreshnessLevel, Playlist, PipelineProgress } from '@mporter/core';
 
 // ── Constants ──
 
@@ -100,6 +100,11 @@ export function SourcesPage() {
 
   // Pipeline done result
   const [pipelineDone, setPipelineDone] = useState<PipelineProgress | null>(null);
+
+  // File list expansion
+  const [expandedPlaylist, setExpandedPlaylist] = useState<string | null>(null);
+  const [playlistFiles, setPlaylistFiles] = useState<FileInfo[]>([]);
+  const [filesLoading, setFilesLoading] = useState(false);
 
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -228,6 +233,24 @@ export function SourcesPage() {
         level: 'ERROR',
         message: err instanceof Error ? err.message : String(err),
       });
+    }
+  }
+
+  async function toggleFiles(key: string) {
+    if (expandedPlaylist === key) {
+      setExpandedPlaylist(null);
+      setPlaylistFiles([]);
+      return;
+    }
+    setExpandedPlaylist(key);
+    setFilesLoading(true);
+    try {
+      const response = await ipc.getFiles(key);
+      setPlaylistFiles(response.files);
+    } catch {
+      setPlaylistFiles([]);
+    } finally {
+      setFilesLoading(false);
     }
   }
 
@@ -394,23 +417,78 @@ export function SourcesPage() {
                       )}
                     </small>
                   </div>
-                  {!isOffline && (
-                    <div className="d-flex gap-1">
+                  <div className="d-flex gap-1">
+                    {(p.file_count ?? 0) > 0 && (
                       <button
-                        className="btn btn-sm btn-outline-secondary"
-                        onClick={() => startEdit(p)}
-                        title="Edit"
+                        className={`btn btn-sm ${expandedPlaylist === p.key ? 'btn-info' : 'btn-outline-info'}`}
+                        onClick={() => toggleFiles(p.key)}
+                        title="Show files"
                       >
-                        <i className="bi bi-pencil" />
+                        <i className={`bi bi-chevron-${expandedPlaylist === p.key ? 'up' : 'down'}`} />
                       </button>
-                      <button
-                        className="btn btn-sm btn-outline-success"
-                        onClick={() => handleProcess(p.key)}
-                        disabled={isPipelining}
-                        title="Run pipeline"
-                      >
-                        <i className="bi bi-play-fill" />
-                      </button>
+                    )}
+                    {!isOffline && (
+                      <>
+                        <button
+                          className="btn btn-sm btn-outline-secondary"
+                          onClick={() => startEdit(p)}
+                          title="Edit"
+                        >
+                          <i className="bi bi-pencil" />
+                        </button>
+                        <button
+                          className="btn btn-sm btn-outline-success"
+                          onClick={() => handleProcess(p.key)}
+                          disabled={isPipelining}
+                          title="Run pipeline"
+                        >
+                          <i className="bi bi-play-fill" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Expanded file list */}
+              {expandedPlaylist === p.key && (
+                <div className="mt-2">
+                  {filesLoading ? (
+                    <div className="text-center py-2">
+                      <span className="spinner-border spinner-border-sm" />
+                    </div>
+                  ) : playlistFiles.length === 0 ? (
+                    <small className="text-secondary">No files found.</small>
+                  ) : (
+                    <div className="table-responsive">
+                      <table className="table table-dark table-sm mb-0" style={{ fontSize: '0.8rem' }}>
+                        <thead>
+                          <tr>
+                            <th>Title</th>
+                            <th>Artist</th>
+                            <th>Synced To</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {playlistFiles.map((f) => (
+                            <tr key={f.uuid}>
+                              <td className="text-truncate" style={{ maxWidth: 200 }}>{f.title}</td>
+                              <td className="text-truncate" style={{ maxWidth: 150 }}>{f.artist}</td>
+                              <td>
+                                {f.synced_to && f.synced_to.length > 0 ? (
+                                  f.synced_to.map((key) => (
+                                    <span key={key} className="badge bg-secondary me-1" style={{ fontSize: '0.65em' }}>
+                                      {key}
+                                    </span>
+                                  ))
+                                ) : (
+                                  <small className="text-secondary">—</small>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   )}
                 </div>

@@ -7,12 +7,14 @@ import type {
   DiscoveredServer,
   DriveInfo,
   FileListResponse,
+  LinkDestinationResponse,
   OkResponse,
   PipelineProgress,
   PipelineStartResult,
   Playlist,
   PlaylistCacheStatus,
   PrefetchResult,
+  PruneResponse,
   ServerConfig,
   SettingsResponse,
   SyncDestinationsResponse,
@@ -21,6 +23,7 @@ import type {
   SyncProgress,
   SyncResult,
   SyncStatusDetail,
+  SyncStatusSummary,
 } from '@mporter/core';
 
 /** Typed API surface exposed to the renderer via contextBridge. */
@@ -46,6 +49,14 @@ const electronAPI = {
   getSyncDestinations: (): Promise<SyncDestinationsResponse> =>
     ipcRenderer.invoke('data:getSyncDestinations'),
   getAbout: (): Promise<AboutResponse> => ipcRenderer.invoke('data:getAbout'),
+  getSyncStatusSummary: (): Promise<SyncStatusSummary[]> =>
+    ipcRenderer.invoke('data:getSyncStatusSummary'),
+  linkDestination: (name: string, syncKey: string | null): Promise<LinkDestinationResponse> =>
+    ipcRenderer.invoke('data:linkDestination', name, syncKey),
+  pruneSyncKey: (key: string): Promise<PruneResponse> =>
+    ipcRenderer.invoke('data:pruneSyncKey', key),
+  renameSyncKey: (key: string, newKey: string): Promise<OkResponse> =>
+    ipcRenderer.invoke('data:renameSyncKey', key, newKey),
   addPlaylist: (key: string, url: string, name: string): Promise<OkResponse> =>
     ipcRenderer.invoke('data:addPlaylist', key, url, name),
   updatePlaylist: (key: string, url?: string, name?: string): Promise<OkResponse> =>

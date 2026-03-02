@@ -126,6 +126,26 @@ export interface OkResponse {
   error?: string;
 }
 
+export interface LinkDestinationResponse {
+  ok: boolean;
+  sync_key: string | null;
+  merge_stats?: { merged_count: number };
+}
+
+export interface PruneResponse {
+  pruned_count: number;
+  remaining_count: number;
+}
+
+export interface SyncStatusSummary {
+  key_name: string;
+  last_sync_at: number;
+  total_files: number;
+  synced_files: number;
+  new_files: number;
+  new_playlists: number;
+}
+
 // ── Sync Manifest ──
 
 export interface SyncManifestPlaylist {

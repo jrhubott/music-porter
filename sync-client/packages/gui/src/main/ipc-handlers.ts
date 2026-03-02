@@ -224,6 +224,25 @@ export function registerIPCHandlers(): void {
     return apiClient.getAbout();
   });
 
+  ipcMain.handle('data:getSyncStatusSummary', async () => {
+    return apiClient.getSyncStatusSummary();
+  });
+
+  ipcMain.handle(
+    'data:linkDestination',
+    async (_event, name: string, syncKey: string | null) => {
+      return apiClient.linkDestination(name, syncKey);
+    },
+  );
+
+  ipcMain.handle('data:pruneSyncKey', async (_event, key: string) => {
+    return apiClient.pruneSyncKey(key);
+  });
+
+  ipcMain.handle('data:renameSyncKey', async (_event, key: string, newKey: string) => {
+    return apiClient.renameSyncKey(key, newKey);
+  });
+
   ipcMain.handle(
     'data:addPlaylist',
     async (_event, key: string, url: string, name: string): Promise<OkResponse> => {
