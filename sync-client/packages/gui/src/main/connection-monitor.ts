@@ -4,7 +4,6 @@ import {
   CONNECTION_HEALTH_CHECK_INTERVAL_MS,
   CONNECTION_RECONNECT_INTERVAL_MS,
   HEALTH_CHECK_FAILURE_THRESHOLD,
-  HEALTH_CHECK_TIMEOUT_MS,
 } from '@mporter/core';
 import type { ConnectionState } from '@mporter/core';
 
@@ -46,6 +45,10 @@ export class ConnectionMonitor {
   notifyConnected(): void {
     this.stopAllTimers();
     this.consecutiveFailures = 0;
+    const { type } = this.apiClient.connectionState;
+    if (type) {
+      console.log('[connection-monitor] Connected via %s', type);
+    }
     this.startHealthCheck();
   }
 
@@ -100,9 +103,17 @@ export class ConnectionMonitor {
   }
 
   private async performHealthCheck(): Promise<void> {
-    const ok = await this.apiClient.ping(HEALTH_CHECK_TIMEOUT_MS);
-    if (ok) {
+    const result = await this.apiClient.resolveHealthCheck();
+
+    if (result.reachable) {
       this.consecutiveFailures = 0;
+      if (result.typeChanged) {
+        console.log('[connection-monitor] Connection switched to %s', result.type);
+        this.sendToRenderer('connection:statusChange', {
+          offline: false,
+          connection: this.apiClient.connectionState,
+        });
+      }
       return;
     }
 

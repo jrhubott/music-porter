@@ -16,6 +16,12 @@ export interface ConnectionState {
   serverVersion?: string;
 }
 
+export interface HealthCheckResult {
+  reachable: boolean;
+  type?: ConnectionType;
+  typeChanged: boolean;
+}
+
 // ── API Responses ──
 
 export interface AuthValidateResponse {
@@ -34,11 +40,16 @@ export interface ServerInfoResponse {
   external_url?: string;
 }
 
+export type FreshnessLevel = 'current' | 'recent' | 'stale' | 'outdated';
+
 export interface Playlist {
   key: string;
   url: string;
   name: string;
   file_count?: number;
+  size_bytes?: number;
+  duration_s?: number;
+  freshness?: FreshnessLevel;
 }
 
 export interface FileInfo {
@@ -73,7 +84,7 @@ export interface SyncPlaylistStatus {
 }
 
 export interface SyncStatusDetail {
-  sync_key: string;
+  destinations: string[];
   last_sync_at: number;
   playlists: SyncPlaylistStatus[];
   total_files: number;
@@ -82,18 +93,18 @@ export interface SyncStatusDetail {
   new_playlists: number;
 }
 
-export interface SyncKeySummary {
-  key_name: string;
-  last_sync_at: number;
-  file_count: number;
-  playlist_count: number;
-}
-
 export interface SyncDestination {
   name: string;
   path: string;
-  scheme: string;
-  sync_key: string | null;
+  type: string;
+  available: boolean;
+  linked_destinations: string[];
+}
+
+export interface ResolveDestinationResponse {
+  destination: SyncDestination;
+  created: boolean;
+  sync_status: SyncStatusDetail | null;
 }
 
 export interface SyncDestinationsResponse {
@@ -115,6 +126,26 @@ export interface OkResponse {
   error?: string;
 }
 
+export interface LinkDestinationResponse {
+  ok: boolean;
+  merge_stats?: { records_moved: number; records_merged: number; source_deleted: boolean };
+  created?: boolean;
+}
+
+export interface ResetTrackingResponse {
+  reset: boolean;
+  files_cleared: number;
+}
+
+export interface SyncStatusSummary {
+  destinations: string[];
+  last_sync_at: number;
+  total_files: number;
+  synced_files: number;
+  new_files: number;
+  new_playlists: number;
+}
+
 // ── Sync Manifest ──
 
 export interface SyncManifestPlaylist {
@@ -122,7 +153,7 @@ export interface SyncManifestPlaylist {
 }
 
 export interface SyncManifest {
-  sync_key: string;
+  destination_name: string;
   server_origin: string;
   last_sync_at: string;
   playlists: Record<string, SyncManifestPlaylist>;
@@ -153,7 +184,7 @@ export interface SyncProgress {
 }
 
 export interface SyncPlan {
-  syncKey: string;
+  destinationName: string;
   playlists: SyncPlanPlaylist[];
   totalFiles: number;
 }
@@ -166,12 +197,13 @@ export interface SyncPlanPlaylist {
 }
 
 export interface SyncResult {
-  syncKey: string;
+  destinationName: string;
   copied: number;
   skipped: number;
   failed: number;
   aborted: boolean;
   durationMs: number;
+  destError?: string;
 }
 
 // ── Discovery ──
@@ -231,6 +263,30 @@ export type {
   PlaylistCacheStatus,
   BackgroundPrefetchStatus,
 } from './cache/types.js';
+
+// ── Pipeline ──
+
+export type PipelineEventType = 'log' | 'progress' | 'overall_progress' | 'done' | 'heartbeat';
+
+export interface PipelineProgress {
+  type: PipelineEventType;
+  // log events
+  level?: string;    // INFO, OK, WARN, ERROR, SKIP
+  message?: string;
+  // progress events
+  current?: number;
+  total?: number;
+  percent?: number;
+  stage?: string;
+  // done events
+  status?: string;   // completed, failed, cancelled
+  result?: Record<string, unknown>;
+  error?: string;
+}
+
+export interface PipelineStartResult {
+  task_id: string;
+}
 
 // ── Window State ──
 

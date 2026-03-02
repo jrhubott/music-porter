@@ -17,6 +17,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -47,7 +48,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.37.3"
+VERSION = "2.38.0"
 
 DEFAULT_DATA_DIR = "data"
 DEFAULT_LIBRARY_DIR = "library"
@@ -65,10 +66,13 @@ DEFAULT_USB_DIR = "RZR/Music"
 # TXXX frame name used to uniquely identify library MP3 files in the DB
 TXXX_TRACK_UUID = "TrackUUID"
 
+# Destination name validation pattern
+VALID_DEST_NAME_RE = r'^[a-zA-Z0-9_-]+$'
+
 # Schema version constants — increment and add a migration case when changing
 # the config.yaml structure or DB tables/columns.
-CONFIG_SCHEMA_VERSION = 3
-DB_SCHEMA_VERSION = 6
+CONFIG_SCHEMA_VERSION = 4
+DB_SCHEMA_VERSION = 8
 
 # Excluded USB volumes by OS
 if IS_MACOS:
@@ -899,6 +903,18 @@ def migrate_data_dir(logger=None):
     return []
 
 
+def _archive_file(src_path, version_label):
+    """Copy a file to data/archive/ with a version suffix if not already archived."""
+    src = Path(src_path)
+    if not src.exists():
+        return
+    archive_dir = Path(DEFAULT_DATA_DIR) / "archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    dest = archive_dir / f"{src.name}.v{version_label}"
+    if not dest.exists():
+        shutil.copy2(str(src), str(dest))
+
+
 def migrate_db_schema(logger=None):
     """Apply sequential DB schema migrations using PRAGMA user_version.
 
@@ -917,8 +933,18 @@ def migrate_db_schema(logger=None):
         conn.execute("PRAGMA journal_mode=WAL")
         current = conn.execute("PRAGMA user_version").fetchone()[0]
 
+        if current > DB_SCHEMA_VERSION:
+            raise RuntimeError(
+                f"Database schema version {current} is newer than this "
+                f"software supports ({DB_SCHEMA_VERSION}). Update the "
+                f"software or restore from data/archive/."
+            )
+
         if current >= DB_SCHEMA_VERSION:
             return []  # already up to date
+
+        # Archive pre-migration DB for rollback safety
+        _archive_file(db_path, current)
 
         from_version = current
         changes = []
@@ -1238,6 +1264,74 @@ def migrate_db_schema(logger=None):
                 logger.info(
                     "DB migration 5→6: extended metadata + library restructure")
 
+        # ── Version 6 → 7: playlists + destinations tables ────────────
+        if current < 7:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS playlists (
+                    key         TEXT PRIMARY KEY,
+                    url         TEXT NOT NULL,
+                    name        TEXT NOT NULL,
+                    created_at  REAL NOT NULL,
+                    updated_at  REAL NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS destinations (
+                    name        TEXT PRIMARY KEY,
+                    path        TEXT NOT NULL,
+                    sync_key    TEXT NOT NULL,
+                    created_at  REAL NOT NULL,
+                    updated_at  REAL NOT NULL
+                )
+            """)
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_destinations_sync_key
+                ON destinations(sync_key)""")
+            conn.execute("PRAGMA user_version = 7")
+            conn.commit()
+            changes.append(
+                "added playlists and destinations tables")
+            if logger:
+                logger.info(
+                    "DB migration 6→7: added playlists + destinations tables")
+
+        # ── Version 7 → 8: sync keys become internal UUIDs ────────────
+        if current < 8:
+            # Migrate human-readable sync_key values to UUIDs.
+            # FK constraints are disabled for the migration since we're
+            # updating PK values referenced by child tables.
+            conn.execute("PRAGMA foreign_keys = OFF")
+
+            existing_keys = conn.execute(
+                "SELECT key_name FROM sync_keys"
+            ).fetchall()
+            for row in existing_keys:
+                old_key = row[0]
+                new_key = str(uuid.uuid4())
+                # Update child tables first, then parent PK
+                conn.execute(
+                    "UPDATE sync_files SET sync_key = ? WHERE sync_key = ?",
+                    (new_key, old_key),
+                )
+                conn.execute(
+                    "UPDATE destinations SET sync_key = ? WHERE sync_key = ?",
+                    (new_key, old_key),
+                )
+                conn.execute(
+                    "UPDATE sync_keys SET key_name = ? WHERE key_name = ?",
+                    (new_key, old_key),
+                )
+
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA user_version = 8")
+            conn.commit()
+            migrated_count = len(existing_keys)
+            changes.append(
+                f"migrated {migrated_count} sync keys to internal UUIDs")
+            if logger:
+                logger.info(
+                    f"DB migration 7→8: migrated {migrated_count} sync keys "
+                    "to UUIDs")
+
         return [MigrationEvent(
             'schema_migrate',
             f"DB schema migrated from version {from_version} to {DB_SCHEMA_VERSION}",
@@ -1273,8 +1367,19 @@ def migrate_config_schema(logger=None):
         data = yaml.safe_load(f) or {}
 
     current = data.get('schema_version', 0)
+
+    if current > CONFIG_SCHEMA_VERSION:
+        raise RuntimeError(
+            f"Config schema version {current} is newer than this "
+            f"software supports ({CONFIG_SCHEMA_VERSION}). Update the "
+            f"software or restore from data/archive/."
+        )
+
     if current >= CONFIG_SCHEMA_VERSION:
         return []  # already up to date
+
+    # Archive pre-migration config for rollback safety
+    _archive_file(conf_path, current)
 
     from_version = current
     changes = []
@@ -1446,6 +1551,65 @@ def migrate_config_schema(logger=None):
 
         data['schema_version'] = 3
         dirty = True
+
+    # ── Version 3 → 4: move playlists + destinations to DB ────────
+    if current < 4:
+        # DB tables already exist from DB migration v7 (runs first)
+        db_path = Path(DEFAULT_DB_FILE)
+        if db_path.exists():
+            db_conn = sqlite3.connect(str(db_path), check_same_thread=False)
+            try:
+                now = time.time()
+
+                # Migrate playlists from config → DB
+                for entry in data.get('playlists', []):
+                    key = str(entry.get('key', '')).strip()
+                    url = str(entry.get('url', '')).strip()
+                    name = str(entry.get('name', '')).strip()
+                    if key and url and name:
+                        db_conn.execute(
+                            "INSERT OR IGNORE INTO playlists "
+                            "(key, url, name, created_at, updated_at) "
+                            "VALUES (?, ?, ?, ?, ?)",
+                            (key, url, name, now, now),
+                        )
+
+                # Migrate destinations from config → DB
+                for entry in data.get('destinations', []):
+                    dname = str(entry.get('name', '')).strip()
+                    dpath = str(entry.get('path', '')).strip()
+                    if dname and dpath:
+                        dsync_key = str(entry.get('sync_key', '')).strip()
+                        if not dsync_key:
+                            dsync_key = dname  # No more null sync_key
+                        db_conn.execute(
+                            "INSERT OR IGNORE INTO destinations "
+                            "(name, path, sync_key, created_at, updated_at) "
+                            "VALUES (?, ?, ?, ?, ?)",
+                            (dname, dpath, dsync_key, now, now),
+                        )
+                        # Ensure sync_keys row exists
+                        db_conn.execute(
+                            "INSERT OR IGNORE INTO sync_keys "
+                            "(key_name, last_sync_at, created_at) "
+                            "VALUES (?, 0, ?)",
+                            (dsync_key, now),
+                        )
+
+                db_conn.commit()
+            finally:
+                db_conn.close()
+
+        # Remove playlists and destinations from config.yaml
+        data.pop('playlists', None)
+        data.pop('destinations', None)
+
+        data['schema_version'] = 4
+        dirty = True
+        changes.append("moved playlists and destinations to database")
+        if logger:
+            logger.info(
+                "Config migration 3→4: moved playlists + destinations to DB")
 
     if dirty:
         with open(conf_path, 'w') as f:
@@ -2142,25 +2306,8 @@ class SyncTracker:
             finally:
                 conn.close()
 
-    def delete_playlist(self, sync_key, playlist):
-        """Delete tracking records for one playlist on a sync key.
-
-        Returns count of deleted records.
-        """
-        with self._write_lock:
-            conn = self._connect()
-            try:
-                cursor = conn.execute(
-                    "DELETE FROM sync_files WHERE sync_key = ? AND playlist = ?",
-                    (sync_key, playlist),
-                )
-                conn.commit()
-                return cursor.rowcount
-            finally:
-                conn.close()
-
-    def get_keys(self):
-        """List all tracked sync keys with total synced file counts.
+    def _get_keys(self):
+        """List all tracked sync keys (internal).
 
         Returns list of dicts: {key_name, last_sync_at, created_at,
         total_synced_files}.
@@ -2215,17 +2362,19 @@ class SyncTracker:
         finally:
             conn.close()
 
-    def get_sync_status(self, sync_key, export_base_dir):
-        """Diff export directory against tracked files for a sync key.
+    def _get_sync_status_for_key(self, sync_key, export_base_dir,
+                                dest_names=None):
+        """Diff export directory against tracked files for a sync key (internal).
 
         Returns SyncStatusResult with per-playlist breakdown.
+        dest_names is the list of destination names sharing this key.
         """
         export_path = Path(export_base_dir)
         if not export_path.exists():
             return SyncStatusResult(
-                sync_key=sync_key, last_sync_at=0, playlists=[],
-                total_files=0, synced_files=0, new_files=0,
-                new_playlists=0)
+                destinations=dest_names or [], last_sync_at=0,
+                playlists=[], total_files=0, synced_files=0,
+                new_files=0, new_playlists=0)
 
         # Get the key's last sync time
         conn = self._connect()
@@ -2288,92 +2437,83 @@ class SyncTracker:
                 new_playlist_count += 1
 
         return SyncStatusResult(
-            sync_key=sync_key, last_sync_at=last_sync,
+            destinations=dest_names or [], last_sync_at=last_sync,
             playlists=playlists, total_files=total_files,
             synced_files=total_synced, new_files=total_new,
             new_playlists=new_playlist_count)
 
-    def get_all_keys_summary(self, export_base_dir):
-        """Summary for all tracked sync keys.
+    def get_destination_status(self, dest_name, export_base_dir):
+        """Get sync status for the group containing a destination.
 
-        Returns list of dicts: {key_name, last_sync_at, total_files,
-        synced_files, new_files, new_playlists}.
+        Resolves destination name → internal sync_key → status.
+        Returns SyncStatusResult with all destination names in the group.
         """
-        keys = self.get_keys()
-        results = []
-        for key_info in keys:
-            status = self.get_sync_status(
-                key_info['key_name'], export_base_dir)
-            results.append({
-                'key_name': key_info['key_name'],
-                'last_sync_at': key_info['last_sync_at'],
-                'total_files': status.total_files,
-                'synced_files': status.synced_files,
-                'new_files': status.new_files,
-                'new_playlists': status.new_playlists,
-            })
-        return results
+        dest = self.get_destination(dest_name)
+        if not dest:
+            return SyncStatusResult(destinations=[dest_name])
 
-    def prune_stale(self, sync_key, export_base_dir):
-        """Remove DB records for files no longer in the export directory.
-
-        Returns dict: {pruned_count, playlists_affected}.
-        """
-        export_path = Path(export_base_dir)
-
-        # Fetch all tracked records for this key
+        # Find all destinations sharing this sync_key
         conn = self._connect()
         try:
             rows = conn.execute(
-                "SELECT id, playlist, file_path FROM sync_files WHERE sync_key = ?",
-                (sync_key,),
+                "SELECT name FROM destinations WHERE sync_key = ?",
+                (dest.sync_key,),
             ).fetchall()
+            group_names = [r['name'] for r in rows]
         finally:
             conn.close()
 
-        stale_ids = []
-        playlists_affected = set()
-        for r in rows:
-            file_on_disk = export_path / r['playlist'] / r['file_path']
-            if not file_on_disk.exists():
-                stale_ids.append(r['id'])
-                playlists_affected.add(r['playlist'])
+        return self._get_sync_status_for_key(
+            dest.sync_key, export_base_dir, dest_names=group_names)
 
-        if stale_ids:
-            with self._write_lock:
-                conn = self._connect()
-                try:
-                    conn.execute(
-                        f"DELETE FROM sync_files WHERE id IN ({','.join('?' * len(stale_ids))})",
-                        stale_ids,
-                    )
-                    conn.commit()
-                finally:
-                    conn.close()
+    def get_destination_groups(self, export_base_dir):
+        """Get sync status for all destination groups.
 
-        return {
-            'pruned_count': len(stale_ids),
-            'playlists_affected': sorted(playlists_affected),
-        }
-
-    def prune_all_keys(self, export_base_dir):
-        """Prune stale records for all tracked sync keys.
-
-        Returns dict: {total_pruned, keys_pruned}.
+        Returns list of SyncStatusResult, one per unique sync_key group.
+        Each result includes the destination names in that group.
         """
-        keys = self.get_keys()
-        total_pruned = 0
-        keys_pruned = []
-        for key_info in keys:
-            result = self.prune_stale(key_info['key_name'], export_base_dir)
-            if result['pruned_count'] > 0:
-                keys_pruned.append({
-                    'key_name': key_info['key_name'],
-                    'pruned_count': result['pruned_count'],
-                    'playlists_affected': result['playlists_affected'],
-                })
-                total_pruned += result['pruned_count']
-        return {'total_pruned': total_pruned, 'keys_pruned': keys_pruned}
+        all_dests = self.get_all_destinations()
+        # Group by sync_key
+        key_to_dests = {}
+        for d in all_dests:
+            key_to_dests.setdefault(d.sync_key, []).append(d)
+
+        results = []
+        for sync_key, dests in key_to_dests.items():
+            names = [d.name for d in dests]
+            status = self._get_sync_status_for_key(
+                sync_key, export_base_dir, dest_names=names)
+            results.append(status)
+        return results
+
+    def reset_destination_tracking(self, dest_name):
+        """Reset sync tracking for a destination's group.
+
+        Deletes all sync_files for the destination's sync_key and
+        resets last_sync_at to 0. The destination and sync_key remain.
+        Returns dict: {reset: bool, files_cleared: int}.
+        """
+        dest = self.get_destination(dest_name)
+        if not dest:
+            return {'reset': False, 'files_cleared': 0}
+
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                cursor = conn.execute(
+                    "DELETE FROM sync_files WHERE sync_key = ?",
+                    (dest.sync_key,),
+                )
+                cleared = cursor.rowcount
+                conn.execute(
+                    "UPDATE sync_keys SET last_sync_at = 0 "
+                    "WHERE key_name = ?",
+                    (dest.sync_key,),
+                )
+                conn.commit()
+                return {'reset': True, 'files_cleared': cleared}
+            finally:
+                conn.close()
 
     def merge_key(self, source_key, target_key):
         """Merge tracking records from source_key into target_key.
@@ -2442,32 +2582,23 @@ class SyncTracker:
             finally:
                 conn.close()
 
-    def rename_key(self, old_key, new_key):
-        """Rename a sync key, moving all tracking records to the new name.
-
-        Returns dict with stats, or None if new_key already exists.
-        Unlike merge_key, rename requires the target name to be unused.
-        """
-        with self._write_lock:
-            conn = self._connect()
-            try:
-                exists = conn.execute(
-                    "SELECT 1 FROM sync_keys WHERE key_name = ?",
-                    (new_key,),
-                ).fetchone()
-            finally:
-                conn.close()
-        if exists:
-            return None
-        return self.merge_key(old_key, new_key)
-
     def get_file_sync_map(self, playlist):
-        """Map filenames to sync keys they've been synced to.
+        """Map filenames to destination names they've been synced to.
 
-        Returns dict: {filename: [sync_key_name, ...]}.
+        Returns dict: {filename: [destination_name, ...]}.
+        Resolves internal sync_key UUIDs to human-readable destination names.
         """
         conn = self._connect()
         try:
+            # Build sync_key → [dest_names] lookup
+            dest_rows = conn.execute(
+                "SELECT name, sync_key FROM destinations"
+            ).fetchall()
+            key_to_names = {}
+            for dr in dest_rows:
+                key_to_names.setdefault(
+                    dr['sync_key'], []).append(dr['name'])
+
             rows = conn.execute(
                 """SELECT file_path, sync_key FROM sync_files
                    WHERE playlist = ? ORDER BY file_path, sync_key""",
@@ -2478,7 +2609,9 @@ class SyncTracker:
 
         sync_map = {}
         for r in rows:
-            sync_map.setdefault(r['file_path'], []).append(r['sync_key'])
+            names = key_to_names.get(r['sync_key'], [])
+            for name in names:
+                sync_map.setdefault(r['file_path'], []).append(name)
         return sync_map
 
     def get_all_sync_files(self):
@@ -2516,9 +2649,482 @@ class SyncTracker:
             finally:
                 conn.close()
 
+    # ── Destination CRUD ──────────────────────────────────────────
 
-# Backwards compatibility alias
-USBSyncTracker = SyncTracker
+    @staticmethod
+    def _generate_sync_key():
+        """Generate a new internal sync key UUID."""
+        return str(uuid.uuid4())
+
+    def add_destination(self, name, path, sync_key=None,
+                        validate_path=True, audit_source=None):
+        """Add a saved destination to the DB.
+
+        If sync_key is not provided, generates a new UUID internally.
+        If sync_key is provided (linking to existing group), uses it.
+        Also creates the sync_keys row.
+        Returns True on success, False on validation/duplicate error.
+        """
+        import re as _re
+        if not _re.match(VALID_DEST_NAME_RE, name):
+            return False
+
+        # Normalize to schemed path
+        if (not path.startswith('usb://') and not path.startswith('folder://')
+                and not path.startswith('web-client://')):
+            path = f'folder://{path}'
+
+        # Auto-generate sync_key UUID if not provided
+        if not sync_key:
+            sync_key = self._generate_sync_key()
+
+        # Validate filesystem path if needed
+        if validate_path:
+            dest_tmp = SyncDestination(name, path, sync_key=sync_key)
+            if not dest_tmp.is_web_client:
+                raw = dest_tmp.raw_path
+                if dest_tmp.is_usb:
+                    volume_path = Path(raw).parts[:3] if IS_MACOS else Path(raw).parts[:1]
+                    volume_mount = Path(*volume_path) if volume_path else Path(raw)
+                    if not volume_mount.is_dir():
+                        return False
+                elif not Path(raw).is_dir():
+                    return False
+
+        now = time.time()
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                # Check for duplicates
+                existing = conn.execute(
+                    "SELECT 1 FROM destinations WHERE name = ? COLLATE NOCASE",
+                    (name,),
+                ).fetchone()
+                if existing:
+                    return False
+                conn.execute(
+                    "INSERT INTO destinations (name, path, sync_key, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (name, path, sync_key, now, now),
+                )
+                # Ensure sync_keys row exists
+                conn.execute(
+                    "INSERT INTO sync_keys (key_name, last_sync_at, created_at) "
+                    "VALUES (?, 0, ?) ON CONFLICT(key_name) DO NOTHING",
+                    (sync_key, now),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        return True
+
+    def get_destination(self, name):
+        """Get a saved destination by name (case-insensitive).
+
+        Returns SyncDestination or None.
+        """
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT name, path, sync_key FROM destinations "
+                "WHERE name = ? COLLATE NOCASE",
+                (name,),
+            ).fetchone()
+            if row:
+                return SyncDestination(row['name'], row['path'],
+                                       sync_key=row['sync_key'])
+            return None
+        finally:
+            conn.close()
+
+    def get_all_destinations(self):
+        """List all saved destinations with linked_destinations populated."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT name, path, sync_key FROM destinations ORDER BY rowid"
+            ).fetchall()
+            # Build sync_key → [names] map for linked_destinations
+            key_to_names = {}
+            for r in rows:
+                key_to_names.setdefault(r['sync_key'], []).append(r['name'])
+
+            dests = []
+            for r in rows:
+                linked = [n for n in key_to_names.get(r['sync_key'], [])
+                          if n != r['name']]
+                dests.append(SyncDestination(
+                    r['name'], r['path'], sync_key=r['sync_key'],
+                    linked_destinations=linked))
+            return dests
+        finally:
+            conn.close()
+
+    def remove_destination(self, name):
+        """Remove a destination by name.
+
+        If this is the last destination using its sync_key, the sync_key
+        and all tracking data are also deleted. Otherwise, tracking data
+        is preserved for the remaining destinations in the group.
+        Returns True if found and deleted.
+        """
+        dest = self.get_destination(name)
+        if not dest:
+            return False
+        sync_key = dest.sync_key
+
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "DELETE FROM destinations WHERE name = ? COLLATE NOCASE",
+                    (name,),
+                )
+                # Check if any other destinations still use this sync_key
+                remaining = conn.execute(
+                    "SELECT COUNT(*) FROM destinations WHERE sync_key = ?",
+                    (sync_key,),
+                ).fetchone()[0]
+                if remaining == 0 and sync_key:
+                    # Last destination — clean up tracking data
+                    conn.execute(
+                        "DELETE FROM sync_keys WHERE key_name = ?",
+                        (sync_key,),
+                    )
+                conn.commit()
+                return True
+            finally:
+                conn.close()
+
+    def rename_destination(self, old_name, new_name):
+        """Rename a destination. sync_key unchanged. Returns True on success."""
+        import re as _re
+        if not _re.match(VALID_DEST_NAME_RE, new_name):
+            return False
+        if old_name.lower() == new_name.lower():
+            return False
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                # Check new name not taken
+                exists = conn.execute(
+                    "SELECT 1 FROM destinations WHERE name = ? COLLATE NOCASE",
+                    (new_name,),
+                ).fetchone()
+                if exists:
+                    return False
+                cursor = conn.execute(
+                    "UPDATE destinations SET name = ?, updated_at = ? "
+                    "WHERE name = ? COLLATE NOCASE",
+                    (new_name, time.time(), old_name),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+            finally:
+                conn.close()
+
+    def find_destination_by_path(self, path):
+        """Find a destination by schemed path. Returns SyncDestination or None."""
+        normalized = path.rstrip('/\\')
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT name, path, sync_key FROM destinations"
+            ).fetchall()
+            for r in rows:
+                if r['path'].rstrip('/\\') == normalized:
+                    return SyncDestination(r['name'], r['path'],
+                                           sync_key=r['sync_key'])
+            return None
+        finally:
+            conn.close()
+
+    def link_destination(self, name, target_dest_name):
+        """Link a destination to another destination's tracking group.
+
+        Looks up the target destination's sync_key UUID, assigns it to
+        this destination, and merges any existing tracking data.
+        Returns True if successful.
+        """
+        if not target_dest_name or not target_dest_name.strip():
+            return False
+        target = self.get_destination(target_dest_name.strip())
+        if not target:
+            return False
+        source = self.get_destination(name)
+        if not source:
+            return False
+        if source.sync_key == target.sync_key:
+            return True  # Already in the same group
+
+        old_key = source.sync_key
+        new_key = target.sync_key
+        now = time.time()
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                # Update destination to use target's sync_key
+                conn.execute(
+                    "UPDATE destinations SET sync_key = ?, updated_at = ? "
+                    "WHERE name = ? COLLATE NOCASE",
+                    (new_key, now, name),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        # Merge tracking data from old key into new key
+        if old_key and old_key != new_key:
+            self.merge_key(old_key, new_key)
+        return True
+
+    def unlink_destination(self, name):
+        """Unlink a destination from its shared tracking group.
+
+        Creates a new independent sync_key UUID for this destination.
+        Tracking data stays with the original group (the unlinked
+        destination starts fresh unless explicitly re-synced).
+        Returns True if found and updated.
+        """
+        dest = self.get_destination(name)
+        if not dest:
+            return False
+        new_key = self._generate_sync_key()
+        now = time.time()
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE destinations SET sync_key = ?, updated_at = ? "
+                    "WHERE name = ? COLLATE NOCASE",
+                    (new_key, now, name),
+                )
+                # Create the new sync_keys row
+                conn.execute(
+                    "INSERT INTO sync_keys (key_name, last_sync_at, created_at) "
+                    "VALUES (?, 0, ?) ON CONFLICT(key_name) DO NOTHING",
+                    (new_key, now),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        return True
+
+    def resolve_destination(self, path=None, name=None, drive_name=None,
+                            link_to=None):
+        """Server-side destination resolution.
+
+        Finds or creates a destination from the provided hints.
+        If link_to is provided (a destination name), the new destination
+        shares that destination's tracking group.
+        Returns dict: {destination: SyncDestination, created: bool}.
+        """
+        # 1. Look up by name if provided
+        if name:
+            dest = self.get_destination(name)
+            if dest:
+                return {'destination': dest, 'created': False}
+
+        # 2. Look up by path if provided
+        if path:
+            dest = self.find_destination_by_path(path)
+            if dest:
+                return {'destination': dest, 'created': False}
+
+        # 3. Auto-create from hints
+        if not path and not name:
+            return None
+
+        if not name:
+            # Generate name from drive_name or path basename
+            if drive_name:
+                name = drive_name
+            elif path:
+                dest_tmp = SyncDestination('_tmp', path, sync_key='')
+                if dest_tmp.is_usb:
+                    raw = dest_tmp.raw_path
+                    parts = Path(raw).parts
+                    name = parts[2] if len(parts) > 2 and parts[1] == 'Volumes' else Path(raw).name
+                else:
+                    name = Path(dest_tmp.raw_path).name
+            # Sanitize name to valid characters
+            import re as _re
+            name = _re.sub(r'[^a-zA-Z0-9_-]', '-', name)
+            if not name:
+                name = 'destination'
+
+        # Determine sync_key: link to existing destination or generate UUID
+        sync_key = None
+        if link_to:
+            target = self.get_destination(link_to)
+            if target:
+                sync_key = target.sync_key
+
+        ok = self.add_destination(name, path or f'folder:///{name}',
+                                  sync_key=sync_key, validate_path=False)
+        if not ok:
+            # Name collision — try suffixed names
+            for i in range(2, 100):
+                suffixed = f'{name}-{i}'
+                ok = self.add_destination(suffixed, path or f'folder:///{suffixed}',
+                                          sync_key=sync_key, validate_path=False)
+                if ok:
+                    name = suffixed
+                    break
+            if not ok:
+                return None
+
+        dest = self.get_destination(name)
+        return {'destination': dest, 'created': True}
+
+
+
+class PlaylistDB:
+    """Persistent playlist storage using SQLite.
+
+    Thread-safe via a write lock; reads are lockless (WAL mode).
+    Each call opens/closes its own connection for thread safety.
+    """
+
+    def __init__(self, db_path=DEFAULT_DB_FILE, audit_logger=None,
+                 audit_source='cli'):
+        self._db_path = str(db_path)
+        Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._write_lock = threading.Lock()
+        self.audit_logger = audit_logger
+        self._audit_source = audit_source
+        self._init_db()
+
+    def _connect(self):
+        conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_db(self):
+        conn = self._connect()
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS playlists (
+                    key         TEXT PRIMARY KEY,
+                    url         TEXT NOT NULL,
+                    name        TEXT NOT NULL,
+                    created_at  REAL NOT NULL,
+                    updated_at  REAL NOT NULL
+                )
+            """)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get(self, key):
+        """Get single playlist by key (case-insensitive). Returns dict or None."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT key, url, name, created_at, updated_at "
+                "FROM playlists WHERE key = ? COLLATE NOCASE",
+                (key,),
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def get_all(self):
+        """List all playlists ordered by insertion order."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT key, url, name, created_at, updated_at "
+                "FROM playlists ORDER BY rowid"
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def add(self, key, url, name):
+        """Insert a new playlist. Returns True on success, False if key exists."""
+        import re as _re
+        if not key or not _re.match(r'^[a-zA-Z0-9_-]+$', key):
+            return False
+        now = time.time()
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                existing = conn.execute(
+                    "SELECT 1 FROM playlists WHERE key = ? COLLATE NOCASE",
+                    (key,),
+                ).fetchone()
+                if existing:
+                    return False
+                conn.execute(
+                    "INSERT INTO playlists (key, url, name, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (key, url, name, now, now),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        if self.audit_logger:
+            self.audit_logger.log(
+                'playlist_add', f"Added playlist '{name}' ({key})",
+                'completed', params={'key': key, 'name': name},
+                source=self._audit_source)
+        return True
+
+    def update(self, key, url=None, name=None):
+        """Update url and/or name for a playlist. Returns True if found."""
+        row = self.get(key)
+        if not row:
+            return False
+        now = time.time()
+        new_url = url if url is not None else row['url']
+        new_name = name if name is not None else row['name']
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE playlists SET url = ?, name = ?, updated_at = ? "
+                    "WHERE key = ? COLLATE NOCASE",
+                    (new_url, new_name, now, key),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        if self.audit_logger:
+            self.audit_logger.log(
+                'playlist_update', f"Updated playlist '{key}'",
+                'completed', params={'key': key, 'url': url, 'name': name},
+                source=self._audit_source)
+        return True
+
+    def remove(self, key):
+        """Delete a playlist by key. Returns True if found."""
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                cursor = conn.execute(
+                    "DELETE FROM playlists WHERE key = ? COLLATE NOCASE",
+                    (key,),
+                )
+                conn.commit()
+                deleted = cursor.rowcount > 0
+            finally:
+                conn.close()
+        if deleted and self.audit_logger:
+            self.audit_logger.log(
+                'playlist_delete', f"Removed playlist '{key}'",
+                'completed', params={'key': key},
+                source=self._audit_source)
+        return deleted
+
+    def count(self):
+        """Return total playlist count."""
+        conn = self._connect()
+        try:
+            return conn.execute("SELECT COUNT(*) FROM playlists").fetchone()[0]
+        finally:
+            conn.close()
 
 
 class TrackDB:
@@ -2800,7 +3406,8 @@ class TrackDB:
         """Return per-playlist aggregate stats.
 
         Returns list of dicts with keys: playlist, track_count,
-        total_size_bytes, cover_with, cover_without.
+        total_size_bytes, total_duration_s, max_updated_at,
+        cover_with, cover_without.
         """
         conn = self._connect()
         try:
@@ -2808,6 +3415,8 @@ class TrackDB:
                 SELECT playlist,
                        COUNT(*) AS track_count,
                        COALESCE(SUM(file_size_bytes), 0) AS total_size_bytes,
+                       COALESCE(SUM(duration_s), 0) AS total_duration_s,
+                       COALESCE(MAX(updated_at), 0) AS max_updated_at,
                        SUM(CASE WHEN cover_art_path IS NOT NULL
                            THEN 1 ELSE 0 END) AS cover_with,
                        SUM(CASE WHEN cover_art_path IS NULL
@@ -3035,31 +3644,24 @@ class EQConfigManager:
 # Section 3: Configuration Management
 # ══════════════════════════════════════════════════════════════════
 
-class PlaylistConfig:
-    """Represents a single playlist configuration."""
-
-    def __init__(self, key, url, name):
-        self.key = key
-        self.url = url
-        self.name = name
-
-    def __repr__(self):
-        return f"PlaylistConfig(key={self.key}, name={self.name})"
-
-
 @dataclass
 class SyncDestination:
-    """A saved sync destination (name + schemed path).
+    """A saved sync destination (name + schemed path + internal sync key).
 
     Paths use a scheme prefix:
       - usb:///Volumes/MY_USB/RZR/Music   → USB drive destination
       - folder:///path/to/dir             → Folder destination
       - web-client://My-USB               → Browser-local sync target
     Legacy plain paths are migrated to folder:// on config load.
+
+    sync_key is an internal UUID — never exposed to users.
+    linked_destinations lists other destination names sharing the same
+    tracking group (populated by SyncTracker queries, not stored in DB).
     """
     name: str
     path: str  # usb:///Volumes/X/RZR/Music or folder:///path/to/dir
-    sync_key: str = None  # optional link to a shared tracking key
+    sync_key: str = ''  # internal UUID; never shown to users
+    linked_destinations: list = field(default_factory=list)
 
     @property
     def type(self) -> str:
@@ -3088,23 +3690,15 @@ class SyncDestination:
         return self.type == 'web-client'
 
     @property
-    def effective_key(self) -> str:
-        """Sync tracking key: sync_key if linked, else name."""
-        return self.sync_key if self.sync_key else self.name
-
-    @property
     def available(self) -> bool:
         if self.is_web_client:
             return True
         return Path(self.raw_path).is_dir()
 
     def to_api_dict(self) -> dict:
-        d = {'name': self.name, 'path': self.path,
-             'type': self.type, 'available': self.available,
-             'effective_key': self.effective_key}
-        if self.sync_key:
-            d['sync_key'] = self.sync_key
-        return d
+        return {'name': self.name, 'path': self.path,
+                'type': self.type, 'available': self.available,
+                'linked_destinations': self.linked_destinations}
 
 
 class ConfigManager:
@@ -3117,8 +3711,6 @@ class ConfigManager:
         self.audit_logger = audit_logger
         self._audit_source = audit_source
         self._on_change = on_change
-        self.playlists = []
-        self.destinations = []
         self.settings = {}
         self.output_profiles = {}
         self._raw_output_types = {}
@@ -3156,26 +3748,6 @@ class ConfigManager:
         # Load settings
         self.settings = data.get('settings', {})
 
-        # Load playlists
-        for entry in data.get('playlists', []):
-            key = entry.get('key', '').strip()
-            url = entry.get('url', '').strip()
-            name = entry.get('name', '').strip()
-            if key and url and name:
-                self.playlists.append(PlaylistConfig(key, url, name))
-            elif key or url or name:
-                self.logger.warn(f"Incomplete playlist entry (need key, url, name): {entry}")
-
-        # Load destinations
-        for entry in data.get('destinations', []):
-            dname = str(entry.get('name', '')).strip()
-            dpath = str(entry.get('path', '')).strip()
-            if dname and dpath:
-                dsync_key = str(entry.get('sync_key', '')).strip() or None
-                self.destinations.append(SyncDestination(dname, dpath, sync_key=dsync_key))
-            elif dname or dpath:
-                self.logger.warn(f"Incomplete destination entry (need name, path): {entry}")
-
         # Load output_types
         raw_types = data.get('output_types')
         if raw_types is None:
@@ -3206,8 +3778,7 @@ class ConfigManager:
                 usb_dir=fields.get("usb_dir", ""),
             )
 
-        self.logger.info(f"Loaded {len(self.playlists)} playlists and "
-                         f"{len(self.output_profiles)} output profiles from {self.conf_path}")
+        self.logger.info(f"Loaded {len(self.output_profiles)} output profiles from {self.conf_path}")
 
     def _create_default(self):
         """Create a default config.yaml with default profiles and empty playlists."""
@@ -3249,20 +3820,7 @@ class ConfigManager:
             'schema_version': CONFIG_SCHEMA_VERSION,
             'settings': self.settings,
             'output_types': output_types,
-            'playlists': [
-                {'key': p.key, 'url': p.url, 'name': p.name}
-                for p in self.playlists
-            ],
         }
-
-        if self.destinations:
-            dest_list = []
-            for d in self.destinations:
-                entry = {'name': d.name, 'path': d.path}
-                if d.sync_key:
-                    entry['sync_key'] = d.sync_key
-                dest_list.append(entry)
-            data['destinations'] = dest_list
 
         with open(self.conf_path, 'w') as f:
             f.write("# Music Porter Configuration\n")
@@ -3286,72 +3844,6 @@ class ConfigManager:
                 'completed', params={'key': key, 'value': value},
                 source=self._audit_source)
 
-    def get_playlist_by_key(self, key):
-        """Get playlist by key (case-insensitive)."""
-        key_lower = key.lower()
-        for playlist in self.playlists:
-            if playlist.key.lower() == key_lower:
-                return playlist
-        return None
-
-    def get_playlist_by_index(self, index):
-        """Get playlist by index (0-based)."""
-        if 0 <= index < len(self.playlists):
-            return self.playlists[index]
-        return None
-
-    def add_playlist(self, key, url, name):
-        """Add a new playlist and persist to config.yaml."""
-        if self.get_playlist_by_key(key):
-            self.logger.warn(f"Playlist key '{key}' already exists")
-            return False
-
-        self.playlists.append(PlaylistConfig(key, url, name))
-        self._save()
-        self.logger.info(f"Added playlist '{name}' to configuration")
-        if self.audit_logger:
-            self.audit_logger.log(
-                'playlist_add', f"Added playlist '{name}' ({key})",
-                'completed', params={'key': key, 'name': name},
-                source=self._audit_source)
-        return True
-
-    def update_playlist(self, key, url=None, name=None):
-        """Update an existing playlist and persist to config.yaml."""
-        playlist = self.get_playlist_by_key(key)
-        if not playlist:
-            self.logger.warn(f"Playlist key '{key}' not found")
-            return False
-        if url is not None:
-            playlist.url = url
-        if name is not None:
-            playlist.name = name
-        self._save()
-        self.logger.info(f"Updated playlist '{key}'")
-        if self.audit_logger:
-            self.audit_logger.log(
-                'playlist_update', f"Updated playlist '{key}'",
-                'completed', params={'key': key, 'url': url, 'name': name},
-                source=self._audit_source)
-        return True
-
-    def remove_playlist(self, key):
-        """Remove a playlist by key (case-insensitive) and persist to config.yaml."""
-        key_lower = key.lower()
-        original_len = len(self.playlists)
-        self.playlists = [p for p in self.playlists if p.key.lower() != key_lower]
-        if len(self.playlists) == original_len:
-            self.logger.warn(f"Playlist key '{key}' not found")
-            return False
-        self._save()
-        self.logger.info(f"Removed playlist '{key}' from configuration")
-        if self.audit_logger:
-            self.audit_logger.log(
-                'playlist_delete', f"Removed playlist '{key}'",
-                'completed', params={'key': key},
-                source=self._audit_source)
-        return True
-
     def ensure_api_key(self):
         """Ensure an API key exists in settings; generate one if missing.
 
@@ -3365,163 +3857,6 @@ class ConfigManager:
             self._save()
             self.logger.info("Generated new API key for web dashboard")
         return key
-
-    # ── Destination CRUD ──────────────────────────────────────────
-
-    def get_destination(self, name):
-        """Get a saved destination by name (case-insensitive). Returns SyncDestination or None."""
-        name_lower = name.lower()
-        for dest in self.destinations:
-            if dest.name.lower() == name_lower:
-                return dest
-        return None
-
-    def add_destination(self, name, path, sync_key=None):
-        """Add a saved sync destination. Returns True on success.
-
-        Path should be a schemed path (usb:// or folder://).
-        Plain paths are auto-prefixed with folder://.
-        Optional sync_key links this destination to a shared tracking key.
-        """
-        import re as _re
-        if not _re.match(r'^[a-zA-Z0-9_-]+$', name):
-            self.logger.error(f"Destination name must be alphanumeric with hyphens/underscores: '{name}'")
-            return False
-        if self.get_destination(name):
-            self.logger.error(f"Destination '{name}' already exists")
-            return False
-
-        # Normalize to schemed path
-        if (not path.startswith('usb://') and not path.startswith('folder://')
-                and not path.startswith('web-client://')):
-            path = f'folder://{path}'
-
-        # Validate the raw filesystem path exists (skip for web-client)
-        dest = SyncDestination(name, path, sync_key=sync_key)
-        if not dest.is_web_client:
-            raw = dest.raw_path
-            if dest.is_usb:
-                # For USB: validate the volume mount exists (subdir may not exist yet)
-                volume_path = Path(raw).parts[:3] if IS_MACOS else Path(raw).parts[:1]
-                volume_mount = Path(*volume_path) if volume_path else Path(raw)
-                if not volume_mount.is_dir():
-                    self.logger.error(f"USB volume mount not found: {volume_mount}")
-                    return False
-            else:
-                if not Path(raw).is_dir():
-                    self.logger.error(f"Destination path does not exist or is not a directory: {raw}")
-                    return False
-
-        self.destinations.append(dest)
-        self._save()
-        link_msg = f" (linked to '{sync_key}')" if sync_key else ''
-        self.logger.info(f"Added sync destination '{name}' → {path}{link_msg}")
-        if self.audit_logger:
-            params = {'name': name, 'path': path}
-            if sync_key:
-                params['sync_key'] = sync_key
-            self.audit_logger.log(
-                'destination_add', f"Added sync destination '{name}'{link_msg}",
-                'completed', params=params,
-                source=self._audit_source)
-        return True
-
-    def remove_destination(self, name):
-        """Remove a saved destination by name (case-insensitive). Returns True if found."""
-        name_lower = name.lower()
-        original_len = len(self.destinations)
-        self.destinations = [d for d in self.destinations if d.name.lower() != name_lower]
-        if len(self.destinations) == original_len:
-            self.logger.warn(f"Destination '{name}' not found")
-            return False
-        self._save()
-        self.logger.info(f"Removed sync destination '{name}'")
-        if self.audit_logger:
-            self.audit_logger.log(
-                'destination_delete', f"Removed sync destination '{name}'",
-                'completed', params={'name': name},
-                source=self._audit_source)
-        return True
-
-    def update_destination_link(self, name, sync_key):
-        """Set or clear a destination's sync_key. Returns True if found.
-
-        Pass sync_key=None or '' to unlink.
-        """
-        dest = self.get_destination(name)
-        if not dest:
-            self.logger.warn(f"Destination '{name}' not found")
-            return False
-        old_key = dest.sync_key
-        new_key = sync_key.strip() if sync_key else None
-        dest.sync_key = new_key
-        self._save()
-        if new_key:
-            self.logger.info(f"Linked destination '{name}' → key '{new_key}'")
-        else:
-            self.logger.info(f"Unlinked destination '{name}' (was '{old_key}')")
-        if self.audit_logger:
-            self.audit_logger.log(
-                'destination_link',
-                f"{'Linked' if new_key else 'Unlinked'} destination '{name}'"
-                + (f" → '{new_key}'" if new_key else ''),
-                'completed',
-                params={'name': name, 'sync_key': new_key, 'old_sync_key': old_key},
-                source=self._audit_source)
-        return True
-
-    def ensure_destination(self, name, path, sync_key=None):
-        """Get or create a destination, auto-linking to sync_key if provided.
-
-        Returns the SyncDestination (existing or newly created), or None on failure.
-        """
-        existing = self.get_destination(name)
-        if existing:
-            return existing
-        ok = self.add_destination(name, path, sync_key=sync_key)
-        return self.get_destination(name) if ok else None
-
-    def rename_sync_key_refs(self, old_key, new_key):
-        """Update all destination sync_key references from old_key to new_key.
-
-        Returns count of destinations updated.
-        """
-        count = 0
-        for dest in self.destinations:
-            if dest.sync_key == old_key:
-                dest.sync_key = new_key
-                count += 1
-        if count:
-            self._save()
-        return count
-
-    def rename_destination(self, old_name, new_name):
-        """Rename a saved destination. Returns True on success."""
-        import re as _re
-        if not _re.match(r'^[a-zA-Z0-9_-]+$', new_name):
-            self.logger.error(f"Destination name must be alphanumeric with hyphens/underscores: '{new_name}'")
-            return False
-        if old_name.lower() == new_name.lower():
-            self.logger.error("New name must be different from the current name")
-            return False
-        if self.get_destination(new_name):
-            self.logger.error(f"Destination '{new_name}' already exists")
-            return False
-        dest = self.get_destination(old_name)
-        if not dest:
-            self.logger.warn(f"Destination '{old_name}' not found")
-            return False
-        dest.name = new_name
-        self._save()
-        self.logger.info(f"Renamed destination '{old_name}' to '{new_name}'")
-        if self.audit_logger:
-            self.audit_logger.log(
-                'destination_rename',
-                f"Renamed destination '{old_name}' to '{new_name}'",
-                'completed',
-                params={'old_name': old_name, 'new_name': new_name},
-                source=self._audit_source)
-        return True
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -3734,11 +4069,11 @@ class DependencyChecker:
             self.logger.error("  python3 -m venv .venv")
             self.logger.error("  source .venv/bin/activate")
 
-    def get_status(self, config=None) -> DependencyCheckResult:
+    def get_status(self, playlist_count=0) -> DependencyCheckResult:
         """Return current dependency status as a result object."""
         packages = self.dep_status.get('packages', {})
         missing = [pkg for pkg, ok in packages.items() if not ok]
-        playlists = len(config.playlists) if config else 0
+        playlists = playlist_count
         return DependencyCheckResult(
             venv_active=self.dep_status.get('venv', False),
             venv_path=self.venv_path,
@@ -4502,7 +4837,6 @@ class SyncResult:
     success: bool
     source: str
     destination: str
-    dest_key: str
     duration: float
     is_usb: bool = False
     files_found: int = 0
@@ -4516,9 +4850,9 @@ class SyncResult:
 
 @dataclass
 class SyncStatusResult:
-    """Result of SyncTracker.get_sync_status()."""
-    sync_key: str
-    last_sync_at: float
+    """Result of SyncTracker.get_destination_status()."""
+    destinations: list = field(default_factory=list)
+    last_sync_at: float = 0
     playlists: list = field(default_factory=list)
     total_files: int = 0
     synced_files: int = 0
@@ -4527,11 +4861,6 @@ class SyncStatusResult:
 
     def to_dict(self) -> dict:
         return asdict(self)
-
-
-# Backwards compatibility aliases
-USBSyncResult = SyncResult
-USBSyncStatusResult = SyncStatusResult
 
 
 
@@ -4564,7 +4893,7 @@ class PipelineResult:
     stages_skipped: list = field(default_factory=list)
     download_result: DownloadResult | None = None
     conversion_result: ConversionResult | None = None
-    usb_result: USBSyncResult | None = None
+    usb_result: SyncResult | None = None
     usb_destination: str | None = None
 
     def to_dict(self) -> dict:
@@ -6545,7 +6874,7 @@ class SyncManager:
         # File is up-to-date, skip
         return False
 
-    def select_destination(self, config=None, output_profile=None):
+    def select_destination(self, output_profile=None):
         """Interactive destination picker showing USB drives, saved destinations, and custom path.
 
         Returns SyncDestination or None if cancelled.
@@ -6556,7 +6885,8 @@ class SyncManager:
         # 1. Auto-detected USB drives
         usb_drives = self.find_usb_drives()
         usb_dir = output_profile.usb_dir if output_profile else DEFAULT_USB_DIR
-        saved_names = {d.name.lower() for d in config.destinations} if config else set()
+        saved = self.sync_tracker.get_all_destinations() if self.sync_tracker else []
+        saved_names = {d.name.lower() for d in saved}
         for vol in usb_drives:
             base = self._get_usb_base_path(vol)
             full_path = str(base / usb_dir) if usb_dir else str(base)
@@ -6567,13 +6897,12 @@ class SyncManager:
             option_dests.append(
                 SyncDestination(vol, f'usb://{full_path}'))
 
-        # 2. Saved destinations from config
-        if config and config.destinations:
-            for dest in config.destinations:
-                status = "" if dest.available else " [not found]"
-                badge = "[USB]" if dest.is_usb else "[Folder]"
-                options.append(f"{badge} {dest.name} ({dest.raw_path}){status}")
-                option_dests.append(dest)
+        # 2. Saved destinations from DB
+        for dest in saved:
+            status = "" if dest.available else " [not found]"
+            badge = "[USB]" if dest.is_usb else "[Folder]"
+            options.append(f"{badge} {dest.name} ({dest.raw_path}){status}")
+            option_dests.append(dest)
 
         # 3. Custom path option
         options.append("Enter custom path...")
@@ -6604,15 +6933,25 @@ class SyncManager:
             if not p.exists() or not p.is_dir():
                 self.logger.error(f"Path does not exist or is not a directory: {custom_path}")
                 return None
-            dest_key = self._sanitize_dest_name(p.name)
-            dest = SyncDestination(dest_key, f'folder://{custom_path}')
-            if config and not config.get_destination(dest_key):
-                config.add_destination(dest_key, dest.path)
+            dest_name = self._sanitize_dest_name(p.name)
+            if self.sync_tracker:
+                self.sync_tracker.add_destination(
+                    dest_name, f'folder://{custom_path}',
+                    validate_path=False)
+                dest = self.sync_tracker.get_destination(dest_name)
+                if dest:
+                    return dest
+            # Fallback if no tracker
+            dest = SyncDestination(dest_name, f'folder://{custom_path}')
             return dest
 
-        # Auto-save USB selections
-        if dest.is_usb and config and not config.get_destination(dest.name):
-            config.add_destination(dest.name, dest.path)
+        # Auto-save USB selections and get back with proper sync_key
+        if dest.is_usb and self.sync_tracker:
+            self.sync_tracker.add_destination(
+                dest.name, dest.path, validate_path=False)
+            saved_dest = self.sync_tracker.get_destination(dest.name)
+            if saved_dest:
+                return saved_dest
 
         return dest
 
@@ -6624,7 +6963,7 @@ class SyncManager:
         sanitized = _re.sub(r'-+', '-', sanitized).strip('-')
         return sanitized or 'custom-dest'
 
-    def sync_to_destination(self, source_dir, dest_path, dest_key,
+    def sync_to_destination(self, source_dir, dest_path, sync_key,
                             dry_run=False, tag_applicator=None,
                             profile=None, playlist_name=None):
         """Sync files to any destination with incremental copy logic.
@@ -6632,7 +6971,7 @@ class SyncManager:
         Args:
             source_dir: Source directory containing MP3 files
             dest_path: Schemed path (usb:// or folder://) or raw filesystem path
-            dest_key: Tracking key name (destination name)
+            sync_key: Internal sync key UUID for tracking
             dry_run: Preview changes without copying
             tag_applicator: Optional TagApplicator for profile-based tagging
             profile: Optional OutputProfile (required if tag_applicator is set)
@@ -6662,7 +7001,7 @@ class SyncManager:
             self.logger.error(
                 f"Source directory does not exist: {source_path}")
             return SyncResult(success=False, source=str(source_dir),
-                              destination='', dest_key=dest_key or '',
+                              destination='',
                               duration=0, is_usb=is_usb)
 
         # Collect all .mp3 files to process
@@ -6746,7 +7085,7 @@ class SyncManager:
 
             return SyncResult(
                 success=True, source=str(source_path), destination=str(dest),
-                dest_key=dest_key, duration=duration, is_usb=is_usb,
+                duration=duration, is_usb=is_usb,
                 files_found=stats.files_found, files_copied=stats.files_copied,
                 files_skipped=stats.files_skipped,
                 files_failed=stats.files_failed)
@@ -6763,7 +7102,7 @@ class SyncManager:
             return SyncResult(
                 success=False, source=str(source_path),
                 destination=str(dest),
-                dest_key=dest_key, duration=duration, is_usb=is_usb,
+                duration=duration, is_usb=is_usb,
                 files_found=stats.files_found, files_copied=stats.files_copied,
                 files_skipped=stats.files_skipped,
                 files_failed=stats.files_failed)
@@ -6808,7 +7147,7 @@ class SyncManager:
                             pl_name = (playlist_name
                                        or source_path.parent.name)
                             self.sync_tracker.record_file(
-                                dest_key, pl_name, record_name)
+                                sync_key, pl_name, record_name)
                     else:
                         stats.files_skipped += 1
                         if self.logger.verbose:
@@ -6832,11 +7171,13 @@ class SyncManager:
 
         # Prompt to eject USB drive (only for USB destinations)
         if is_usb and not dry_run:
-            self._prompt_and_eject_usb(dest_key)
+            # Extract volume name from path for eject
+            volume_name = Path(fs_path).parts[2] if IS_MACOS and len(Path(fs_path).parts) > 2 else Path(fs_path).name
+            self._prompt_and_eject_usb(volume_name)
 
         return SyncResult(
             success=stats.files_failed == 0, source=str(source_path),
-            destination=str(dest), dest_key=dest_key, duration=duration,
+            destination=str(dest), duration=duration,
             is_usb=is_usb, files_found=stats.files_found,
             files_copied=stats.files_copied,
             files_skipped=stats.files_skipped,
@@ -6848,12 +7189,19 @@ class SyncManager:
             volume = self.select_usb_drive()
         if not volume:
             return SyncResult(success=False, source=str(source_dir),
-                              destination='', dest_key='', duration=0, is_usb=True)
+                              destination='', duration=0, is_usb=True)
 
         base_path = str(self._get_usb_base_path(volume))
         full_path = str(Path(base_path) / usb_dir) if usb_dir else base_path
+        # Resolve destination to get internal sync_key
+        sync_key = volume  # fallback
+        if self.sync_tracker:
+            result = self.sync_tracker.resolve_destination(
+                path=f'usb://{full_path}', drive_name=volume)
+            if result:
+                sync_key = result['destination'].sync_key
         return self.sync_to_destination(
-            source_dir, dest_path=f'usb://{full_path}', dest_key=volume,
+            source_dir, dest_path=f'usb://{full_path}', sync_key=sync_key,
             dry_run=dry_run)
 
     def _prompt_and_eject_usb(self, volume_name):
@@ -7053,7 +7401,8 @@ class DataManager:
     """Manages playlist data lifecycle (deletion, cleanup)."""
 
     def __init__(self, logger=None, config=None, prompt_handler=None, output_profile=None,
-                 audit_logger=None, audit_source='cli', track_db=None):
+                 audit_logger=None, audit_source='cli', track_db=None,
+                 playlist_db=None):
         self.logger = logger or Logger()
         self.config = config or ConfigManager(logger=self.logger)
         self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
@@ -7061,6 +7410,7 @@ class DataManager:
         self.audit_logger = audit_logger
         self._audit_source = audit_source
         self.track_db = track_db
+        self.playlist_db = playlist_db
 
     def delete_playlist_data(self, playlist_key, delete_source=True, delete_library=True,
                              remove_config=False, dry_run=False):
@@ -7180,13 +7530,16 @@ class DataManager:
             if self.track_db:
                 self.track_db.delete_tracks_by_playlist(playlist_key)
 
-        # Remove config entry
+        # Remove playlist entry
         if remove_config:
-            if self.config.remove_playlist(playlist_key):
+            removed = False
+            if self.playlist_db:
+                removed = self.playlist_db.remove(playlist_key)
+            if removed:
                 config_removed = True
-                self.logger.info(f"  Removed config entry for '{playlist_key}'")
+                self.logger.info(f"  Removed playlist entry for '{playlist_key}'")
             else:
-                self.logger.info(f"  Config entry for '{playlist_key}' not found (may not be configured)")
+                self.logger.info(f"  Playlist entry for '{playlist_key}' not found")
 
         result = DeleteResult(
             success=len(errors) == 0,
@@ -7369,7 +7722,7 @@ class PipelineOrchestrator:
                  cookie_path=DEFAULT_COOKIES, workers=None,
                  prompt_handler=None, display_handler=None,
                  cancel_event=None, audit_logger=None, audit_source='cli',
-                 sync_tracker=None, track_db=None,
+                 sync_tracker=None, track_db=None, playlist_db=None,
                  eq_config_manager=None, eq_config_override=None,
                  project_root=None):
         self.logger = logger or Logger()
@@ -7382,6 +7735,7 @@ class PipelineOrchestrator:
         self._audit_source = audit_source
         self.sync_tracker = sync_tracker
         self.track_db = track_db
+        self.playlist_db = playlist_db
         self.deps = deps or DependencyChecker(self.logger)
         self.config = config or ConfigManager(logger=self.logger)
         self.stats = PipelineStatistics()
@@ -7503,7 +7857,7 @@ class PipelineOrchestrator:
                 f"\n=== STAGE 3: Sync to {sync_destination.name} ===")
             usb_result = sync_mgr.sync_to_destination(
                 library_dir, dest_path=sync_destination.path,
-                dest_key=sync_destination.effective_key, dry_run=dry_run)
+                sync_key=sync_destination.sync_key, dry_run=dry_run)
 
             if usb_result.success:
                 self.stats.stages_completed.append("sync")
@@ -7599,22 +7953,29 @@ class PipelineOrchestrator:
     def _download_playlist(self, playlist_arg, auto, dry_run, verbose,
                            validate_cookies=True, auto_refresh_cookies=False):
         """Download playlist from configuration."""
-        # Find playlist by name or index
+        # Find playlist by key or index from PlaylistDB
         playlist = None
-        if playlist_arg.isdigit():
-            playlist = self.config.get_playlist_by_index(int(playlist_arg) - 1)
-        else:
-            playlist = self.config.get_playlist_by_key(playlist_arg)
+        if self.playlist_db:
+            if playlist_arg.isdigit():
+                all_pl = self.playlist_db.get_all()
+                idx = int(playlist_arg) - 1
+                if 0 <= idx < len(all_pl):
+                    playlist = all_pl[idx]
+            else:
+                playlist = self.playlist_db.get(playlist_arg)
 
         if not playlist:
             self.logger.error(f"Playlist not found: {playlist_arg}")
             self.stats.stages_failed.append("download")
             return False
 
-        self.stats.playlist_key = playlist.key
-        self.stats.playlist_name = playlist.name
+        pl_key = playlist['key']
+        pl_name = playlist['name']
+        pl_url = playlist['url']
+        self.stats.playlist_key = pl_key
+        self.stats.playlist_name = pl_name
 
-        output_dir = get_source_dir(playlist.key)
+        output_dir = get_source_dir(pl_key)
 
         downloader = Downloader(self.logger, self.deps.venv_python,
                                cookie_path=self.cookie_path,
@@ -7622,9 +7983,9 @@ class PipelineOrchestrator:
                                display_handler=self.display_handler,
                                cancel_event=self.cancel_event)
         dl_result = downloader.download(
-            playlist.url,
+            pl_url,
             output_dir,
-            key=playlist.key,
+            key=pl_key,
             confirm=not auto,
             dry_run=dry_run,
             validate_cookies=validate_cookies,
@@ -7648,8 +8009,9 @@ class PipelineOrchestrator:
                 return False
 
     def _ask_save_to_config(self, key, url, album_name):
-        """Ask user if they want to save a new playlist to config."""
-        if self.prompt_handler.confirm(f"Save '{album_name}' to {DEFAULT_CONFIG_FILE}?", default=False):
-            self.config.add_playlist(key, url, album_name)
+        """Ask user if they want to save a new playlist."""
+        if self.prompt_handler.confirm(f"Save '{album_name}' to configuration?", default=False):
+            if self.playlist_db:
+                self.playlist_db.add(key, url, album_name)
 
 

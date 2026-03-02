@@ -607,11 +607,13 @@ class PipelineScheduler:
             display = self._ctx.make_display_handler(task_id)
             task = self._ctx.task_manager.get(task_id)
 
+            playlist_db = self._ctx.playlist_db
             orchestrator = mp.PipelineOrchestrator(
                 logger, deps, config,
                 quality_preset=quality_preset,
                 workers=workers,
                 track_db=self._ctx.track_db,
+                playlist_db=playlist_db,
                 display_handler=display,
                 cancel_event=task.cancel_event,
                 audit_logger=self._ctx.audit_logger,
@@ -619,13 +621,14 @@ class PipelineScheduler:
             )
 
             # Determine which playlists to process
+            all_playlists = playlist_db.get_all()
             if playlists_filter:
                 to_run = [
-                    p for p in config.playlists
-                    if p.key in playlists_filter
+                    p for p in all_playlists
+                    if p['key'] in playlists_filter
                 ]
             else:
-                to_run = list(config.playlists)
+                to_run = list(all_playlists)
 
             if not to_run:
                 logger.warning("No playlists to process")
@@ -641,14 +644,13 @@ class PipelineScheduler:
                     break
                 display.show_overall_progress(
                     i + 1, len(to_run),
-                    f"Playlist {i + 1} of {len(to_run)}: {pl.name}")
+                    f"Playlist {i + 1} of {len(to_run)}: {pl['name']}")
                 logger.info(f"\n{'=' * 60}")
                 logger.info(
-                    f"Processing {i + 1}/{len(to_run)}: {pl.name}")
+                    f"Processing {i + 1}/{len(to_run)}: {pl['name']}")
                 logger.info(f"{'=' * 60}")
-                idx = config.playlists.index(pl) + 1
                 orchestrator.run_full_pipeline(
-                    playlist=str(idx), auto=True,
+                    playlist=pl['key'], auto=True,
                     dry_run=False, verbose=False,
                     quality_preset=quality_preset,
                 )
@@ -748,6 +750,7 @@ class AppContext:
     audit_logger: object  # mp.AuditLogger
     sync_tracker: object  # mp.SyncTracker
     track_db: object  # mp.TrackDB
+    playlist_db: object  # mp.PlaylistDB
     api_key: str
     project_root: Path
     scheduler: 'PipelineScheduler | None' = None
@@ -875,11 +878,14 @@ def create_app(project_root=None, no_auth=False, server_host=None,
     _db_path = str(project_root / mp.DEFAULT_DB_FILE)
 
     _task_db = mp.TaskHistoryDB(_db_path)
+    _audit = mp.AuditLogger(_db_path)
     ctx = AppContext(
         task_manager=TaskManager(task_db=_task_db),
-        audit_logger=mp.AuditLogger(_db_path),
+        audit_logger=_audit,
         sync_tracker=mp.SyncTracker(_db_path),
         track_db=mp.TrackDB(_db_path),
+        playlist_db=mp.PlaylistDB(_db_path, audit_logger=_audit,
+                                  audit_source='web'),
         api_key=_api_key,
         project_root=project_root,
     )

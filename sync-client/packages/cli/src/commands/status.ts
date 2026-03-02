@@ -4,23 +4,24 @@ import { createConnectedClient } from '../shared.js';
 
 export function registerStatusCommand(program: Command): void {
   program
-    .command('status [key]')
-    .description('Show sync status for all keys or a specific key')
+    .command('status [destination]')
+    .description('Show sync status for all destination groups or a specific destination')
     .option('--json', 'Output as JSON')
-    .action(async (key: string | undefined, opts: { json?: boolean }) => {
+    .action(async (destination: string | undefined, opts: { json?: boolean }) => {
       const client = await createConnectedClient();
       if (!client) return;
 
-      if (key) {
-        // Detail for one key
+      if (destination) {
+        // Detail for one destination
         try {
-          const detail = await client.getSyncStatus(key);
+          const detail = await client.getSyncStatus(destination);
           if (opts.json) {
             console.log(JSON.stringify(detail, null, 2));
             return;
           }
 
-          console.log(`\nSync Key: ${detail.sync_key}`);
+          const dests = detail.destinations ?? [destination];
+          console.log(`\nDestination${dests.length > 1 ? 's' : ''}: ${dests.join(', ')}`);
           if (detail.last_sync_at) {
             printField('Last Sync', new Date(detail.last_sync_at * 1000).toLocaleString());
           }
@@ -45,32 +46,33 @@ export function registerStatusCommand(program: Command): void {
           printError(`Failed to get status: ${err instanceof Error ? err.message : err}`);
         }
       } else {
-        // All keys
+        // All destination groups — use summary endpoint
         try {
-          const keys = await client.getSyncKeys();
+          const summary = await client.getSyncStatusSummary();
           if (opts.json) {
-            console.log(JSON.stringify(keys, null, 2));
+            console.log(JSON.stringify(summary, null, 2));
             return;
           }
 
-          if (keys.length === 0) {
-            console.log('No sync keys found.');
+          if (summary.length === 0) {
+            console.log('No sync destinations found.');
             return;
           }
 
           console.log();
           printTable(
-            ['Sync Key', 'Files', 'Playlists', 'Last Sync'],
-            keys.map((k) => [
-              k.key_name,
-              String(k.file_count),
-              String(k.playlist_count),
+            ['Destinations', 'Total', 'Synced', 'New', 'Last Sync'],
+            summary.map((k) => [
+              (k.destinations ?? []).join(', ') || '—',
+              String(k.total_files),
+              String(k.synced_files),
+              String(k.new_files),
               k.last_sync_at ? new Date(k.last_sync_at * 1000).toLocaleString() : 'Never',
             ]),
           );
           console.log();
         } catch (err) {
-          printError(`Failed to get sync keys: ${err instanceof Error ? err.message : err}`);
+          printError(`Failed to get sync status: ${err instanceof Error ? err.message : err}`);
         }
       }
     });

@@ -23,7 +23,7 @@ export function registerSyncCommand(program: Command): void {
     .description('Sync playlists to a destination')
     .option('-p, --playlist <key>', 'Sync a specific playlist')
     .option('-d, --dest <path>', 'Destination path or saved destination name')
-    .option('-k, --key <name>', 'Override sync key')
+    .option('-n, --name <name>', 'Override destination name')
     .option('--profile <name>', 'Output profile to use (determines USB directory)')
     .option('--concurrency <n>', 'Number of parallel downloads', String(DEFAULT_CONCURRENCY))
     .option('--dry-run', 'Preview sync without downloading')
@@ -32,7 +32,7 @@ export function registerSyncCommand(program: Command): void {
     .action(async (opts: {
       playlist?: string;
       dest?: string;
-      key?: string;
+      name?: string;
       profile?: string;
       concurrency?: string;
       dryRun?: boolean;
@@ -82,7 +82,7 @@ export function registerSyncCommand(program: Command): void {
         try {
           const result = await engine.sync(dest, {
             playlists,
-            syncKey: opts.key,
+            destinationName: opts.name,
             offlineOnly: true,
             cacheManager: cm,
             signal: abortController.signal,
@@ -119,7 +119,7 @@ export function registerSyncCommand(program: Command): void {
           } else {
             printSuccess('Offline sync complete!');
           }
-          printField('Sync Key', result.syncKey);
+          printField('Destination', result.destinationName);
           printField('Copied', String(result.copied));
           printField('Skipped', String(result.skipped));
           if (result.failed > 0) {
@@ -214,14 +214,14 @@ export function registerSyncCommand(program: Command): void {
 
       if (resolvedProfileName) console.log(`Profile: ${resolvedProfileName}`);
       console.log(`Syncing to: ${dest}`);
-      if (opts.key) console.log(`Sync key: ${opts.key}`);
+      if (opts.name) console.log(`Destination: ${opts.name}`);
       if (usbDriveName) console.log(`USB drive: ${usbDriveName}`);
       console.log();
 
       try {
         const result = await engine.sync(dest, {
           playlists,
-          syncKey: opts.key,
+          destinationName: opts.name,
           usbDriveName,
           profile: resolvedProfileName || undefined,
           concurrency,
@@ -271,16 +271,20 @@ export function registerSyncCommand(program: Command): void {
           printSuccess('Sync complete!');
         }
 
-        printField('Sync Key', result.syncKey);
+        printField('Destination', result.destinationName);
         printField('Copied', String(result.copied));
         printField('Skipped', String(result.skipped));
         if (result.failed > 0) {
           printField('Failed', chalk.red(String(result.failed)));
         }
         printField('Duration', formatDuration(result.durationMs));
+        if (result.destError) {
+          console.log();
+          printError(result.destError);
+        }
         console.log();
 
-        if (result.failed > 0) {
+        if (result.destError || result.failed > 0) {
           process.exitCode = EXIT_PARTIAL_FAILURE;
         }
       } catch (err) {

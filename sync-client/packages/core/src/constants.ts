@@ -1,5 +1,5 @@
 /** Sync client version — bumped independently from the server. */
-export const VERSION = '1.4.0';
+export const VERSION = '1.5.0';
 
 /** Manifest filename stored in sync destination root. */
 export const MANIFEST_FILENAME = '.music-porter-sync.json';
@@ -46,12 +46,6 @@ export const TEMP_SUFFIX = '.tmp';
 /** Bearer token prefix for Authorization header. */
 export const AUTH_HEADER_PREFIX = 'Bearer';
 
-/** Sync key prefix for USB drive destinations. */
-export const USB_SYNC_KEY_PREFIX = 'usbkey-';
-
-/** Sync key prefix for generic client destinations. */
-export const CLIENT_SYNC_KEY_PREFIX = 'client-';
-
 /** Per-file download timeout (ms) — 5 minutes, generous for large files on slow USB. */
 export const FILE_DOWNLOAD_TIMEOUT_MS = 300_000;
 
@@ -97,6 +91,9 @@ export const CONNECTION_RECONNECT_INTERVAL_MS = 15_000;
 
 /** Timeout (ms) for a single health-check ping. */
 export const HEALTH_CHECK_TIMEOUT_MS = 5_000;
+
+/** Timeout (ms) for the local URL probe during a dual-URL health check. */
+export const HEALTH_CHECK_LOCAL_TIMEOUT_MS = 3_000;
 
 /** Number of consecutive health-check failures before declaring the connection lost. */
 export const HEALTH_CHECK_FAILURE_THRESHOLD = 2;

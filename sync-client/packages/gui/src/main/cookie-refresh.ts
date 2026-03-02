@@ -26,6 +26,16 @@ export interface CookieRefreshResult {
   error?: string;
 }
 
+/** Active cookie refresh window (at most one at a time). */
+let activeCookieWindow: BrowserWindow | null = null;
+
+/** Cancel an in-progress cookie refresh by closing its window. */
+export function cancelCookieRefresh(): void {
+  if (activeCookieWindow && !activeCookieWindow.isDestroyed()) {
+    activeCookieWindow.close();
+  }
+}
+
 /**
  * Open a BrowserWindow pointed at Apple Music, wait for the user to sign in,
  * then extract all Apple cookies in Netscape format.
@@ -44,7 +54,7 @@ export function openCookieRefreshWindow(
       width: COOKIE_WINDOW_WIDTH,
       height: COOKIE_WINDOW_HEIGHT,
       parent: parentWindow,
-      modal: true,
+      title: 'Sign In to Apple Music',
       show: false,
       webPreferences: {
         partition: LOGIN_PARTITION,
@@ -98,8 +108,14 @@ export function openCookieRefreshWindow(
       finish({ success: false, error: 'Login timed out' });
     }, COOKIE_REFRESH_TIMEOUT_MS);
 
+    activeCookieWindow = win;
+
+    // Prevent the loaded page from overriding our window title
+    win.on('page-title-updated', (e) => e.preventDefault());
+
     // User closed window before completing login
     win.on('closed', () => {
+      activeCookieWindow = null;
       finish({ success: false, error: 'Login window closed' });
     });
 

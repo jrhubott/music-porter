@@ -7,17 +7,23 @@ import type {
   DiscoveredServer,
   DriveInfo,
   FileListResponse,
+  LinkDestinationResponse,
+  OkResponse,
+  PipelineProgress,
+  PipelineStartResult,
   Playlist,
   PlaylistCacheStatus,
   PrefetchResult,
+  ResetTrackingResponse,
   ServerConfig,
   SettingsResponse,
+  SyncDestination,
   SyncDestinationsResponse,
-  SyncKeySummary,
   SyncPreferences,
   SyncProgress,
   SyncResult,
   SyncStatusDetail,
+  SyncStatusSummary,
 } from '@mporter/core';
 
 /** Typed API surface exposed to the renderer via contextBridge. */
@@ -37,18 +43,38 @@ const electronAPI = {
   getSettings: (): Promise<SettingsResponse> => ipcRenderer.invoke('data:getSettings'),
   getFiles: (playlistKey: string): Promise<FileListResponse> =>
     ipcRenderer.invoke('data:getFiles', playlistKey),
-  getSyncStatus: (key: string): Promise<SyncStatusDetail> =>
-    ipcRenderer.invoke('data:getSyncStatus', key),
-  getSyncKeys: (): Promise<SyncKeySummary[]> => ipcRenderer.invoke('data:getSyncKeys'),
+  getSyncStatus: (destName: string): Promise<SyncStatusDetail> =>
+    ipcRenderer.invoke('data:getSyncStatus', destName),
   getSyncDestinations: (): Promise<SyncDestinationsResponse> =>
     ipcRenderer.invoke('data:getSyncDestinations'),
+  getLocalDestinations: (): Promise<SyncDestination[]> =>
+    ipcRenderer.invoke('data:getLocalDestinations'),
   getAbout: (): Promise<AboutResponse> => ipcRenderer.invoke('data:getAbout'),
+  getSyncStatusSummary: (): Promise<SyncStatusSummary[]> =>
+    ipcRenderer.invoke('data:getSyncStatusSummary'),
+  linkDestination: (name: string, targetDest: string | null): Promise<LinkDestinationResponse> =>
+    ipcRenderer.invoke('data:linkDestination', name, targetDest),
+  resetDestinationTracking: (name: string): Promise<ResetTrackingResponse> =>
+    ipcRenderer.invoke('data:resetDestinationTracking', name),
+  addPlaylist: (key: string, url: string, name: string): Promise<OkResponse> =>
+    ipcRenderer.invoke('data:addPlaylist', key, url, name),
+  updatePlaylist: (key: string, url?: string, name?: string): Promise<OkResponse> =>
+    ipcRenderer.invoke('data:updatePlaylist', key, url, name),
+
+  // Pipeline
+  startPipeline: (opts?: {
+    playlist?: string;
+    auto?: boolean;
+    preset?: string;
+  }): Promise<PipelineStartResult> => ipcRenderer.invoke('pipeline:start', opts),
+  cancelPipeline: (taskId?: string): Promise<void> =>
+    ipcRenderer.invoke('pipeline:cancel', taskId),
 
   // Sync
   startSync: (opts: {
     dest: string;
     playlists?: string[];
-    syncKey?: string;
+    destinationName?: string;
     concurrency?: number;
     usbDriveName?: string;
     profile?: string;
@@ -56,8 +82,8 @@ const electronAPI = {
     offlineOnly?: boolean;
   }): Promise<SyncResult> => ipcRenderer.invoke('sync:start', opts),
   cancelSync: (): Promise<void> => ipcRenderer.invoke('sync:cancel'),
-  resolveSyncKey: (destPath: string, usbDriveName?: string): Promise<string | null> =>
-    ipcRenderer.invoke('sync:resolveSyncKey', destPath, usbDriveName),
+  resolveDestination: (destPath: string, usbDriveName?: string): Promise<string | null> =>
+    ipcRenderer.invoke('sync:resolveDestination', destPath, usbDriveName),
 
   // Drives
   listDrives: (): Promise<DriveInfo[]> => ipcRenderer.invoke('drives:list'),
@@ -73,6 +99,7 @@ const electronAPI = {
     days_remaining?: number | null;
     error?: string;
   }> => ipcRenderer.invoke('cookies:refresh'),
+  cancelCookieRefresh: (): Promise<void> => ipcRenderer.invoke('cookies:cancelRefresh'),
 
   // Preferences
   getPreferences: (): Promise<SyncPreferences> => ipcRenderer.invoke('prefs:get'),
@@ -152,6 +179,12 @@ const electronAPI = {
       callback(data);
     ipcRenderer.on('drives:autoSync', handler);
     return () => ipcRenderer.removeListener('drives:autoSync', handler);
+  },
+  onPipelineProgress: (callback: (progress: PipelineProgress) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, progress: PipelineProgress) =>
+      callback(progress);
+    ipcRenderer.on('pipeline:progress', handler);
+    return () => ipcRenderer.removeListener('pipeline:progress', handler);
   },
   onBackgroundPrefetchStatus: (callback: (status: BackgroundPrefetchStatus) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, status: BackgroundPrefetchStatus) =>

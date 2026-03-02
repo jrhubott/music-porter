@@ -3,12 +3,15 @@ import type {
   BackgroundPrefetchStatus,
   ConnectionState,
   DriveInfo,
+  PipelineProgress,
   PlaylistCacheStatus,
   Playlist,
   ProfileInfo,
+  SyncDestination,
   SyncProgress,
   SyncResult,
   SyncStatusDetail,
+  SyncStatusSummary,
 } from '@mporter/core';
 
 interface AppState {
@@ -72,6 +75,29 @@ interface AppState {
   setAutoPinNewPlaylists: (enabled: boolean) => void;
   backgroundPrefetchStatus: BackgroundPrefetchStatus | null;
   setBackgroundPrefetchStatus: (status: BackgroundPrefetchStatus | null) => void;
+
+  // Sync Status
+  syncStatusSummary: SyncStatusSummary[];
+  setSyncStatusSummary: (summary: SyncStatusSummary[]) => void;
+  selectedDestGroup: string | null;
+  setSelectedDestGroup: (dest: string | null) => void;
+  selectedDestGroupDetail: SyncStatusDetail | null;
+  setSelectedDestGroupDetail: (detail: SyncStatusDetail | null) => void;
+
+  // Destinations (shared)
+  destinations: SyncDestination[];
+  setDestinations: (destinations: SyncDestination[]) => void;
+
+  // Pipeline
+  isPipelining: boolean;
+  setIsPipelining: (pipelining: boolean) => void;
+  pipelineTaskId: string | null;
+  setPipelineTaskId: (id: string | null) => void;
+  pipelineProgress: PipelineProgress | null;
+  setPipelineProgress: (progress: PipelineProgress | null) => void;
+  pipelineLogs: PipelineProgress[];
+  appendPipelineLog: (log: PipelineProgress) => void;
+  clearPipelineLogs: () => void;
 
   // UI
   activePage: string;
@@ -160,6 +186,30 @@ export const useAppState = create<AppState>((set) => ({
   setAutoPinNewPlaylists: (autoPinNewPlaylists) => set({ autoPinNewPlaylists }),
   backgroundPrefetchStatus: null,
   setBackgroundPrefetchStatus: (backgroundPrefetchStatus) => set({ backgroundPrefetchStatus }),
+
+  // Sync Status
+  syncStatusSummary: [],
+  setSyncStatusSummary: (syncStatusSummary) => set({ syncStatusSummary }),
+  selectedDestGroup: null,
+  setSelectedDestGroup: (selectedDestGroup) => set({ selectedDestGroup }),
+  selectedDestGroupDetail: null,
+  setSelectedDestGroupDetail: (selectedDestGroupDetail) => set({ selectedDestGroupDetail }),
+
+  // Destinations (shared)
+  destinations: [],
+  setDestinations: (destinations) => set({ destinations }),
+
+  // Pipeline
+  isPipelining: false,
+  setIsPipelining: (isPipelining) => set({ isPipelining }),
+  pipelineTaskId: null,
+  setPipelineTaskId: (pipelineTaskId) => set({ pipelineTaskId }),
+  pipelineProgress: null,
+  setPipelineProgress: (pipelineProgress) => set({ pipelineProgress }),
+  pipelineLogs: [],
+  appendPipelineLog: (log) =>
+    set((state) => ({ pipelineLogs: [...state.pipelineLogs, log] })),
+  clearPipelineLogs: () => set({ pipelineLogs: [] }),
 
   // UI
   activePage: 'connect',

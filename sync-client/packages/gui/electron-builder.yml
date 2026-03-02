@@ -1,5 +1,6 @@
 appId: com.musicporter.sync
 productName: Music Porter Sync
+npmRebuild: false
 directories:
   buildResources: build
   output: out
@@ -12,10 +13,12 @@ mac:
     - zip
   icon: build/icon.icns
   category: public.app-category.music
-  hardenedRuntime: true
+  identity: null
+  artifactName: "MusicPorterSync-${version}-${arch}.${ext}"
 win:
   target:
     - nsis
+  artifactName: "MusicPorterSync-${version}-Setup.${ext}"
 linux:
   target:
     - AppImage

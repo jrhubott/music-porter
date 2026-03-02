@@ -168,8 +168,8 @@ Unknown variables are left as literal text (e.g., `{foo}` stays as `{foo}`).
 ## Documentation
 
 - **[User Guide](MUSIC-PORTER-GUIDE.md)** - Complete usage guide with examples
-- **[Cookie Management Guide](COOKIE-MANAGEMENT-GUIDE.md)** - Cookie validation, auto-refresh, and troubleshooting
-- **[iOS Companion Guide](IOS-COMPANION-GUIDE.md)** - iOS app setup, pairing, and usage
+- **[Cookie Management Guide](docs/COOKIE-MANAGEMENT-GUIDE.md)** - Cookie validation, auto-refresh, and troubleshooting
+- **[iOS Companion Guide](docs/IOS-COMPANION-GUIDE.md)** - iOS app setup, pairing, and usage
 - **[Architecture](CLAUDE.md)** - Developer guide and AI assistant context
 
 ## Configuration
@@ -229,7 +229,7 @@ Requires `data/cookies.txt` file with valid Apple Music session cookies. The ser
 - Use the web dashboard Settings page to refresh cookies
 - Or manually export cookies from music.apple.com using a browser extension
 
-See [Cookie Management Guide](COOKIE-MANAGEMENT-GUIDE.md) for detailed instructions.
+See [Cookie Management Guide](docs/COOKIE-MANAGEMENT-GUIDE.md) for detailed instructions.
 
 ## Project Structure
 
@@ -268,7 +268,7 @@ Cross-platform sync client (`sync-client/` subdirectory) with both a CLI tool (`
 
 **Cookies expired / Downloads fail**
 - Use the web dashboard to refresh cookies
-- See [Cookie Management Guide](COOKIE-MANAGEMENT-GUIDE.md)
+- See [Cookie Management Guide](docs/COOKIE-MANAGEMENT-GUIDE.md)
 
 **FFmpeg not found**
 - Install: `brew install ffmpeg` (macOS) or equivalent for your platform
@@ -329,7 +329,7 @@ Cross-platform sync client (`sync-client/` subdirectory) with both a CLI tool (`
 
 ## Version
 
-Current version: **v2.37.0**
+Current version: **v2.38.0**
 
 ## License
 

@@ -1,5 +1,6 @@
 import {
   AUTH_HEADER_PREFIX,
+  HEALTH_CHECK_LOCAL_TIMEOUT_MS,
   HEALTH_CHECK_TIMEOUT_MS,
   LOCAL_TIMEOUT_MS,
   STANDARD_TIMEOUT_MS,
@@ -10,6 +11,7 @@ import {
   NotConfiguredError,
   ServerBusyError,
   ServerError,
+  SyncError,
 } from './errors.js';
 import type {
   AboutResponse,
@@ -20,12 +22,19 @@ import type {
   CookieStatus,
   CookieUploadResponse,
   FileListResponse,
+  HealthCheckResult,
+  OkResponse,
+  PipelineProgress,
+  PipelineStartResult,
   Playlist,
+  ResolveDestinationResponse,
   ServerInfoResponse,
   SettingsResponse,
   SyncDestinationsResponse,
-  SyncKeySummary,
   SyncStatusDetail,
+  SyncStatusSummary,
+  LinkDestinationResponse,
+  ResetTrackingResponse,
 } from './types.js';
 import type { MetadataCache } from './cache/metadata-cache.js';
 
@@ -177,6 +186,119 @@ export class APIClient {
     return result.body!;
   }
 
+  /** Add a new playlist to the server. Uses custom fetch to distinguish duplicate-key 409 from busy 409. */
+  async addPlaylist(key: string, url: string, name: string): Promise<OkResponse> {
+    const fetchURL = this.buildURL('/api/playlists');
+    const response = await fetch(fetchURL, {
+      method: 'POST',
+      headers: this.authHeaders(),
+      body: JSON.stringify({ key, url, name }),
+    });
+    if (response.status === HTTP_UNAUTHORIZED) throw new AuthError();
+    if (response.status < SUCCESS_RANGE_START || response.status > SUCCESS_RANGE_END) {
+      const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+      throw new ServerError(response.status, (body['error'] as string) ?? response.statusText);
+    }
+    this.clearETagCache();
+    return (await response.json()) as OkResponse;
+  }
+
+  /** Update an existing playlist's name and/or URL. */
+  async updatePlaylist(key: string, url?: string, name?: string): Promise<OkResponse> {
+    const fetchURL = this.buildURL(`/api/playlists/${encodeURIComponent(key)}`);
+    const body: Record<string, string> = {};
+    if (url !== undefined) body['url'] = url;
+    if (name !== undefined) body['name'] = name;
+    const response = await fetch(fetchURL, {
+      method: 'PUT',
+      headers: this.authHeaders(),
+      body: JSON.stringify(body),
+    });
+    if (response.status === HTTP_UNAUTHORIZED) throw new AuthError();
+    if (response.status < SUCCESS_RANGE_START || response.status > SUCCESS_RANGE_END) {
+      const respBody = await response.json().catch(() => ({})) as Record<string, unknown>;
+      throw new ServerError(response.status, (respBody['error'] as string) ?? response.statusText);
+    }
+    this.clearETagCache();
+    return (await response.json()) as OkResponse;
+  }
+
+  // ── Pipeline ──
+
+  /** Start a server pipeline run. Returns task_id on success, null if server is busy. */
+  async startPipeline(opts?: {
+    playlist?: string;
+    auto?: boolean;
+    preset?: string;
+  }): Promise<PipelineStartResult | null> {
+    const fetchURL = this.buildURL('/api/pipeline/run');
+    const response = await fetch(fetchURL, {
+      method: 'POST',
+      headers: this.authHeaders(),
+      body: JSON.stringify(opts ?? {}),
+    });
+    if (response.status === HTTP_CONFLICT) return null;
+    if (response.status === HTTP_UNAUTHORIZED) throw new AuthError();
+    if (response.status < SUCCESS_RANGE_START || response.status > SUCCESS_RANGE_END) {
+      throw new ServerError(response.status, response.statusText);
+    }
+    return (await response.json()) as PipelineStartResult;
+  }
+
+  /** Stream SSE events from a server task. Yields parsed PipelineProgress objects. */
+  async *streamTask(taskId: string, signal?: AbortSignal): AsyncGenerator<PipelineProgress> {
+    const url = this.buildURL(`/api/stream/${taskId}`);
+    const headers: Record<string, string> = {};
+    if (this.apiKey) {
+      headers['Authorization'] = `${AUTH_HEADER_PREFIX} ${this.apiKey}`;
+    }
+    const response = await fetch(url, { headers, signal });
+    if (!response.body) return;
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // Parse SSE lines: "data: {...}\n\n"
+        const parts = buffer.split('\n\n');
+        // Keep the last incomplete chunk in the buffer
+        buffer = parts.pop() ?? '';
+
+        for (const part of parts) {
+          for (const line of part.split('\n')) {
+            if (line.startsWith('data: ')) {
+              try {
+                const event = JSON.parse(line.slice('data: '.length)) as PipelineProgress;
+                yield event;
+              } catch {
+                // Skip malformed JSON
+              }
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  /** Cancel a running server task. */
+  async cancelTask(taskId: string): Promise<void> {
+    const url = this.buildURL(`/api/tasks/${taskId}/cancel`);
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: this.authHeaders(),
+    });
+    // Best-effort — ignore errors (task may have already finished)
+    if (response.status === HTTP_UNAUTHORIZED) throw new AuthError();
+  }
+
   // ── Files ──
 
   async getFiles(
@@ -250,28 +372,79 @@ export class APIClient {
   // ── Sync ──
 
   async recordSync(
-    syncKey: string,
+    destinationName: string,
     playlist: string,
     files: string[],
-    folderName?: string,
+    destPath?: string,
+    destType?: 'usb' | 'folder',
   ): Promise<ClientRecordResponse> {
-    const body: Record<string, unknown> = { sync_key: syncKey, playlist, files };
-    if (folderName) {
-      body['folder_name'] = folderName;
+    const body: Record<string, unknown> = { destination: destinationName, playlist, files };
+    if (destPath) {
+      body['dest_path'] = destPath;
+      if (destType) {
+        body['dest_type'] = destType;
+      }
     }
-    return this.post<ClientRecordResponse>('/api/sync/client-record', body);
+
+    const url = this.buildURL('/api/sync/client-record');
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: this.authHeaders(),
+      body: JSON.stringify(body),
+    });
+
+    // Handle dest conflict before generic checkResponse (which maps 409 → ServerBusyError)
+    if (response.status === HTTP_CONFLICT) {
+      const data = await response.json().catch(() => null) as { error?: string } | null;
+      throw new SyncError(data?.error ?? 'Destination conflict');
+    }
+
+    this.checkResponse(response);
+    return (await response.json()) as ClientRecordResponse;
   }
 
-  async getSyncStatus(key: string): Promise<SyncStatusDetail> {
-    return this.get<SyncStatusDetail>(`/api/sync/status/${key}`);
-  }
-
-  async getSyncKeys(): Promise<SyncKeySummary[]> {
-    return this.get<SyncKeySummary[]>('/api/sync/keys');
+  async getSyncStatus(destName: string): Promise<SyncStatusDetail> {
+    return this.get<SyncStatusDetail>(`/api/sync/status/${encodeURIComponent(destName)}`);
   }
 
   async getSyncDestinations(): Promise<SyncDestinationsResponse> {
     return this.get<SyncDestinationsResponse>('/api/sync/destinations');
+  }
+
+  async linkDestination(name: string, targetDest: string | null): Promise<LinkDestinationResponse> {
+    return this.put<LinkDestinationResponse>(
+      `/api/sync/destinations/${encodeURIComponent(name)}/link`,
+      { destination: targetDest },
+    );
+  }
+
+  async resetDestinationTracking(name: string): Promise<ResetTrackingResponse> {
+    return this.post<ResetTrackingResponse>(
+      `/api/sync/destinations/${encodeURIComponent(name)}/reset`,
+      {},
+    );
+  }
+
+  async getSyncStatusSummary(): Promise<SyncStatusSummary[]> {
+    return this.get<SyncStatusSummary[]>('/api/sync/status');
+  }
+
+  /** Resolve a destination on the server — finds or creates a destination. */
+  async resolveDestination(opts: {
+    path?: string;
+    name?: string;
+    driveName?: string;
+    linkTo?: string;
+  }): Promise<ResolveDestinationResponse> {
+    const body: Record<string, string> = {};
+    if (opts.path) body['path'] = opts.path;
+    if (opts.name) body['name'] = opts.name;
+    if (opts.driveName) body['drive_name'] = opts.driveName;
+    if (opts.linkTo) body['link_to'] = opts.linkTo;
+    return this.post<ResolveDestinationResponse>(
+      '/api/sync/destinations/resolve',
+      body,
+    );
   }
 
   // ── Cookies ──
@@ -323,6 +496,56 @@ export class APIClient {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /**
+   * Dual-URL health check — tries local first (short timeout), then external.
+   * Updates activeURL/connType when a different URL succeeds.
+   * Does NOT clear activeURL on failure (let the monitor's threshold logic handle that).
+   */
+  async resolveHealthCheck(): Promise<HealthCheckResult> {
+    const hasLocal = this.localURL !== undefined;
+    const hasExternal = this.externalURL !== undefined;
+
+    if (!hasLocal && !hasExternal) {
+      return { reachable: false, typeChanged: false };
+    }
+
+    // Try local first (preferred)
+    if (hasLocal) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), HEALTH_CHECK_LOCAL_TIMEOUT_MS);
+      try {
+        await this.getFrom(this.localURL!, '/api/status', controller.signal);
+        const changed = this.connType !== 'local';
+        this.activeURL = this.localURL;
+        this.connType = 'local';
+        return { reachable: true, type: 'local', typeChanged: changed };
+      } catch {
+        // Local unreachable — try external
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    // Fall back to external
+    if (hasExternal) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
+      try {
+        await this.getFrom(this.externalURL!, '/api/status', controller.signal);
+        const changed = this.connType !== 'external';
+        this.activeURL = this.externalURL;
+        this.connType = 'external';
+        return { reachable: true, type: 'external', typeChanged: changed };
+      } catch {
+        // External also unreachable
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    return { reachable: false, type: this.connType, typeChanged: false };
   }
 
   // ── HTTP Helpers ──
@@ -389,6 +612,32 @@ export class APIClient {
       method: 'POST',
       headers: this.authHeaders(),
       body: JSON.stringify(body),
+      signal,
+    });
+    this.checkResponse(response);
+    return (await response.json()) as T;
+  }
+
+  private async put<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+    const url = this.buildURL(path);
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: this.authHeaders(),
+      body: JSON.stringify(body),
+      signal,
+    });
+    this.checkResponse(response);
+    return (await response.json()) as T;
+  }
+
+  /** GET from a specific base URL (for health checks against explicit URLs). */
+  private async getFrom<T>(baseURL: string, path: string, signal?: AbortSignal): Promise<T> {
+    const base = baseURL.replace(/\/$/, '');
+    const p = path.startsWith('/') ? path : `/${path}`;
+    const url = `${base}${p}`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: this.authHeaders(),
       signal,
     });
     this.checkResponse(response);

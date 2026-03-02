@@ -1,5 +1,5 @@
 import { ipcMain, dialog, safeStorage, BrowserWindow } from 'electron';
-import { statfsSync } from 'node:fs';
+import { existsSync, statfsSync } from 'node:fs';
 import {
   APIClient,
   CacheManager,
@@ -12,8 +12,6 @@ import {
   VERSION,
   getConfigDir,
   readManifest,
-  USB_SYNC_KEY_PREFIX,
-  CLIENT_SYNC_KEY_PREFIX,
 } from '@mporter/core';
 import type {
   BackgroundPrefetchStatus,
@@ -22,14 +20,18 @@ import type {
   CookieUploadResponse,
   DiscoveredServer,
   DriveInfo,
+  OkResponse,
+  PipelineProgress,
+  PipelineStartResult,
   PlaylistCacheStatus,
   PrefetchResult,
   ServerConfig,
+  SyncDestination,
   SyncPreferences,
   SyncProgress,
   SyncResult,
 } from '@mporter/core';
-import { openCookieRefreshWindow } from './cookie-refresh.js';
+import { openCookieRefreshWindow, cancelCookieRefresh } from './cookie-refresh.js';
 import type { BackgroundPrefetchService } from './background-prefetch.js';
 import type { ConnectionMonitor } from './connection-monitor.js';
 
@@ -47,6 +49,7 @@ export const apiClient = new APIClient();
 const driveManager = new DriveManager();
 let activeSyncAbort: AbortController | null = null;
 let activePrefetchAbort: AbortController | null = null;
+let activePipelineAbort: AbortController | null = null;
 let bgPrefetchService: BackgroundPrefetchService | null = null;
 let connectionMonitor: ConnectionMonitor | null = null;
 
@@ -204,20 +207,101 @@ export function registerIPCHandlers(): void {
     return apiClient.getFiles(playlistKey, true);
   });
 
-  ipcMain.handle('data:getSyncStatus', async (_event, key: string) => {
-    return apiClient.getSyncStatus(key);
-  });
-
-  ipcMain.handle('data:getSyncKeys', async () => {
-    return apiClient.getSyncKeys();
+  ipcMain.handle('data:getSyncStatus', async (_event, destName: string) => {
+    return apiClient.getSyncStatus(destName);
   });
 
   ipcMain.handle('data:getSyncDestinations', async () => {
     return apiClient.getSyncDestinations();
   });
 
+  ipcMain.handle('data:getLocalDestinations', async (): Promise<SyncDestination[]> => {
+    const response = await apiClient.getSyncDestinations();
+    return response.destinations.filter((d) => {
+      if (d.type === 'web-client') return false;
+      const rawPath = d.path.replace(/^(usb|folder):\/\//, '');
+      return existsSync(rawPath);
+    });
+  });
+
   ipcMain.handle('data:getAbout', async () => {
     return apiClient.getAbout();
+  });
+
+  ipcMain.handle('data:getSyncStatusSummary', async () => {
+    return apiClient.getSyncStatusSummary();
+  });
+
+  ipcMain.handle(
+    'data:linkDestination',
+    async (_event, name: string, targetDest: string | null) => {
+      return apiClient.linkDestination(name, targetDest);
+    },
+  );
+
+  ipcMain.handle('data:resetDestinationTracking', async (_event, name: string) => {
+    return apiClient.resetDestinationTracking(name);
+  });
+
+  ipcMain.handle(
+    'data:addPlaylist',
+    async (_event, key: string, url: string, name: string): Promise<OkResponse> => {
+      return apiClient.addPlaylist(key, url, name);
+    },
+  );
+
+  ipcMain.handle(
+    'data:updatePlaylist',
+    async (_event, key: string, url?: string, name?: string): Promise<OkResponse> => {
+      return apiClient.updatePlaylist(key, url, name);
+    },
+  );
+
+  // ── Pipeline ──
+
+  ipcMain.handle(
+    'pipeline:start',
+    async (
+      event,
+      opts?: { playlist?: string; auto?: boolean; preset?: string },
+    ): Promise<PipelineStartResult> => {
+      const result = await apiClient.startPipeline(opts);
+      if (!result) {
+        throw new Error('Server is busy with another operation');
+      }
+
+      activePipelineAbort = new AbortController();
+      const { signal } = activePipelineAbort;
+
+      // Stream SSE events in the background, relaying to renderer
+      (async () => {
+        try {
+          for await (const progress of apiClient.streamTask(result.task_id, signal)) {
+            event.sender.send('pipeline:progress', progress);
+            if ((progress as PipelineProgress).type === 'done') break;
+          }
+        } catch {
+          // Aborted or connection lost — renderer handles cleanup
+        } finally {
+          activePipelineAbort = null;
+        }
+      })();
+
+      return result;
+    },
+  );
+
+  ipcMain.handle('pipeline:cancel', async (_event, taskId?: string): Promise<void> => {
+    activePipelineAbort?.abort();
+    activePipelineAbort = null;
+    // Also cancel on the server side if we have a task ID
+    if (taskId) {
+      try {
+        await apiClient.cancelTask(taskId);
+      } catch {
+        // Best-effort server-side cancel
+      }
+    }
   });
 
   // ── Sync ──
@@ -229,7 +313,7 @@ export function registerIPCHandlers(): void {
       opts: {
         dest: string;
         playlists?: string[];
-        syncKey?: string;
+        destinationName?: string;
         concurrency?: number;
         usbDriveName?: string;
         profile?: string;
@@ -244,7 +328,7 @@ export function registerIPCHandlers(): void {
 
       return engine.sync(opts.dest, {
         playlists: opts.playlists,
-        syncKey: opts.syncKey,
+        destinationName: opts.destinationName,
         usbDriveName: opts.usbDriveName,
         profile: opts.profile,
         force: opts.force,
@@ -269,14 +353,21 @@ export function registerIPCHandlers(): void {
   });
 
   ipcMain.handle(
-    'sync:resolveSyncKey',
+    'sync:resolveDestination',
     async (_event, destPath: string, usbDriveName?: string): Promise<string | null> => {
       try {
-        if (usbDriveName) return `${USB_SYNC_KEY_PREFIX}${usbDriveName}`;
+        // Use server-side resolution when connected
+        if (apiClient.connectionState.connected) {
+          const scheme = usbDriveName ? 'usb://' : 'folder://';
+          const resolved = await apiClient.resolveDestination({
+            path: `${scheme}${destPath}`,
+            driveName: usbDriveName,
+          });
+          return resolved.destination.name;
+        }
+        // Offline fallback: read from manifest
         const manifest = readManifest(destPath);
-        if (manifest?.sync_key) return manifest.sync_key;
-        const basename = destPath.split('/').pop() ?? destPath.split('\\').pop() ?? 'sync';
-        return `${CLIENT_SYNC_KEY_PREFIX}${basename}`;
+        return manifest?.destination_name ?? null;
       } catch {
         return null;
       }
@@ -359,14 +450,20 @@ export function registerIPCHandlers(): void {
     };
   });
 
+  ipcMain.handle('cookies:cancelRefresh', (): void => {
+    cancelCookieRefresh();
+  });
+
   // ── Cache ──
 
   ipcMain.handle('cache:pin', (_event, playlist: string): void => {
     configStore.pinPlaylist(playlist);
+    bgPrefetchService?.triggerPinChange();
   });
 
   ipcMain.handle('cache:unpin', (_event, playlist: string): void => {
     configStore.unpinPlaylist(playlist);
+    bgPrefetchService?.triggerPinChange();
   });
 
   ipcMain.handle('cache:getPinnedPlaylists', (): string[] => {

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useIPC } from '../hooks/useIPC.js';
 import { useAppState } from '../store/app-state.js';
-import type { DriveInfo, Playlist, SyncProgress } from '@mporter/core';
+import { LinkDestinationModal } from '../components/LinkDestinationModal.js';
+import type { DriveInfo, Playlist, SyncDestination, SyncProgress } from '@mporter/core';
 
 const BYTES_PER_KB = 1024;
 const BYTES_PER_MB = 1024 * 1024;
@@ -23,6 +24,10 @@ function formatDuration(ms: number): string {
   const minutes = Math.floor(seconds / SECONDS_PER_MINUTE);
   const secs = seconds % SECONDS_PER_MINUTE;
   return `${minutes}m ${secs}s`;
+}
+
+function stripScheme(path: string): string {
+  return path.replace(/^(usb|folder):\/\//, '');
 }
 
 export function SyncPage() {
@@ -70,7 +75,9 @@ export function SyncPage() {
   const [autoSyncDrives, setAutoSyncDrives] = useState<string[]>([]);
   const [ejectAfterSync, setEjectAfterSync] = useState(false);
   const [ejected, setEjected] = useState(false);
-  const [recentDestinations, setRecentDestinations] = useState<string[]>([]);
+  const [localDestinations, setLocalDestinations] = useState<SyncDestination[]>([]);
+  const [linkModalOpen, setLinkModalOpen] = useState(false);
+  const [linkTargetName, setLinkTargetName] = useState('');
 
   useEffect(() => {
     if (isOffline) {
@@ -113,20 +120,21 @@ export function SyncPage() {
 
   async function loadData() {
     try {
-      const [playlistData, settingsData, prefs, savedProfile, pinned, autoPin] = await Promise.all([
+      const [playlistData, settingsData, prefs, savedProfile, pinned, autoPin, localDests] = await Promise.all([
         ipc.getPlaylists(),
         ipc.getSettings(),
         ipc.getPreferences(),
         ipc.getProfile(),
         ipc.cacheGetPinnedPlaylists(),
         ipc.cacheGetAutoPinNewPlaylists(),
+        ipc.getLocalDestinations(),
       ]);
       setPlaylists(playlistData);
       setServerProfiles(settingsData.profiles);
       setAutoSyncDrives(prefs.autoSyncDrives);
       setEjectAfterSync(prefs.ejectAfterSync);
       setAutoPinNewPlaylists(autoPin);
-      setRecentDestinations(prefs.recentDestinations ?? []);
+      setLocalDestinations(localDests);
 
       // Sync pins with server when auto-pin is enabled
       const playlistKeys = playlistData.map((p) => p.key);
@@ -194,11 +202,6 @@ export function SyncPage() {
     }
   }
 
-  async function handlePrefetchNow() {
-    // Trigger the background prefetch service (handles auto-pin sync, stale detection, etc.)
-    await ipc.cacheTriggerPrefetch();
-  }
-
   async function toggleAutoSync(driveName: string) {
     const isEnabled = autoSyncDrives.includes(driveName);
     const updated = isEnabled
@@ -233,9 +236,9 @@ export function SyncPage() {
 
   async function loadSyncStatus(path: string, driveName?: string) {
     try {
-      const syncKey = await ipc.resolveSyncKey(path, driveName);
-      if (syncKey) {
-        const status = await ipc.getSyncStatus(syncKey);
+      const destName = await ipc.resolveDestination(path, driveName);
+      if (destName) {
+        const status = await ipc.getSyncStatus(destName);
         setDestSyncStatus(status);
       } else {
         setDestSyncStatus(null);
@@ -258,9 +261,25 @@ export function SyncPage() {
       setDestPath(path);
       setSelectedDrive(null);
       loadSyncStatus(path);
-      await ipc.addRecentDestination(path);
-      const prefs = await ipc.getPreferences();
-      setRecentDestinations(prefs.recentDestinations ?? []);
+
+      // First-sync detection: if the destination is newly created and other destinations exist,
+      // prompt to link to an existing destination
+      try {
+        const destName = await ipc.resolveDestination(path);
+        if (destName) {
+          const destsResp = await ipc.getSyncDestinations();
+          const otherDests = destsResp.destinations.filter((d) => d.name !== destName);
+          if (otherDests.length > 0) {
+            const folderName = path.split('/').pop() ?? path.split('\\').pop() ?? 'folder';
+            setLinkTargetName(folderName);
+            setLinkModalOpen(true);
+          }
+          // Refresh local destinations after resolve (may have created a new one)
+          setLocalDestinations(await ipc.getLocalDestinations());
+        }
+      } catch {
+        // Non-critical — skip first-sync prompt on error
+      }
     }
   }
 
@@ -283,11 +302,13 @@ export function SyncPage() {
       });
       setLastSyncResult(result);
 
-      // Record non-USB destination to recent list on successful sync
-      if (!syncDrive && !result.aborted) {
-        await ipc.addRecentDestination(destPath);
-        const prefs = await ipc.getPreferences();
-        setRecentDestinations(prefs.recentDestinations ?? []);
+      // Refresh local destinations after sync (server may have created/updated destinations)
+      if (!result.aborted) {
+        try {
+          setLocalDestinations(await ipc.getLocalDestinations());
+        } catch {
+          // Non-critical
+        }
       }
 
       // Auto-eject on successful USB sync when auto-sync or eject-after-sync is enabled
@@ -371,28 +392,8 @@ export function SyncPage() {
           })()}
         </div>
         <div className="d-flex gap-2 align-items-center">
-          {!isOffline && pinnedPlaylists.size > 0 && (
-            <button
-              className="btn btn-sm btn-outline-info"
-              onClick={handlePrefetchNow}
-              disabled={backgroundPrefetchStatus?.running || isSyncing}
-            >
-              {backgroundPrefetchStatus?.running ? (
-                <>
-                  <span className="spinner-border spinner-border-sm me-1" />
-                  Prefetching...
-                </>
-              ) : (
-                <>
-                  <i className="bi bi-cloud-download me-1" />
-                  Prefetch Now
-                </>
-              )}
-            </button>
-          )}
           <button className="btn btn-sm btn-outline-secondary" onClick={isOffline ? loadOfflineData : loadData}>
-            <i className="bi bi-arrow-clockwise me-1" />
-            Refresh
+            <i className="bi bi-arrow-clockwise" />
           </button>
         </div>
       </div>
@@ -504,7 +505,7 @@ export function SyncPage() {
         <div className="card-header">Destination</div>
         <div className="card-body">
           <div className="d-flex gap-2">
-            {recentDestinations.length > 0 ? (
+            {localDestinations.length > 0 ? (
               <select
                 className="form-select bg-dark text-light border-secondary"
                 value={destPath}
@@ -518,8 +519,10 @@ export function SyncPage() {
                 }}
               >
                 <option value="">Select a destination...</option>
-                {recentDestinations.map((path) => (
-                  <option key={path} value={path}>{path}</option>
+                {localDestinations.map((d) => (
+                  <option key={d.name} value={stripScheme(d.path)}>
+                    {d.name} — {stripScheme(d.path)}
+                  </option>
                 ))}
               </select>
             ) : (
@@ -680,14 +683,20 @@ export function SyncPage() {
       {/* Result */}
       {lastSyncResult && (
         <div
-          className={`alert ${lastSyncResult.aborted ? 'alert-warning' : lastSyncResult.failed > 0 ? 'alert-danger' : 'alert-success'}`}
+          className={`alert ${lastSyncResult.aborted ? 'alert-warning' : (lastSyncResult.failed > 0 || lastSyncResult.destError) ? 'alert-danger' : 'alert-success'}`}
         >
           <h6>{lastSyncResult.aborted ? 'Sync Aborted' : 'Sync Complete'}</h6>
           <div>Copied: {lastSyncResult.copied}</div>
           <div>Skipped: {lastSyncResult.skipped}</div>
           {lastSyncResult.failed > 0 && <div>Failed: {lastSyncResult.failed}</div>}
           <div>Duration: {formatDuration(lastSyncResult.durationMs)}</div>
-          <div>Sync Key: {lastSyncResult.syncKey}</div>
+          <div>Destination: {lastSyncResult.destinationName}</div>
+          {lastSyncResult.destError && (
+            <div className="mt-2 text-danger">
+              <i className="bi bi-exclamation-triangle-fill me-1" />
+              {lastSyncResult.destError}
+            </div>
+          )}
           {ejected && (
             <div className="mt-2 text-success">
               <i className="bi bi-eject-fill me-1" />
@@ -702,6 +711,19 @@ export function SyncPage() {
           )}
         </div>
       )}
+
+      <LinkDestinationModal
+        show={linkModalOpen}
+        destinationName={linkTargetName}
+        destinationPath={destPath}
+        onClose={() => setLinkModalOpen(false)}
+        onLinked={() => {
+          // Refresh sync status after linking
+          if (destPath) {
+            loadSyncStatus(destPath, selectedDrive?.name);
+          }
+        }}
+      />
     </div>
   );
 }

@@ -192,16 +192,16 @@ struct DashboardView: View {
         if !vm.syncStatus.isEmpty {
             GroupBox("Sync Status") {
                 VStack(spacing: 8) {
-                    ForEach(vm.syncStatus) { key in
+                    ForEach(vm.syncStatus) { group in
                         NavigationLink(destination: SyncStatusView()) {
                             HStack {
-                                Image(systemName: vm.usbKeyNames.contains(key.keyName) ? "externaldrive.connected.to.line.below" : "folder.fill")
+                                Image(systemName: vm.usbDestNames.contains(group.primaryDestination) ? "externaldrive.connected.to.line.below" : "folder.fill")
                                     .foregroundStyle(.secondary)
-                                Text(key.keyName)
+                                Text(group.displayLabel)
                                     .font(.subheadline.weight(.medium))
                                 Spacer()
-                                if key.newFiles > 0 {
-                                    Text("+\(key.newFiles) new")
+                                if group.newFiles > 0 {
+                                    Text("+\(group.newFiles) new")
                                         .font(.caption)
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 2)
@@ -213,8 +213,8 @@ struct DashboardView: View {
                                         .font(.caption)
                                         .foregroundStyle(.green)
                                 }
-                                if key.newPlaylists > 0 {
-                                    Text("\(key.newPlaylists) new PL")
+                                if group.newPlaylists > 0 {
+                                    Text("\(group.newPlaylists) new PL")
                                         .font(.caption)
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 2)

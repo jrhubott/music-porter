@@ -2,11 +2,12 @@ import { existsSync, mkdirSync, statSync, createWriteStream, renameSync, unlinkS
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
-import { CLIENT_SYNC_KEY_PREFIX, DEFAULT_CONCURRENCY, FILE_DOWNLOAD_TIMEOUT_MS, TEMP_SUFFIX, USB_SYNC_KEY_PREFIX } from './constants.js';
+import { DEFAULT_CONCURRENCY, FILE_DOWNLOAD_TIMEOUT_MS, TEMP_SUFFIX } from './constants.js';
+import { SyncError } from './errors.js';
 import type { APIClient } from './api-client.js';
 import type { CacheManager } from './cache/cache-manager.js';
 import type { MetadataCache } from './cache/metadata-cache.js';
-import type { FileInfo, SyncManifest, SyncResult } from './types.js';
+import type { FileInfo, SyncResult } from './types.js';
 import type { LogCallback, ProgressCallback } from './progress.js';
 import {
   readManifest,
@@ -19,9 +20,9 @@ import {
 export interface SyncOptions {
   /** Specific playlist keys to sync. If empty, sync all. */
   playlists?: string[];
-  /** Override the sync key. */
-  syncKey?: string;
-  /** USB drive name — when set, uses usb- prefix for sync key. */
+  /** Override the destination name. */
+  destinationName?: string;
+  /** USB drive name — triggers USB-type destination resolution. */
   usbDriveName?: string;
   /** Output profile name — when set, server applies profile-specific tags to downloads. */
   profile?: string;
@@ -50,7 +51,7 @@ export interface SyncOptions {
  *
  * Replicates the browser sync flow from templates/sync.html:
  * 1. Read manifest from destination
- * 2. Resolve sync key (explicit > manifest > generated)
+ * 2. Resolve destination via server
  * 3. Write manifest immediately (survives interruptions)
  * 4. For each playlist: fetch file list, check manifest/disk, download new files
  * 5. Record synced files to server
@@ -88,9 +89,16 @@ export class SyncEngine {
     // Phase 1: Read existing manifest
     const manifest = readManifest(destDir);
 
-    // Phase 2: Resolve sync key
-    const syncKey = this.resolveSyncKey(options.syncKey, manifest, destDir, options.usbDriveName);
-    log('info', `Sync key: ${syncKey}`);
+    // Phase 2: Resolve destination via server
+    const destType = options.usbDriveName ? 'usb' : 'folder';
+    const scheme = destType === 'usb' ? 'usb://' : 'folder://';
+    const resolved = await this.client.resolveDestination({
+      path: `${scheme}${destDir}`,
+      driveName: options.usbDriveName,
+      name: options.destinationName,
+    });
+    const destName = resolved.destination.name;
+    log('info', `Destination: ${destName}`);
 
     // Phase 3: Determine which playlists to sync
     let playlistKeys = options.playlists ?? [];
@@ -99,10 +107,10 @@ export class SyncEngine {
       playlistKeys = playlists.map((p) => p.key);
     }
 
-    // Phase 4: Write initial manifest (persists sync_key across interruptions)
+    // Phase 4: Write initial manifest (persists destination_name across interruptions)
     const activeURL = this.client.connectionState.activeURL ?? '';
-    const newManifest = manifest ?? createManifest(syncKey, activeURL);
-    newManifest.sync_key = syncKey;
+    const newManifest = manifest ?? createManifest(destName, activeURL);
+    newManifest.destination_name = destName;
     if (!options.dryRun) {
       writeManifest(destDir, newManifest);
     }
@@ -146,6 +154,7 @@ export class SyncEngine {
     let totalFailed = 0;
     let processed = 0;
     let aborted = false;
+    let destConflict: string | undefined;
 
     for (const { key, files } of playlistFileList) {
       if (options.signal?.aborted) {
@@ -310,9 +319,16 @@ export class SyncEngine {
       // Record all synced files (skipped + downloaded) to server in one batch
       if (!options.dryRun && Object.keys(syncedFiles).length > 0) {
         try {
-          await this.client.recordSync(syncKey, key, Object.keys(syncedFiles));
+          const recordDestType = options.usbDriveName ? 'usb' : 'folder';
+          await this.client.recordSync(
+            destName, key, Object.keys(syncedFiles), destDir, recordDestType,
+          );
         } catch (err) {
-          log('warn', `Failed to record sync for "${key}": ${err}`);
+          const message = err instanceof Error ? err.message : String(err);
+          log('error', `Failed to record sync for "${key}": ${message}`);
+          if (!destConflict && err instanceof SyncError) {
+            destConflict = message;
+          }
         }
       }
 
@@ -336,12 +352,13 @@ export class SyncEngine {
     });
 
     return {
-      syncKey,
+      destinationName: destName,
       copied: totalCopied,
       skipped: totalSkipped,
       failed: totalFailed,
       aborted,
       durationMs: Date.now() - startTime,
+      destError: destConflict,
     };
   }
 
@@ -356,10 +373,10 @@ export class SyncEngine {
       mkdirSync(destDir, { recursive: true });
     }
 
-    // Read existing manifest
+    // Read existing manifest — offline uses manifest destination name or explicit name
     const manifest = readManifest(destDir);
-    const syncKey = this.resolveSyncKey(options.syncKey, manifest, destDir, options.usbDriveName);
-    log('info', `Offline sync — key: ${syncKey}`);
+    const destName = options.destinationName ?? manifest?.destination_name ?? 'offline-sync';
+    log('info', `Offline sync — destination: ${destName}`);
 
     // Use cached playlists as the source of truth
     const requestedPlaylists = options.playlists ?? [];
@@ -369,8 +386,8 @@ export class SyncEngine {
       : cachedPlaylists;
 
     // Write initial manifest
-    const newManifest = manifest ?? createManifest(syncKey, 'offline');
-    newManifest.sync_key = syncKey;
+    const newManifest = manifest ?? createManifest(destName, 'offline');
+    newManifest.destination_name = destName;
     writeManifest(destDir, newManifest);
 
     // Build file list from cache
@@ -481,7 +498,7 @@ export class SyncEngine {
     });
 
     return {
-      syncKey,
+      destinationName: destName,
       copied: totalCopied,
       skipped: totalSkipped,
       failed: totalFailed,
@@ -582,20 +599,4 @@ export class SyncEngine {
     }
   }
 
-  /** Resolve the sync key from explicit, USB drive name, manifest, or generated. */
-  private resolveSyncKey(
-    explicit: string | undefined,
-    manifest: SyncManifest | null,
-    destDir: string,
-    usbDriveName?: string,
-  ): string {
-    if (explicit) return explicit;
-    // USB drive name takes priority over manifest — the manifest may
-    // contain a stale key from before USB-aware sync was implemented.
-    if (usbDriveName) return `${USB_SYNC_KEY_PREFIX}${usbDriveName}`;
-    if (manifest?.sync_key) return manifest.sync_key;
-    // Generate from directory name
-    const dirName = destDir.split('/').pop() ?? destDir.split('\\').pop() ?? 'sync';
-    return `${CLIENT_SYNC_KEY_PREFIX}${dirName}`;
-  }
 }
