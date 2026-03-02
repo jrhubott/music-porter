@@ -40,7 +40,7 @@ def _auto_activate_venv():
 
 _auto_activate_venv()
 
-from porter_core import (  # noqa: E402
+from porter_core import (
     VERSION,
     DependencyChecker,
     Logger,

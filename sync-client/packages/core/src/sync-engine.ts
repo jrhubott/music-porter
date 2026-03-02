@@ -7,7 +7,7 @@ import { SyncError } from './errors.js';
 import type { APIClient } from './api-client.js';
 import type { CacheManager } from './cache/cache-manager.js';
 import type { MetadataCache } from './cache/metadata-cache.js';
-import type { FileInfo, SyncManifest, SyncResult } from './types.js';
+import type { FileInfo, SyncResult } from './types.js';
 import type { LogCallback, ProgressCallback } from './progress.js';
 import {
   readManifest,
