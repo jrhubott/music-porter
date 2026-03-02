@@ -17,6 +17,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -65,17 +66,13 @@ DEFAULT_USB_DIR = "RZR/Music"
 # TXXX frame name used to uniquely identify library MP3 files in the DB
 TXXX_TRACK_UUID = "TrackUUID"
 
-# Sync key prefixes for auto-generated keys
-USB_SYNC_KEY_PREFIX = "usbkey-"
-CLIENT_SYNC_KEY_PREFIX = "client-"
-
 # Destination name validation pattern
 VALID_DEST_NAME_RE = r'^[a-zA-Z0-9_-]+$'
 
 # Schema version constants — increment and add a migration case when changing
 # the config.yaml structure or DB tables/columns.
 CONFIG_SCHEMA_VERSION = 4
-DB_SCHEMA_VERSION = 7
+DB_SCHEMA_VERSION = 8
 
 # Excluded USB volumes by OS
 if IS_MACOS:
@@ -1296,6 +1293,44 @@ def migrate_db_schema(logger=None):
             if logger:
                 logger.info(
                     "DB migration 6→7: added playlists + destinations tables")
+
+        # ── Version 7 → 8: sync keys become internal UUIDs ────────────
+        if current < 8:
+            # Migrate human-readable sync_key values to UUIDs.
+            # FK constraints are disabled for the migration since we're
+            # updating PK values referenced by child tables.
+            conn.execute("PRAGMA foreign_keys = OFF")
+
+            existing_keys = conn.execute(
+                "SELECT key_name FROM sync_keys"
+            ).fetchall()
+            for row in existing_keys:
+                old_key = row[0]
+                new_key = str(uuid.uuid4())
+                # Update child tables first, then parent PK
+                conn.execute(
+                    "UPDATE sync_files SET sync_key = ? WHERE sync_key = ?",
+                    (new_key, old_key),
+                )
+                conn.execute(
+                    "UPDATE destinations SET sync_key = ? WHERE sync_key = ?",
+                    (new_key, old_key),
+                )
+                conn.execute(
+                    "UPDATE sync_keys SET key_name = ? WHERE key_name = ?",
+                    (new_key, old_key),
+                )
+
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA user_version = 8")
+            conn.commit()
+            migrated_count = len(existing_keys)
+            changes.append(
+                f"migrated {migrated_count} sync keys to internal UUIDs")
+            if logger:
+                logger.info(
+                    f"DB migration 7→8: migrated {migrated_count} sync keys "
+                    "to UUIDs")
 
         return [MigrationEvent(
             'schema_migrate',
