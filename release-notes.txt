@@ -1,3 +1,7 @@
+Version 2.38.4 (2026-03-02):
+• Fix cancelled sync re-downloading files already on disk
+• Sync client updated to v1.5.2
+
 Version 2.38.2 (2026-03-02):
 • Don't show USB in recents
 • Fix pre-existing Pyright type errors in porter_core.py and web_ui.py
