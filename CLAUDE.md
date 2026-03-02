@@ -40,6 +40,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - When creating a new SRS, check existing files in `SRS/` for the highest entry number and use the next one
 - Edge cases are the last subsection under Requirements
 - Store individual SRS files in the `SRS/` directory
+- Requirements documents **outside `SRS/`** (e.g. build tooling in `build/`) are not required to use the project SRS table format. They should define their own column schema appropriate to their domain and document it clearly at the top of the file.
 - Organized by **user feature** (not by internal class or module)
 - Each entry maps to a user-facing capability, aligned with API endpoints where applicable
 - Cross-cutting concerns (logging, progress, server flags) go in the "Server & Runtime" entry
