@@ -757,14 +757,17 @@ function loadSyncStatus() {
     row.classList.remove('d-none');
     const usbNames = new Set((destData.destinations || []).filter(d => d.type === 'usb').map(d => d.name));
     badges.innerHTML = data.map(k => {
-      const icon = usbNames.has(k.key_name) ? 'bi-usb-drive' : 'bi-folder2-open';
+      const dests = k.destinations || [];
+      const label = dests.join(', ') || '(unknown)';
+      const isUsb = dests.some(d => usbNames.has(d));
+      const icon = isUsb ? 'bi-usb-drive' : 'bi-folder2-open';
       const newBadge = k.new_files > 0
         ? `<span class="badge bg-warning text-dark ms-1">+${k.new_files} new</span>`
         : '<span class="badge bg-success ms-1">synced</span>';
       const plBadge = k.new_playlists > 0
         ? ` <span class="badge bg-info ms-1">${k.new_playlists} new playlist${k.new_playlists > 1 ? 's' : ''}</span>`
         : '';
-      return `<div><i class="bi ${icon} me-1"></i><strong>${k.key_name}</strong> ${newBadge}${plBadge} <span class="text-muted small">${k.synced_files}/${k.total_files} files</span></div>`;
+      return `<div><i class="bi ${icon} me-1"></i><strong>${label}</strong> ${newBadge}${plBadge} <span class="text-muted small">${k.synced_files}/${k.total_files} files</span></div>`;
     }).join('');
   }).catch(() => {});
 }
