@@ -2,35 +2,33 @@ import SwiftUI
 
 struct SyncStatusView: View {
     @Environment(AppState.self) private var appState
-    @State private var keys: [SyncKeySummary] = []
+    @State private var groups: [SyncStatusSummary] = []
     @State private var detail: SyncStatusDetail?
-    @State private var selectedKey: String?
+    @State private var selectedGroup: String?
     @State private var destinations: [SyncDestination] = []
-    @State private var usbKeyNames: Set<String> = []
+    @State private var usbDestNames: Set<String> = []
     @State private var vm = OperationViewModel()
     @State private var isLoading = false
     @State private var error: String?
-    @State private var showDeleteConfirm = false
-    @State private var keyToDelete: String?
-    @State private var showDeletePlaylistConfirm = false
-    @State private var playlistToDelete: (String, String)?
+    @State private var showResetConfirm = false
+    @State private var destToReset: String?
     @State private var showDeleteDestConfirm = false
     @State private var destToDelete: String?
 
     var body: some View {
         List {
-            if isLoading && keys.isEmpty {
+            if isLoading && groups.isEmpty {
                 ProgressView("Loading sync status...")
                     .frame(maxWidth: .infinity)
-            } else if keys.isEmpty {
+            } else if groups.isEmpty {
                 ContentUnavailableView(
                     "No Sync History",
                     systemImage: "arrow.left.arrow.right",
                     description: Text("Sync files to a destination to start tracking.")
                 )
             } else {
-                keysSection
-                if let detail, selectedKey != nil {
+                groupsSection
+                if let detail, selectedGroup != nil {
                     detailSection(detail)
                 }
             }
@@ -54,17 +52,17 @@ struct SyncStatusView: View {
         .refreshable { await load() }
         .task { await load() }
         .confirmationDialog(
-            "Delete Sync Key",
-            isPresented: $showDeleteConfirm,
+            "Reset Sync Tracking",
+            isPresented: $showResetConfirm,
             titleVisibility: .visible
         ) {
-            Button("Delete", role: .destructive) {
-                if let key = keyToDelete {
-                    Task { await deleteKey(key) }
+            Button("Reset", role: .destructive) {
+                if let name = destToReset {
+                    Task { await resetTracking(name) }
                 }
             }
         } message: {
-            Text("Delete all sync tracking data for \(keyToDelete ?? "")?")
+            Text("Reset all sync tracking data for \(destToReset ?? "")? All files will be re-synced on next sync.")
         }
         .confirmationDialog(
             "Remove Destination",
@@ -79,45 +77,30 @@ struct SyncStatusView: View {
         } message: {
             Text("Remove saved destination \"\(destToDelete ?? "")\"?")
         }
-        .confirmationDialog(
-            "Delete Playlist Tracking",
-            isPresented: $showDeletePlaylistConfirm,
-            titleVisibility: .visible
-        ) {
-            Button("Delete", role: .destructive) {
-                if let (key, playlist) = playlistToDelete {
-                    Task { await deletePlaylist(key, playlist) }
-                }
-            }
-        } message: {
-            if let (key, playlist) = playlistToDelete {
-                Text("Delete tracking for \"\(playlist)\" on \"\(key)\"?")
-            }
-        }
     }
 
-    // MARK: - Keys List
+    // MARK: - Destination Groups
 
-    private var keysSection: some View {
-        Section("Sync Keys") {
-            ForEach(keys) { key in
+    private var groupsSection: some View {
+        Section("Destination Groups") {
+            ForEach(groups) { group in
                 Button {
-                    selectedKey = key.keyName
-                    Task { await loadDetail(key.keyName) }
+                    selectedGroup = group.primaryDestination
+                    Task { await loadDetail(group.primaryDestination) }
                 } label: {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
-                                Image(systemName: usbKeyNames.contains(key.keyName) ? "externaldrive.connected.to.line.below" : "folder.fill")
+                                Image(systemName: usbDestNames.contains(group.primaryDestination) ? "externaldrive.connected.to.line.below" : "folder.fill")
                                     .foregroundStyle(.secondary)
-                                Text(key.keyName)
+                                Text(group.displayLabel)
                                     .font(.subheadline.weight(.medium))
                             }
                             HStack(spacing: 8) {
-                                Text("\(key.syncedFiles)/\(key.totalFiles) files")
+                                Text("\(group.syncedFiles)/\(group.totalFiles) files")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                if let date = key.lastSyncDate {
+                                if let date = group.lastSyncDate {
                                     Text(date, style: .relative)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
@@ -126,8 +109,8 @@ struct SyncStatusView: View {
                         }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 4) {
-                            if key.newFiles > 0 {
-                                Text("+\(key.newFiles) new")
+                            if group.newFiles > 0 {
+                                Text("+\(group.newFiles) new")
                                     .font(.caption)
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 2)
@@ -139,8 +122,8 @@ struct SyncStatusView: View {
                                     .font(.caption)
                                     .foregroundStyle(.green)
                             }
-                            if key.newPlaylists > 0 {
-                                Text("\(key.newPlaylists) new PL")
+                            if group.newPlaylists > 0 {
+                                Text("\(group.newPlaylists) new PL")
                                     .font(.caption)
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 2)
@@ -149,7 +132,7 @@ struct SyncStatusView: View {
                                     .clipShape(Capsule())
                             }
                         }
-                        if selectedKey == key.keyName {
+                        if selectedGroup == group.primaryDestination {
                             Image(systemName: "chevron.down")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -163,20 +146,20 @@ struct SyncStatusView: View {
                 .buttonStyle(.plain)
                 .swipeActions(edge: .trailing) {
                     Button(role: .destructive) {
-                        keyToDelete = key.keyName
-                        showDeleteConfirm = true
+                        destToReset = group.primaryDestination
+                        showResetConfirm = true
                     } label: {
-                        Label("Delete", systemImage: "trash")
+                        Label("Reset", systemImage: "arrow.counterclockwise")
                     }
                 }
                 .swipeActions(edge: .leading) {
                     Button {
-                        Task { await syncKey(key.keyName) }
+                        Task { await syncDestination(group.primaryDestination) }
                     } label: {
                         Label("Sync", systemImage: "arrow.triangle.2.circlepath")
                     }
                     .tint(.blue)
-                    .disabled(!isKeyAvailable(key.keyName) || vm.isRunning)
+                    .disabled(!isDestAvailable(group.primaryDestination) || vm.isRunning)
                 }
             }
         }
@@ -185,11 +168,11 @@ struct SyncStatusView: View {
     // MARK: - Playlist Detail
 
     private func detailSection(_ detail: SyncStatusDetail) -> some View {
-        Section("Playlists: \(detail.syncKey)") {
+        Section("Playlists: \(detail.displayLabel)") {
             Button {
-                Task { await pruneKey(detail.syncKey) }
+                Task { await resetTracking(detail.destinations.first ?? "") }
             } label: {
-                Label("Prune Stale Records", systemImage: "eraser")
+                Label("Reset Sync Tracking", systemImage: "arrow.counterclockwise")
                     .font(.subheadline)
                     .foregroundStyle(.yellow)
             }
@@ -228,22 +211,14 @@ struct SyncStatusView: View {
                                 .foregroundStyle(.green)
                         }
                     }
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) {
-                            playlistToDelete = (detail.syncKey, playlist.name)
-                            showDeletePlaylistConfirm = true
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                    }
                     .swipeActions(edge: .leading) {
                         Button {
-                            Task { await syncPlaylist(detail.syncKey, playlist: playlist.name) }
+                            Task { await syncPlaylist(detail.destinations.first ?? "", playlist: playlist.name) }
                         } label: {
                             Label("Sync", systemImage: "arrow.triangle.2.circlepath")
                         }
                         .tint(.blue)
-                        .disabled(!isKeyAvailable(detail.syncKey) || vm.isRunning)
+                        .disabled(!isDestAvailable(detail.destinations.first ?? "") || vm.isRunning)
                     }
                 }
             }
@@ -262,6 +237,11 @@ struct SyncStatusView: View {
                         Text(dest.path)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        if dest.hasLinkedDestinations {
+                            Text("Linked with: \(dest.linkedDestinations.joined(separator: ", "))")
+                                .font(.caption)
+                                .foregroundStyle(.cyan)
+                        }
                     }
                     Spacer()
                     if dest.available {
@@ -292,44 +272,34 @@ struct SyncStatusView: View {
         isLoading = true
         error = nil
         do {
-            async let k = appState.apiClient.getSyncStatus()
+            async let g = appState.apiClient.getSyncStatus()
             async let d = appState.apiClient.getSyncDestinations()
-            keys = try await k
+            groups = try await g
             let destResponse = try? await d
             let allDests = destResponse?.destinations ?? []
             destinations = allDests
-            usbKeyNames = Set(allDests.filter { $0.type == "usb" }.map { $0.name })
+            usbDestNames = Set(allDests.filter { $0.type == "usb" }.map { $0.name })
         } catch {
             self.error = error.localizedDescription
         }
         isLoading = false
     }
 
-    private func loadDetail(_ key: String) async {
+    private func loadDetail(_ destName: String) async {
         do {
-            detail = try await appState.apiClient.getSyncStatusDetail(key: key)
+            detail = try await appState.apiClient.getSyncStatusDetail(destName: destName)
         } catch {
             self.error = error.localizedDescription
         }
     }
 
-    private func deleteKey(_ key: String) async {
+    private func resetTracking(_ destName: String) async {
         do {
-            try await appState.apiClient.deleteSyncKey(key: key)
-            if selectedKey == key {
-                selectedKey = nil
+            _ = try await appState.apiClient.resetDestinationTracking(name: destName)
+            if selectedGroup == destName {
+                selectedGroup = nil
                 detail = nil
             }
-            await load()
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-
-    private func deletePlaylist(_ key: String, _ playlist: String) async {
-        do {
-            _ = try await appState.apiClient.deleteSyncPlaylist(key: key, playlist: playlist)
-            await loadDetail(key)
             await load()
         } catch {
             self.error = error.localizedDescription
@@ -345,43 +315,33 @@ struct SyncStatusView: View {
         }
     }
 
-    private func pruneKey(_ key: String) async {
-        do {
-            _ = try await appState.apiClient.pruneSyncKey(key: key)
-            await loadDetail(key)
-            await load()
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
+    // MARK: - Destination Availability
 
-    // MARK: - Sync Availability
-
-    private func isKeyAvailable(_ keyName: String) -> Bool {
-        if usbKeyNames.contains(keyName) { return true }
-        return destinations.first(where: { $0.name == keyName })?.available == true
+    private func isDestAvailable(_ destName: String) -> Bool {
+        if usbDestNames.contains(destName) { return true }
+        return destinations.first(where: { $0.name == destName })?.available == true
     }
 
     // MARK: - Sync Actions
 
-    private func syncKey(_ keyName: String) async {
+    private func syncDestination(_ destName: String) async {
         let activeProfile = appState.activeProfile
         await vm.run(api: appState.apiClient) {
             try await appState.apiClient.syncToDestination(
                 sourceDir: "library",
-                destination: keyName,
+                destination: destName,
                 profile: activeProfile
             )
         }
         await load()
     }
 
-    private func syncPlaylist(_ keyName: String, playlist: String) async {
+    private func syncPlaylist(_ destName: String, playlist: String) async {
         let activeProfile = appState.activeProfile
         await vm.run(api: appState.apiClient) {
             try await appState.apiClient.syncToDestination(
                 sourceDir: "library/\(playlist)",
-                destination: keyName,
+                destination: destName,
                 profile: activeProfile
             )
         }

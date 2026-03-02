@@ -327,55 +327,33 @@ final class APIClient {
 
     // MARK: - Sync Status
 
-    func getSyncStatus() async throws -> [SyncKeySummary] {
+    func getSyncStatus() async throws -> [SyncStatusSummary] {
         try await get("/api/sync/status")
     }
 
-    func getSyncStatusDetail(key: String) async throws -> SyncStatusDetail {
-        try await get("/api/sync/status/\(key)")
+    func getSyncStatusDetail(destName: String) async throws -> SyncStatusDetail {
+        try await get("/api/sync/status/\(destName)")
     }
 
-    func getSyncKeys() async throws -> [SyncKeySummary] {
-        try await get("/api/sync/keys")
-    }
-
-    func deleteSyncKey(key: String) async throws {
-        let _: OkResponse = try await delete("/api/sync/keys/\(key)")
-    }
-
-    func deleteSyncPlaylist(key: String, playlist: String) async throws -> Int {
-        let response: DeletedCountResponse = try await delete("/api/sync/keys/\(key)/playlists/\(playlist)")
-        return response.deleted
-    }
-
-    func pruneSyncKey(key: String) async throws -> SyncPruneResult {
-        try await postAny("/api/sync/keys/\(key)/prune", body: [:] as [String: String])
-    }
-
-    func renameSyncKey(key: String, newKey: String) async throws {
-        let _: OkResponse = try await post("/api/sync/keys/\(key)/rename", body: ["new_key": newKey])
-    }
-
-    func resolveDestination(path: String? = nil, name: String? = nil, driveName: String? = nil, syncKey: String? = nil) async throws -> ResolveDestinationResponse {
+    func resolveDestination(path: String? = nil, name: String? = nil, driveName: String? = nil, linkTo: String? = nil) async throws -> ResolveDestinationResponse {
         var body: [String: String] = [:]
         if let path { body["path"] = path }
         if let name { body["name"] = name }
         if let driveName { body["drive_name"] = driveName }
-        if let syncKey { body["sync_key"] = syncKey }
+        if let linkTo { body["link_to"] = linkTo }
         return try await post("/api/sync/destinations/resolve", body: body)
     }
 
-    func linkDestination(name: String, syncKey: String) async throws {
-        let _: OkResponse = try await put("/api/sync/destinations/\(name)/link", body: ["sync_key": syncKey])
+    func linkDestination(name: String, targetDest: String) async throws {
+        let _: OkResponse = try await put("/api/sync/destinations/\(name)/link", body: ["destination": targetDest])
     }
 
     func unlinkDestination(name: String) async throws {
-        // Send empty sync_key to trigger server-side unlink (creates new independent key)
-        let _: OkResponse = try await put("/api/sync/destinations/\(name)/link", body: ["sync_key": ""])
+        let _: OkResponse = try await putAny("/api/sync/destinations/\(name)/link", body: ["destination": NSNull()])
     }
 
-    func renameDestination(name: String, newName: String) async throws {
-        let _: OkResponse = try await post("/api/sync/destinations/\(name)/rename", body: ["new_name": newName])
+    func resetDestinationTracking(name: String) async throws -> ResetTrackingResponse {
+        try await postAny("/api/sync/destinations/\(name)/reset", body: [:] as [String: String])
     }
 
     func getFileSyncStatus(playlist: String) async throws -> [String: [String]] {
@@ -498,6 +476,14 @@ final class APIClient {
     private func put<T: Decodable, B: Encodable>(_ path: String, body: B) async throws -> T {
         var request = try makeRequest(path, method: "PUT")
         request.httpBody = try JSONEncoder().encode(body)
+        let (data, response) = try await session.data(for: request)
+        try checkResponse(response, data: data)
+        return try decodeResponse(data, response: response)
+    }
+
+    private func putAny<T: Decodable>(_ path: String, body: [String: Any]) async throws -> T {
+        var request = try makeRequest(path, method: "PUT")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response) = try await session.data(for: request)
         try checkResponse(response, data: data)
         return try decodeResponse(data, response: response)
