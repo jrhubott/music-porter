@@ -1,6 +1,6 @@
 # Database Schema Reference
 
-SQLite database stored at `data/music-porter.db`. Current version: **DB_SCHEMA_VERSION = 7** (defined in `porter_core.py` ~line 71).
+SQLite database stored at `data/music-porter.db`. Current version: **DB_SCHEMA_VERSION = 8** (defined in `porter_core.py` ~line 71).
 
 ## PRAGMA Settings
 
@@ -70,11 +70,11 @@ Background task tracking with persistence across restarts. Added in **migration 
 
 ### sync\_keys
 
-Sync destination metadata for tracking file synchronization. Added in **migration 0 -> 1**.
+Internal sync tracking identifiers (UUIDs). Not exposed to users — destinations are the user-facing concept. Added in **migration 0 -> 1**, values migrated to UUIDs in **migration 7 -> 8**.
 
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
-| key\_name | TEXT | PRIMARY KEY | Unique sync destination identifier |
+| key\_name | TEXT | PRIMARY KEY | Internal UUID identifier |
 | last\_sync\_at | REAL | NOT NULL DEFAULT 0 | Unix epoch of last sync |
 | created\_at | REAL | NOT NULL DEFAULT 0 | Unix epoch of creation |
 
@@ -91,7 +91,7 @@ Per-file sync records. Added in **migration 0 -> 1**.
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
 | id | INTEGER | PRIMARY KEY AUTOINCREMENT | Auto-generated row ID |
-| sync\_key | TEXT | NOT NULL, FK -> sync\_keys(key\_name) ON DELETE CASCADE | Destination identifier |
+| sync\_key | TEXT | NOT NULL, FK -> sync\_keys(key\_name) ON DELETE CASCADE | Internal UUID (references sync\_keys) |
 | file\_path | TEXT | NOT NULL | Relative path to audio file |
 | playlist | TEXT | NOT NULL | Playlist identifier |
 | synced\_at | REAL | NOT NULL | Unix epoch of sync |
@@ -215,13 +215,13 @@ Sync destination configuration previously stored in `config.yaml`, migrated to t
 |--------|------|-------------|-------------|
 | name | TEXT | PRIMARY KEY | Unique destination name |
 | path | TEXT | NOT NULL | Destination path (with `usb://` or `folder://` scheme) |
-| sync\_key | TEXT | NOT NULL | Associated sync key identifier |
+| sync\_key | TEXT | NOT NULL | Internal UUID (references sync\_keys). Multiple destinations sharing the same sync\_key form a linked group with shared tracking. |
 | created\_at | REAL | NOT NULL | Unix epoch timestamp |
 | updated\_at | REAL | NOT NULL | Unix epoch timestamp |
 
 **Indexes:** `idx_destinations_sync_key(sync_key)`
 
-**Class:** `ConfigManager` (or related destination management class)
+**Class:** `SyncTracker`
 
 ---
 
@@ -236,10 +236,11 @@ Sync destination configuration previously stored in `config.yaml`, migrated to t
 | 4 | 5 | Added `idx_tracks_source_m4a` index on `tracks(source_m4a_path)`. |
 | 5 | 6 | Added 14 metadata columns to `tracks` (genre through copyright). Restructured library directories and updated file paths in existing rows. |
 | 6 | 7 | Added `playlists` and `destinations` tables. Migrated playlist and destination data from `config.yaml` to the database. Added `idx_destinations_sync_key` index. |
+| 7 | 8 | Migrated sync\_keys key\_name values from human-readable names to UUIDs. Updated all references in sync\_files and destinations tables. Sync keys are now internal identifiers; destinations are the user-facing concept. |
 
 ## Notes
 
 - Migrations run sequentially at startup via `migrate_db_schema()` before any DB class is instantiated.
 - Each `if current < N:` block is idempotent and sets the version to exactly N.
-- Fresh installs run through all migrations 0 -> 1 -> 2 -> ... -> 7.
+- Fresh installs run through all migrations 0 -> 1 -> 2 -> ... -> 8.
 - Never modify existing migration blocks; always add a new `if current < N:` block.

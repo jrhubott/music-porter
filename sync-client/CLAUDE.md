@@ -52,7 +52,7 @@ Offline audio file caching and API response metadata caching:
 
 Binary: `mporter-sync`. Uses commander for subcommand parsing.
 
-Commands: `server` (connection mgmt), `discover` (mDNS browse), `list` (playlists/files), `status` (sync keys), `sync` (download to destination), `destinations` (drives + saved).
+Commands: `server` (connection mgmt), `discover` (mDNS browse), `list` (playlists/files), `status` (destination groups), `sync` (download to destination), `destinations` (drives + saved + reset).
 
 Interactive mode when invoked with no arguments.
 
@@ -114,10 +114,10 @@ Single server with local-first, external-fallback:
 
 Replicates browser sync flow from `templates/sync.html`:
 1. Read `.music-porter-sync.json` manifest from destination
-2. Resolve sync key (explicit > manifest > `client-<dirname>`)
+2. Resolve destination via server (explicit name > manifest > auto-create from path)
 3. For each playlist: fetch file list, check manifest/disk for skip, download new
 4. Atomic writes (`.tmp` + rename), concurrent downloads (default: 4)
-5. Record synced files to server via `POST /api/sync/client-record`
+5. Record synced files to server via `POST /api/sync/client-record` (by destination name)
 6. Update manifest after each playlist
 
 ### Config Storage

@@ -45,7 +45,7 @@ Codable structs matching server JSON responses:
 - `FileListResponse` — Playlist key, fileCount, files array
 - `SSEEvent` — Enum: `.log(level, message)`, `.progress(current, total, percent, stage)`, `.heartbeat`, `.done(status, result, error)`
 - `TaskInfo` — Task id, operation, description, status, result, error, elapsed; computed `isRunning`, `isCompleted`, `isFailed`
-- `USBSyncStatus` — `SyncKeySummary`, `SyncPlaylistInfo`, `SyncStatusDetail`, `SyncPruneResult`, `SyncDestination`, `SyncDestinationsResponse`
+- `USBSyncStatus` — `SyncStatusSummary`, `SyncPlaylistInfo`, `SyncStatusDetail`, `ResetTrackingResponse`, `SyncDestination`, `SyncDestinationsResponse`, `ResolveDestinationResponse`
 
 ### Services (9 files + Cache module)
 
@@ -102,7 +102,7 @@ SwiftUI with enforced dark theme:
 | `DashboardView` | Server status card, library stats, sync status, playlist overview; accessed from Settings |
 | `PlaylistDetailView` | Track list with `TrackRow` components; pull-to-refresh |
 | `OperationsView` | Full task history with status badges; accessed from Process tab "View All" |
-| `SyncStatusView` | Sync keys, playlist detail, saved destinations; accessed from Settings |
+| `SyncStatusView` | Destination groups, playlist detail, saved destinations; accessed from Settings |
 | `AppleMusicPlaylistDetailView` | Apple Music playlist track listing with playback |
 | `QRScannerView` | QR code scanner for pairing |
 | `TrackRow` | Reusable: artwork thumbnail (44x44), title, artist, size |
