@@ -7,9 +7,11 @@ import type {
   PlaylistCacheStatus,
   Playlist,
   ProfileInfo,
+  SyncDestination,
   SyncProgress,
   SyncResult,
   SyncStatusDetail,
+  SyncStatusSummary,
 } from '@mporter/core';
 
 interface AppState {
@@ -73,6 +75,18 @@ interface AppState {
   setAutoPinNewPlaylists: (enabled: boolean) => void;
   backgroundPrefetchStatus: BackgroundPrefetchStatus | null;
   setBackgroundPrefetchStatus: (status: BackgroundPrefetchStatus | null) => void;
+
+  // Sync Status
+  syncStatusSummary: SyncStatusSummary[];
+  setSyncStatusSummary: (summary: SyncStatusSummary[]) => void;
+  selectedSyncKey: string | null;
+  setSelectedSyncKey: (key: string | null) => void;
+  selectedSyncKeyDetail: SyncStatusDetail | null;
+  setSelectedSyncKeyDetail: (detail: SyncStatusDetail | null) => void;
+
+  // Destinations (shared)
+  destinations: SyncDestination[];
+  setDestinations: (destinations: SyncDestination[]) => void;
 
   // Pipeline
   isPipelining: boolean;
@@ -172,6 +186,18 @@ export const useAppState = create<AppState>((set) => ({
   setAutoPinNewPlaylists: (autoPinNewPlaylists) => set({ autoPinNewPlaylists }),
   backgroundPrefetchStatus: null,
   setBackgroundPrefetchStatus: (backgroundPrefetchStatus) => set({ backgroundPrefetchStatus }),
+
+  // Sync Status
+  syncStatusSummary: [],
+  setSyncStatusSummary: (syncStatusSummary) => set({ syncStatusSummary }),
+  selectedSyncKey: null,
+  setSelectedSyncKey: (selectedSyncKey) => set({ selectedSyncKey }),
+  selectedSyncKeyDetail: null,
+  setSelectedSyncKeyDetail: (selectedSyncKeyDetail) => set({ selectedSyncKeyDetail }),
+
+  // Destinations (shared)
+  destinations: [],
+  setDestinations: (destinations) => set({ destinations }),
 
   // Pipeline
   isPipelining: false,

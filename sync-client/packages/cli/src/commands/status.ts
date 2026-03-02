@@ -45,32 +45,33 @@ export function registerStatusCommand(program: Command): void {
           printError(`Failed to get status: ${err instanceof Error ? err.message : err}`);
         }
       } else {
-        // All keys
+        // All keys — use summary endpoint for richer data
         try {
-          const keys = await client.getSyncKeys();
+          const summary = await client.getSyncStatusSummary();
           if (opts.json) {
-            console.log(JSON.stringify(keys, null, 2));
+            console.log(JSON.stringify(summary, null, 2));
             return;
           }
 
-          if (keys.length === 0) {
+          if (summary.length === 0) {
             console.log('No sync keys found.');
             return;
           }
 
           console.log();
           printTable(
-            ['Sync Key', 'Files', 'Playlists', 'Last Sync'],
-            keys.map((k) => [
+            ['Sync Key', 'Total', 'Synced', 'New', 'Last Sync'],
+            summary.map((k) => [
               k.key_name,
-              String(k.file_count),
-              String(k.playlist_count),
+              String(k.total_files),
+              String(k.synced_files),
+              String(k.new_files),
               k.last_sync_at ? new Date(k.last_sync_at * 1000).toLocaleString() : 'Never',
             ]),
           );
           console.log();
         } catch (err) {
-          printError(`Failed to get sync keys: ${err instanceof Error ? err.message : err}`);
+          printError(`Failed to get sync status: ${err instanceof Error ? err.message : err}`);
         }
       }
     });

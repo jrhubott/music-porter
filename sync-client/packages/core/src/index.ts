@@ -14,12 +14,14 @@ export type {
   FileInfo,
   FileListResponse,
   FreshnessLevel,
+  LinkDestinationResponse,
   OkResponse,
   PipelineEventType,
   PipelineProgress,
   PipelineStartResult,
   Playlist,
   ProfileInfo,
+  PruneResponse,
   ServerConfig,
   ServerInfoResponse,
   SettingsResponse,
@@ -36,6 +38,7 @@ export type {
   SyncProgress,
   SyncResult,
   SyncStatusDetail,
+  SyncStatusSummary,
   WindowState,
 } from './types.js';
 
