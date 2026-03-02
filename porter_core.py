@@ -72,7 +72,7 @@ VALID_DEST_NAME_RE = r'^[a-zA-Z0-9_-]+$'
 # Schema version constants — increment and add a migration case when changing
 # the config.yaml structure or DB tables/columns.
 CONFIG_SCHEMA_VERSION = 4
-DB_SCHEMA_VERSION = 8
+DB_SCHEMA_VERSION = 9
 
 # Excluded USB volumes by OS
 if IS_MACOS:
@@ -1332,6 +1332,16 @@ def migrate_db_schema(logger=None):
                     f"DB migration 7→8: migrated {migrated_count} sync keys "
                     "to UUIDs")
 
+        # ── Version 8 → 9: group name on sync_keys ──────────────────────
+        if current < 9:
+            conn.execute("ALTER TABLE sync_keys ADD COLUMN name TEXT")
+            conn.execute("PRAGMA user_version = 9")
+            conn.commit()
+            changes.append("added name column to sync_keys")
+            if logger:
+                logger.info(
+                    "DB migration 8→9: added name column to sync_keys")
+
         return [MigrationEvent(
             'schema_migrate',
             f"DB schema migrated from version {from_version} to {DB_SCHEMA_VERSION}",
@@ -2309,13 +2319,13 @@ class SyncTracker:
     def _get_keys(self):
         """List all tracked sync keys (internal).
 
-        Returns list of dicts: {key_name, last_sync_at, created_at,
+        Returns list of dicts: {key_name, name, last_sync_at, created_at,
         total_synced_files}.
         """
         conn = self._connect()
         try:
             rows = conn.execute("""
-                SELECT k.key_name, k.last_sync_at, k.created_at,
+                SELECT k.key_name, k.name, k.last_sync_at, k.created_at,
                        COUNT(f.id) AS total_synced_files
                 FROM sync_keys k
                 LEFT JOIN sync_files f ON f.sync_key = k.key_name
@@ -2363,18 +2373,19 @@ class SyncTracker:
             conn.close()
 
     def _get_sync_status_for_key(self, sync_key, export_base_dir,
-                                dest_names=None):
+                                dest_names=None, group_name=''):
         """Diff export directory against tracked files for a sync key (internal).
 
         Returns SyncStatusResult with per-playlist breakdown.
         dest_names is the list of destination names sharing this key.
+        group_name is the human-readable label for the group (may be empty).
         """
         export_path = Path(export_base_dir)
         if not export_path.exists():
             return SyncStatusResult(
                 destinations=dest_names or [], last_sync_at=0,
                 playlists=[], total_files=0, synced_files=0,
-                new_files=0, new_playlists=0)
+                new_files=0, new_playlists=0, group_name=group_name)
 
         # Get the key's last sync time
         conn = self._connect()
@@ -2440,7 +2451,7 @@ class SyncTracker:
             destinations=dest_names or [], last_sync_at=last_sync,
             playlists=playlists, total_files=total_files,
             synced_files=total_synced, new_files=total_new,
-            new_playlists=new_playlist_count)
+            new_playlists=new_playlist_count, group_name=group_name)
 
     def get_destination_status(self, dest_name, export_base_dir):
         """Get sync status for the group containing a destination.
@@ -2452,7 +2463,7 @@ class SyncTracker:
         if not dest:
             return SyncStatusResult(destinations=[dest_name])
 
-        # Find all destinations sharing this sync_key
+        # Find all destinations sharing this sync_key and fetch group name
         conn = self._connect()
         try:
             rows = conn.execute(
@@ -2460,11 +2471,17 @@ class SyncTracker:
                 (dest.sync_key,),
             ).fetchall()
             group_names = [r['name'] for r in rows]
+            key_row = conn.execute(
+                "SELECT name FROM sync_keys WHERE key_name = ?",
+                (dest.sync_key,),
+            ).fetchone()
+            group_name = (key_row['name'] or '') if key_row else ''
         finally:
             conn.close()
 
         return self._get_sync_status_for_key(
-            dest.sync_key, export_base_dir, dest_names=group_names)
+            dest.sync_key, export_base_dir, dest_names=group_names,
+            group_name=group_name)
 
     def get_destination_groups(self, export_base_dir):
         """Get sync status for all destination groups.
@@ -2478,11 +2495,24 @@ class SyncTracker:
         for d in all_dests:
             key_to_dests.setdefault(d.sync_key, []).append(d)
 
+        # Fetch group names from sync_keys in one query
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT key_name, name FROM sync_keys"
+            ).fetchall()
+            key_group_names = {r['key_name']: (r['name'] or '')
+                               for r in rows}
+        finally:
+            conn.close()
+
         results = []
         for sync_key, dests in key_to_dests.items():
             names = [d.name for d in dests]
+            gname = key_group_names.get(sync_key, '')
             status = self._get_sync_status_for_key(
-                sync_key, export_base_dir, dest_names=names)
+                sync_key, export_base_dir, dest_names=names,
+                group_name=gname)
             results.append(status)
         return results
 
@@ -2514,6 +2544,44 @@ class SyncTracker:
                 return {'reset': True, 'files_cleared': cleared}
             finally:
                 conn.close()
+
+    def set_group_name(self, dest_name: str, name: str) -> bool:
+        """Set the human-readable label for a destination's group.
+
+        Looks up the sync_key for dest_name and updates sync_keys.name.
+        Pass an empty string to clear the name (stores NULL).
+        Returns False if the destination is not found.
+        """
+        dest = self.get_destination(dest_name)
+        if not dest:
+            return False
+        stored = name.strip() if name and name.strip() else None
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE sync_keys SET name = ? WHERE key_name = ?",
+                    (stored, dest.sync_key),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        return True
+
+    def get_group_name(self, dest_name: str) -> str:
+        """Return the group name for a destination's group ('' if unset)."""
+        dest = self.get_destination(dest_name)
+        if not dest:
+            return ''
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT name FROM sync_keys WHERE key_name = ?",
+                (dest.sync_key,),
+            ).fetchone()
+            return (row['name'] or '') if row else ''
+        finally:
+            conn.close()
 
     def merge_key(self, source_key, target_key):
         """Merge tracking records from source_key into target_key.
@@ -4858,6 +4926,7 @@ class SyncStatusResult:
     synced_files: int = 0
     new_files: int = 0
     new_playlists: int = 0
+    group_name: str = ''
 
     def to_dict(self) -> dict:
         return asdict(self)

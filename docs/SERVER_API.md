@@ -1062,6 +1062,7 @@ Summary of sync status per destination group. Destinations sharing the same trac
 | Field | Type | Description |
 |-------|------|-------------|
 | `destinations` | string[] | Destination names in this tracking group |
+| `group_name` | string | Human-readable group label (empty string if unset) |
 | `last_sync_at` | number | Unix timestamp of last sync |
 | `total_files` | integer | Total files in library |
 | `synced_files` | integer | Files synced to this group |
@@ -1117,6 +1118,32 @@ Reset all sync tracking for a destination's tracking group. Deletes all sync fil
 | `files_cleared` | integer | Number of sync tracking records deleted |
 
 **Status codes:** 404 if destination not found
+
+---
+
+### PUT /api/sync/destinations/\<name\>/group-name
+
+Set or clear the human-readable label for a destination's tracking group. The label is shared by all destinations in the group.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `name` | string | Any destination name in the group |
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | New group label. Send an empty string to clear the label (UI falls back to primary destination name). |
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ok` | boolean | `true` on success |
+
+**Status codes:** 404 if destination not found, 400 if body is missing or `name` field absent
 
 ---
 
