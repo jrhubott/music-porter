@@ -7356,7 +7356,8 @@ class DataManager:
     """Manages playlist data lifecycle (deletion, cleanup)."""
 
     def __init__(self, logger=None, config=None, prompt_handler=None, output_profile=None,
-                 audit_logger=None, audit_source='cli', track_db=None):
+                 audit_logger=None, audit_source='cli', track_db=None,
+                 playlist_db=None):
         self.logger = logger or Logger()
         self.config = config or ConfigManager(logger=self.logger)
         self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
@@ -7364,6 +7365,7 @@ class DataManager:
         self.audit_logger = audit_logger
         self._audit_source = audit_source
         self.track_db = track_db
+        self.playlist_db = playlist_db
 
     def delete_playlist_data(self, playlist_key, delete_source=True, delete_library=True,
                              remove_config=False, dry_run=False):
@@ -7483,13 +7485,16 @@ class DataManager:
             if self.track_db:
                 self.track_db.delete_tracks_by_playlist(playlist_key)
 
-        # Remove config entry
+        # Remove playlist entry
         if remove_config:
-            if self.config.remove_playlist(playlist_key):
+            removed = False
+            if self.playlist_db:
+                removed = self.playlist_db.remove(playlist_key)
+            if removed:
                 config_removed = True
-                self.logger.info(f"  Removed config entry for '{playlist_key}'")
+                self.logger.info(f"  Removed playlist entry for '{playlist_key}'")
             else:
-                self.logger.info(f"  Config entry for '{playlist_key}' not found (may not be configured)")
+                self.logger.info(f"  Playlist entry for '{playlist_key}' not found")
 
         result = DeleteResult(
             success=len(errors) == 0,

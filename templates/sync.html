@@ -456,7 +456,7 @@ function loadSources() {
 
 // ── Sync helpers for action buttons ──
 function findDestMeta(keyName) {
-  return destsMeta.find(d => d.name !== '__custom__' && (d.name === keyName || d.effective_key === keyName));
+  return destsMeta.find(d => d.name !== '__custom__' && (d.name === keyName || d.sync_key === keyName));
 }
 
 function syncToKey(keyName, playlistKey) {
@@ -540,7 +540,7 @@ function loadSyncStatusData() {
       const plBadge = k.new_playlists > 0
         ? `<span class="badge bg-info">${k.new_playlists}</span>`
         : `<span class="text-muted">0</span>`;
-      const matchedDest = destsMeta.find(d => d.name === k.key_name || d.effective_key === k.key_name);
+      const matchedDest = destsMeta.find(d => d.name === k.key_name || d.sync_key === k.key_name);
       let icon = 'bi-folder2-open';
       if (matchedDest?.type === 'usb') icon = 'bi-usb-drive';
       else if (matchedDest?.type === 'web-client') icon = 'bi-pc-display';
@@ -800,7 +800,7 @@ function populateLinkToDropdown() {
   const keys = allKeysData.map(k => k.key_name);
   // Add destination names that aren't already keys (for pre-linking)
   destsMeta.forEach(d => {
-    if (d.effective_key && !keys.includes(d.effective_key)) keys.push(d.effective_key);
+    if (d.sync_key && !keys.includes(d.sync_key)) keys.push(d.sync_key);
   });
   keys.sort();
 
