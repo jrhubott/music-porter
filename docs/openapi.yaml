@@ -48,8 +48,6 @@ tags:
     description: Sync destination management
   - name: Sync Operations
     description: Sync execution and status
-  - name: Sync Keys
-    description: Sync key tracking management
   - name: Tasks
     description: Background task management and history
   - name: SSE
@@ -1261,9 +1259,9 @@ paths:
                   type: string
                 path:
                   type: string
-                  description: "Path with scheme (e.g. usb:///Volumes/Drive, folder:///path)"
-                sync_key:
+                link_to:
                   type: string
+                  description: Name of an existing destination to link tracking with
       responses:
         "200":
           description: Destination added
@@ -1279,7 +1277,7 @@ paths:
                     type: string
                   path:
                     type: string
-                  sync_key:
+                  linked_to:
                     type: string
                     nullable: true
         "400":
@@ -1307,11 +1305,10 @@ paths:
   /api/sync/destinations/{name}/link:
     put:
       operationId: linkSyncDestination
-      summary: Link sync key
+      summary: Link destination
       description: >
-        Link or unlink a sync key to a destination. When linking and the
-        destination previously had tracking data under a different key, the
-        old tracking data is merged into the new key.
+        Link or unlink a destination to another destination for shared tracking.
+        When linking, tracking data is merged. Pass null to unlink.
       tags: [Sync Destinations]
       parameters:
         - name: name
@@ -1325,38 +1322,29 @@ paths:
             schema:
               type: object
               properties:
-                sync_key:
+                destination:
                   type: string
-                  description: Sync key to link (empty or omit to unlink)
+                  nullable: true
+                  description: Name of destination to link to (null to unlink)
       responses:
         "200":
           description: Link updated
           content:
             application/json:
               schema:
-                type: object
-                required: [ok]
-                properties:
-                  ok:
-                    type: boolean
-                  sync_key:
-                    type: string
-                    nullable: true
-                  merge_stats:
-                    type: object
-                    description: Merge statistics if tracking data was merged
+                $ref: "#/components/schemas/LinkDestinationResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /api/sync/destinations/{name}/rename:
+  /api/sync/destinations/{name}/reset:
     post:
-      operationId: renameSyncDestination
-      summary: Rename destination
+      operationId: resetDestinationTracking
+      summary: Reset tracking
       description: >
-        Rename a saved destination. If the destination had no explicit sync
-        key, its tracking data is also renamed.
+        Reset all sync tracking data for a destination. Clears all file
+        records so the next sync treats everything as new.
       tags: [Sync Destinations]
       parameters:
         - name: name
@@ -1364,41 +1352,63 @@ paths:
           required: true
           schema:
             type: string
-          description: Current destination name
+          description: Destination name
+      responses:
+        "200":
+          description: Tracking reset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResetTrackingResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/sync/destinations/resolve:
+    post:
+      operationId: resolveSyncDestination
+      summary: Resolve destination
+      description: >
+        Resolve a sync destination on the server. Finds an existing destination
+        by name or path, or creates one from the given path and drive name.
+        Returns the resolved destination and current sync status.
+      tags: [Sync Destinations]
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [new_name]
               properties:
-                new_name:
+                path:
                   type: string
-                  description: "Alphanumeric, hyphens, underscores only"
+                  description: Destination path (e.g. /Volumes/Lexar/RZR/Music)
+                drive_name:
+                  type: string
+                  description: Drive display name, used when creating a new destination from path
+                link_to:
+                  type: string
+                  description: Name of an existing destination to link tracking with
+                name:
+                  type: string
+                  description: Name of an existing saved destination to resolve
       responses:
         "200":
-          description: Destination renamed
+          description: Destination resolved
           content:
             application/json:
               schema:
                 type: object
-                required: [ok, old_name, new_name, tracking_renamed]
+                required: [destination, created, sync_status]
                 properties:
-                  ok:
+                  destination:
+                    $ref: "#/components/schemas/SyncDestination"
+                  created:
                     type: boolean
-                  old_name:
-                    type: string
-                  new_name:
-                    type: string
-                  tracking_renamed:
-                    type: boolean
+                    description: Whether a new destination was created
+                  sync_status:
+                    $ref: "#/components/schemas/SyncStatusDetail"
         "400":
           $ref: "#/components/responses/BadRequest"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          $ref: "#/components/responses/Conflict"
 
   # ── Sync Operations ───────────────────────────────────────────────
   /api/sync/run:
@@ -1449,31 +1459,31 @@ paths:
     get:
       operationId: getSyncStatus
       summary: Sync status summary
-      description: Summary of all tracked sync keys with file counts.
+      description: Summary of all destinations with sync file counts.
       tags: [Sync Operations]
       responses:
         "200":
-          description: Sync key summaries
+          description: Sync status summaries
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/SyncKeySummary"
+                  $ref: "#/components/schemas/SyncStatusSummary"
 
-  /api/sync/status/{key}:
+  /api/sync/status/{dest_name}:
     get:
       operationId: getSyncStatusDetail
       summary: Sync status detail
-      description: Per-playlist breakdown for a specific sync key.
+      description: Per-playlist breakdown for a specific destination.
       tags: [Sync Operations]
       parameters:
-        - name: key
+        - name: dest_name
           in: path
           required: true
           schema:
             type: string
-          description: Sync key name
+          description: Destination name
       responses:
         "200":
           description: Detailed sync status
@@ -1482,173 +1492,24 @@ paths:
               schema:
                 $ref: "#/components/schemas/SyncStatusDetail"
 
-  # ── Sync Keys ─────────────────────────────────────────────────────
-  /api/sync/keys:
-    get:
-      operationId: listSyncKeys
-      summary: List sync keys
-      description: List all tracked sync keys.
-      tags: [Sync Keys]
-      responses:
-        "200":
-          description: Sync key list
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  type: object
-                  required: [key_name, last_sync_at, created_at]
-                  properties:
-                    key_name:
-                      type: string
-                    last_sync_at:
-                      type: number
-                      description: Unix timestamp
-                    created_at:
-                      type: number
-                      description: Unix timestamp
-
-  /api/sync/keys/{key}:
-    delete:
-      operationId: deleteSyncKey
-      summary: Delete sync key
-      description: Delete a sync key and all its tracking data.
-      tags: [Sync Keys]
-      parameters:
-        - name: key
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          $ref: "#/components/responses/Ok"
-
-  /api/sync/keys/{key}/playlists/{playlist}:
-    delete:
-      operationId: deleteSyncKeyPlaylist
-      summary: Delete playlist tracking
-      description: Delete tracking records for one playlist on a sync key.
-      tags: [Sync Keys]
-      parameters:
-        - name: key
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: playlist
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Tracking records deleted
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [ok, deleted]
-                properties:
-                  ok:
-                    type: boolean
-                  deleted:
-                    type: integer
-
-  /api/sync/keys/{key}/prune:
-    post:
-      operationId: pruneSyncKey
-      summary: Prune stale records
-      description: Prune stale tracking records for files no longer in the library.
-      tags: [Sync Keys]
-      parameters:
-        - name: key
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Prune result
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [pruned_count]
-                properties:
-                  pruned_count:
-                    type: integer
-
-  /api/sync/keys/{key}/rename:
-    post:
-      operationId: renameSyncKey
-      summary: Rename sync key
-      description: >
-        Rename a sync key, moving all tracking data to the new name. Also
-        updates any destination config references.
-      tags: [Sync Keys]
-      parameters:
-        - name: key
-          in: path
-          required: true
-          schema:
-            type: string
-          description: Current sync key name
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [new_key]
-              properties:
-                new_key:
-                  type: string
-                  description: "Alphanumeric, hyphens, underscores only"
-      responses:
-        "200":
-          description: Key renamed
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [ok, old_key, new_key, stats, destinations_updated]
-                properties:
-                  ok:
-                    type: boolean
-                  old_key:
-                    type: string
-                  new_key:
-                    type: string
-                  stats:
-                    type: object
-                    description: Migration statistics
-                  destinations_updated:
-                    type: integer
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "409":
-          $ref: "#/components/responses/Conflict"
-
   /api/sync/client-record:
     post:
       operationId: recordClientSync
       summary: Record client sync
       description: >
         Record files synced via client-side (browser or sync-client) sync for
-        server-side tracking. Automatically registers a web-client://
-        destination if folder_name is provided.
-      tags: [Sync Keys]
+        server-side tracking. Automatically registers a web-client destination
+        if folder_name is provided.
+      tags: [Sync Operations]
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [sync_key, playlist, files]
+              required: [destination, playlist, files]
               properties:
-                sync_key:
+                destination:
                   type: string
                 playlist:
                   type: string
@@ -2403,26 +2264,30 @@ components:
 
     SyncDestination:
       type: object
-      required: [name, path, scheme]
+      required: [name, path, type, available]
       properties:
         name:
           type: string
         path:
           type: string
-          description: "Path with scheme (e.g. usb:///Volumes/Drive, folder:///path)"
-        scheme:
+        type:
           type: string
           enum: [usb, folder, web-client]
-        sync_key:
-          type: string
-          nullable: true
+        available:
+          type: boolean
+        linked_destinations:
+          type: array
+          items:
+            type: string
 
-    SyncKeySummary:
+    SyncStatusSummary:
       type: object
-      required: [key_name, last_sync_at, total_files, synced_files, new_files, new_playlists]
+      required: [destinations, last_sync_at, total_files, synced_files, new_files, new_playlists]
       properties:
-        key_name:
-          type: string
+        destinations:
+          type: array
+          items:
+            type: string
         last_sync_at:
           type: number
           description: Unix timestamp
@@ -2437,10 +2302,12 @@ components:
 
     SyncStatusDetail:
       type: object
-      required: [sync_key, last_sync_at, playlists, total_files, synced_files, new_files, new_playlists]
+      required: [destinations, last_sync_at, playlists, total_files, synced_files, new_files, new_playlists]
       properties:
-        sync_key:
-          type: string
+        destinations:
+          type: array
+          items:
+            type: string
         last_sync_at:
           type: number
           description: Unix timestamp
@@ -2468,6 +2335,33 @@ components:
           type: integer
         new_playlists:
           type: integer
+
+    ResetTrackingResponse:
+      type: object
+      required: [reset, files_cleared]
+      properties:
+        reset:
+          type: boolean
+        files_cleared:
+          type: integer
+
+    LinkDestinationResponse:
+      type: object
+      required: [ok, created]
+      properties:
+        ok:
+          type: boolean
+        merge_stats:
+          type: object
+          properties:
+            records_moved:
+              type: integer
+            records_merged:
+              type: integer
+            source_deleted:
+              type: boolean
+        created:
+          type: boolean
 
     ProfileInfo:
       type: object

@@ -6,8 +6,8 @@ final class DashboardViewModel {
     var summary: SummaryResponse?
     var libraryStats: LibraryStatsResponse?
     var activeTasks: [TaskInfo] = []
-    var syncStatus: [SyncKeySummary] = []
-    var usbKeyNames: Set<String> = []
+    var syncStatus: [SyncStatusSummary] = []
+    var usbDestNames: Set<String> = []
     var isLoading = false
     var error: String?
 
@@ -27,7 +27,7 @@ final class DashboardViewModel {
             activeTasks = (try? await ts) ?? []
             syncStatus = (try? await us) ?? []
             let destResponse = try? await ds
-            usbKeyNames = Set((destResponse?.destinations ?? []).filter { $0.type == "usb" }.map { $0.name })
+            usbDestNames = Set((destResponse?.destinations ?? []).filter { $0.type == "usb" }.map { $0.name })
         } catch {
             self.error = error.localizedDescription
         }

@@ -79,10 +79,10 @@ interface AppState {
   // Sync Status
   syncStatusSummary: SyncStatusSummary[];
   setSyncStatusSummary: (summary: SyncStatusSummary[]) => void;
-  selectedSyncKey: string | null;
-  setSelectedSyncKey: (key: string | null) => void;
-  selectedSyncKeyDetail: SyncStatusDetail | null;
-  setSelectedSyncKeyDetail: (detail: SyncStatusDetail | null) => void;
+  selectedDestGroup: string | null;
+  setSelectedDestGroup: (dest: string | null) => void;
+  selectedDestGroupDetail: SyncStatusDetail | null;
+  setSelectedDestGroupDetail: (detail: SyncStatusDetail | null) => void;
 
   // Destinations (shared)
   destinations: SyncDestination[];
@@ -190,10 +190,10 @@ export const useAppState = create<AppState>((set) => ({
   // Sync Status
   syncStatusSummary: [],
   setSyncStatusSummary: (syncStatusSummary) => set({ syncStatusSummary }),
-  selectedSyncKey: null,
-  setSelectedSyncKey: (selectedSyncKey) => set({ selectedSyncKey }),
-  selectedSyncKeyDetail: null,
-  setSelectedSyncKeyDetail: (selectedSyncKeyDetail) => set({ selectedSyncKeyDetail }),
+  selectedDestGroup: null,
+  setSelectedDestGroup: (selectedDestGroup) => set({ selectedDestGroup }),
+  selectedDestGroupDetail: null,
+  setSelectedDestGroupDetail: (selectedDestGroupDetail) => set({ selectedDestGroupDetail }),
 
   // Destinations (shared)
   destinations: [],

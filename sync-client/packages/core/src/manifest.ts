@@ -32,9 +32,9 @@ export function getManifestFiles(
 }
 
 /** Create a new empty manifest. */
-export function createManifest(syncKey: string, serverOrigin: string): SyncManifest {
+export function createManifest(destinationName: string, serverOrigin: string): SyncManifest {
   return {
-    sync_key: syncKey,
+    destination_name: destinationName,
     server_origin: serverOrigin,
     last_sync_at: new Date().toISOString(),
     playlists: {},

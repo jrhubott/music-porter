@@ -27,14 +27,14 @@ import type {
   PipelineProgress,
   PipelineStartResult,
   Playlist,
+  ResolveDestinationResponse,
   ServerInfoResponse,
   SettingsResponse,
   SyncDestinationsResponse,
-  SyncKeySummary,
   SyncStatusDetail,
   SyncStatusSummary,
   LinkDestinationResponse,
-  PruneResponse,
+  ResetTrackingResponse,
 } from './types.js';
 import type { MetadataCache } from './cache/metadata-cache.js';
 
@@ -372,17 +372,13 @@ export class APIClient {
   // ── Sync ──
 
   async recordSync(
-    syncKey: string,
+    destinationName: string,
     playlist: string,
     files: string[],
-    folderName?: string,
     destPath?: string,
     destType?: 'usb' | 'folder',
   ): Promise<ClientRecordResponse> {
-    const body: Record<string, unknown> = { sync_key: syncKey, playlist, files };
-    if (folderName) {
-      body['folder_name'] = folderName;
-    }
+    const body: Record<string, unknown> = { destination: destinationName, playlist, files };
     if (destPath) {
       body['dest_path'] = destPath;
       if (destType) {
@@ -400,48 +396,55 @@ export class APIClient {
     // Handle dest conflict before generic checkResponse (which maps 409 → ServerBusyError)
     if (response.status === HTTP_CONFLICT) {
       const data = await response.json().catch(() => null) as { error?: string } | null;
-      throw new SyncError(data?.error ?? 'Destination sync key conflict');
+      throw new SyncError(data?.error ?? 'Destination conflict');
     }
 
     this.checkResponse(response);
     return (await response.json()) as ClientRecordResponse;
   }
 
-  async getSyncStatus(key: string): Promise<SyncStatusDetail> {
-    return this.get<SyncStatusDetail>(`/api/sync/status/${key}`);
-  }
-
-  async getSyncKeys(): Promise<SyncKeySummary[]> {
-    return this.get<SyncKeySummary[]>('/api/sync/keys');
+  async getSyncStatus(destName: string): Promise<SyncStatusDetail> {
+    return this.get<SyncStatusDetail>(`/api/sync/status/${encodeURIComponent(destName)}`);
   }
 
   async getSyncDestinations(): Promise<SyncDestinationsResponse> {
     return this.get<SyncDestinationsResponse>('/api/sync/destinations');
   }
 
-  async linkDestination(name: string, syncKey: string | null, path?: string): Promise<LinkDestinationResponse> {
+  async linkDestination(name: string, targetDest: string | null): Promise<LinkDestinationResponse> {
     return this.put<LinkDestinationResponse>(
       `/api/sync/destinations/${encodeURIComponent(name)}/link`,
-      { sync_key: syncKey, ...(path && { path }) },
+      { destination: targetDest },
     );
   }
 
-  async pruneSyncKey(key: string): Promise<PruneResponse> {
-    return this.post<PruneResponse>(
-      `/api/sync/keys/${encodeURIComponent(key)}/prune`,
+  async resetDestinationTracking(name: string): Promise<ResetTrackingResponse> {
+    return this.post<ResetTrackingResponse>(
+      `/api/sync/destinations/${encodeURIComponent(name)}/reset`,
       {},
-    );
-  }
-
-  async renameSyncKey(key: string, newKey: string): Promise<OkResponse> {
-    return this.post<OkResponse>(
-      `/api/sync/keys/${encodeURIComponent(key)}/rename`,
-      { new_key: newKey },
     );
   }
 
   async getSyncStatusSummary(): Promise<SyncStatusSummary[]> {
     return this.get<SyncStatusSummary[]>('/api/sync/status');
+  }
+
+  /** Resolve a destination on the server — finds or creates a destination. */
+  async resolveDestination(opts: {
+    path?: string;
+    name?: string;
+    driveName?: string;
+    linkTo?: string;
+  }): Promise<ResolveDestinationResponse> {
+    const body: Record<string, string> = {};
+    if (opts.path) body['path'] = opts.path;
+    if (opts.name) body['name'] = opts.name;
+    if (opts.driveName) body['drive_name'] = opts.driveName;
+    if (opts.linkTo) body['link_to'] = opts.linkTo;
+    return this.post<ResolveDestinationResponse>(
+      '/api/sync/destinations/resolve',
+      body,
+    );
   }
 
   // ── Cookies ──

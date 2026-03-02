@@ -1,22 +1,28 @@
 import Foundation
 
-/// Summary of a tracked sync key with sync counts.
-struct SyncKeySummary: Identifiable, Codable {
-    let keyName: String
+/// Summary of a destination group's sync status.
+struct SyncStatusSummary: Identifiable, Codable {
+    let destinations: [String]
     let lastSyncAt: Double
     let totalFiles: Int
     let syncedFiles: Int
     let newFiles: Int
     let newPlaylists: Int
 
-    var id: String { keyName }
+    var id: String { destinations.joined(separator: ",") }
+
+    /// Display label for the destination group.
+    var displayLabel: String { destinations.joined(separator: ", ") }
+
+    /// The first destination name (used for detail lookup).
+    var primaryDestination: String { destinations.first ?? "" }
 
     var lastSyncDate: Date? {
         lastSyncAt > 0 ? Date(timeIntervalSince1970: lastSyncAt) : nil
     }
 
     enum CodingKeys: String, CodingKey {
-        case keyName = "key_name"
+        case destinations
         case lastSyncAt = "last_sync_at"
         case totalFiles = "total_files"
         case syncedFiles = "synced_files"
@@ -25,10 +31,7 @@ struct SyncKeySummary: Identifiable, Codable {
     }
 }
 
-/// Backwards compatibility alias.
-typealias USBKeySummary = SyncKeySummary
-
-/// Per-playlist sync info within a sync key detail.
+/// Per-playlist sync info within a sync status detail.
 struct SyncPlaylistInfo: Identifiable, Codable {
     let name: String
     let totalFiles: Int
@@ -47,12 +50,9 @@ struct SyncPlaylistInfo: Identifiable, Codable {
     }
 }
 
-/// Backwards compatibility alias.
-typealias USBPlaylistSyncInfo = SyncPlaylistInfo
-
-/// Full sync status detail for one sync key.
+/// Full sync status detail for a destination group.
 struct SyncStatusDetail: Codable {
-    let syncKey: String
+    let destinations: [String]
     let lastSyncAt: Double
     let playlists: [SyncPlaylistInfo]
     let totalFiles: Int
@@ -60,12 +60,15 @@ struct SyncStatusDetail: Codable {
     let newFiles: Int
     let newPlaylists: Int
 
+    /// Display label for the destination group.
+    var displayLabel: String { destinations.joined(separator: ", ") }
+
     var lastSyncDate: Date? {
         lastSyncAt > 0 ? Date(timeIntervalSince1970: lastSyncAt) : nil
     }
 
     enum CodingKeys: String, CodingKey {
-        case syncKey = "sync_key"
+        case destinations
         case lastSyncAt = "last_sync_at"
         case playlists
         case totalFiles = "total_files"
@@ -75,22 +78,16 @@ struct SyncStatusDetail: Codable {
     }
 }
 
-/// Backwards compatibility alias.
-typealias USBSyncStatusDetail = SyncStatusDetail
-
-/// Result of pruning stale tracking records.
-struct SyncPruneResult: Codable {
-    let prunedCount: Int
-    let playlistsAffected: [String]
+/// Result of resetting sync tracking for a destination.
+struct ResetTrackingResponse: Codable {
+    let reset: Bool
+    let filesCleared: Int
 
     enum CodingKeys: String, CodingKey {
-        case prunedCount = "pruned_count"
-        case playlistsAffected = "playlists_affected"
+        case reset
+        case filesCleared = "files_cleared"
     }
 }
-
-/// Backwards compatibility alias.
-typealias USBPruneResult = SyncPruneResult
 
 /// A saved sync destination.
 struct SyncDestination: Identifiable, Codable {
@@ -98,19 +95,32 @@ struct SyncDestination: Identifiable, Codable {
     let path: String
     let type: String
     let available: Bool
-    let syncKey: String?
-    let effectiveKey: String
+    let linkedDestinations: [String]
 
     var id: String { name }
 
+    /// Whether this destination is linked with other destinations.
+    var hasLinkedDestinations: Bool { !linkedDestinations.isEmpty }
+
     enum CodingKeys: String, CodingKey {
         case name, path, type, available
-        case syncKey = "sync_key"
-        case effectiveKey = "effective_key"
+        case linkedDestinations = "linked_destinations"
     }
 }
 
 /// Response from GET /api/sync/destinations.
 struct SyncDestinationsResponse: Codable {
     let destinations: [SyncDestination]
+}
+
+/// Response from POST /api/sync/destinations/resolve.
+struct ResolveDestinationResponse: Codable {
+    let destination: SyncDestination
+    let created: Bool
+    let syncStatus: SyncStatusDetail?
+
+    enum CodingKeys: String, CodingKey {
+        case destination, created
+        case syncStatus = "sync_status"
+    }
 }

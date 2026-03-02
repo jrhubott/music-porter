@@ -1,5 +1,5 @@
 import { ipcMain, dialog, safeStorage, BrowserWindow } from 'electron';
-import { statfsSync } from 'node:fs';
+import { existsSync, statfsSync } from 'node:fs';
 import {
   APIClient,
   CacheManager,
@@ -12,8 +12,6 @@ import {
   VERSION,
   getConfigDir,
   readManifest,
-  USB_SYNC_KEY_PREFIX,
-  CLIENT_SYNC_KEY_PREFIX,
 } from '@mporter/core';
 import type {
   BackgroundPrefetchStatus,
@@ -28,6 +26,7 @@ import type {
   PlaylistCacheStatus,
   PrefetchResult,
   ServerConfig,
+  SyncDestination,
   SyncPreferences,
   SyncProgress,
   SyncResult,
@@ -208,16 +207,21 @@ export function registerIPCHandlers(): void {
     return apiClient.getFiles(playlistKey, true);
   });
 
-  ipcMain.handle('data:getSyncStatus', async (_event, key: string) => {
-    return apiClient.getSyncStatus(key);
-  });
-
-  ipcMain.handle('data:getSyncKeys', async () => {
-    return apiClient.getSyncKeys();
+  ipcMain.handle('data:getSyncStatus', async (_event, destName: string) => {
+    return apiClient.getSyncStatus(destName);
   });
 
   ipcMain.handle('data:getSyncDestinations', async () => {
     return apiClient.getSyncDestinations();
+  });
+
+  ipcMain.handle('data:getLocalDestinations', async (): Promise<SyncDestination[]> => {
+    const response = await apiClient.getSyncDestinations();
+    return response.destinations.filter((d) => {
+      if (d.type === 'web-client') return false;
+      const rawPath = d.path.replace(/^(usb|folder):\/\//, '');
+      return existsSync(rawPath);
+    });
   });
 
   ipcMain.handle('data:getAbout', async () => {
@@ -230,17 +234,13 @@ export function registerIPCHandlers(): void {
 
   ipcMain.handle(
     'data:linkDestination',
-    async (_event, name: string, syncKey: string | null, path?: string) => {
-      return apiClient.linkDestination(name, syncKey, path);
+    async (_event, name: string, targetDest: string | null) => {
+      return apiClient.linkDestination(name, targetDest);
     },
   );
 
-  ipcMain.handle('data:pruneSyncKey', async (_event, key: string) => {
-    return apiClient.pruneSyncKey(key);
-  });
-
-  ipcMain.handle('data:renameSyncKey', async (_event, key: string, newKey: string) => {
-    return apiClient.renameSyncKey(key, newKey);
+  ipcMain.handle('data:resetDestinationTracking', async (_event, name: string) => {
+    return apiClient.resetDestinationTracking(name);
   });
 
   ipcMain.handle(
@@ -313,7 +313,7 @@ export function registerIPCHandlers(): void {
       opts: {
         dest: string;
         playlists?: string[];
-        syncKey?: string;
+        destinationName?: string;
         concurrency?: number;
         usbDriveName?: string;
         profile?: string;
@@ -328,7 +328,7 @@ export function registerIPCHandlers(): void {
 
       return engine.sync(opts.dest, {
         playlists: opts.playlists,
-        syncKey: opts.syncKey,
+        destinationName: opts.destinationName,
         usbDriveName: opts.usbDriveName,
         profile: opts.profile,
         force: opts.force,
@@ -353,14 +353,21 @@ export function registerIPCHandlers(): void {
   });
 
   ipcMain.handle(
-    'sync:resolveSyncKey',
+    'sync:resolveDestination',
     async (_event, destPath: string, usbDriveName?: string): Promise<string | null> => {
       try {
-        if (usbDriveName) return `${USB_SYNC_KEY_PREFIX}${usbDriveName}`;
+        // Use server-side resolution when connected
+        if (apiClient.connectionState.connected) {
+          const scheme = usbDriveName ? 'usb://' : 'folder://';
+          const resolved = await apiClient.resolveDestination({
+            path: `${scheme}${destPath}`,
+            driveName: usbDriveName,
+          });
+          return resolved.destination.name;
+        }
+        // Offline fallback: read from manifest
         const manifest = readManifest(destPath);
-        if (manifest?.sync_key) return manifest.sync_key;
-        const basename = destPath.split('/').pop() ?? destPath.split('\\').pop() ?? 'sync';
-        return `${CLIENT_SYNC_KEY_PREFIX}${basename}`;
+        return manifest?.destination_name ?? null;
       } catch {
         return null;
       }

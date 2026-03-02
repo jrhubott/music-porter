@@ -17,22 +17,15 @@ export function registerDestinationsCommand(program: Command): void {
       try {
         const response = await client.getSyncDestinations();
         if (response.destinations.length > 0) {
-          // Detect shared sync keys (same key used by multiple destinations)
-          const keyCounts = new Map<string, number>();
-          for (const d of response.destinations) {
-            const key = d.sync_key;
-            if (key) {
-              keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
-            }
-          }
-
           console.log('\nSaved Destinations:');
           printTable(
-            ['Name', 'Path', 'Sync Key'],
+            ['Name', 'Path', 'Linked'],
             response.destinations.map((d) => {
-              const key = d.sync_key ?? '—';
-              const shared = d.sync_key && (keyCounts.get(d.sync_key) ?? 0) > 1;
-              return [d.name, d.path, shared ? `${key} (shared)` : key];
+              const linked = d.linked_destinations ?? [];
+              const linkedLabel = linked.length > 0
+                ? `${linked.join(', ')}`
+                : '—';
+              return [d.name, d.path, linkedLabel];
             }),
           );
           console.log();
@@ -63,17 +56,17 @@ export function registerDestinationsCommand(program: Command): void {
     });
 
   cmd
-    .command('link <name> <sync-key>')
-    .description('Link a destination to an existing sync key')
-    .action(async (name: string, syncKey: string) => {
+    .command('link <name> <target-destination>')
+    .description('Link a destination to share tracking with another destination')
+    .action(async (name: string, targetDest: string) => {
       const client = await createConnectedClient();
       if (!client) return;
 
       try {
-        const result = await client.linkDestination(name, syncKey);
-        printSuccess(`Linked '${name}' to sync key '${result.sync_key}'.`);
+        const result = await client.linkDestination(name, targetDest);
+        printSuccess(`Linked '${name}' to '${targetDest}'.`);
         if (result.merge_stats) {
-          console.log(`  Merged ${result.merge_stats.merged_count} tracking record(s).`);
+          console.log(`  Merged ${result.merge_stats.records_moved} tracking record(s).`);
         }
       } catch (err) {
         printError(`Failed to link destination: ${err instanceof Error ? err.message : err}`);
@@ -82,16 +75,31 @@ export function registerDestinationsCommand(program: Command): void {
 
   cmd
     .command('unlink <name>')
-    .description('Unlink a destination from its shared sync key')
+    .description('Unlink a destination from its group')
     .action(async (name: string) => {
       const client = await createConnectedClient();
       if (!client) return;
 
       try {
         await client.linkDestination(name, null);
-        printSuccess(`Unlinked '${name}' from its sync key.`);
+        printSuccess(`Unlinked '${name}' from its group.`);
       } catch (err) {
         printError(`Failed to unlink destination: ${err instanceof Error ? err.message : err}`);
+      }
+    });
+
+  cmd
+    .command('reset <name>')
+    .description('Reset sync tracking for a destination group')
+    .action(async (name: string) => {
+      const client = await createConnectedClient();
+      if (!client) return;
+
+      try {
+        const result = await client.resetDestinationTracking(name);
+        printSuccess(`Reset tracking for '${name}' (${result.files_cleared} record(s) cleared).`);
+      } catch (err) {
+        printError(`Failed to reset tracking: ${err instanceof Error ? err.message : err}`);
       }
     });
 

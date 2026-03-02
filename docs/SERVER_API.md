@@ -842,11 +842,11 @@ Per-file sync status map for a playlist. Lightweight endpoint with no ID3 reads.
 |-----------|------|-------------|
 | `key` | string | Playlist key |
 
-**Response:** Object mapping filenames to arrays of sync key names.
+**Response:** Object mapping filenames to arrays of destination names they have been synced to.
 
 ```json
 {
-  "abc123.mp3": ["usbkey-Drive1", "client-MyFolder"],
+  "abc123.mp3": ["My-USB", "Downloads"],
   "def456.mp3": []
 }
 ```
@@ -897,7 +897,7 @@ Stream a ZIP archive of MP3s from multiple playlists. Files are organized into s
 
 ### GET /api/sync/destinations
 
-List all sync destinations (saved from config + auto-detected USB drives in web mode).
+List all sync destinations (saved from DB + auto-detected USB drives in web mode).
 
 **Response:**
 
@@ -906,8 +906,9 @@ List all sync destinations (saved from config + auto-detected USB drives in web 
 | `destinations` | object[] | Destination list |
 | `destinations[].name` | string | Destination name |
 | `destinations[].path` | string | Destination path with scheme (e.g., `"usb:///Volumes/Drive/Music"`, `"folder:///path"`) |
-| `destinations[].scheme` | string | Path scheme: `"usb"`, `"folder"`, or `"web-client"` |
-| `destinations[].sync_key` | string? | Linked sync key, or `null` |
+| `destinations[].type` | string | Destination type: `"usb"`, `"folder"`, or `"web-client"` |
+| `destinations[].available` | boolean | Whether the destination path is currently accessible |
+| `destinations[].linked_destinations` | string[] | Names of other destinations sharing the same sync tracking group |
 
 ---
 
@@ -921,7 +922,7 @@ Add a saved sync destination.
 |-------|------|----------|-------------|
 | `name` | string | Yes | Destination display name |
 | `path` | string | Yes | Destination path with scheme |
-| `sync_key` | string | No | Sync key to link |
+| `link_to` | string | No | Name of an existing destination to share tracking with (instead of independent tracking) |
 
 **Response:**
 
@@ -930,9 +931,11 @@ Add a saved sync destination.
 | `ok` | boolean | Always `true` on success |
 | `name` | string | Destination name |
 | `path` | string | Destination path |
-| `sync_key` | string? | Linked sync key (if provided) |
+| `type` | string | Destination type: `"usb"`, `"folder"`, or `"web-client"` |
+| `available` | boolean | Whether the destination path is currently accessible |
+| `linked_destinations` | string[] | Names of other destinations sharing the same sync tracking group |
 
-**Status codes:** 400 if name or path missing, or if add fails
+**Status codes:** 400 if name or path missing, or if add fails. 404 if `link_to` target not found
 
 ---
 
@@ -954,7 +957,12 @@ Remove a saved sync destination.
 
 ### PUT /api/sync/destinations/\<name\>/link
 
-Link or unlink a sync key to a destination. When linking and the destination previously had tracking data under a different key, the old tracking data is merged into the new key.
+Link or unlink a destination's sync tracking to another destination's group.
+
+- **To link:** `{"destination": "other-dest-name"}` — joins the target's tracking group
+- **To unlink:** `{"destination": null}` — creates new independent tracking
+
+If the destination does not exist and a `path` is provided in the body, it will be auto-created (useful for sync-client first-time setup).
 
 **Path parameters:**
 
@@ -966,46 +974,59 @@ Link or unlink a sync key to a destination. When linking and the destination pre
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `sync_key` | string | No | Sync key to link (empty string or omit to unlink) |
+| `destination` | string? | No | Name of the destination to link to, or `null` to unlink |
+| `path` | string | No | Destination path with scheme — used to auto-create the destination if it doesn't exist |
 
 **Response:**
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `ok` | boolean | Always `true` on success |
-| `sync_key` | string? | The linked sync key, or `null` if unlinked |
-| `merge_stats` | object? | Merge statistics if tracking data was merged |
+| `name` | string | Destination name |
+| `path` | string | Destination path |
+| `type` | string | Destination type |
+| `available` | boolean | Whether the destination path is currently accessible |
+| `linked_destinations` | string[] | Names of other destinations sharing the same sync tracking group |
+| `created` | boolean | *(only if auto-created)* `true` if the destination was newly created |
 
-**Status codes:** 404 if destination not found
+**Status codes:** 404 if destination not found and no `path` provided, 400 if creation or update fails
 
 ---
 
-### POST /api/sync/destinations/\<name\>/rename
+### POST /api/sync/destinations/resolve
 
-Rename a saved destination. If the destination had no explicit sync key, its tracking data is also renamed.
+Resolve a sync destination on the server. Finds an existing destination by name or path, or creates one from the given path and drive name. Returns the resolved destination and current sync status.
 
-**Path parameters:**
+This endpoint moves destination resolution logic from clients to the server.
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `name` | string | Current destination name |
-
-**Request body:**
+**Request body (at least `path` or `name` required):**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `new_name` | string | Yes | New name (alphanumeric, hyphens, underscores only) |
+| `path` | string | No | Destination path with scheme (e.g., `"usb:///Volumes/Lexar/RZR/Music"`) |
+| `drive_name` | string | No | Drive display name, used when creating a new destination from path |
+| `link_to` | string | No | Name of an existing destination to share tracking with |
+| `name` | string | No | Name of an existing saved destination to resolve |
 
 **Response:**
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `ok` | boolean | Always `true` on success |
-| `old_name` | string | Previous destination name |
-| `new_name` | string | New destination name |
-| `tracking_renamed` | boolean | Whether tracking data was also renamed |
+| `destination` | object | Resolved destination |
+| `destination.name` | string | Destination name |
+| `destination.path` | string | Destination path with scheme |
+| `destination.type` | string | Destination type: `"usb"`, `"folder"`, or `"web-client"` |
+| `destination.available` | boolean | Whether the destination path is currently accessible |
+| `destination.linked_destinations` | string[] | Names of other destinations sharing the same sync tracking group |
+| `created` | boolean | `true` if a new destination was created, `false` if an existing one was found |
+| `sync_status` | object | Sync status for the resolved destination's group |
+| `sync_status.destinations` | string[] | All destination names in this tracking group |
+| `sync_status.total_files` | integer | Total files in library |
+| `sync_status.synced_files` | integer | Files synced to this group |
+| `sync_status.new_files` | integer | Files not yet synced |
+| `sync_status.playlists` | object[] | Per-playlist sync details (same structure as `GET /api/sync/status/<dest_name>`) |
 
-**Status codes:** 400 if name invalid or same as current, 404 if not found, 409 if new name already exists
+**Status codes:** 400 if both `path` and `name` are missing
 
 ---
 
@@ -1034,41 +1055,41 @@ Background task: sync MP3s to a destination with profile-specific tags applied o
 
 ### GET /api/sync/status
 
-Summary of all tracked sync keys with file counts.
+Summary of sync status per destination group. Destinations sharing the same tracking are grouped together.
 
-**Response:** Array of sync key summaries.
+**Response:** Array of destination group summaries.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `key_name` | string | Sync key identifier |
+| `destinations` | string[] | Destination names in this tracking group |
 | `last_sync_at` | number | Unix timestamp of last sync |
 | `total_files` | integer | Total files in library |
-| `synced_files` | integer | Files synced to this key |
+| `synced_files` | integer | Files synced to this group |
 | `new_files` | integer | Files not yet synced |
 | `new_playlists` | integer | Playlists with no synced files |
 
 ---
 
-### GET /api/sync/status/\<key\>
+### GET /api/sync/status/\<dest\_name\>
 
-Per-playlist breakdown for a specific sync key.
+Per-playlist sync breakdown for a destination's tracking group.
 
 **Path parameters:**
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `key` | string | Sync key name |
+| `dest_name` | string | Destination name |
 
 **Response:**
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `sync_key` | string | Sync key name |
+| `destinations` | string[] | All destination names in this tracking group |
 | `last_sync_at` | number | Unix timestamp of last sync |
 | `playlists` | object[] | Per-playlist sync details |
 | `playlists[].name` | string | Playlist key |
 | `playlists[].total_files` | integer | Total files in playlist |
-| `playlists[].synced_files` | integer | Files synced to this key |
+| `playlists[].synced_files` | integer | Files synced to this group |
 | `playlists[].new_files` | integer | Files not yet synced |
 | `playlists[].is_new_playlist` | boolean | `true` if no files synced yet |
 | `total_files` | integer | Total files across all playlists |
@@ -1078,116 +1099,41 @@ Per-playlist breakdown for a specific sync key.
 
 ---
 
-## Sync Keys
+### POST /api/sync/destinations/\<name\>/reset
 
-### GET /api/sync/keys
-
-List all tracked sync keys.
-
-**Response:** Array of sync key objects.
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `key_name` | string | Sync key identifier |
-| `last_sync_at` | number | Unix timestamp of last sync |
-| `created_at` | number | Unix timestamp when key was created |
-
----
-
-### DELETE /api/sync/keys/\<key\>
-
-Delete a sync key and all its tracking data.
+Reset all sync tracking for a destination's tracking group. Deletes all sync file records and resets the last-sync timestamp. The destination itself remains.
 
 **Path parameters:**
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `key` | string | Sync key to delete |
-
-**Response:** `{"ok": true}`
-
----
-
-### DELETE /api/sync/keys/\<key\>/playlists/\<playlist\>
-
-Delete tracking records for one playlist on a sync key.
-
-**Path parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `key` | string | Sync key name |
-| `playlist` | string | Playlist key |
+| `name` | string | Destination name |
 
 **Response:**
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `ok` | boolean | Always `true` |
-| `deleted` | integer | Number of tracking records deleted |
+| `reset` | boolean | `true` on success |
+| `files_cleared` | integer | Number of sync tracking records deleted |
 
----
-
-### POST /api/sync/keys/\<key\>/prune
-
-Prune stale tracking records for files no longer in the library.
-
-**Path parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `key` | string | Sync key name |
-
-**Response:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `pruned_count` | integer | Number of stale records removed |
-
----
-
-### POST /api/sync/keys/\<key\>/rename
-
-Rename a sync key, moving all tracking data to the new name. Also updates any destination config references.
-
-**Path parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `key` | string | Current sync key name |
-
-**Request body:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `new_key` | string | Yes | New key name (alphanumeric, hyphens, underscores only) |
-
-**Response:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `ok` | boolean | Always `true` on success |
-| `old_key` | string | Previous key name |
-| `new_key` | string | New key name |
-| `stats` | object | Migration statistics (records moved, playlists affected) |
-| `destinations_updated` | integer | Number of destination configs updated |
-
-**Status codes:** 400 if new_key invalid or same as current, 409 if new_key already exists
+**Status codes:** 404 if destination not found
 
 ---
 
 ### POST /api/sync/client-record
 
-Record files synced via client-side (browser or sync-client) sync for server-side tracking. Automatically registers a `web-client://` destination if `folder_name` is provided.
+Record files synced via client-side (browser or sync-client) sync for server-side tracking. If the destination does not exist, it can be auto-created by providing `dest_path` and optionally `dest_type`.
 
 **Request body:**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `sync_key` | string | Yes | Sync key for the destination |
+| `destination` | string | Yes | Destination name |
 | `playlist` | string | Yes | Playlist key |
 | `files` | string[] | Yes | List of filenames that were synced |
-| `folder_name` | string | No | Folder name for auto-registering web-client destination |
+| `dest_path` | string | No | Filesystem path for auto-creating the destination if it doesn't exist |
+| `dest_type` | string | No | Type for auto-creation: `"usb"` or `"folder"` (default: `"folder"`) |
+| `link_to` | string | No | Name of an existing destination to share tracking with (only used during auto-creation) |
 
 **Response:**
 
@@ -1196,7 +1142,7 @@ Record files synced via client-side (browser or sync-client) sync for server-sid
 | `ok` | boolean | Always `true` on success |
 | `recorded` | integer | Number of file records saved |
 
-**Status codes:** 400 if required fields missing or sync tracker unavailable
+**Status codes:** 400 if required fields missing or sync tracker unavailable, 404 if destination not found and no `dest_path` provided
 
 ---
 

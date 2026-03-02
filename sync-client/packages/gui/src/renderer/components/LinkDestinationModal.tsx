@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useIPC } from '../hooks/useIPC.js';
-import type { SyncKeySummary } from '@mporter/core';
+import type { SyncDestination } from '@mporter/core';
 
 interface LinkDestinationModalProps {
   show: boolean;
@@ -12,45 +12,41 @@ interface LinkDestinationModalProps {
 
 export function LinkDestinationModal({ show, destinationName, destinationPath, onClose, onLinked }: LinkDestinationModalProps) {
   const ipc = useIPC();
-  const [mode, setMode] = useState<'new' | 'existing'>('new');
-  const [newKeyName, setNewKeyName] = useState('');
-  const [existingKeys, setExistingKeys] = useState<SyncKeySummary[]>([]);
-  const [selectedKey, setSelectedKey] = useState('');
+  const [otherDestinations, setOtherDestinations] = useState<SyncDestination[]>([]);
+  const [selectedDest, setSelectedDest] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (show) {
-      setNewKeyName(`client-${destinationName}`);
-      setMode('new');
-      setSelectedKey('');
+      setSelectedDest('');
       setError('');
-      loadKeys();
+      loadDestinations();
     }
   }, [show, destinationName]);
 
-  async function loadKeys() {
+  async function loadDestinations() {
     try {
-      const keys = await ipc.getSyncKeys();
-      setExistingKeys(keys);
-      if (keys.length > 0) {
-        setSelectedKey(keys[0]!.key_name);
+      const response = await ipc.getSyncDestinations();
+      const others = response.destinations.filter((d) => d.name !== destinationName);
+      setOtherDestinations(others);
+      if (others.length > 0) {
+        setSelectedDest(others[0]!.name);
       }
     } catch {
-      setExistingKeys([]);
+      setOtherDestinations([]);
     }
   }
 
   async function handleLink() {
-    const syncKey = mode === 'new' ? newKeyName.trim() : selectedKey;
-    if (!syncKey) {
-      setError('Please enter or select a sync key.');
+    if (!selectedDest) {
+      setError('Please select a destination to share tracking with.');
       return;
     }
     setLoading(true);
     setError('');
     try {
-      const result = await ipc.linkDestination(destinationName, syncKey, destinationPath);
+      const result = await ipc.linkDestination(destinationName, selectedDest);
       if (result.ok) {
         onLinked();
         onClose();
@@ -79,67 +75,38 @@ export function LinkDestinationModal({ show, destinationName, destinationPath, o
           </div>
           <div className="modal-body">
             <p className="text-secondary mb-3">
-              Link <strong>{destinationName}</strong> to a sync key so tracking data is shared.
+              Link <strong>{destinationName}</strong> to share sync tracking with another destination.
+              {destinationPath && (
+                <>
+                  <br />
+                  <small className="text-secondary">{destinationPath}</small>
+                </>
+              )}
             </p>
 
-            <div className="form-check mb-2">
-              <input
-                className="form-check-input"
-                type="radio"
-                id="mode-new"
-                checked={mode === 'new'}
-                onChange={() => setMode('new')}
-              />
-              <label className="form-check-label" htmlFor="mode-new">
-                Create new sync key
-              </label>
-            </div>
-            {mode === 'new' && (
-              <div className="ms-4 mb-3">
-                <input
-                  type="text"
-                  className="form-control form-control-sm bg-dark text-light border-secondary"
-                  value={newKeyName}
-                  onChange={(e) => setNewKeyName(e.target.value)}
-                  placeholder="Sync key name..."
-                />
+            {otherDestinations.length === 0 ? (
+              <div className="text-secondary">
+                No other destinations available to link with.
               </div>
-            )}
-
-            <div className="form-check mb-2">
-              <input
-                className="form-check-input"
-                type="radio"
-                id="mode-existing"
-                checked={mode === 'existing'}
-                onChange={() => setMode('existing')}
-              />
-              <label className="form-check-label" htmlFor="mode-existing">
-                Use existing sync key
-              </label>
-            </div>
-            {mode === 'existing' && (
-              <div className="ms-4 mb-3">
-                {existingKeys.length === 0 ? (
-                  <small className="text-secondary">No existing sync keys found.</small>
-                ) : (
-                  <div className="list-group list-group-flush">
-                    {existingKeys.map((k) => (
-                      <button
-                        key={k.key_name}
-                        className={`list-group-item list-group-item-action border-secondary ${selectedKey === k.key_name ? 'active' : ''}`}
-                        onClick={() => setSelectedKey(k.key_name)}
-                      >
-                        <div className="d-flex justify-content-between">
-                          <span>{k.key_name}</span>
-                          <small className="text-secondary">
-                            {k.file_count} files, {k.playlist_count} playlists
-                          </small>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
+            ) : (
+              <div className="list-group list-group-flush">
+                {otherDestinations.map((d) => (
+                  <button
+                    key={d.name}
+                    className={`list-group-item list-group-item-action border-secondary ${selectedDest === d.name ? 'active' : ''}`}
+                    onClick={() => setSelectedDest(d.name)}
+                  >
+                    <div className="d-flex justify-content-between">
+                      <span>{d.name}</span>
+                      <small className="text-secondary">{d.path}</small>
+                    </div>
+                    {d.linked_destinations && d.linked_destinations.length > 0 && (
+                      <small className="text-info">
+                        Already linked with: {d.linked_destinations.join(', ')}
+                      </small>
+                    )}
+                  </button>
+                ))}
               </div>
             )}
 
@@ -151,7 +118,11 @@ export function LinkDestinationModal({ show, destinationName, destinationPath, o
             <button className="btn btn-secondary" onClick={onClose} disabled={loading}>
               Cancel
             </button>
-            <button className="btn btn-primary" onClick={handleLink} disabled={loading}>
+            <button
+              className="btn btn-primary"
+              onClick={handleLink}
+              disabled={loading || otherDestinations.length === 0}
+            >
               {loading ? (
                 <>
                   <span className="spinner-border spinner-border-sm me-1" />

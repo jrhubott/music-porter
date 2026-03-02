@@ -18,10 +18,10 @@ export function DestinationsPage() {
     setDestinations,
     syncStatusSummary,
     setSyncStatusSummary,
-    selectedSyncKey,
-    setSelectedSyncKey,
-    selectedSyncKeyDetail,
-    setSelectedSyncKeyDetail,
+    selectedDestGroup,
+    setSelectedDestGroup,
+    selectedDestGroupDetail,
+    setSelectedDestGroupDetail,
   } = useAppState();
 
   const [linkModalOpen, setLinkModalOpen] = useState(false);
@@ -85,26 +85,18 @@ export function DestinationsPage() {
     }
   }
 
-  async function handleSelectSyncKey(keyName: string) {
-    if (selectedSyncKey === keyName) {
-      setSelectedSyncKey(null);
-      setSelectedSyncKeyDetail(null);
+  async function handleSelectDestGroup(destName: string) {
+    if (selectedDestGroup === destName) {
+      setSelectedDestGroup(null);
+      setSelectedDestGroupDetail(null);
       return;
     }
-    setSelectedSyncKey(keyName);
+    setSelectedDestGroup(destName);
     try {
-      const detail = await ipc.getSyncStatus(keyName);
-      setSelectedSyncKeyDetail(detail);
+      const detail = await ipc.getSyncStatus(destName);
+      setSelectedDestGroupDetail(detail);
     } catch {
-      setSelectedSyncKeyDetail(null);
-    }
-  }
-
-  // Detect shared sync keys
-  const keyCounts = new Map<string, number>();
-  for (const d of destinations) {
-    if (d.sync_key) {
-      keyCounts.set(d.sync_key, (keyCounts.get(d.sync_key) ?? 0) + 1);
+      setSelectedDestGroupDetail(null);
     }
   }
 
@@ -163,20 +155,17 @@ export function DestinationsPage() {
             </div>
           )}
           {destinations.map((d) => {
-            const isShared = d.sync_key ? (keyCounts.get(d.sync_key) ?? 0) > 1 : false;
+            const hasLinked = d.linked_destinations && d.linked_destinations.length > 0;
             return (
               <div key={d.name} className="list-group-item bg-dark d-flex justify-content-between align-items-center">
                 <div>
                   <div className="fw-bold text-light">{d.name}</div>
                   <small className="text-secondary">
                     {d.path}
-                    {d.sync_key && (
-                      <>
-                        <span className="badge bg-secondary ms-2">{d.sync_key}</span>
-                        {isShared && (
-                          <span className="badge bg-info bg-opacity-25 text-info ms-1">shared</span>
-                        )}
-                      </>
+                    {hasLinked && (
+                      <span className="badge bg-info bg-opacity-25 text-info ms-2">
+                        linked with {d.linked_destinations.join(', ')}
+                      </span>
                     )}
                   </small>
                 </div>
@@ -184,15 +173,15 @@ export function DestinationsPage() {
                   <button
                     className="btn btn-sm btn-outline-info"
                     onClick={() => openLinkModal(d.name, d.path)}
-                    title="Link to sync key"
+                    title="Link with another destination"
                   >
                     <i className="bi bi-link-45deg" />
                   </button>
-                  {d.sync_key && (
+                  {hasLinked && (
                     <button
                       className="btn btn-sm btn-outline-secondary"
                       onClick={() => handleUnlink(d.name)}
-                      title="Unlink from sync key"
+                      title="Unlink from group"
                     >
                       <i className="bi bi-x-lg" />
                     </button>
@@ -217,13 +206,13 @@ export function DestinationsPage() {
         </div>
         <div className="card-body p-0">
           {syncStatusSummary.length === 0 ? (
-            <div className="p-3 text-secondary">No sync keys found</div>
+            <div className="p-3 text-secondary">No destination groups found</div>
           ) : (
             <div className="table-responsive">
               <table className="table table-dark table-hover mb-0">
                 <thead>
                   <tr>
-                    <th>Sync Key</th>
+                    <th>Destinations</th>
                     <th className="text-end">Total</th>
                     <th className="text-end">Synced</th>
                     <th className="text-end">New</th>
@@ -231,48 +220,52 @@ export function DestinationsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {syncStatusSummary.map((s) => (
-                    <tr
-                      key={s.key_name}
-                      className={`cursor-pointer ${selectedSyncKey === s.key_name ? 'table-active' : ''}`}
-                      onClick={() => handleSelectSyncKey(s.key_name)}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      <td>
-                        <i className={`bi bi-chevron-${selectedSyncKey === s.key_name ? 'down' : 'right'} me-1`} />
-                        {s.key_name}
-                      </td>
-                      <td className="text-end">{s.total_files}</td>
-                      <td className="text-end">{s.synced_files}</td>
-                      <td className="text-end">
-                        {s.new_files > 0 ? (
-                          <span className="text-info">{s.new_files}</span>
-                        ) : (
-                          <span className="text-success">0</span>
-                        )}
-                      </td>
-                      <td>
-                        <small className="text-secondary">
-                          {s.last_sync_at
-                            ? new Date(s.last_sync_at * 1000).toLocaleString()
-                            : 'Never'}
-                        </small>
-                      </td>
-                    </tr>
-                  ))}
+                  {syncStatusSummary.map((s) => {
+                    const groupLabel = s.destinations.join(', ');
+                    const groupKey = groupLabel;
+                    return (
+                      <tr
+                        key={groupKey}
+                        className={`cursor-pointer ${selectedDestGroup === groupKey ? 'table-active' : ''}`}
+                        onClick={() => handleSelectDestGroup(s.destinations[0]!)}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <td>
+                          <i className={`bi bi-chevron-${selectedDestGroup === groupKey ? 'down' : 'right'} me-1`} />
+                          {groupLabel}
+                        </td>
+                        <td className="text-end">{s.total_files}</td>
+                        <td className="text-end">{s.synced_files}</td>
+                        <td className="text-end">
+                          {s.new_files > 0 ? (
+                            <span className="text-info">{s.new_files}</span>
+                          ) : (
+                            <span className="text-success">0</span>
+                          )}
+                        </td>
+                        <td>
+                          <small className="text-secondary">
+                            {s.last_sync_at
+                              ? new Date(s.last_sync_at * 1000).toLocaleString()
+                              : 'Never'}
+                          </small>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
 
-          {/* Per-key detail panel */}
-          {selectedSyncKey && selectedSyncKeyDetail && (
+          {/* Per-destination detail panel */}
+          {selectedDestGroup && selectedDestGroupDetail && (
             <div className="border-top border-secondary p-3">
               <h6 className="text-light mb-3">
                 <i className="bi bi-list-task me-2" />
-                {selectedSyncKey} — Per-Playlist Breakdown
+                {selectedDestGroupDetail.destinations?.join(', ') ?? selectedDestGroup} — Per-Playlist Breakdown
               </h6>
-              {selectedSyncKeyDetail.playlists.length === 0 ? (
+              {selectedDestGroupDetail.playlists.length === 0 ? (
                 <small className="text-secondary">No playlist data available.</small>
               ) : (
                 <div className="table-responsive">
@@ -287,7 +280,7 @@ export function DestinationsPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {selectedSyncKeyDetail.playlists.map((p) => {
+                      {selectedDestGroupDetail.playlists.map((p) => {
                         const badgeClass = p.is_new_playlist
                           ? 'bg-warning text-dark'
                           : p.new_files > 0
