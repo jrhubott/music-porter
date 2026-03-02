@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, statSync, createWriteStream, renameSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, createWriteStream } from 'node:fs';
+import { stat, access, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
@@ -184,7 +185,7 @@ export class SyncEngine {
         if (!options.force) {
           const manifestSize = manifestFiles[manifestKey];
           if (manifestSize !== undefined && manifestSize === file.size
-              && existsSync(filePath)) {
+              && await access(filePath).then(() => true).catch(() => false)) {
             // Skip — manifest says this file is current and file exists on disk
             totalSkipped++;
             processed++;
@@ -204,10 +205,10 @@ export class SyncEngine {
           }
 
           // Check disk
-          if (existsSync(filePath)) {
+          if (await access(filePath).then(() => true).catch(() => false)) {
             try {
-              const stat = statSync(filePath);
-              if (stat.size === file.size) {
+              const st = await stat(filePath);
+              if (st.size === file.size) {
                 totalSkipped++;
                 processed++;
                 syncedFiles[manifestKey] = file.size;
@@ -230,7 +231,7 @@ export class SyncEngine {
           }
 
           // Cache hit check — copy from local cache instead of downloading
-          if (cache && cache.copyToDestination(file.uuid, filePath)) {
+          if (cache && await cache.copyToDestination(file.uuid, filePath)) {
             totalCopied++;
             processed++;
             syncedFiles[manifestKey] = file.size;
@@ -440,7 +441,7 @@ export class SyncEngine {
 
         // Skip if already on disk with matching size
         const manifestSize = manifestFiles[manifestKey];
-        if (manifestSize !== undefined && manifestSize === entry.size && existsSync(filePath)) {
+        if (manifestSize !== undefined && manifestSize === entry.size && await access(filePath).then(() => true).catch(() => false)) {
           totalSkipped++;
           processed++;
           syncedFiles[manifestKey] = entry.size;
@@ -459,7 +460,7 @@ export class SyncEngine {
         }
 
         // Copy from cache
-        if (cache.copyToDestination(entry.uuid, filePath)) {
+        if (await cache.copyToDestination(entry.uuid, filePath)) {
           totalCopied++;
           syncedFiles[manifestKey] = entry.size;
         } else {
@@ -569,12 +570,12 @@ export class SyncEngine {
       const nodeStream = Readable.fromWeb(body as import('node:stream/web').ReadableStream);
       const writeStream = createWriteStream(tmpPath);
       await pipeline(nodeStream, writeStream);
-      renameSync(tmpPath, filePath);
+      await rename(tmpPath, filePath);
 
       // Write-through: copy downloaded file into cache (non-fatal on failure)
       if (cache) {
         try {
-          cache.storeFromFile(file, playlistKey, filePath);
+          await cache.storeFromFile(file, playlistKey, filePath);
         } catch {
           // Cache write failures are non-fatal
         }
@@ -584,7 +585,7 @@ export class SyncEngine {
     } catch (err) {
       // Clean up partial download
       try {
-        if (existsSync(tmpPath)) unlinkSync(tmpPath);
+        await unlink(tmpPath);
       } catch {
         // Ignore cleanup errors
       }
