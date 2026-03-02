@@ -7,6 +7,10 @@ command -v git >/dev/null 2>&1 || die "git not found"
 command -v docker >/dev/null 2>&1 || die "docker not found"
 git rev-parse --git-dir >/dev/null 2>&1 || die "not a git repository"
 
+if [[ $# -gt 0 ]]; then
+    git checkout "$1" || die "git checkout $1 failed (check for uncommitted changes)"
+fi
+
 echo "Branch: $(git rev-parse --abbrev-ref HEAD)"
 
 docker compose down || true
