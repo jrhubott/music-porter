@@ -230,8 +230,8 @@ export function registerIPCHandlers(): void {
 
   ipcMain.handle(
     'data:linkDestination',
-    async (_event, name: string, syncKey: string | null) => {
-      return apiClient.linkDestination(name, syncKey);
+    async (_event, name: string, syncKey: string | null, path?: string) => {
+      return apiClient.linkDestination(name, syncKey, path);
     },
   );
 

@@ -678,7 +678,7 @@ export function SyncPage() {
       {/* Result */}
       {lastSyncResult && (
         <div
-          className={`alert ${lastSyncResult.aborted ? 'alert-warning' : lastSyncResult.failed > 0 ? 'alert-danger' : 'alert-success'}`}
+          className={`alert ${lastSyncResult.aborted ? 'alert-warning' : (lastSyncResult.failed > 0 || lastSyncResult.destError) ? 'alert-danger' : 'alert-success'}`}
         >
           <h6>{lastSyncResult.aborted ? 'Sync Aborted' : 'Sync Complete'}</h6>
           <div>Copied: {lastSyncResult.copied}</div>
@@ -686,6 +686,12 @@ export function SyncPage() {
           {lastSyncResult.failed > 0 && <div>Failed: {lastSyncResult.failed}</div>}
           <div>Duration: {formatDuration(lastSyncResult.durationMs)}</div>
           <div>Sync Key: {lastSyncResult.syncKey}</div>
+          {lastSyncResult.destError && (
+            <div className="mt-2 text-danger">
+              <i className="bi bi-exclamation-triangle-fill me-1" />
+              {lastSyncResult.destError}
+            </div>
+          )}
           {ejected && (
             <div className="mt-2 text-success">
               <i className="bi bi-eject-fill me-1" />
@@ -704,6 +710,7 @@ export function SyncPage() {
       <LinkDestinationModal
         show={linkModalOpen}
         destinationName={linkTargetName}
+        destinationPath={destPath}
         onClose={() => setLinkModalOpen(false)}
         onLinked={() => {
           // Refresh sync status after linking

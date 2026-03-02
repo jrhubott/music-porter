@@ -26,6 +26,7 @@ export function DestinationsPage() {
 
   const [linkModalOpen, setLinkModalOpen] = useState(false);
   const [linkTargetName, setLinkTargetName] = useState('');
+  const [linkTargetPath, setLinkTargetPath] = useState<string | undefined>();
 
   useEffect(() => {
     loadData();
@@ -69,8 +70,9 @@ export function DestinationsPage() {
     }
   }
 
-  function openLinkModal(name: string) {
+  function openLinkModal(name: string, path?: string) {
     setLinkTargetName(name);
+    setLinkTargetPath(path);
     setLinkModalOpen(true);
   }
 
@@ -181,7 +183,7 @@ export function DestinationsPage() {
                 <div className="d-flex gap-1">
                   <button
                     className="btn btn-sm btn-outline-info"
-                    onClick={() => openLinkModal(d.name)}
+                    onClick={() => openLinkModal(d.name, d.path)}
                     title="Link to sync key"
                   >
                     <i className="bi bi-link-45deg" />
@@ -318,6 +320,7 @@ export function DestinationsPage() {
       <LinkDestinationModal
         show={linkModalOpen}
         destinationName={linkTargetName}
+        destinationPath={linkTargetPath}
         onClose={() => setLinkModalOpen(false)}
         onLinked={() => {
           loadDestinations();

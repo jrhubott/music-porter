@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { CLIENT_SYNC_KEY_PREFIX, DEFAULT_CONCURRENCY, FILE_DOWNLOAD_TIMEOUT_MS, TEMP_SUFFIX, USB_SYNC_KEY_PREFIX } from './constants.js';
+import { SyncError } from './errors.js';
 import type { APIClient } from './api-client.js';
 import type { CacheManager } from './cache/cache-manager.js';
 import type { MetadataCache } from './cache/metadata-cache.js';
@@ -146,6 +147,7 @@ export class SyncEngine {
     let totalFailed = 0;
     let processed = 0;
     let aborted = false;
+    let destConflict: string | undefined;
 
     for (const { key, files } of playlistFileList) {
       if (options.signal?.aborted) {
@@ -310,9 +312,16 @@ export class SyncEngine {
       // Record all synced files (skipped + downloaded) to server in one batch
       if (!options.dryRun && Object.keys(syncedFiles).length > 0) {
         try {
-          await this.client.recordSync(syncKey, key, Object.keys(syncedFiles));
+          const destType = options.usbDriveName ? 'usb' : 'folder';
+          await this.client.recordSync(
+            syncKey, key, Object.keys(syncedFiles), undefined, destDir, destType,
+          );
         } catch (err) {
-          log('warn', `Failed to record sync for "${key}": ${err}`);
+          const message = err instanceof Error ? err.message : String(err);
+          log('error', `Failed to record sync for "${key}": ${message}`);
+          if (!destConflict && err instanceof SyncError) {
+            destConflict = message;
+          }
         }
       }
 
@@ -342,6 +351,7 @@ export class SyncEngine {
       failed: totalFailed,
       aborted,
       durationMs: Date.now() - startTime,
+      destError: destConflict,
     };
   }
 

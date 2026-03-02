@@ -5,11 +5,12 @@ import type { SyncKeySummary } from '@mporter/core';
 interface LinkDestinationModalProps {
   show: boolean;
   destinationName: string;
+  destinationPath?: string;
   onClose: () => void;
   onLinked: () => void;
 }
 
-export function LinkDestinationModal({ show, destinationName, onClose, onLinked }: LinkDestinationModalProps) {
+export function LinkDestinationModal({ show, destinationName, destinationPath, onClose, onLinked }: LinkDestinationModalProps) {
   const ipc = useIPC();
   const [mode, setMode] = useState<'new' | 'existing'>('new');
   const [newKeyName, setNewKeyName] = useState('');
@@ -49,7 +50,7 @@ export function LinkDestinationModal({ show, destinationName, onClose, onLinked 
     setLoading(true);
     setError('');
     try {
-      const result = await ipc.linkDestination(destinationName, syncKey);
+      const result = await ipc.linkDestination(destinationName, syncKey, destinationPath);
       if (result.ok) {
         onLinked();
         onClose();

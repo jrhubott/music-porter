@@ -3379,12 +3379,21 @@ class ConfigManager:
                 return dest
         return None
 
-    def add_destination(self, name, path, sync_key=None):
+    def find_destination_by_path(self, path):
+        """Find a destination by schemed path. Returns SyncDestination or None."""
+        normalized = path.rstrip('/\\')
+        for dest in self.destinations:
+            if dest.path.rstrip('/\\') == normalized:
+                return dest
+        return None
+
+    def add_destination(self, name, path, sync_key=None, validate_path=True):
         """Add a saved sync destination. Returns True on success.
 
         Path should be a schemed path (usb:// or folder://).
         Plain paths are auto-prefixed with folder://.
         Optional sync_key links this destination to a shared tracking key.
+        Set validate_path=False to skip filesystem checks (remote client paths).
         """
         import re as _re
         if not _re.match(r'^[a-zA-Z0-9_-]+$', name):
@@ -3399,9 +3408,9 @@ class ConfigManager:
                 and not path.startswith('web-client://')):
             path = f'folder://{path}'
 
-        # Validate the raw filesystem path exists (skip for web-client)
+        # Validate the raw filesystem path exists (skip for web-client and remote)
         dest = SyncDestination(name, path, sync_key=sync_key)
-        if not dest.is_web_client:
+        if validate_path and not dest.is_web_client:
             raw = dest.raw_path
             if dest.is_usb:
                 # For USB: validate the volume mount exists (subdir may not exist yet)
@@ -3473,15 +3482,16 @@ class ConfigManager:
                 source=self._audit_source)
         return True
 
-    def ensure_destination(self, name, path, sync_key=None):
+    def ensure_destination(self, name, path, sync_key=None, validate_path=True):
         """Get or create a destination, auto-linking to sync_key if provided.
 
         Returns the SyncDestination (existing or newly created), or None on failure.
+        Set validate_path=False to skip filesystem checks (remote client paths).
         """
         existing = self.get_destination(name)
         if existing:
             return existing
-        ok = self.add_destination(name, path, sync_key=sync_key)
+        ok = self.add_destination(name, path, sync_key=sync_key, validate_path=validate_path)
         return self.get_destination(name) if ok else None
 
     def rename_sync_key_refs(self, old_key, new_key):

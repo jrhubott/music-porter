@@ -11,6 +11,7 @@ import {
   NotConfiguredError,
   ServerBusyError,
   ServerError,
+  SyncError,
 } from './errors.js';
 import type {
   AboutResponse,
@@ -375,12 +376,35 @@ export class APIClient {
     playlist: string,
     files: string[],
     folderName?: string,
+    destPath?: string,
+    destType?: 'usb' | 'folder',
   ): Promise<ClientRecordResponse> {
     const body: Record<string, unknown> = { sync_key: syncKey, playlist, files };
     if (folderName) {
       body['folder_name'] = folderName;
     }
-    return this.post<ClientRecordResponse>('/api/sync/client-record', body);
+    if (destPath) {
+      body['dest_path'] = destPath;
+      if (destType) {
+        body['dest_type'] = destType;
+      }
+    }
+
+    const url = this.buildURL('/api/sync/client-record');
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: this.authHeaders(),
+      body: JSON.stringify(body),
+    });
+
+    // Handle dest conflict before generic checkResponse (which maps 409 → ServerBusyError)
+    if (response.status === HTTP_CONFLICT) {
+      const data = await response.json().catch(() => null) as { error?: string } | null;
+      throw new SyncError(data?.error ?? 'Destination sync key conflict');
+    }
+
+    this.checkResponse(response);
+    return (await response.json()) as ClientRecordResponse;
   }
 
   async getSyncStatus(key: string): Promise<SyncStatusDetail> {
@@ -395,10 +419,10 @@ export class APIClient {
     return this.get<SyncDestinationsResponse>('/api/sync/destinations');
   }
 
-  async linkDestination(name: string, syncKey: string | null): Promise<LinkDestinationResponse> {
+  async linkDestination(name: string, syncKey: string | null, path?: string): Promise<LinkDestinationResponse> {
     return this.put<LinkDestinationResponse>(
       `/api/sync/destinations/${encodeURIComponent(name)}/link`,
-      { sync_key: syncKey },
+      { sync_key: syncKey, ...(path && { path }) },
     );
   }
 

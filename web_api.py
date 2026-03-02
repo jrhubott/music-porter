@@ -1686,7 +1686,14 @@ def api_sync_destination_link(name):
     config = ctx.get_config()
     dest = config.get_destination(name)
     if not dest:
-        return jsonify({'error': f"Destination '{name}' not found"}), 404
+        # Auto-create if caller provides a path (e.g. sync-client first-time folder)
+        path = data.get('path', '').strip()
+        if not path:
+            return jsonify({'error': f"Destination '{name}' not found"}), 404
+        ok = config.add_destination(name, path, sync_key=new_sync_key)
+        if not ok:
+            return jsonify({'error': f"Failed to create destination '{name}'"}), 400
+        return jsonify({'ok': True, 'sync_key': new_sync_key, 'created': True})
 
     merge_stats = None
 
@@ -2024,6 +2031,32 @@ def api_sync_client_record():
     if folder_name:
         config = ctx.get_config()
         config.ensure_destination(sync_key, f'web-client://{folder_name}', sync_key=sync_key)
+
+    # Auto-register folder:// or usb:// destination with conflict detection
+    dest_path = data.get('dest_path', '').strip()
+    if dest_path:
+        dest_type = data.get('dest_type', 'folder')
+        scheme = 'usb://' if dest_type == 'usb' else 'folder://'
+        schemed_path = f'{scheme}{dest_path}'
+
+        config = ctx.get_config()
+        existing = config.find_destination_by_path(schemed_path)
+
+        if existing:
+            existing_key = existing.effective_key
+            if existing_key != sync_key:
+                return jsonify({
+                    'ok': False,
+                    'recorded': len(files),
+                    'error': (f'Destination "{existing.name}" is already linked to '
+                              f'sync key "{existing_key}", not "{sync_key}". '
+                              f'Relink the destination or use the correct sync key.'),
+                }), 409
+        else:
+            basename = (dest_path.rstrip('/\\').rsplit('/', 1)[-1]
+                        .rsplit('\\', 1)[-1] or 'destination')
+            config.ensure_destination(
+                basename, schemed_path, sync_key=sync_key, validate_path=False)
 
     return jsonify({'ok': True, 'recorded': len(files)})
 

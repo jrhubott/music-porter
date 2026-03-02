@@ -130,6 +130,7 @@ export interface LinkDestinationResponse {
   ok: boolean;
   sync_key: string | null;
   merge_stats?: { merged_count: number };
+  created?: boolean;
 }
 
 export interface PruneResponse {
@@ -203,6 +204,7 @@ export interface SyncResult {
   failed: number;
   aborted: boolean;
   durationMs: number;
+  destError?: string;
 }
 
 // ── Discovery ──

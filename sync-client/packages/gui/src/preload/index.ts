@@ -51,8 +51,8 @@ const electronAPI = {
   getAbout: (): Promise<AboutResponse> => ipcRenderer.invoke('data:getAbout'),
   getSyncStatusSummary: (): Promise<SyncStatusSummary[]> =>
     ipcRenderer.invoke('data:getSyncStatusSummary'),
-  linkDestination: (name: string, syncKey: string | null): Promise<LinkDestinationResponse> =>
-    ipcRenderer.invoke('data:linkDestination', name, syncKey),
+  linkDestination: (name: string, syncKey: string | null, path?: string): Promise<LinkDestinationResponse> =>
+    ipcRenderer.invoke('data:linkDestination', name, syncKey, path),
   pruneSyncKey: (key: string): Promise<PruneResponse> =>
     ipcRenderer.invoke('data:pruneSyncKey', key),
   renameSyncKey: (key: string, newKey: string): Promise<OkResponse> =>
