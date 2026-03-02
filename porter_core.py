@@ -3612,18 +3612,6 @@ class EQConfigManager:
 # Section 3: Configuration Management
 # ══════════════════════════════════════════════════════════════════
 
-class PlaylistConfig:
-    """Represents a single playlist configuration."""
-
-    def __init__(self, key, url, name):
-        self.key = key
-        self.url = url
-        self.name = name
-
-    def __repr__(self):
-        return f"PlaylistConfig(key={self.key}, name={self.name})"
-
-
 @dataclass
 class SyncDestination:
     """A saved sync destination (name + schemed path + sync key).
@@ -3688,8 +3676,6 @@ class ConfigManager:
         self.audit_logger = audit_logger
         self._audit_source = audit_source
         self._on_change = on_change
-        self.playlists = []
-        self.destinations = []
         self.settings = {}
         self.output_profiles = {}
         self._raw_output_types = {}
@@ -3727,26 +3713,6 @@ class ConfigManager:
         # Load settings
         self.settings = data.get('settings', {})
 
-        # Load playlists
-        for entry in data.get('playlists', []):
-            key = entry.get('key', '').strip()
-            url = entry.get('url', '').strip()
-            name = entry.get('name', '').strip()
-            if key and url and name:
-                self.playlists.append(PlaylistConfig(key, url, name))
-            elif key or url or name:
-                self.logger.warn(f"Incomplete playlist entry (need key, url, name): {entry}")
-
-        # Load destinations
-        for entry in data.get('destinations', []):
-            dname = str(entry.get('name', '')).strip()
-            dpath = str(entry.get('path', '')).strip()
-            if dname and dpath:
-                dsync_key = str(entry.get('sync_key', '')).strip() or None
-                self.destinations.append(SyncDestination(dname, dpath, sync_key=dsync_key))
-            elif dname or dpath:
-                self.logger.warn(f"Incomplete destination entry (need name, path): {entry}")
-
         # Load output_types
         raw_types = data.get('output_types')
         if raw_types is None:
@@ -3777,8 +3743,7 @@ class ConfigManager:
                 usb_dir=fields.get("usb_dir", ""),
             )
 
-        self.logger.info(f"Loaded {len(self.playlists)} playlists and "
-                         f"{len(self.output_profiles)} output profiles from {self.conf_path}")
+        self.logger.info(f"Loaded {len(self.output_profiles)} output profiles from {self.conf_path}")
 
     def _create_default(self):
         """Create a default config.yaml with default profiles and empty playlists."""
@@ -3820,20 +3785,7 @@ class ConfigManager:
             'schema_version': CONFIG_SCHEMA_VERSION,
             'settings': self.settings,
             'output_types': output_types,
-            'playlists': [
-                {'key': p.key, 'url': p.url, 'name': p.name}
-                for p in self.playlists
-            ],
         }
-
-        if self.destinations:
-            dest_list = []
-            for d in self.destinations:
-                entry = {'name': d.name, 'path': d.path}
-                if d.sync_key:
-                    entry['sync_key'] = d.sync_key
-                dest_list.append(entry)
-            data['destinations'] = dest_list
 
         with open(self.conf_path, 'w') as f:
             f.write("# Music Porter Configuration\n")
@@ -3857,72 +3809,6 @@ class ConfigManager:
                 'completed', params={'key': key, 'value': value},
                 source=self._audit_source)
 
-    def get_playlist_by_key(self, key):
-        """Get playlist by key (case-insensitive)."""
-        key_lower = key.lower()
-        for playlist in self.playlists:
-            if playlist.key.lower() == key_lower:
-                return playlist
-        return None
-
-    def get_playlist_by_index(self, index):
-        """Get playlist by index (0-based)."""
-        if 0 <= index < len(self.playlists):
-            return self.playlists[index]
-        return None
-
-    def add_playlist(self, key, url, name):
-        """Add a new playlist and persist to config.yaml."""
-        if self.get_playlist_by_key(key):
-            self.logger.warn(f"Playlist key '{key}' already exists")
-            return False
-
-        self.playlists.append(PlaylistConfig(key, url, name))
-        self._save()
-        self.logger.info(f"Added playlist '{name}' to configuration")
-        if self.audit_logger:
-            self.audit_logger.log(
-                'playlist_add', f"Added playlist '{name}' ({key})",
-                'completed', params={'key': key, 'name': name},
-                source=self._audit_source)
-        return True
-
-    def update_playlist(self, key, url=None, name=None):
-        """Update an existing playlist and persist to config.yaml."""
-        playlist = self.get_playlist_by_key(key)
-        if not playlist:
-            self.logger.warn(f"Playlist key '{key}' not found")
-            return False
-        if url is not None:
-            playlist.url = url
-        if name is not None:
-            playlist.name = name
-        self._save()
-        self.logger.info(f"Updated playlist '{key}'")
-        if self.audit_logger:
-            self.audit_logger.log(
-                'playlist_update', f"Updated playlist '{key}'",
-                'completed', params={'key': key, 'url': url, 'name': name},
-                source=self._audit_source)
-        return True
-
-    def remove_playlist(self, key):
-        """Remove a playlist by key (case-insensitive) and persist to config.yaml."""
-        key_lower = key.lower()
-        original_len = len(self.playlists)
-        self.playlists = [p for p in self.playlists if p.key.lower() != key_lower]
-        if len(self.playlists) == original_len:
-            self.logger.warn(f"Playlist key '{key}' not found")
-            return False
-        self._save()
-        self.logger.info(f"Removed playlist '{key}' from configuration")
-        if self.audit_logger:
-            self.audit_logger.log(
-                'playlist_delete', f"Removed playlist '{key}'",
-                'completed', params={'key': key},
-                source=self._audit_source)
-        return True
-
     def ensure_api_key(self):
         """Ensure an API key exists in settings; generate one if missing.
 
@@ -3936,173 +3822,6 @@ class ConfigManager:
             self._save()
             self.logger.info("Generated new API key for web dashboard")
         return key
-
-    # ── Destination CRUD ──────────────────────────────────────────
-
-    def get_destination(self, name):
-        """Get a saved destination by name (case-insensitive). Returns SyncDestination or None."""
-        name_lower = name.lower()
-        for dest in self.destinations:
-            if dest.name.lower() == name_lower:
-                return dest
-        return None
-
-    def find_destination_by_path(self, path):
-        """Find a destination by schemed path. Returns SyncDestination or None."""
-        normalized = path.rstrip('/\\')
-        for dest in self.destinations:
-            if dest.path.rstrip('/\\') == normalized:
-                return dest
-        return None
-
-    def add_destination(self, name, path, sync_key=None, validate_path=True):
-        """Add a saved sync destination. Returns True on success.
-
-        Path should be a schemed path (usb:// or folder://).
-        Plain paths are auto-prefixed with folder://.
-        Optional sync_key links this destination to a shared tracking key.
-        Set validate_path=False to skip filesystem checks (remote client paths).
-        """
-        import re as _re
-        if not _re.match(r'^[a-zA-Z0-9_-]+$', name):
-            self.logger.error(f"Destination name must be alphanumeric with hyphens/underscores: '{name}'")
-            return False
-        if self.get_destination(name):
-            self.logger.error(f"Destination '{name}' already exists")
-            return False
-
-        # Normalize to schemed path
-        if (not path.startswith('usb://') and not path.startswith('folder://')
-                and not path.startswith('web-client://')):
-            path = f'folder://{path}'
-
-        # Validate the raw filesystem path exists (skip for web-client and remote)
-        dest = SyncDestination(name, path, sync_key=sync_key)
-        if validate_path and not dest.is_web_client:
-            raw = dest.raw_path
-            if dest.is_usb:
-                # For USB: validate the volume mount exists (subdir may not exist yet)
-                volume_path = Path(raw).parts[:3] if IS_MACOS else Path(raw).parts[:1]
-                volume_mount = Path(*volume_path) if volume_path else Path(raw)
-                if not volume_mount.is_dir():
-                    self.logger.error(f"USB volume mount not found: {volume_mount}")
-                    return False
-            else:
-                if not Path(raw).is_dir():
-                    self.logger.error(f"Destination path does not exist or is not a directory: {raw}")
-                    return False
-
-        self.destinations.append(dest)
-        self._save()
-        link_msg = f" (linked to '{sync_key}')" if sync_key else ''
-        self.logger.info(f"Added sync destination '{name}' → {path}{link_msg}")
-        if self.audit_logger:
-            params = {'name': name, 'path': path}
-            if sync_key:
-                params['sync_key'] = sync_key
-            self.audit_logger.log(
-                'destination_add', f"Added sync destination '{name}'{link_msg}",
-                'completed', params=params,
-                source=self._audit_source)
-        return True
-
-    def remove_destination(self, name):
-        """Remove a saved destination by name (case-insensitive). Returns True if found."""
-        name_lower = name.lower()
-        original_len = len(self.destinations)
-        self.destinations = [d for d in self.destinations if d.name.lower() != name_lower]
-        if len(self.destinations) == original_len:
-            self.logger.warn(f"Destination '{name}' not found")
-            return False
-        self._save()
-        self.logger.info(f"Removed sync destination '{name}'")
-        if self.audit_logger:
-            self.audit_logger.log(
-                'destination_delete', f"Removed sync destination '{name}'",
-                'completed', params={'name': name},
-                source=self._audit_source)
-        return True
-
-    def update_destination_link(self, name, sync_key):
-        """Set or clear a destination's sync_key. Returns True if found.
-
-        Pass sync_key=None or '' to unlink.
-        """
-        dest = self.get_destination(name)
-        if not dest:
-            self.logger.warn(f"Destination '{name}' not found")
-            return False
-        old_key = dest.sync_key
-        new_key = sync_key.strip() if sync_key else None
-        dest.sync_key = new_key
-        self._save()
-        if new_key:
-            self.logger.info(f"Linked destination '{name}' → key '{new_key}'")
-        else:
-            self.logger.info(f"Unlinked destination '{name}' (was '{old_key}')")
-        if self.audit_logger:
-            self.audit_logger.log(
-                'destination_link',
-                f"{'Linked' if new_key else 'Unlinked'} destination '{name}'"
-                + (f" → '{new_key}'" if new_key else ''),
-                'completed',
-                params={'name': name, 'sync_key': new_key, 'old_sync_key': old_key},
-                source=self._audit_source)
-        return True
-
-    def ensure_destination(self, name, path, sync_key=None, validate_path=True):
-        """Get or create a destination, auto-linking to sync_key if provided.
-
-        Returns the SyncDestination (existing or newly created), or None on failure.
-        Set validate_path=False to skip filesystem checks (remote client paths).
-        """
-        existing = self.get_destination(name)
-        if existing:
-            return existing
-        ok = self.add_destination(name, path, sync_key=sync_key, validate_path=validate_path)
-        return self.get_destination(name) if ok else None
-
-    def rename_sync_key_refs(self, old_key, new_key):
-        """Update all destination sync_key references from old_key to new_key.
-
-        Returns count of destinations updated.
-        """
-        count = 0
-        for dest in self.destinations:
-            if dest.sync_key == old_key:
-                dest.sync_key = new_key
-                count += 1
-        if count:
-            self._save()
-        return count
-
-    def rename_destination(self, old_name, new_name):
-        """Rename a saved destination. Returns True on success."""
-        import re as _re
-        if not _re.match(r'^[a-zA-Z0-9_-]+$', new_name):
-            self.logger.error(f"Destination name must be alphanumeric with hyphens/underscores: '{new_name}'")
-            return False
-        if old_name.lower() == new_name.lower():
-            self.logger.error("New name must be different from the current name")
-            return False
-        if self.get_destination(new_name):
-            self.logger.error(f"Destination '{new_name}' already exists")
-            return False
-        dest = self.get_destination(old_name)
-        if not dest:
-            self.logger.warn(f"Destination '{old_name}' not found")
-            return False
-        dest.name = new_name
-        self._save()
-        self.logger.info(f"Renamed destination '{old_name}' to '{new_name}'")
-        if self.audit_logger:
-            self.audit_logger.log(
-                'destination_rename',
-                f"Renamed destination '{old_name}' to '{new_name}'",
-                'completed',
-                params={'old_name': old_name, 'new_name': new_name},
-                source=self._audit_source)
-        return True
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -4315,11 +4034,11 @@ class DependencyChecker:
             self.logger.error("  python3 -m venv .venv")
             self.logger.error("  source .venv/bin/activate")
 
-    def get_status(self, config=None) -> DependencyCheckResult:
+    def get_status(self, playlist_count=0) -> DependencyCheckResult:
         """Return current dependency status as a result object."""
         packages = self.dep_status.get('packages', {})
         missing = [pkg for pkg, ok in packages.items() if not ok]
-        playlists = len(config.playlists) if config else 0
+        playlists = playlist_count
         return DependencyCheckResult(
             venv_active=self.dep_status.get('venv', False),
             venv_path=self.venv_path,
@@ -7126,7 +6845,7 @@ class SyncManager:
         # File is up-to-date, skip
         return False
 
-    def select_destination(self, config=None, output_profile=None):
+    def select_destination(self, output_profile=None):
         """Interactive destination picker showing USB drives, saved destinations, and custom path.
 
         Returns SyncDestination or None if cancelled.
@@ -7137,7 +6856,8 @@ class SyncManager:
         # 1. Auto-detected USB drives
         usb_drives = self.find_usb_drives()
         usb_dir = output_profile.usb_dir if output_profile else DEFAULT_USB_DIR
-        saved_names = {d.name.lower() for d in config.destinations} if config else set()
+        saved = self.sync_tracker.get_all_destinations() if self.sync_tracker else []
+        saved_names = {d.name.lower() for d in saved}
         for vol in usb_drives:
             base = self._get_usb_base_path(vol)
             full_path = str(base / usb_dir) if usb_dir else str(base)
@@ -7146,15 +6866,14 @@ class SyncManager:
                 continue
             options.append(f"[USB] {vol} ({full_path})")
             option_dests.append(
-                SyncDestination(vol, f'usb://{full_path}'))
+                SyncDestination(vol, f'usb://{full_path}', sync_key=vol))
 
-        # 2. Saved destinations from config
-        if config and config.destinations:
-            for dest in config.destinations:
-                status = "" if dest.available else " [not found]"
-                badge = "[USB]" if dest.is_usb else "[Folder]"
-                options.append(f"{badge} {dest.name} ({dest.raw_path}){status}")
-                option_dests.append(dest)
+        # 2. Saved destinations from DB
+        for dest in saved:
+            status = "" if dest.available else " [not found]"
+            badge = "[USB]" if dest.is_usb else "[Folder]"
+            options.append(f"{badge} {dest.name} ({dest.raw_path}){status}")
+            option_dests.append(dest)
 
         # 3. Custom path option
         options.append("Enter custom path...")
@@ -7186,14 +6905,17 @@ class SyncManager:
                 self.logger.error(f"Path does not exist or is not a directory: {custom_path}")
                 return None
             dest_key = self._sanitize_dest_name(p.name)
-            dest = SyncDestination(dest_key, f'folder://{custom_path}')
-            if config and not config.get_destination(dest_key):
-                config.add_destination(dest_key, dest.path)
+            dest = SyncDestination(dest_key, f'folder://{custom_path}',
+                                   sync_key=dest_key)
+            if self.sync_tracker:
+                self.sync_tracker.add_destination(
+                    dest_key, dest.path, validate_path=False)
             return dest
 
         # Auto-save USB selections
-        if dest.is_usb and config and not config.get_destination(dest.name):
-            config.add_destination(dest.name, dest.path)
+        if dest.is_usb and self.sync_tracker:
+            self.sync_tracker.add_destination(
+                dest.name, dest.path, validate_path=False)
 
         return dest
 
@@ -7950,7 +7672,7 @@ class PipelineOrchestrator:
                  cookie_path=DEFAULT_COOKIES, workers=None,
                  prompt_handler=None, display_handler=None,
                  cancel_event=None, audit_logger=None, audit_source='cli',
-                 sync_tracker=None, track_db=None,
+                 sync_tracker=None, track_db=None, playlist_db=None,
                  eq_config_manager=None, eq_config_override=None,
                  project_root=None):
         self.logger = logger or Logger()
@@ -7963,6 +7685,7 @@ class PipelineOrchestrator:
         self._audit_source = audit_source
         self.sync_tracker = sync_tracker
         self.track_db = track_db
+        self.playlist_db = playlist_db
         self.deps = deps or DependencyChecker(self.logger)
         self.config = config or ConfigManager(logger=self.logger)
         self.stats = PipelineStatistics()
@@ -8084,7 +7807,7 @@ class PipelineOrchestrator:
                 f"\n=== STAGE 3: Sync to {sync_destination.name} ===")
             usb_result = sync_mgr.sync_to_destination(
                 library_dir, dest_path=sync_destination.path,
-                dest_key=sync_destination.effective_key, dry_run=dry_run)
+                dest_key=sync_destination.sync_key, dry_run=dry_run)
 
             if usb_result.success:
                 self.stats.stages_completed.append("sync")
@@ -8180,22 +7903,29 @@ class PipelineOrchestrator:
     def _download_playlist(self, playlist_arg, auto, dry_run, verbose,
                            validate_cookies=True, auto_refresh_cookies=False):
         """Download playlist from configuration."""
-        # Find playlist by name or index
+        # Find playlist by key or index from PlaylistDB
         playlist = None
-        if playlist_arg.isdigit():
-            playlist = self.config.get_playlist_by_index(int(playlist_arg) - 1)
-        else:
-            playlist = self.config.get_playlist_by_key(playlist_arg)
+        if self.playlist_db:
+            if playlist_arg.isdigit():
+                all_pl = self.playlist_db.get_all()
+                idx = int(playlist_arg) - 1
+                if 0 <= idx < len(all_pl):
+                    playlist = all_pl[idx]
+            else:
+                playlist = self.playlist_db.get(playlist_arg)
 
         if not playlist:
             self.logger.error(f"Playlist not found: {playlist_arg}")
             self.stats.stages_failed.append("download")
             return False
 
-        self.stats.playlist_key = playlist.key
-        self.stats.playlist_name = playlist.name
+        pl_key = playlist['key']
+        pl_name = playlist['name']
+        pl_url = playlist['url']
+        self.stats.playlist_key = pl_key
+        self.stats.playlist_name = pl_name
 
-        output_dir = get_source_dir(playlist.key)
+        output_dir = get_source_dir(pl_key)
 
         downloader = Downloader(self.logger, self.deps.venv_python,
                                cookie_path=self.cookie_path,
@@ -8203,9 +7933,9 @@ class PipelineOrchestrator:
                                display_handler=self.display_handler,
                                cancel_event=self.cancel_event)
         dl_result = downloader.download(
-            playlist.url,
+            pl_url,
             output_dir,
-            key=playlist.key,
+            key=pl_key,
             confirm=not auto,
             dry_run=dry_run,
             validate_cookies=validate_cookies,
@@ -8229,8 +7959,9 @@ class PipelineOrchestrator:
                 return False
 
     def _ask_save_to_config(self, key, url, album_name):
-        """Ask user if they want to save a new playlist to config."""
-        if self.prompt_handler.confirm(f"Save '{album_name}' to {DEFAULT_CONFIG_FILE}?", default=False):
-            self.config.add_playlist(key, url, album_name)
+        """Ask user if they want to save a new playlist."""
+        if self.prompt_handler.confirm(f"Save '{album_name}' to configuration?", default=False):
+            if self.playlist_db:
+                self.playlist_db.add(key, url, album_name)
 
 
