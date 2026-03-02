@@ -27,6 +27,7 @@ import type {
   PipelineProgress,
   PipelineStartResult,
   Playlist,
+  ResolveDestinationResponse,
   ServerInfoResponse,
   SettingsResponse,
   SyncDestinationsResponse,
@@ -442,6 +443,24 @@ export class APIClient {
 
   async getSyncStatusSummary(): Promise<SyncStatusSummary[]> {
     return this.get<SyncStatusSummary[]>('/api/sync/status');
+  }
+
+  /** Resolve a destination on the server — finds or creates a destination and returns sync key. */
+  async resolveDestination(opts: {
+    path?: string;
+    name?: string;
+    driveName?: string;
+    syncKey?: string;
+  }): Promise<ResolveDestinationResponse> {
+    const body: Record<string, string> = {};
+    if (opts.path) body['path'] = opts.path;
+    if (opts.name) body['name'] = opts.name;
+    if (opts.driveName) body['drive_name'] = opts.driveName;
+    if (opts.syncKey) body['sync_key'] = opts.syncKey;
+    return this.post<ResolveDestinationResponse>(
+      '/api/sync/destinations/resolve',
+      body,
+    );
   }
 
   // ── Cookies ──

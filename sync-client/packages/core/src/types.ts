@@ -104,7 +104,25 @@ export interface SyncDestination {
   name: string;
   path: string;
   scheme: string;
-  sync_key: string | null;
+  sync_key: string;
+}
+
+export interface ResolveDestinationResponse {
+  destination: SyncDestination & { type: string; available: boolean };
+  created: boolean;
+  sync_status: {
+    sync_key: string;
+    total_files: number;
+    synced_files: number;
+    new_files: number;
+    playlists: Array<{
+      name: string;
+      total_files: number;
+      synced_files: number;
+      new_files: number;
+      is_new_playlist: boolean;
+    }>;
+  } | null;
 }
 
 export interface SyncDestinationsResponse {
@@ -128,7 +146,7 @@ export interface OkResponse {
 
 export interface LinkDestinationResponse {
   ok: boolean;
-  sync_key: string | null;
+  sync_key: string;
   merge_stats?: { merged_count: number };
   created?: boolean;
 }

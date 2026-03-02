@@ -21,7 +21,7 @@ export function LinkDestinationModal({ show, destinationName, destinationPath, o
 
   useEffect(() => {
     if (show) {
-      setNewKeyName(`client-${destinationName}`);
+      setNewKeyName(destinationName);
       setMode('new');
       setSelectedKey('');
       setError('');

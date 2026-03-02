@@ -12,8 +12,6 @@ import {
   VERSION,
   getConfigDir,
   readManifest,
-  USB_SYNC_KEY_PREFIX,
-  CLIENT_SYNC_KEY_PREFIX,
 } from '@mporter/core';
 import type {
   BackgroundPrefetchStatus,
@@ -356,11 +354,18 @@ export function registerIPCHandlers(): void {
     'sync:resolveSyncKey',
     async (_event, destPath: string, usbDriveName?: string): Promise<string | null> => {
       try {
-        if (usbDriveName) return `${USB_SYNC_KEY_PREFIX}${usbDriveName}`;
+        // Use server-side resolution when connected
+        if (client.connectionState.connected) {
+          const scheme = usbDriveName ? 'usb://' : 'folder://';
+          const resolved = await client.resolveDestination({
+            path: `${scheme}${destPath}`,
+            driveName: usbDriveName,
+          });
+          return resolved.destination.sync_key;
+        }
+        // Offline fallback: read from manifest
         const manifest = readManifest(destPath);
-        if (manifest?.sync_key) return manifest.sync_key;
-        const basename = destPath.split('/').pop() ?? destPath.split('\\').pop() ?? 'sync';
-        return `${CLIENT_SYNC_KEY_PREFIX}${basename}`;
+        return manifest?.sync_key ?? null;
       } catch {
         return null;
       }

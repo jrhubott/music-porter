@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, statSync, createWriteStream, renameSync, unlinkS
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
-import { CLIENT_SYNC_KEY_PREFIX, DEFAULT_CONCURRENCY, FILE_DOWNLOAD_TIMEOUT_MS, TEMP_SUFFIX, USB_SYNC_KEY_PREFIX } from './constants.js';
+import { DEFAULT_CONCURRENCY, FILE_DOWNLOAD_TIMEOUT_MS, TEMP_SUFFIX } from './constants.js';
 import { SyncError } from './errors.js';
 import type { APIClient } from './api-client.js';
 import type { CacheManager } from './cache/cache-manager.js';
@@ -89,8 +89,15 @@ export class SyncEngine {
     // Phase 1: Read existing manifest
     const manifest = readManifest(destDir);
 
-    // Phase 2: Resolve sync key
-    const syncKey = this.resolveSyncKey(options.syncKey, manifest, destDir, options.usbDriveName);
+    // Phase 2: Resolve sync key via server
+    const destType = options.usbDriveName ? 'usb' : 'folder';
+    const scheme = destType === 'usb' ? 'usb://' : 'folder://';
+    const resolved = await this.client.resolveDestination({
+      path: `${scheme}${destDir}`,
+      driveName: options.usbDriveName,
+      syncKey: options.syncKey,
+    });
+    const syncKey = resolved.destination.sync_key;
     log('info', `Sync key: ${syncKey}`);
 
     // Phase 3: Determine which playlists to sync
@@ -366,9 +373,9 @@ export class SyncEngine {
       mkdirSync(destDir, { recursive: true });
     }
 
-    // Read existing manifest
+    // Read existing manifest — offline uses manifest sync key or explicit key
     const manifest = readManifest(destDir);
-    const syncKey = this.resolveSyncKey(options.syncKey, manifest, destDir, options.usbDriveName);
+    const syncKey = options.syncKey ?? manifest?.sync_key ?? 'offline-sync';
     log('info', `Offline sync — key: ${syncKey}`);
 
     // Use cached playlists as the source of truth
@@ -592,20 +599,4 @@ export class SyncEngine {
     }
   }
 
-  /** Resolve the sync key from explicit, USB drive name, manifest, or generated. */
-  private resolveSyncKey(
-    explicit: string | undefined,
-    manifest: SyncManifest | null,
-    destDir: string,
-    usbDriveName?: string,
-  ): string {
-    if (explicit) return explicit;
-    // USB drive name takes priority over manifest — the manifest may
-    // contain a stale key from before USB-aware sync was implemented.
-    if (usbDriveName) return `${USB_SYNC_KEY_PREFIX}${usbDriveName}`;
-    if (manifest?.sync_key) return manifest.sync_key;
-    // Generate from directory name
-    const dirName = destDir.split('/').pop() ?? destDir.split('\\').pop() ?? 'sync';
-    return `${CLIENT_SYNC_KEY_PREFIX}${dirName}`;
-  }
 }

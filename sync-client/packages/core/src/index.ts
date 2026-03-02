@@ -22,6 +22,7 @@ export type {
   Playlist,
   ProfileInfo,
   PruneResponse,
+  ResolveDestinationResponse,
   ServerConfig,
   ServerInfoResponse,
   SettingsResponse,
@@ -78,7 +79,6 @@ export {
   AUTH_HEADER_PREFIX,
   BONJOUR_BROWSE_TIMEOUT_MS,
   BONJOUR_SERVICE_TYPE,
-  CLIENT_SYNC_KEY_PREFIX,
   CONNECTION_HEALTH_CHECK_INTERVAL_MS,
   CONNECTION_RECONNECT_INTERVAL_MS,
   COOKIE_POLL_INTERVAL_MS,
@@ -105,7 +105,6 @@ export {
   SESSION_COOKIE_FALLBACK_S,
   STANDARD_TIMEOUT_MS,
   TEMP_SUFFIX,
-  USB_SYNC_KEY_PREFIX,
   VERSION,
 } from './constants.js';
 
