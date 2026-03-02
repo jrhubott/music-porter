@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, createWriteStream } from 'node:fs';
-import { stat, access, rename, unlink } from 'node:fs/promises';
+import { access, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
@@ -204,30 +204,23 @@ export class SyncEngine {
             continue;
           }
 
-          // Check disk
+          // Check disk — file exists at final path; atomic writes guarantee completeness
           if (await access(filePath).then(() => true).catch(() => false)) {
-            try {
-              const st = await stat(filePath);
-              if (st.size === file.size) {
-                totalSkipped++;
-                processed++;
-                syncedFiles[manifestKey] = file.size;
-                onProgress({
-                  phase: 'syncing',
-                  playlist: key,
-                  file: diskName,
-                  subdir,
-                  processed,
-                  total: grandTotal,
-                  copied: totalCopied,
-                  skipped: totalSkipped,
-                  failed: totalFailed,
-                });
-                continue;
-              }
-            } catch {
-              // Can't stat — will download
-            }
+            totalSkipped++;
+            processed++;
+            syncedFiles[manifestKey] = file.size;
+            onProgress({
+              phase: 'syncing',
+              playlist: key,
+              file: diskName,
+              subdir,
+              processed,
+              total: grandTotal,
+              copied: totalCopied,
+              skipped: totalSkipped,
+              failed: totalFailed,
+            });
+            continue;
           }
 
           // Cache hit check — copy from local cache instead of downloading
@@ -254,71 +247,71 @@ export class SyncEngine {
         filesToDownload.push(file);
       }
 
-      if (aborted) break;
+      if (!aborted) {
+        // Download files with concurrency limit
+        if (!options.dryRun) {
+          const results = await this.downloadBatch(
+            key,
+            filesToDownload,
+            destDir,
+            concurrency,
+            options.profile,
+            options.signal,
+            cache,
+            (file, success) => {
+              const dn = file.display_filename || file.filename;
+              const fileSubdir = file.output_subdir ?? key;
+              const fileManifestKey = fileSubdir ? `${fileSubdir}/${dn}` : dn;
+              processed++;
+              if (success) {
+                totalCopied++;
+                syncedFiles[fileManifestKey] = file.size;
+              } else {
+                totalFailed++;
+              }
+              onProgress({
+                phase: 'syncing',
+                playlist: key,
+                file: dn,
+                subdir: fileSubdir,
+                processed,
+                total: grandTotal,
+                copied: totalCopied,
+                skipped: totalSkipped,
+                failed: totalFailed,
+              });
+            },
+            log,
+          );
 
-      // Download files with concurrency limit
-      if (!options.dryRun) {
-        const results = await this.downloadBatch(
-          key,
-          filesToDownload,
-          destDir,
-          concurrency,
-          options.profile,
-          options.signal,
-          cache,
-          (file, success) => {
+          if (results.aborted) {
+            aborted = true;
+          }
+        } else {
+          // Dry run — count as would-be copies
+          for (const file of filesToDownload) {
             const dn = file.display_filename || file.filename;
-            const fileSubdir = file.output_subdir ?? key;
-            const fileManifestKey = fileSubdir ? `${fileSubdir}/${dn}` : dn;
+            const drySubdir = file.output_subdir ?? key;
             processed++;
-            if (success) {
-              totalCopied++;
-              syncedFiles[fileManifestKey] = file.size;
-            } else {
-              totalFailed++;
-            }
+            totalCopied++;
+            log('info', `[dry-run] Would download: ${drySubdir ? drySubdir + '/' : ''}${dn}`);
             onProgress({
               phase: 'syncing',
               playlist: key,
               file: dn,
-              subdir: fileSubdir,
+              subdir: drySubdir,
               processed,
               total: grandTotal,
               copied: totalCopied,
               skipped: totalSkipped,
               failed: totalFailed,
             });
-          },
-          log,
-        );
-
-        if (results.aborted) {
-          aborted = true;
-        }
-      } else {
-        // Dry run — count as would-be copies
-        for (const file of filesToDownload) {
-          const dn = file.display_filename || file.filename;
-          const drySubdir = file.output_subdir ?? key;
-          processed++;
-          totalCopied++;
-          log('info', `[dry-run] Would download: ${drySubdir ? drySubdir + '/' : ''}${dn}`);
-          onProgress({
-            phase: 'syncing',
-            playlist: key,
-            file: dn,
-            subdir: drySubdir,
-            processed,
-            total: grandTotal,
-            copied: totalCopied,
-            skipped: totalSkipped,
-            failed: totalFailed,
-          });
+          }
         }
       }
 
       // Record all synced files (skipped + downloaded) to server in one batch
-      if (!options.dryRun && Object.keys(syncedFiles).length > 0) {
+      if (!aborted && !options.dryRun && Object.keys(syncedFiles).length > 0) {
         try {
           const recordDestType = options.usbDriveName ? 'usb' : 'folder';
           await this.client.recordSync(
@@ -333,7 +326,7 @@ export class SyncEngine {
         }
       }
 
-      // Update manifest after each playlist
+      // Update manifest after each playlist (always, even if aborted mid-check-loop)
       if (!options.dryRun) {
         updateManifestPlaylist(newManifest, key, syncedFiles);
         writeManifest(destDir, newManifest);
