@@ -1009,6 +1009,43 @@ Rename a saved destination. If the destination had no explicit sync key, its tra
 
 ---
 
+### POST /api/sync/destinations/resolve
+
+Resolve a sync destination on the server. Finds an existing destination by name or path, or creates one from the given path and drive name. Returns the resolved destination with its sync key and current sync status.
+
+This endpoint moves sync key resolution logic from clients to the server.
+
+**Request body (at least `path` or `name` required):**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `path` | string | No | Destination path with scheme (e.g., `"usb:///Volumes/Lexar/RZR/Music"`) |
+| `drive_name` | string | No | Drive display name, used when creating a new destination from path |
+| `sync_key` | string | No | Explicit sync key to use (overrides default resolution) |
+| `name` | string | No | Name of an existing saved destination to resolve |
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `destination` | object | Resolved destination |
+| `destination.name` | string | Destination name |
+| `destination.path` | string | Destination path with scheme |
+| `destination.sync_key` | string | Resolved sync key (always set) |
+| `destination.type` | string | Destination type: `"usb"`, `"folder"`, or `"web-client"` |
+| `destination.available` | boolean | Whether the destination path is currently accessible |
+| `created` | boolean | `true` if a new destination was created, `false` if an existing one was found |
+| `sync_status` | object | Sync status for the resolved sync key |
+| `sync_status.sync_key` | string | Sync key name |
+| `sync_status.total_files` | integer | Total files in library |
+| `sync_status.synced_files` | integer | Files synced to this key |
+| `sync_status.new_files` | integer | Files not yet synced |
+| `sync_status.playlists` | object[] | Per-playlist sync details (same structure as `GET /api/sync/status/<key>`) |
+
+**Status codes:** 400 if both `path` and `name` are missing
+
+---
+
 ## Sync Operations
 
 ### POST /api/sync/run

@@ -244,7 +244,7 @@ The web dashboard (`web_ui.py`) provides a browser-based interface for all music
 
 11 Jinja2 templates in `templates/` using Bootstrap 5.3.3 dark theme (CDN from jsDelivr). `base.html` provides shared layout (sidebar, log panel, SSE handler). Pages: `/login`, `/` (dashboard), `/playlists`, `/pipeline`, `/convert`, `/sync`, `/settings`, `/operations`, `/audit`, `/about`.
 
-### API Endpoints (~59)
+### API Endpoints (~60)
 
 All API routes are defined in `web_api.py` as a Flask Blueprint.
 
@@ -258,7 +258,7 @@ All API routes are defined in `web_api.py` as a Flask Blueprint.
 - **Directories:** `GET /api/directories/music`, `GET /api/directories/export`
 - **Operations:** `POST /api/pipeline/run`, `/api/convert/run`, `/api/convert/batch`, `/api/library/backfill-metadata`
 - **Files:** `GET /api/files/<key>` (list with `display_filename`), `/<key>/<filename>` (download with Content-Disposition), `/<key>/<filename>/artwork`, `/<key>/sync-status`, `/<key>/download-all` (ZIP), `POST /api/files/download-zip`
-- **Sync:** `GET /api/sync/destinations`, `POST /api/sync/destinations`, `DELETE /api/sync/destinations/<name>`, `PUT /api/sync/destinations/<name>/link`, `POST /api/sync/destinations/<name>/rename`, `POST /api/sync/run`, `GET /api/sync/status`, `GET /api/sync/status/<key>`
+- **Sync:** `GET /api/sync/destinations`, `POST /api/sync/destinations`, `DELETE /api/sync/destinations/<name>`, `PUT /api/sync/destinations/<name>/link`, `POST /api/sync/destinations/<name>/rename`, `POST /api/sync/destinations/resolve`, `POST /api/sync/run`, `GET /api/sync/status`, `GET /api/sync/status/<key>`
 - **Sync Keys:** `GET /api/sync/keys`, `DELETE /api/sync/keys/<key>`, `DELETE /api/sync/keys/<key>/playlists/<playlist>`, `POST /api/sync/keys/<key>/prune`, `POST /api/sync/keys/<key>/rename`, `POST /api/sync/client-record`
 - **EQ:** `GET /api/eq`, `POST /api/eq`, `DELETE /api/eq`, `GET /api/eq/resolve`, `GET /api/eq/effects`
 - **Tasks:** `GET /api/tasks`, `/api/tasks/<id>`, `POST /api/tasks/<id>/cancel`, `GET /api/stream/<id>` (SSE), `GET /api/tasks/history`, `GET /api/tasks/stats`, `POST /api/tasks/clear`
@@ -336,7 +336,7 @@ All persistent state lives in `data/`: `config.yaml`, `cookies.txt`, `music-port
 
 ### config.yaml
 
-YAML file with `settings` (output\_type, workers, server\_name, quality\_preset), `output_types` (profile definitions with template-based formats), `playlists` (key, url, name), and `destinations` (name, path with `usb://` or `folder://` scheme). Path: `data/config.yaml`. Auto-created if missing.
+YAML file with `settings` (output\_type, workers, server\_name, quality\_preset) and `output_types` (profile definitions with template-based formats). Playlists and destinations are stored in the SQLite database (moved from config in schema v4). Path: `data/config.yaml`. Auto-created if missing.
 
 ### Schema Versioning
 
@@ -354,7 +354,7 @@ Both functions are called at startup before any DB class or ConfigManager is ins
 3. Migrations must be idempotent and sequential (version 0→1→2→…)
 4. **Never modify existing version blocks** — each `if current < N:` block sets the version to exactly N (not `DB_SCHEMA_VERSION`/`CONFIG_SCHEMA_VERSION`). New changes go exclusively in a new `if current < N:` block. Fresh installs run through all migrations sequentially (0→1→2→…N). This applies to both DB and config migrations.
 
-**Current DB schema (version 6) — 7 tables:**
+**Current DB schema (version 7) — 9 tables:**
 
 - `audit_entries`: id, timestamp, operation, description, params, status, duration\_s, source
 - `task_history`: id, operation, description, status, result, error, started\_at, finished\_at, source
@@ -363,14 +363,14 @@ Both functions are called at startup before any DB class or ConfigManager is ins
 - `eq_presets`: id, profile, playlist, loudnorm, bass\_boost, treble\_boost, compressor, updated\_at (UNIQUE profile+playlist)
 - `scheduled_jobs`: job\_name (PK), next\_run\_time, last\_run\_time, last\_run\_status, last\_run\_error, on\_missed, updated\_at
 - `tracks`: uuid (PK), playlist, file\_path, title, artist, album, cover\_art\_path, cover\_art\_hash, duration\_s, file\_size\_bytes, source\_m4a\_path, genre, track\_number, track\_total, disc\_number, disc\_total, year, composer, album\_artist, bpm, comment, compilation, grouping, lyrics, copyright, created\_at, updated\_at (indexes: playlist, file\_path, source\_m4a\_path)
+- `playlists`: key (PK), url, name, created\_at, updated\_at
+- `destinations`: name (PK), path, sync\_key (NOT NULL), created\_at, updated\_at (index: sync\_key)
 
-**Current config schema (version 3) — top-level keys:**
+**Current config schema (version 4) — top-level keys:**
 
 - `schema_version` (integer)
 - `settings` (output\_type, workers, server\_name, quality\_preset)
 - `output_types` (profile name → id3\_title, id3\_artist, id3\_album, id3\_genre, id3\_extra, id3\_versions, artwork\_size, filename, directory, usb\_dir)
-- `playlists` (list of key, url, name)
-- `destinations` (list of name, path with scheme, optional sync\_key)
 
 ### USB Drive Exclusions
 
@@ -382,11 +382,11 @@ Constant `EXCLUDED_USB_VOLUMES` in `porter_core.py` — platform-specific (macOS
 
 Organized by concern (dataclasses, DB classes, business logic):
 
-**Configuration:** `EQConfig`, `OutputProfile`, `SafeTemplateDict`, `PlaylistConfig`, `SyncDestination`, `ConfigManager`
+**Configuration:** `EQConfig`, `OutputProfile`, `SafeTemplateDict`, `SyncDestination`, `ConfigManager`
 
 **Infrastructure:** `Logger`, `ProgressBar`, `MigrationEvent`, `DependencyChecker`, `UserPromptHandler` (protocol), `DisplayHandler` (protocol), `NonInteractivePromptHandler`, `NullDisplayHandler`
 
-**Database:** `AuditLogger`, `TaskHistoryDB`, `ScheduledJobsDB`, `SyncTracker`, `TrackDB`, `EQConfigManager`
+**Database:** `AuditLogger`, `TaskHistoryDB`, `ScheduledJobsDB`, `SyncTracker`, `TrackDB`, `EQConfigManager`, `PlaylistDB`
 
 **Result dataclasses:** `ConversionResult`, `DownloadResult`, `SyncResult`, `SyncStatusResult`, `DeleteResult`, `PipelineResult`, `AggregateResult`, `DependencyCheckResult`
 

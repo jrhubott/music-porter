@@ -1400,6 +1400,69 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
+  /api/sync/destinations/resolve:
+    post:
+      operationId: resolveSyncDestination
+      summary: Resolve destination
+      description: >
+        Resolve a sync destination on the server. Finds an existing destination
+        by name or path, or creates one from the given path and drive name.
+        Returns the resolved destination with its sync key and current sync
+        status. Moves sync key resolution logic from clients to the server.
+      tags: [Sync Destinations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+                  description: "Destination path with scheme (e.g. usb:///Volumes/Lexar/RZR/Music)"
+                drive_name:
+                  type: string
+                  description: Drive display name, used when creating a new destination from path
+                sync_key:
+                  type: string
+                  description: Explicit sync key to use (overrides default resolution)
+                name:
+                  type: string
+                  description: Name of an existing saved destination to resolve
+      responses:
+        "200":
+          description: Destination resolved
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [destination, created, sync_status]
+                properties:
+                  destination:
+                    type: object
+                    required: [name, path, sync_key, type, available]
+                    properties:
+                      name:
+                        type: string
+                      path:
+                        type: string
+                      sync_key:
+                        type: string
+                        description: Resolved sync key (always set)
+                      type:
+                        type: string
+                        enum: [usb, folder, web-client]
+                      available:
+                        type: boolean
+                        description: Whether the destination path is currently accessible
+                  created:
+                    type: boolean
+                    description: Whether a new destination was created
+                  sync_status:
+                    $ref: "#/components/schemas/SyncStatusDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
   # ── Sync Operations ───────────────────────────────────────────────
   /api/sync/run:
     post:

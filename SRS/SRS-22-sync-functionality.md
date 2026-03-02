@@ -23,7 +23,7 @@
 
 | ID | Web | CLI | GUI | iOS | Requirement |
 |----|-----|-----|-----|-----|-------------|
-| 22.2.1 | [x] | N/A | N/A | [ ] | As a user, I can add a named destination with a folder path so that I can reuse it for future syncs. Acceptance: the destination is saved persistently in configuration with its name and path; it appears in the destination list on subsequent sessions. |
+| 22.2.1 | [x] | N/A | N/A | [ ] | As a user, I can add a named destination with a folder path so that I can reuse it for future syncs. Acceptance: the destination is saved persistently with its name and path; it appears in the destination list on subsequent sessions. |
 | 22.2.2 | [x] | N/A | N/A | [ ] | As a user, I can remove a saved destination so that outdated or unwanted entries are cleaned up. Acceptance: the destination is deleted from configuration; its sync tracking data (sync key) is not deleted unless explicitly requested. |
 | 22.2.3 | [x] | N/A | N/A | [ ] | As a user, I can rename a saved destination so that I can update its display name. Acceptance: the destination name changes everywhere it appears; its path, sync key association, and tracking data remain intact. |
 | 22.2.4 | [x] | [x] | [x] | [ ] | As a user, I can view all saved destinations with their type, path, and availability so that I can choose where to sync. Acceptance: each destination shows its name, type (USB, folder, or browser client), path, and whether the path currently exists or is connected. |

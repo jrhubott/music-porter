@@ -1,6 +1,6 @@
 # Database Schema Reference
 
-SQLite database stored at `data/music-porter.db`. Current version: **DB_SCHEMA_VERSION = 6** (defined in `porter_core.py` ~line 71).
+SQLite database stored at `data/music-porter.db`. Current version: **DB_SCHEMA_VERSION = 7** (defined in `porter_core.py` ~line 71).
 
 ## PRAGMA Settings
 
@@ -191,6 +191,40 @@ Library metadata for all MP3s. Core table added in **migration 3 -> 4**, source\
 
 ---
 
+### playlists
+
+Playlist configuration previously stored in `config.yaml`, migrated to the database for better data management. Added in **migration 6 -> 7**.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| key | TEXT | PRIMARY KEY | Unique playlist identifier |
+| url | TEXT | NOT NULL | Apple Music playlist URL |
+| name | TEXT | NOT NULL | Human-readable playlist name |
+| created\_at | REAL | NOT NULL | Unix epoch timestamp |
+| updated\_at | REAL | NOT NULL | Unix epoch timestamp |
+
+**Class:** `ConfigManager` (or related playlist management class)
+
+---
+
+### destinations
+
+Sync destination configuration previously stored in `config.yaml`, migrated to the database for better data management. Added in **migration 6 -> 7**.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| name | TEXT | PRIMARY KEY | Unique destination name |
+| path | TEXT | NOT NULL | Destination path (with `usb://` or `folder://` scheme) |
+| sync\_key | TEXT | NOT NULL | Associated sync key identifier |
+| created\_at | REAL | NOT NULL | Unix epoch timestamp |
+| updated\_at | REAL | NOT NULL | Unix epoch timestamp |
+
+**Indexes:** `idx_destinations_sync_key(sync_key)`
+
+**Class:** `ConfigManager` (or related destination management class)
+
+---
+
 ## Migration History
 
 | From | To | Changes |
@@ -201,10 +235,11 @@ Library metadata for all MP3s. Core table added in **migration 3 -> 4**, source\
 | 3 | 4 | Added `tracks` table with playlist and file\_path indexes. |
 | 4 | 5 | Added `idx_tracks_source_m4a` index on `tracks(source_m4a_path)`. |
 | 5 | 6 | Added 14 metadata columns to `tracks` (genre through copyright). Restructured library directories and updated file paths in existing rows. |
+| 6 | 7 | Added `playlists` and `destinations` tables. Migrated playlist and destination data from `config.yaml` to the database. Added `idx_destinations_sync_key` index. |
 
 ## Notes
 
 - Migrations run sequentially at startup via `migrate_db_schema()` before any DB class is instantiated.
 - Each `if current < N:` block is idempotent and sets the version to exactly N.
-- Fresh installs run through all migrations 0 -> 1 -> 2 -> ... -> 6.
+- Fresh installs run through all migrations 0 -> 1 -> 2 -> ... -> 7.
 - Never modify existing migration blocks; always add a new `if current < N:` block.
