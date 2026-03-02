@@ -1929,13 +1929,63 @@ def api_sync_status():
 def api_sync_status_detail(dest_name):
     """Per-playlist sync breakdown for a destination's group.
 
-    Resolves destination name → internal sync_key → status.
+    Resolves destination name → internal sync_key → DB-based status.
     Returns status for the entire destination group.
     """
     ctx = _ctx()
-    export_base = str(ctx.project_root / mp.get_audio_dir())
-    status = ctx.sync_tracker.get_destination_status(dest_name, export_base)
-    return jsonify(status.to_dict())
+    dest = ctx.sync_tracker.get_destination(dest_name)
+    if not dest:
+        return jsonify({'error': 'Destination not found'}), 404
+
+    sync_key = dest.sync_key
+    conn = ctx.sync_tracker._connect()
+    try:
+        rows = conn.execute(
+            "SELECT name FROM destinations WHERE sync_key = ?", (sync_key,)
+        ).fetchall()
+        group_names = [r['name'] for r in rows]
+    finally:
+        conn.close()
+
+    playlist_stats = {
+        s['playlist']: s['track_count']
+        for s in ctx.track_db.get_playlist_stats()
+    }
+    synced_counts = ctx.sync_tracker.get_synced_counts(sync_key)
+
+    playlists = []
+    new_playlist_count = 0
+    for name, total in sorted(playlist_stats.items()):
+        synced = synced_counts.get(name, 0)
+        new = total - synced
+        is_new = synced == 0
+        playlists.append({
+            'name': name,
+            'total_files': total,
+            'synced_files': synced,
+            'new_files': new,
+            'is_new_playlist': is_new,
+        })
+        if is_new:
+            new_playlist_count += 1
+
+    total_files = sum(playlist_stats.values())
+    total_synced = sum(synced_counts.values())
+
+    keys = ctx.sync_tracker._get_keys()
+    key_info = next((k for k in keys if k['key_name'] == sync_key), None)
+    last_sync = key_info['last_sync_at'] if key_info else 0
+
+    result = mp.SyncStatusResult(
+        destinations=group_names,
+        last_sync_at=last_sync,
+        playlists=playlists,
+        total_files=total_files,
+        synced_files=total_synced,
+        new_files=total_files - total_synced,
+        new_playlists=new_playlist_count,
+    )
+    return jsonify(result.to_dict())
 
 
 @api_bp.route('/api/sync/destinations/<name>/reset', methods=['POST'])
