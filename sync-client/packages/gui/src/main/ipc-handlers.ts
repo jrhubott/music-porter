@@ -355,9 +355,9 @@ export function registerIPCHandlers(): void {
     async (_event, destPath: string, usbDriveName?: string): Promise<string | null> => {
       try {
         // Use server-side resolution when connected
-        if (client.connectionState.connected) {
+        if (apiClient.connectionState.connected) {
           const scheme = usbDriveName ? 'usb://' : 'folder://';
-          const resolved = await client.resolveDestination({
+          const resolved = await apiClient.resolveDestination({
             path: `${scheme}${destPath}`,
             driveName: usbDriveName,
           });
