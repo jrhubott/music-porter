@@ -278,9 +278,13 @@ export function registerSyncCommand(program: Command): void {
           printField('Failed', chalk.red(String(result.failed)));
         }
         printField('Duration', formatDuration(result.durationMs));
+        if (result.destError) {
+          console.log();
+          printError(result.destError);
+        }
         console.log();
 
-        if (result.failed > 0) {
+        if (result.destError || result.failed > 0) {
           process.exitCode = EXIT_PARTIAL_FAILURE;
         }
       } catch (err) {
