@@ -22,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import ClassVar, Protocol, runtime_checkable
+from typing import Any, ClassVar, Optional, Protocol, runtime_checkable
 
 # ══════════════════════════════════════════════════════════════════
 # Section 0: Platform Detection
@@ -592,7 +592,7 @@ def apply_template(template, **variables):
 
 # Third-party imports — deferred so the script can start without a venv
 # and let DependencyChecker install missing packages first.
-_tqdm = None   # set by _init_third_party()
+_tqdm: Any = None   # set by _init_third_party()
 
 def _init_third_party():
     """Import third-party packages after DependencyChecker has ensured they exist."""
@@ -2949,7 +2949,7 @@ class SyncTracker:
                     name = Path(dest_tmp.raw_path).name
             # Sanitize name to valid characters
             import re as _re
-            name = _re.sub(r'[^a-zA-Z0-9_-]', '-', name)
+            name = _re.sub(r'[^a-zA-Z0-9_-]', '-', name or '')
             if not name:
                 name = 'destination'
 
@@ -3880,7 +3880,7 @@ class DependencyChecker:
 
     def __init__(self, logger=None):
         self.logger = logger or Logger()
-        self.venv_python = None
+        self.venv_python: str = sys.executable
         self.venv_path = None
         self.dep_status = {
             'venv': False,
@@ -3929,7 +3929,7 @@ class DependencyChecker:
                 packages.append(name)
         return packages
 
-    def _check_package(self, package_name):
+    def _check_package(self, package_name: str) -> bool:
         """Check if a single package is available. Returns True if installed."""
         if package_name in self.SUBPROCESS_CHECK:
             try:
@@ -7629,7 +7629,7 @@ class AggregateStatistics:
         self.successful_playlists = 0
         self.failed_playlists = 0
         self.start_time = time.time()
-        self.end_time = None
+        self.end_time: Optional[float] = None
         self.usb_destination = None
 
     def add_playlist_result(self, orchestrator_stats):

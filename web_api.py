@@ -442,7 +442,7 @@ def api_convert_batch():
         logger = ctx.make_logger(task_id, verbose=verbose)
         config = mp.ConfigManager(logger=logger, audit_logger=ctx.audit_logger,
                                   audit_source=source)
-        quality_preset = config.get_setting('quality_preset', preset)
+        quality_preset = config.get_setting('quality_preset', preset) or mp.DEFAULT_QUALITY_PRESET
         workers = config.get_setting('workers', mp.DEFAULT_WORKERS)
         display = ctx.make_display_handler(task_id)
         task = ctx.task_manager.get(task_id)
@@ -940,7 +940,7 @@ def api_pipeline_run():
         deps = mp.DependencyChecker(logger)
 
         quality_preset = preset or config.get_setting(
-            'quality_preset', mp.DEFAULT_QUALITY_PRESET)
+            'quality_preset', mp.DEFAULT_QUALITY_PRESET) or mp.DEFAULT_QUALITY_PRESET
         display = ctx.make_display_handler(task_id)
         task = ctx.task_manager.get(task_id)
 
@@ -1637,7 +1637,9 @@ def api_sync_destinations():
             base = usb_mgr._get_usb_base_path(vol)
             usb_path = f"usb://{base / usb_dir}" if usb_dir else f"usb://{base}"
             dest = mp.SyncDestination(name=vol, path=usb_path)
-            destinations.append(dest.to_api_dict())
+            dest_dict = dest.to_api_dict()
+            dest_dict['auto_detected'] = True
+            destinations.append(dest_dict)
 
     return jsonify({'destinations': destinations})
 

@@ -409,7 +409,7 @@ function loadDestinations() {
     }
 
     sel.innerHTML = opts;
-    renderDestsTable(dests.filter(d => d.type !== 'usb'));
+    renderDestsTable(dests.filter(d => !d.auto_detected));
     renderSyncStatusForDest();
     loadSyncStatusData();
   });
