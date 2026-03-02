@@ -74,7 +74,7 @@ VALID_DEST_NAME_RE = r'^[a-zA-Z0-9_-]+$'
 
 # Schema version constants — increment and add a migration case when changing
 # the config.yaml structure or DB tables/columns.
-CONFIG_SCHEMA_VERSION = 3
+CONFIG_SCHEMA_VERSION = 4
 DB_SCHEMA_VERSION = 7
 
 # Excluded USB volumes by OS
@@ -1516,6 +1516,65 @@ def migrate_config_schema(logger=None):
 
         data['schema_version'] = 3
         dirty = True
+
+    # ── Version 3 → 4: move playlists + destinations to DB ────────
+    if current < 4:
+        # DB tables already exist from DB migration v7 (runs first)
+        db_path = Path(DEFAULT_DB_FILE)
+        if db_path.exists():
+            db_conn = sqlite3.connect(str(db_path), check_same_thread=False)
+            try:
+                now = time.time()
+
+                # Migrate playlists from config → DB
+                for entry in data.get('playlists', []):
+                    key = str(entry.get('key', '')).strip()
+                    url = str(entry.get('url', '')).strip()
+                    name = str(entry.get('name', '')).strip()
+                    if key and url and name:
+                        db_conn.execute(
+                            "INSERT OR IGNORE INTO playlists "
+                            "(key, url, name, created_at, updated_at) "
+                            "VALUES (?, ?, ?, ?, ?)",
+                            (key, url, name, now, now),
+                        )
+
+                # Migrate destinations from config → DB
+                for entry in data.get('destinations', []):
+                    dname = str(entry.get('name', '')).strip()
+                    dpath = str(entry.get('path', '')).strip()
+                    if dname and dpath:
+                        dsync_key = str(entry.get('sync_key', '')).strip()
+                        if not dsync_key:
+                            dsync_key = dname  # No more null sync_key
+                        db_conn.execute(
+                            "INSERT OR IGNORE INTO destinations "
+                            "(name, path, sync_key, created_at, updated_at) "
+                            "VALUES (?, ?, ?, ?, ?)",
+                            (dname, dpath, dsync_key, now, now),
+                        )
+                        # Ensure sync_keys row exists
+                        db_conn.execute(
+                            "INSERT OR IGNORE INTO sync_keys "
+                            "(key_name, last_sync_at, created_at) "
+                            "VALUES (?, 0, ?)",
+                            (dsync_key, now),
+                        )
+
+                db_conn.commit()
+            finally:
+                db_conn.close()
+
+        # Remove playlists and destinations from config.yaml
+        data.pop('playlists', None)
+        data.pop('destinations', None)
+
+        data['schema_version'] = 4
+        dirty = True
+        changes.append("moved playlists and destinations to database")
+        if logger:
+            logger.info(
+                "Config migration 3→4: moved playlists + destinations to DB")
 
     if dirty:
         with open(conf_path, 'w') as f:
