@@ -35,10 +35,10 @@
 
 | ID | Web | CLI | GUI | iOS | Requirement |
 |----|-----|-----|-----|-----|-------------|
-| 22.3.1 | [x] | [x] | [x] | [ ] | As a user, I can see connected USB drives automatically appear as available sync destinations so that I don't have to manually enter paths. Acceptance: when a USB drive is connected, it appears in the destination list without user action. |
-| 22.3.2 | [x] | [x] | [x] | [ ] | As a user, I can expect that system volumes (e.g., boot drives) are excluded from the USB destination list so that I don't accidentally sync to the wrong drive. Acceptance: on macOS, "Macintosh HD" and "Macintosh HD - Data" are excluded; on Windows, "C:" is excluded; on Linux, "boot" and "root" are excluded. |
-| 22.3.3 | [x] | [x] | [x] | [ ] | As a user, I can expect USB drive detection to work on macOS, Linux, and Windows so that the feature is available regardless of my platform. Acceptance: macOS scans `/Volumes/`, Linux scans `/media/$USER/` and `/mnt/`, Windows scans drive letters. |
-| 22.3.4 | [x] | [x] | [x] | [ ] | As a user, I can eject a USB drive after sync completes so that I can safely remove it. Acceptance: on macOS and Linux, the drive is ejected automatically or on request; on Windows, the user is informed to eject manually. |
+| 22.3.1 | [x] | [x] | [x] | N/A | As a user, I can see connected USB drives automatically appear as available sync destinations so that I don't have to manually enter paths. Acceptance: when a USB drive is connected, it appears in the destination list without user action. |
+| 22.3.2 | [x] | [x] | [x] | N/A | As a user, I can expect that system volumes (e.g., boot drives) are excluded from the USB destination list so that I don't accidentally sync to the wrong drive. Acceptance: on macOS, "Macintosh HD" and "Macintosh HD - Data" are excluded; on Windows, "C:" is excluded; on Linux, "boot" and "root" are excluded. |
+| 22.3.3 | [x] | [x] | [x] | N/A | As a user, I can expect USB drive detection to work on macOS, Linux, and Windows so that the feature is available regardless of my platform. Acceptance: macOS scans `/Volumes/`, Linux scans `/media/$USER/` and `/mnt/`, Windows scans drive letters. |
+| 22.3.4 | [x] | [x] | [x] | N/A | As a user, I can eject a USB drive after sync completes so that I can safely remove it. Acceptance: on macOS and Linux, the drive is ejected automatically or on request; on Windows, the user is informed to eject manually. |
 
 ---
 
@@ -47,11 +47,11 @@
 | ID | Web | CLI | GUI | iOS | Requirement |
 |----|-----|-----|-----|-----|-------------|
 | 22.4.1 | [x] | [x] | [x] | [ ] | As a user, I can expect each destination to have a tracking key that records which files have been synced so that incremental sync works correctly. Acceptance: a sync key is created or associated when a destination is first synced; subsequent syncs reference this key to determine what is new. |
-| 22.4.2 | [x] | [x] | [ ] | [ ] | As a user, I can view all sync keys with their total synced file counts so that I can see the tracking state. Acceptance: a list of all sync keys is shown, each with the number of files recorded as synced. |
-| 22.4.3 | [x] | N/A | N/A | [ ] | As a user, I can delete a sync key and all its tracking data so that I can reset sync state for a destination. Acceptance: the sync key and all associated file records are removed from the database; files at the destination are not affected. |
-| 22.4.4 | [x] | N/A | N/A | [ ] | As a user, I can remove tracking for a specific playlist from a sync key so that only that playlist is re-synced next time. Acceptance: file records for the specified playlist are deleted from the sync key; records for other playlists remain. |
-| 22.4.5 | [x] | N/A | N/A | [ ] | As a user, I can prune stale records from a sync key so that tracking data stays accurate when files are removed from the library. Acceptance: file records that reference tracks no longer in the library are removed; valid records remain. |
-| 22.4.6 | [x] | N/A | N/A | [ ] | As a user, I can rename a sync key so that its name reflects its current purpose. Acceptance: the sync key name changes in the database; all destination references and file records update automatically. |
+| 22.4.2 | [x] | [x] | [ ] | [x] | As a user, I can view all sync keys with their total synced file counts so that I can see the tracking state. Acceptance: a list of all sync keys is shown, each with the number of files recorded as synced. |
+| 22.4.3 | [x] | N/A | N/A | [x] | As a user, I can delete a sync key and all its tracking data so that I can reset sync state for a destination. Acceptance: the sync key and all associated file records are removed from the database; files at the destination are not affected. |
+| 22.4.4 | [x] | N/A | N/A | [x] | As a user, I can remove tracking for a specific playlist from a sync key so that only that playlist is re-synced next time. Acceptance: file records for the specified playlist are deleted from the sync key; records for other playlists remain. |
+| 22.4.5 | [x] | N/A | N/A | [x] | As a user, I can prune stale records from a sync key so that tracking data stays accurate when files are removed from the library. Acceptance: file records that reference tracks no longer in the library are removed; valid records remain. |
+| 22.4.6 | [x] | N/A | N/A | [x] | As a user, I can rename a sync key so that its name reflects its current purpose. Acceptance: the sync key name changes in the database; all destination references and file records update automatically. |
 
 ---
 
@@ -73,10 +73,10 @@ Sync keys track which files have been synced to a physical device. Some devices 
 
 | ID | Web | CLI | GUI | iOS | Requirement |
 |----|-----|-----|-----|-----|-------------|
-| 22.6.1 | [x] | [x] | [x] | [ ] | As a user, I can view a summary across all sync keys showing total files, synced files, and new files so that I can see overall sync health. Acceptance: a summary table or card displays aggregate counts across all tracked sync keys. |
-| 22.6.2 | [x] | [x] | [x] | [ ] | As a user, I can view a per-playlist breakdown for a specific sync key so that I can see detailed sync status. Acceptance: for a given sync key, each playlist shows its total file count, synced count, and new (unsynced) count. |
-| 22.6.3 | [x] | [x] | [x] | [ ] | As a user, I can see which playlists have never been synced to a given key so that I know what's missing. Acceptance: playlists with zero synced files for the selected key are clearly identified. |
-| 22.6.4 | [x] | [x] | [x] | [ ] | As a user, I can see how many new (unsynced) files exist per playlist for a given key so that I can prioritize what to sync. Acceptance: each playlist shows the count of files not yet recorded in the sync key. |
+| 22.6.1 | [x] | [x] | [x] | [x] | As a user, I can view a summary across all sync keys showing total files, synced files, and new files so that I can see overall sync health. Acceptance: a summary table or card displays aggregate counts across all tracked sync keys. |
+| 22.6.2 | [x] | [x] | [x] | [x] | As a user, I can view a per-playlist breakdown for a specific sync key so that I can see detailed sync status. Acceptance: for a given sync key, each playlist shows its total file count, synced count, and new (unsynced) count. |
+| 22.6.3 | [x] | [x] | [x] | [x] | As a user, I can see which playlists have never been synced to a given key so that I know what's missing. Acceptance: playlists with zero synced files for the selected key are clearly identified. |
+| 22.6.4 | [x] | [x] | [x] | [x] | As a user, I can see how many new (unsynced) files exist per playlist for a given key so that I can prioritize what to sync. Acceptance: each playlist shows the count of files not yet recorded in the sync key. |
 | 22.6.5 | [x] | [ ] | [x] | [ ] | As a user, I can view which sync keys have received each individual file so that I can trace where a specific track has been synced. Acceptance: for a given file, a list of sync keys that include it is displayed. |
 
 ---
@@ -89,16 +89,16 @@ All sync clients (web dashboard, desktop app, iOS app) share core sync capabilit
 
 | ID | Web | CLI | GUI | iOS | Requirement |
 |----|-----|-----|-----|-----|-------------|
-| 22.7.1 | N/A | [x] | [x] | [ ] | As a user, I can discover servers automatically on the local network so that I don't have to manually configure a connection. Acceptance: the client uses mDNS/Bonjour to find running music-porter servers and presents them for selection. |
-| 22.7.2 | N/A | [x] | [x] | [ ] | As a user, I can enter a server URL and API key manually so that I can connect to servers not on the local network. Acceptance: the client accepts a URL and API key, validates the connection, and saves the configuration. |
-| 22.7.3 | N/A | [x] | [x] | [ ] | As a user, I can connect via local network or external URL, with the client trying local first and falling back to external so that the fastest connection is used automatically. Acceptance: the client attempts the local address first; if unreachable, it connects via the external URL without user intervention. |
-| 22.7.4 | N/A | [ ] | [x] | [ ] | As a user, I can reconnect, disconnect, or go offline from settings so that I have control over the connection state. Acceptance: settings provide explicit actions to reconnect to the server, disconnect cleanly, or switch to offline mode. |
+| 22.7.1 | N/A | [x] | [x] | [x] | As a user, I can discover servers automatically on the local network so that I don't have to manually configure a connection. Acceptance: the client uses mDNS/Bonjour to find running music-porter servers and presents them for selection. |
+| 22.7.2 | N/A | [x] | [x] | [x] | As a user, I can enter a server URL and API key manually so that I can connect to servers not on the local network. Acceptance: the client accepts a URL and API key, validates the connection, and saves the configuration. |
+| 22.7.3 | N/A | [x] | [x] | [x] | As a user, I can connect via local network or external URL, with the client trying local first and falling back to external so that the fastest connection is used automatically. Acceptance: the client attempts the local address first; if unreachable, it connects via the external URL without user intervention. |
+| 22.7.4 | N/A | [ ] | [x] | [x] | As a user, I can reconnect, disconnect, or go offline from settings so that I have control over the connection state. Acceptance: settings provide explicit actions to reconnect to the server, disconnect cleanly, or switch to offline mode. |
 
 ### Playlist Selection
 
 | ID | Web | CLI | GUI | iOS | Requirement |
 |----|-----|-----|-----|-----|-------------|
-| 22.7.5 | [x] | [x] | [x] | [ ] | As a user, I can view all playlists with file counts, sizes, and freshness status so that I can see what's available. Acceptance: each playlist shows its track count, total size, and whether it has new content since the last sync. |
+| 22.7.5 | [x] | [x] | [x] | [x] | As a user, I can view all playlists with file counts, sizes, and freshness status so that I can see what's available. Acceptance: each playlist shows its track count, total size, and whether it has new content since the last sync. |
 | 22.7.6 | [x] | [x] | [x] | [ ] | As a user, I can select individual playlists or all playlists for sync so that I can control what gets synced. Acceptance: checkboxes or a select-all option allow choosing which playlists to include in the next sync operation. |
 
 ### Sync Execution
@@ -117,18 +117,18 @@ All sync clients (web dashboard, desktop app, iOS app) share core sync capabilit
 
 | ID | Web | CLI | GUI | iOS | Requirement |
 |----|-----|-----|-----|-----|-------------|
-| 22.7.14 | N/A | [x] | [x] | [ ] | As a user, I can continue working offline using locally cached files when the server is unavailable so that I can still sync from cache. Acceptance: when the server is unreachable, the client operates in offline mode using cached metadata and audio files. |
-| 22.7.15 | N/A | [x] | [x] | [ ] | As a user, I can pin playlists for offline caching so that they are available without a server connection. Acceptance: pinned playlists are downloaded to the local cache and remain available when offline. |
-| 22.7.16 | N/A | [x] | [x] | [ ] | As a user, I can enable auto-pin so that new playlists are automatically pinned as they appear on the server. Acceptance: when auto-pin is enabled, any playlist added to the server is automatically marked as pinned and cached. |
-| 22.7.17 | N/A | [x] | [x] | [ ] | As a user, I can view per-playlist cache status (fully cached, partially cached, not cached) so that I know what's available offline. Acceptance: each playlist displays its cache state with a visual indicator. |
-| 22.7.18 | N/A | [ ] | [x] | [ ] | As a user, I can expect background prefetch to automatically cache pinned playlists during idle time so that they are ready when I need them. Acceptance: when the client is idle and connected to the server, pinned playlists are downloaded in the background without user action. |
-| 22.7.19 | N/A | [x] | [x] | [ ] | As a user, I can manage cache by setting a maximum cache size, clearing individual playlists, or clearing all cached files so that I can control disk usage. Acceptance: cache settings allow setting a size limit; clearing a playlist removes its cached files; clearing all removes the entire cache. |
+| 22.7.14 | N/A | [x] | [x] | [x] | As a user, I can continue working offline using locally cached files when the server is unavailable so that I can still sync from cache. Acceptance: when the server is unreachable, the client operates in offline mode using cached metadata and audio files. |
+| 22.7.15 | N/A | [x] | [x] | [x] | As a user, I can pin playlists for offline caching so that they are available without a server connection. Acceptance: pinned playlists are downloaded to the local cache and remain available when offline. |
+| 22.7.16 | N/A | [x] | [x] | [x] | As a user, I can enable auto-pin so that new playlists are automatically pinned as they appear on the server. Acceptance: when auto-pin is enabled, any playlist added to the server is automatically marked as pinned and cached. |
+| 22.7.17 | N/A | [x] | [x] | [x] | As a user, I can view per-playlist cache status (fully cached, partially cached, not cached) so that I know what's available offline. Acceptance: each playlist displays its cache state with a visual indicator. |
+| 22.7.18 | N/A | [ ] | [x] | [x] | As a user, I can expect background prefetch to automatically cache pinned playlists during idle time so that they are ready when I need them. Acceptance: when the client is idle and connected to the server, pinned playlists are downloaded in the background without user action. |
+| 22.7.19 | N/A | [x] | [x] | [x] | As a user, I can manage cache by setting a maximum cache size, clearing individual playlists, or clearing all cached files so that I can control disk usage. Acceptance: cache settings allow setting a size limit; clearing a playlist removes its cached files; clearing all removes the entire cache. |
 
 ### Destination Selection
 
 | ID | Web | CLI | GUI | iOS | Requirement |
 |----|-----|-----|-----|-----|-------------|
-| 22.7.20 | [x] | [x] | [x] | [ ] | As a user, I can see connected USB drives auto-detected with free space shown so that I can choose where to sync. Acceptance: USB drives appear in the destination list with their name and available free space displayed. |
+| 22.7.20 | [x] | [x] | [x] | N/A | As a user, I can see connected USB drives auto-detected with free space shown so that I can choose where to sync. Acceptance: USB drives appear in the destination list with their name and available free space displayed. |
 | 22.7.21 | [x] | [x] | [x] | [ ] | As a user, I can browse for a local folder as a sync destination so that I can sync to any directory on my computer. Acceptance: a folder picker dialog allows selecting any local directory as the sync target. |
 | 22.7.22 | [ ] | [ ] | [x] | [ ] | As a user, I can select from recently used destinations via a dropdown so that I can quickly pick familiar targets. Acceptance: a dropdown lists previously used destinations; selecting one sets it as the active destination. |
 | 22.7.23 | [x] | [x] | [x] | [ ] | As a user, I can expect that when a USB drive is selected, files sync to the output profile's configured USB directory within the drive so that files are organized consistently. Acceptance: files are placed in the subdirectory specified by the profile's `usb_dir` setting on the selected drive. |
@@ -137,9 +137,9 @@ All sync clients (web dashboard, desktop app, iOS app) share core sync capabilit
 
 | ID | Web | CLI | GUI | iOS | Requirement |
 |----|-----|-----|-----|-----|-------------|
-| 22.7.24 | [x] | [x] | [x] | [ ] | As a user, I can eject USB drives safely from within the application so that I can remove them without data loss. Acceptance: an eject button is available for connected USB drives; the drive is unmounted safely before removal. |
-| 22.7.25 | [ ] | [ ] | [x] | [ ] | As a user, I can toggle auto-eject so that USB drives are ejected automatically after sync completes. Acceptance: when auto-eject is enabled, the USB drive is ejected immediately after a successful sync without user action. |
-| 22.7.26 | [ ] | [ ] | [x] | [ ] | As a user, I can configure auto-sync for specific USB drives so that syncing starts automatically when I plug them in. Acceptance: the client remembers which USB drives have auto-sync enabled; when one of those drives is connected, sync begins automatically. |
+| 22.7.24 | [x] | [x] | [x] | N/A | As a user, I can eject USB drives safely from within the application so that I can remove them without data loss. Acceptance: an eject button is available for connected USB drives; the drive is unmounted safely before removal. |
+| 22.7.25 | [ ] | [ ] | [x] | N/A | As a user, I can toggle auto-eject so that USB drives are ejected automatically after sync completes. Acceptance: when auto-eject is enabled, the USB drive is ejected immediately after a successful sync without user action. |
+| 22.7.26 | [ ] | [ ] | [x] | N/A | As a user, I can configure auto-sync for specific USB drives so that syncing starts automatically when I plug them in. Acceptance: the client remembers which USB drives have auto-sync enabled; when one of those drives is connected, sync begins automatically. |
 
 ### Browser-Specific Features (Web Dashboard)
 
@@ -153,9 +153,9 @@ All sync clients (web dashboard, desktop app, iOS app) share core sync capabilit
 
 | ID | Web | CLI | GUI | iOS | Requirement |
 |----|-----|-----|-----|-----|-------------|
-| 22.7.30 | [x] | [x] | [x] | [ ] | As a user, I can select an output profile that controls file naming, tags, and artwork so that synced files match my preferences. Acceptance: a profile selector lists available profiles from the server; the selected profile is applied during sync. |
+| 22.7.30 | [x] | [x] | [x] | [x] | As a user, I can select an output profile that controls file naming, tags, and artwork so that synced files match my preferences. Acceptance: a profile selector lists available profiles from the server; the selected profile is applied during sync. |
 | 22.7.31 | [ ] | [x] | [x] | [ ] | As a user, I can adjust parallel download concurrency (1–8 concurrent downloads) so that I can balance speed and system load. Acceptance: a concurrency setting allows choosing between 1 and 8 simultaneous downloads; the setting is saved for future sessions. |
-| 22.7.32 | [ ] | [ ] | [x] | [ ] | As a user, I can view the server version and release notes from the client so that I know what version I'm connected to. Acceptance: the client displays the connected server's version number and its release notes. |
+| 22.7.32 | [ ] | [ ] | [x] | [x] | As a user, I can view the server version and release notes from the client so that I know what version I'm connected to. Acceptance: the client displays the connected server's version number and its release notes. |
 
 ---
 
