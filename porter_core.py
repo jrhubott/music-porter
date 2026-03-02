@@ -68,7 +68,7 @@ TXXX_TRACK_UUID = "TrackUUID"
 # Schema version constants — increment and add a migration case when changing
 # the config.yaml structure or DB tables/columns.
 CONFIG_SCHEMA_VERSION = 3
-DB_SCHEMA_VERSION = 6
+DB_SCHEMA_VERSION = 7
 
 # Excluded USB volumes by OS
 if IS_MACOS:
@@ -899,6 +899,18 @@ def migrate_data_dir(logger=None):
     return []
 
 
+def _archive_file(src_path, version_label):
+    """Copy a file to data/archive/ with a version suffix if not already archived."""
+    src = Path(src_path)
+    if not src.exists():
+        return
+    archive_dir = Path(DEFAULT_DATA_DIR) / "archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    dest = archive_dir / f"{src.name}.v{version_label}"
+    if not dest.exists():
+        shutil.copy2(str(src), str(dest))
+
+
 def migrate_db_schema(logger=None):
     """Apply sequential DB schema migrations using PRAGMA user_version.
 
@@ -917,8 +929,18 @@ def migrate_db_schema(logger=None):
         conn.execute("PRAGMA journal_mode=WAL")
         current = conn.execute("PRAGMA user_version").fetchone()[0]
 
+        if current > DB_SCHEMA_VERSION:
+            raise RuntimeError(
+                f"Database schema version {current} is newer than this "
+                f"software supports ({DB_SCHEMA_VERSION}). Update the "
+                f"software or restore from data/archive/."
+            )
+
         if current >= DB_SCHEMA_VERSION:
             return []  # already up to date
+
+        # Archive pre-migration DB for rollback safety
+        _archive_file(db_path, current)
 
         from_version = current
         changes = []
@@ -1238,6 +1260,36 @@ def migrate_db_schema(logger=None):
                 logger.info(
                     "DB migration 5→6: extended metadata + library restructure")
 
+        # ── Version 6 → 7: playlists + destinations tables ────────────
+        if current < 7:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS playlists (
+                    key         TEXT PRIMARY KEY,
+                    url         TEXT NOT NULL,
+                    name        TEXT NOT NULL,
+                    created_at  REAL NOT NULL,
+                    updated_at  REAL NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS destinations (
+                    name        TEXT PRIMARY KEY,
+                    path        TEXT NOT NULL,
+                    sync_key    TEXT NOT NULL,
+                    created_at  REAL NOT NULL,
+                    updated_at  REAL NOT NULL
+                )
+            """)
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_destinations_sync_key
+                ON destinations(sync_key)""")
+            conn.execute("PRAGMA user_version = 7")
+            conn.commit()
+            changes.append(
+                "added playlists and destinations tables")
+            if logger:
+                logger.info(
+                    "DB migration 6→7: added playlists + destinations tables")
+
         return [MigrationEvent(
             'schema_migrate',
             f"DB schema migrated from version {from_version} to {DB_SCHEMA_VERSION}",
@@ -1273,8 +1325,19 @@ def migrate_config_schema(logger=None):
         data = yaml.safe_load(f) or {}
 
     current = data.get('schema_version', 0)
+
+    if current > CONFIG_SCHEMA_VERSION:
+        raise RuntimeError(
+            f"Config schema version {current} is newer than this "
+            f"software supports ({CONFIG_SCHEMA_VERSION}). Update the "
+            f"software or restore from data/archive/."
+        )
+
     if current >= CONFIG_SCHEMA_VERSION:
         return []  # already up to date
+
+    # Archive pre-migration config for rollback safety
+    _archive_file(conf_path, current)
 
     from_version = current
     changes = []
