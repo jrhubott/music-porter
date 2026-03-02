@@ -1,3 +1,12 @@
+Version 2.38.2 (2026-03-02):
+• Don't show USB in recents
+• Fix pre-existing Pyright type errors in porter_core.py and web_ui.py
+• Quick fix to usb destinations not showing up
+• Fix GUI freeze during large USB sync by using async fs ops
+• Add standalone merge-dev-to-main release script
+• Build Script from Sonnet - realtime
+• Sync client updated to v1.5.1
+
 Version 2.38.0 (2026-03-01):
 • Destination-centric sync — complete rewrite of sync UX across all clients (web, CLI, GUI, iOS) to focus on named destinations instead of sync keys
 • DB schema migration v7→v8 — sync keys migrated to UUIDs, playlists and destinations moved from config.yaml to SQLite database
