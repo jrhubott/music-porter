@@ -329,7 +329,7 @@ Cross-platform sync client (`sync-client/` subdirectory) with both a CLI tool (`
 
 ## Version
 
-Current version: **v2.37.0**
+Current version: **v2.38.0**
 
 ## License
 

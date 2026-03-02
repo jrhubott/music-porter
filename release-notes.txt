@@ -1,3 +1,27 @@
+Version 2.38.0 (2026-03-01):
+• Destination-centric sync — complete rewrite of sync UX across all clients (web, CLI, GUI, iOS) to focus on named destinations instead of sync keys
+• DB schema migration v7→v8 — sync keys migrated to UUIDs, playlists and destinations moved from config.yaml to SQLite database
+• Config schema migration v3→v4 — playlists and destinations removed from config.yaml (now stored in DB)
+• Destination resolution — server auto-creates destinations on first sync via POST /api/sync/destinations/resolve
+• Sources page — new playlist browsing page in sync-client GUI with freshness badges and playlist stats
+• Freshness level added to GET /api/playlists response (size_bytes, duration_s)
+• OpenAPI 3.1.0 specification for the server REST API (docs/openapi.yaml)
+• Rewrite sync.html for destination-centric UX with destination picker and status display
+• Rewrite sync-client CLI destinations/status/sync commands for destination-centric model
+• Rewrite sync-client GUI sync, destinations, and sources pages
+• Rewrite iOS sync status view, API client, and models for destination-centric sync
+• GitHub Actions workflow for automated sync-client releases
+• Fix sync status showing 'undefined' as destination name on dashboard
+• Fix sync status detail endpoint returning empty playlist breakdown
+• Fix cancel UI: reset pipeline state after aborting SSE stream
+• Fix Process All: pass auto flag to pipeline endpoint
+• Fix link endpoint crash when sync_key is null in JSON body
+• Add update-and-start script with optional branch parameter
+• SRS-22: Sync Functionality requirements added
+• Documentation updates: DB_SCHEMA.md, SERVER_API.md rewritten with field-level docs
+• iOS app version bumped to 1.7.0
+• Sync client version bumped to 1.5.0
+
 Version 2.37.3 (2026-02-28):
 • iOS connection health monitor — auto-detects server loss via periodic pings, transitions to offline mode after 2 consecutive failures, auto-reconnects every 15s
 • iOS manual offline mode — "Go Offline" button in Settings enters offline mode without auto-reconnect, "Reconnect" button with spinner to restore connection
