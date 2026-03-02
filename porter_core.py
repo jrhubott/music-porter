@@ -2602,8 +2602,15 @@ class SyncTracker:
                 ).fetchone()[0]
 
                 if source_count == 0:
+                    # No tracking records to move, but still clean up the
+                    # source key row to avoid orphaned sync_keys entries.
+                    conn.execute(
+                        "DELETE FROM sync_keys WHERE key_name = ?",
+                        (source_key,),
+                    )
+                    conn.commit()
                     return {'records_moved': 0, 'records_merged': 0,
-                            'source_deleted': False}
+                            'source_deleted': True}
 
                 # Ensure target key exists
                 now = time.time()
@@ -2928,6 +2935,18 @@ class SyncTracker:
         old_key = source.sync_key
         new_key = target.sync_key
         now = time.time()
+
+        # Read the target group's name before merging so we can restore it
+        # if merge_key (or any future caller) inadvertently changes it.
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT name FROM sync_keys WHERE key_name = ?", (new_key,)
+            ).fetchone()
+            target_group_name = (row['name'] if row else None)
+        finally:
+            conn.close()
+
         with self._write_lock:
             conn = self._connect()
             try:
@@ -2944,6 +2963,22 @@ class SyncTracker:
         # Merge tracking data from old key into new key
         if old_key and old_key != new_key:
             self.merge_key(old_key, new_key)
+
+        # Explicitly preserve the target group's name: linking must never
+        # change the label of the group being joined.
+        if target_group_name:
+            with self._write_lock:
+                conn = self._connect()
+                try:
+                    conn.execute(
+                        "UPDATE sync_keys SET name = ? "
+                        "WHERE key_name = ? AND (name IS NULL OR name != ?)",
+                        (target_group_name, new_key, target_group_name),
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+
         return True
 
     def unlink_destination(self, name):
