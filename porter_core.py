@@ -48,7 +48,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.38.6"
+VERSION = "2.38.7-dev"
 
 DEFAULT_DATA_DIR = "data"
 DEFAULT_LIBRARY_DIR = "library"
