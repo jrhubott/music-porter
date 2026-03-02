@@ -3,11 +3,9 @@ import {
   mkdirSync,
   unlinkSync,
   rmSync,
-  statSync,
   createWriteStream,
-  renameSync,
-  copyFileSync,
 } from 'node:fs';
+import { copyFile, rename, stat, mkdir, unlink } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
@@ -68,9 +66,7 @@ export class CacheManager {
   ): Promise<void> {
     const displayName = file.display_filename || file.filename;
     const fileDir = join(this.cacheDir, playlistKey);
-    if (!existsSync(fileDir)) {
-      mkdirSync(fileDir, { recursive: true });
-    }
+    await mkdir(fileDir, { recursive: true });
     const filePath = join(fileDir, displayName);
     const tmpPath = filePath + TEMP_SUFFIX;
 
@@ -78,14 +74,14 @@ export class CacheManager {
       const nodeStream = Readable.fromWeb(body as import('node:stream/web').ReadableStream);
       const writeStream = createWriteStream(tmpPath);
       await pipeline(nodeStream, writeStream);
-      renameSync(tmpPath, filePath);
+      await rename(tmpPath, filePath);
 
-      const stat = statSync(filePath);
+      const st = await stat(filePath);
       const entry: CacheEntry = {
         uuid: file.uuid,
         playlist: playlistKey,
         display_filename: displayName,
-        size: stat.size,
+        size: st.size,
         cached_at: new Date().toISOString(),
       };
       if (serverCreatedAt !== undefined) {
@@ -98,7 +94,7 @@ export class CacheManager {
       this.persistIndex();
     } catch {
       try {
-        if (existsSync(tmpPath)) unlinkSync(tmpPath);
+        await unlink(tmpPath);
       } catch {
         // Ignore cleanup errors
       }
@@ -107,31 +103,29 @@ export class CacheManager {
   }
 
   /** Copy an existing file into cache and update the index. */
-  storeFromFile(
+  async storeFromFile(
     file: FileInfo,
     playlistKey: string,
     sourcePath: string,
     serverCreatedAt?: number,
     serverUpdatedAt?: number,
-  ): void {
+  ): Promise<void> {
     const displayName = file.display_filename || file.filename;
     const fileDir = join(this.cacheDir, playlistKey);
-    if (!existsSync(fileDir)) {
-      mkdirSync(fileDir, { recursive: true });
-    }
+    await mkdir(fileDir, { recursive: true });
     const filePath = join(fileDir, displayName);
     const tmpPath = filePath + TEMP_SUFFIX;
 
     try {
-      copyFileSync(sourcePath, tmpPath);
-      renameSync(tmpPath, filePath);
+      await copyFile(sourcePath, tmpPath);
+      await rename(tmpPath, filePath);
 
-      const stat = statSync(filePath);
+      const st = await stat(filePath);
       const entry: CacheEntry = {
         uuid: file.uuid,
         playlist: playlistKey,
         display_filename: displayName,
-        size: stat.size,
+        size: st.size,
         cached_at: new Date().toISOString(),
       };
       if (serverCreatedAt !== undefined) {
@@ -144,7 +138,7 @@ export class CacheManager {
       this.persistIndex();
     } catch {
       try {
-        if (existsSync(tmpPath)) unlinkSync(tmpPath);
+        await unlink(tmpPath);
       } catch {
         // Ignore cleanup errors
       }
@@ -154,18 +148,16 @@ export class CacheManager {
   // ── Copy Out ──
 
   /** Copy a cached file to a destination path. Returns true on success. */
-  copyToDestination(uuid: string, destPath: string): boolean {
+  async copyToDestination(uuid: string, destPath: string): Promise<boolean> {
     const cachedPath = this.isCached(uuid);
     if (!cachedPath) return false;
 
     try {
       const destDir = dirname(destPath);
-      if (!existsSync(destDir)) {
-        mkdirSync(destDir, { recursive: true });
-      }
+      await mkdir(destDir, { recursive: true });
       const tmpPath = destPath + TEMP_SUFFIX;
-      copyFileSync(cachedPath, tmpPath);
-      renameSync(tmpPath, destPath);
+      await copyFile(cachedPath, tmpPath);
+      await rename(tmpPath, destPath);
       return true;
     } catch {
       return false;
@@ -173,18 +165,18 @@ export class CacheManager {
   }
 
   /** Add an index entry for a file that already exists in cache (no copy). */
-  recordEntry(file: FileInfo, playlistKey: string): void {
+  async recordEntry(file: FileInfo, playlistKey: string): Promise<void> {
     const displayName = file.display_filename || file.filename;
     const filePath = join(this.cacheDir, playlistKey, displayName);
     if (!existsSync(filePath)) return;
 
     try {
-      const stat = statSync(filePath);
+      const st = await stat(filePath);
       this.index.entries[file.uuid] = {
         uuid: file.uuid,
         playlist: playlistKey,
         display_filename: displayName,
-        size: stat.size,
+        size: st.size,
         cached_at: new Date().toISOString(),
       };
       this.persistIndex();
