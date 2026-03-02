@@ -126,7 +126,7 @@ export function LinkDestinationModal({ show, destinationName, onClose, onLinked 
                     {existingKeys.map((k) => (
                       <button
                         key={k.key_name}
-                        className={`list-group-item list-group-item-action bg-dark text-light border-secondary ${selectedKey === k.key_name ? 'active' : ''}`}
+                        className={`list-group-item list-group-item-action border-secondary ${selectedKey === k.key_name ? 'active' : ''}`}
                         onClick={() => setSelectedKey(k.key_name)}
                       >
                         <div className="d-flex justify-content-between">
