@@ -1,5 +1,16 @@
-docker compose down
-git checkout dev
-git pull --rebase
-docker compose build
+#!/bin/bash
+set -euo pipefail
+
+die() { echo "ERROR: $*" >&2; exit 1; }
+
+command -v git >/dev/null 2>&1 || die "git not found"
+command -v docker >/dev/null 2>&1 || die "docker not found"
+git rev-parse --git-dir >/dev/null 2>&1 || die "not a git repository"
+
+echo "Branch: $(git rev-parse --abbrev-ref HEAD)"
+
+docker compose down || true
+git checkout dev || die "git checkout dev failed (check for uncommitted changes)"
+git pull --rebase || die "git pull --rebase failed"
+docker compose build || die "docker compose build failed"
 docker compose up
