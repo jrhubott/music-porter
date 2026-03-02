@@ -18,6 +18,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **No magic numbers** — define named constants for numeric values; avoid bare literals in logic
 
+### Code Intelligence
+
+Prefer LSP over Grep/Read for code navigation — it's faster, precise, and avoids reading entire files:
+- `documentSymbol` to list all symbols in a file
+- `findReferences` to see all usages across the codebase
+- `goToDefinition` to jump to source
+- `hover` for type info without reading the file
+
+**Limitation:** `workspaceSymbol` (search by name across the project) does not work — use Grep to find definitions by name. LSP is for **position-based** navigation when you're already at a specific symbol.
+
+Use Grep only when LSP isn't available or for text/pattern searches (comments, strings, config).
+
+After writing or editing code, check LSP diagnostics and fix errors before proceeding.
+
 ## Requirements Handling
 
 ### Workflow
