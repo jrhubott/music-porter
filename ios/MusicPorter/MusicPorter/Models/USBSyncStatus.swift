@@ -98,19 +98,29 @@ struct SyncDestination: Identifiable, Codable {
     let path: String
     let type: String
     let available: Bool
-    let syncKey: String?
-    let effectiveKey: String
+    let syncKey: String
 
     var id: String { name }
 
     enum CodingKeys: String, CodingKey {
         case name, path, type, available
         case syncKey = "sync_key"
-        case effectiveKey = "effective_key"
     }
 }
 
 /// Response from GET /api/sync/destinations.
 struct SyncDestinationsResponse: Codable {
     let destinations: [SyncDestination]
+}
+
+/// Response from POST /api/sync/destinations/resolve.
+struct ResolveDestinationResponse: Codable {
+    let destination: SyncDestination
+    let created: Bool
+    let syncStatus: SyncStatusDetail?
+
+    enum CodingKeys: String, CodingKey {
+        case destination, created
+        case syncStatus = "sync_status"
+    }
 }

@@ -352,6 +352,32 @@ final class APIClient {
         try await postAny("/api/sync/keys/\(key)/prune", body: [:] as [String: String])
     }
 
+    func renameSyncKey(key: String, newKey: String) async throws {
+        let _: OkResponse = try await post("/api/sync/keys/\(key)/rename", body: ["new_key": newKey])
+    }
+
+    func resolveDestination(path: String? = nil, name: String? = nil, driveName: String? = nil, syncKey: String? = nil) async throws -> ResolveDestinationResponse {
+        var body: [String: String] = [:]
+        if let path { body["path"] = path }
+        if let name { body["name"] = name }
+        if let driveName { body["drive_name"] = driveName }
+        if let syncKey { body["sync_key"] = syncKey }
+        return try await post("/api/sync/destinations/resolve", body: body)
+    }
+
+    func linkDestination(name: String, syncKey: String) async throws {
+        let _: OkResponse = try await put("/api/sync/destinations/\(name)/link", body: ["sync_key": syncKey])
+    }
+
+    func unlinkDestination(name: String) async throws {
+        // Send empty sync_key to trigger server-side unlink (creates new independent key)
+        let _: OkResponse = try await put("/api/sync/destinations/\(name)/link", body: ["sync_key": ""])
+    }
+
+    func renameDestination(name: String, newName: String) async throws {
+        let _: OkResponse = try await post("/api/sync/destinations/\(name)/rename", body: ["new_name": newName])
+    }
+
     func getFileSyncStatus(playlist: String) async throws -> [String: [String]] {
         try await get("/api/files/\(playlist)/sync-status")
     }
