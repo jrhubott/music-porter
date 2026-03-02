@@ -2306,25 +2306,8 @@ class SyncTracker:
             finally:
                 conn.close()
 
-    def delete_playlist(self, sync_key, playlist):
-        """Delete tracking records for one playlist on a sync key.
-
-        Returns count of deleted records.
-        """
-        with self._write_lock:
-            conn = self._connect()
-            try:
-                cursor = conn.execute(
-                    "DELETE FROM sync_files WHERE sync_key = ? AND playlist = ?",
-                    (sync_key, playlist),
-                )
-                conn.commit()
-                return cursor.rowcount
-            finally:
-                conn.close()
-
-    def get_keys(self):
-        """List all tracked sync keys with total synced file counts.
+    def _get_keys(self):
+        """List all tracked sync keys (internal).
 
         Returns list of dicts: {key_name, last_sync_at, created_at,
         total_synced_files}.
@@ -2379,17 +2362,19 @@ class SyncTracker:
         finally:
             conn.close()
 
-    def get_sync_status(self, sync_key, export_base_dir):
-        """Diff export directory against tracked files for a sync key.
+    def _get_sync_status_for_key(self, sync_key, export_base_dir,
+                                dest_names=None):
+        """Diff export directory against tracked files for a sync key (internal).
 
         Returns SyncStatusResult with per-playlist breakdown.
+        dest_names is the list of destination names sharing this key.
         """
         export_path = Path(export_base_dir)
         if not export_path.exists():
             return SyncStatusResult(
-                sync_key=sync_key, last_sync_at=0, playlists=[],
-                total_files=0, synced_files=0, new_files=0,
-                new_playlists=0)
+                destinations=dest_names or [], last_sync_at=0,
+                playlists=[], total_files=0, synced_files=0,
+                new_files=0, new_playlists=0)
 
         # Get the key's last sync time
         conn = self._connect()
@@ -2452,92 +2437,83 @@ class SyncTracker:
                 new_playlist_count += 1
 
         return SyncStatusResult(
-            sync_key=sync_key, last_sync_at=last_sync,
+            destinations=dest_names or [], last_sync_at=last_sync,
             playlists=playlists, total_files=total_files,
             synced_files=total_synced, new_files=total_new,
             new_playlists=new_playlist_count)
 
-    def get_all_keys_summary(self, export_base_dir):
-        """Summary for all tracked sync keys.
+    def get_destination_status(self, dest_name, export_base_dir):
+        """Get sync status for the group containing a destination.
 
-        Returns list of dicts: {key_name, last_sync_at, total_files,
-        synced_files, new_files, new_playlists}.
+        Resolves destination name → internal sync_key → status.
+        Returns SyncStatusResult with all destination names in the group.
         """
-        keys = self.get_keys()
-        results = []
-        for key_info in keys:
-            status = self.get_sync_status(
-                key_info['key_name'], export_base_dir)
-            results.append({
-                'key_name': key_info['key_name'],
-                'last_sync_at': key_info['last_sync_at'],
-                'total_files': status.total_files,
-                'synced_files': status.synced_files,
-                'new_files': status.new_files,
-                'new_playlists': status.new_playlists,
-            })
-        return results
+        dest = self.get_destination(dest_name)
+        if not dest:
+            return SyncStatusResult(destinations=[dest_name])
 
-    def prune_stale(self, sync_key, export_base_dir):
-        """Remove DB records for files no longer in the export directory.
-
-        Returns dict: {pruned_count, playlists_affected}.
-        """
-        export_path = Path(export_base_dir)
-
-        # Fetch all tracked records for this key
+        # Find all destinations sharing this sync_key
         conn = self._connect()
         try:
             rows = conn.execute(
-                "SELECT id, playlist, file_path FROM sync_files WHERE sync_key = ?",
-                (sync_key,),
+                "SELECT name FROM destinations WHERE sync_key = ?",
+                (dest.sync_key,),
             ).fetchall()
+            group_names = [r['name'] for r in rows]
         finally:
             conn.close()
 
-        stale_ids = []
-        playlists_affected = set()
-        for r in rows:
-            file_on_disk = export_path / r['playlist'] / r['file_path']
-            if not file_on_disk.exists():
-                stale_ids.append(r['id'])
-                playlists_affected.add(r['playlist'])
+        return self._get_sync_status_for_key(
+            dest.sync_key, export_base_dir, dest_names=group_names)
 
-        if stale_ids:
-            with self._write_lock:
-                conn = self._connect()
-                try:
-                    conn.execute(
-                        f"DELETE FROM sync_files WHERE id IN ({','.join('?' * len(stale_ids))})",
-                        stale_ids,
-                    )
-                    conn.commit()
-                finally:
-                    conn.close()
+    def get_destination_groups(self, export_base_dir):
+        """Get sync status for all destination groups.
 
-        return {
-            'pruned_count': len(stale_ids),
-            'playlists_affected': sorted(playlists_affected),
-        }
-
-    def prune_all_keys(self, export_base_dir):
-        """Prune stale records for all tracked sync keys.
-
-        Returns dict: {total_pruned, keys_pruned}.
+        Returns list of SyncStatusResult, one per unique sync_key group.
+        Each result includes the destination names in that group.
         """
-        keys = self.get_keys()
-        total_pruned = 0
-        keys_pruned = []
-        for key_info in keys:
-            result = self.prune_stale(key_info['key_name'], export_base_dir)
-            if result['pruned_count'] > 0:
-                keys_pruned.append({
-                    'key_name': key_info['key_name'],
-                    'pruned_count': result['pruned_count'],
-                    'playlists_affected': result['playlists_affected'],
-                })
-                total_pruned += result['pruned_count']
-        return {'total_pruned': total_pruned, 'keys_pruned': keys_pruned}
+        all_dests = self.get_all_destinations()
+        # Group by sync_key
+        key_to_dests = {}
+        for d in all_dests:
+            key_to_dests.setdefault(d.sync_key, []).append(d)
+
+        results = []
+        for sync_key, dests in key_to_dests.items():
+            names = [d.name for d in dests]
+            status = self._get_sync_status_for_key(
+                sync_key, export_base_dir, dest_names=names)
+            results.append(status)
+        return results
+
+    def reset_destination_tracking(self, dest_name):
+        """Reset sync tracking for a destination's group.
+
+        Deletes all sync_files for the destination's sync_key and
+        resets last_sync_at to 0. The destination and sync_key remain.
+        Returns dict: {reset: bool, files_cleared: int}.
+        """
+        dest = self.get_destination(dest_name)
+        if not dest:
+            return {'reset': False, 'files_cleared': 0}
+
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                cursor = conn.execute(
+                    "DELETE FROM sync_files WHERE sync_key = ?",
+                    (dest.sync_key,),
+                )
+                cleared = cursor.rowcount
+                conn.execute(
+                    "UPDATE sync_keys SET last_sync_at = 0 "
+                    "WHERE key_name = ?",
+                    (dest.sync_key,),
+                )
+                conn.commit()
+                return {'reset': True, 'files_cleared': cleared}
+            finally:
+                conn.close()
 
     def merge_key(self, source_key, target_key):
         """Merge tracking records from source_key into target_key.
@@ -2606,32 +2582,23 @@ class SyncTracker:
             finally:
                 conn.close()
 
-    def rename_key(self, old_key, new_key):
-        """Rename a sync key, moving all tracking records to the new name.
-
-        Returns dict with stats, or None if new_key already exists.
-        Unlike merge_key, rename requires the target name to be unused.
-        """
-        with self._write_lock:
-            conn = self._connect()
-            try:
-                exists = conn.execute(
-                    "SELECT 1 FROM sync_keys WHERE key_name = ?",
-                    (new_key,),
-                ).fetchone()
-            finally:
-                conn.close()
-        if exists:
-            return None
-        return self.merge_key(old_key, new_key)
-
     def get_file_sync_map(self, playlist):
-        """Map filenames to sync keys they've been synced to.
+        """Map filenames to destination names they've been synced to.
 
-        Returns dict: {filename: [sync_key_name, ...]}.
+        Returns dict: {filename: [destination_name, ...]}.
+        Resolves internal sync_key UUIDs to human-readable destination names.
         """
         conn = self._connect()
         try:
+            # Build sync_key → [dest_names] lookup
+            dest_rows = conn.execute(
+                "SELECT name, sync_key FROM destinations"
+            ).fetchall()
+            key_to_names = {}
+            for dr in dest_rows:
+                key_to_names.setdefault(
+                    dr['sync_key'], []).append(dr['name'])
+
             rows = conn.execute(
                 """SELECT file_path, sync_key FROM sync_files
                    WHERE playlist = ? ORDER BY file_path, sync_key""",
@@ -2642,7 +2609,9 @@ class SyncTracker:
 
         sync_map = {}
         for r in rows:
-            sync_map.setdefault(r['file_path'], []).append(r['sync_key'])
+            names = key_to_names.get(r['sync_key'], [])
+            for name in names:
+                sync_map.setdefault(r['file_path'], []).append(name)
         return sync_map
 
     def get_all_sync_files(self):
@@ -2682,11 +2651,17 @@ class SyncTracker:
 
     # ── Destination CRUD ──────────────────────────────────────────
 
+    @staticmethod
+    def _generate_sync_key():
+        """Generate a new internal sync key UUID."""
+        return str(uuid.uuid4())
+
     def add_destination(self, name, path, sync_key=None,
                         validate_path=True, audit_source=None):
         """Add a saved destination to the DB.
 
-        If sync_key is not provided, auto-generates one from name.
+        If sync_key is not provided, generates a new UUID internally.
+        If sync_key is provided (linking to existing group), uses it.
         Also creates the sync_keys row.
         Returns True on success, False on validation/duplicate error.
         """
@@ -2699,18 +2674,9 @@ class SyncTracker:
                 and not path.startswith('web-client://')):
             path = f'folder://{path}'
 
-        # Auto-generate sync_key if not provided
+        # Auto-generate sync_key UUID if not provided
         if not sync_key:
-            dest_tmp = SyncDestination(name, path, sync_key='')
-            if dest_tmp.is_usb:
-                # Extract drive name from USB path
-                raw = dest_tmp.raw_path
-                parts = Path(raw).parts
-                # macOS: /Volumes/DriveName/... → DriveName
-                drive_name = parts[2] if len(parts) > 2 and parts[1] == 'Volumes' else name
-                sync_key = f'{USB_SYNC_KEY_PREFIX}{drive_name}'
-            else:
-                sync_key = name
+            sync_key = self._generate_sync_key()
 
         # Validate filesystem path if needed
         if validate_path:
@@ -2772,31 +2738,61 @@ class SyncTracker:
             conn.close()
 
     def get_all_destinations(self):
-        """List all saved destinations."""
+        """List all saved destinations with linked_destinations populated."""
         conn = self._connect()
         try:
             rows = conn.execute(
                 "SELECT name, path, sync_key FROM destinations ORDER BY rowid"
             ).fetchall()
-            return [SyncDestination(r['name'], r['path'],
-                                    sync_key=r['sync_key']) for r in rows]
+            # Build sync_key → [names] map for linked_destinations
+            key_to_names = {}
+            for r in rows:
+                key_to_names.setdefault(r['sync_key'], []).append(r['name'])
+
+            dests = []
+            for r in rows:
+                linked = [n for n in key_to_names.get(r['sync_key'], [])
+                          if n != r['name']]
+                dests.append(SyncDestination(
+                    r['name'], r['path'], sync_key=r['sync_key'],
+                    linked_destinations=linked))
+            return dests
         finally:
             conn.close()
 
     def remove_destination(self, name):
-        """Remove a destination by name. Does NOT delete sync key or tracking data.
+        """Remove a destination by name.
 
+        If this is the last destination using its sync_key, the sync_key
+        and all tracking data are also deleted. Otherwise, tracking data
+        is preserved for the remaining destinations in the group.
         Returns True if found and deleted.
         """
+        dest = self.get_destination(name)
+        if not dest:
+            return False
+        sync_key = dest.sync_key
+
         with self._write_lock:
             conn = self._connect()
             try:
-                cursor = conn.execute(
+                conn.execute(
                     "DELETE FROM destinations WHERE name = ? COLLATE NOCASE",
                     (name,),
                 )
+                # Check if any other destinations still use this sync_key
+                remaining = conn.execute(
+                    "SELECT COUNT(*) FROM destinations WHERE sync_key = ?",
+                    (sync_key,),
+                ).fetchone()[0]
+                if remaining == 0 and sync_key:
+                    # Last destination — clean up tracking data
+                    conn.execute(
+                        "DELETE FROM sync_keys WHERE key_name = ?",
+                        (sync_key,),
+                    )
                 conn.commit()
-                return cursor.rowcount > 0
+                return True
             finally:
                 conn.close()
 
@@ -2843,70 +2839,84 @@ class SyncTracker:
         finally:
             conn.close()
 
-    def link_destination(self, name, sync_key):
-        """Set a destination's sync_key. Auto-creates sync_keys row.
+    def link_destination(self, name, target_dest_name):
+        """Link a destination to another destination's tracking group.
 
-        Returns True if found and updated.
+        Looks up the target destination's sync_key UUID, assigns it to
+        this destination, and merges any existing tracking data.
+        Returns True if successful.
         """
-        if not sync_key or not sync_key.strip():
+        if not target_dest_name or not target_dest_name.strip():
             return False
-        sync_key = sync_key.strip()
+        target = self.get_destination(target_dest_name.strip())
+        if not target:
+            return False
+        source = self.get_destination(name)
+        if not source:
+            return False
+        if source.sync_key == target.sync_key:
+            return True  # Already in the same group
+
+        old_key = source.sync_key
+        new_key = target.sync_key
         now = time.time()
         with self._write_lock:
             conn = self._connect()
             try:
-                cursor = conn.execute(
+                # Update destination to use target's sync_key
+                conn.execute(
                     "UPDATE destinations SET sync_key = ?, updated_at = ? "
                     "WHERE name = ? COLLATE NOCASE",
-                    (sync_key, now, name),
-                )
-                if cursor.rowcount == 0:
-                    return False
-                # Ensure sync_keys row exists
-                conn.execute(
-                    "INSERT INTO sync_keys (key_name, last_sync_at, created_at) "
-                    "VALUES (?, 0, ?) ON CONFLICT(key_name) DO NOTHING",
-                    (sync_key, now),
+                    (new_key, now, name),
                 )
                 conn.commit()
-                return True
             finally:
                 conn.close()
 
-    def unlink_destination(self, name):
-        """Create a new independent sync_key = destination name.
+        # Merge tracking data from old key into new key
+        if old_key and old_key != new_key:
+            self.merge_key(old_key, new_key)
+        return True
 
+    def unlink_destination(self, name):
+        """Unlink a destination from its shared tracking group.
+
+        Creates a new independent sync_key UUID for this destination.
+        Tracking data stays with the original group (the unlinked
+        destination starts fresh unless explicitly re-synced).
         Returns True if found and updated.
         """
         dest = self.get_destination(name)
         if not dest:
             return False
-        return self.link_destination(name, dest.name)
-
-    def rename_sync_key_refs(self, old_key, new_key):
-        """Update all destination sync_key references from old_key to new_key.
-
-        Returns count of destinations updated.
-        """
+        new_key = self._generate_sync_key()
         now = time.time()
         with self._write_lock:
             conn = self._connect()
             try:
-                cursor = conn.execute(
+                conn.execute(
                     "UPDATE destinations SET sync_key = ?, updated_at = ? "
-                    "WHERE sync_key = ?",
-                    (new_key, now, old_key),
+                    "WHERE name = ? COLLATE NOCASE",
+                    (new_key, now, name),
+                )
+                # Create the new sync_keys row
+                conn.execute(
+                    "INSERT INTO sync_keys (key_name, last_sync_at, created_at) "
+                    "VALUES (?, 0, ?) ON CONFLICT(key_name) DO NOTHING",
+                    (new_key, now),
                 )
                 conn.commit()
-                return cursor.rowcount
             finally:
                 conn.close()
+        return True
 
     def resolve_destination(self, path=None, name=None, drive_name=None,
-                            explicit_key=None):
+                            link_to=None):
         """Server-side destination resolution.
 
-        Finds or creates a destination + sync key from the provided hints.
+        Finds or creates a destination from the provided hints.
+        If link_to is provided (a destination name), the new destination
+        shares that destination's tracking group.
         Returns dict: {destination: SyncDestination, created: bool}.
         """
         # 1. Look up by name if provided
@@ -2943,22 +2953,12 @@ class SyncTracker:
             if not name:
                 name = 'destination'
 
-        # Determine sync_key
-        sync_key = explicit_key
-        if not sync_key:
-            if path:
-                dest_tmp = SyncDestination('_tmp', path, sync_key='')
-                if dest_tmp.is_usb:
-                    dn = drive_name
-                    if not dn and path:
-                        raw = dest_tmp.raw_path
-                        parts = Path(raw).parts
-                        dn = parts[2] if len(parts) > 2 and parts[1] == 'Volumes' else name
-                    sync_key = f'{USB_SYNC_KEY_PREFIX}{dn}'
-                else:
-                    sync_key = f'{CLIENT_SYNC_KEY_PREFIX}{name}'
-            else:
-                sync_key = name
+        # Determine sync_key: link to existing destination or generate UUID
+        sync_key = None
+        if link_to:
+            target = self.get_destination(link_to)
+            if target:
+                sync_key = target.sync_key
 
         ok = self.add_destination(name, path or f'folder:///{name}',
                                   sync_key=sync_key, validate_path=False)
@@ -2977,9 +2977,6 @@ class SyncTracker:
         dest = self.get_destination(name)
         return {'destination': dest, 'created': True}
 
-
-# Backwards compatibility alias
-USBSyncTracker = SyncTracker
 
 
 class PlaylistDB:
@@ -3649,7 +3646,7 @@ class EQConfigManager:
 
 @dataclass
 class SyncDestination:
-    """A saved sync destination (name + schemed path + sync key).
+    """A saved sync destination (name + schemed path + internal sync key).
 
     Paths use a scheme prefix:
       - usb:///Volumes/MY_USB/RZR/Music   → USB drive destination
@@ -3657,11 +3654,14 @@ class SyncDestination:
       - web-client://My-USB               → Browser-local sync target
     Legacy plain paths are migrated to folder:// on config load.
 
-    sync_key is always set — no fallback to name.
+    sync_key is an internal UUID — never exposed to users.
+    linked_destinations lists other destination names sharing the same
+    tracking group (populated by SyncTracker queries, not stored in DB).
     """
     name: str
     path: str  # usb:///Volumes/X/RZR/Music or folder:///path/to/dir
-    sync_key: str = ''  # always set; auto-created from name if not provided
+    sync_key: str = ''  # internal UUID; never shown to users
+    linked_destinations: list = field(default_factory=list)
 
     @property
     def type(self) -> str:
@@ -3697,8 +3697,8 @@ class SyncDestination:
 
     def to_api_dict(self) -> dict:
         return {'name': self.name, 'path': self.path,
-                'sync_key': self.sync_key,
-                'type': self.type, 'available': self.available}
+                'type': self.type, 'available': self.available,
+                'linked_destinations': self.linked_destinations}
 
 
 class ConfigManager:
@@ -4837,7 +4837,6 @@ class SyncResult:
     success: bool
     source: str
     destination: str
-    dest_key: str
     duration: float
     is_usb: bool = False
     files_found: int = 0
@@ -4851,9 +4850,9 @@ class SyncResult:
 
 @dataclass
 class SyncStatusResult:
-    """Result of SyncTracker.get_sync_status()."""
-    sync_key: str
-    last_sync_at: float
+    """Result of SyncTracker.get_destination_status()."""
+    destinations: list = field(default_factory=list)
+    last_sync_at: float = 0
     playlists: list = field(default_factory=list)
     total_files: int = 0
     synced_files: int = 0
@@ -4862,11 +4861,6 @@ class SyncStatusResult:
 
     def to_dict(self) -> dict:
         return asdict(self)
-
-
-# Backwards compatibility aliases
-USBSyncResult = SyncResult
-USBSyncStatusResult = SyncStatusResult
 
 
 
@@ -4899,7 +4893,7 @@ class PipelineResult:
     stages_skipped: list = field(default_factory=list)
     download_result: DownloadResult | None = None
     conversion_result: ConversionResult | None = None
-    usb_result: USBSyncResult | None = None
+    usb_result: SyncResult | None = None
     usb_destination: str | None = None
 
     def to_dict(self) -> dict:
@@ -6901,7 +6895,7 @@ class SyncManager:
                 continue
             options.append(f"[USB] {vol} ({full_path})")
             option_dests.append(
-                SyncDestination(vol, f'usb://{full_path}', sync_key=vol))
+                SyncDestination(vol, f'usb://{full_path}'))
 
         # 2. Saved destinations from DB
         for dest in saved:
@@ -6939,18 +6933,25 @@ class SyncManager:
             if not p.exists() or not p.is_dir():
                 self.logger.error(f"Path does not exist or is not a directory: {custom_path}")
                 return None
-            dest_key = self._sanitize_dest_name(p.name)
-            dest = SyncDestination(dest_key, f'folder://{custom_path}',
-                                   sync_key=dest_key)
+            dest_name = self._sanitize_dest_name(p.name)
             if self.sync_tracker:
                 self.sync_tracker.add_destination(
-                    dest_key, dest.path, validate_path=False)
+                    dest_name, f'folder://{custom_path}',
+                    validate_path=False)
+                dest = self.sync_tracker.get_destination(dest_name)
+                if dest:
+                    return dest
+            # Fallback if no tracker
+            dest = SyncDestination(dest_name, f'folder://{custom_path}')
             return dest
 
-        # Auto-save USB selections
+        # Auto-save USB selections and get back with proper sync_key
         if dest.is_usb and self.sync_tracker:
             self.sync_tracker.add_destination(
                 dest.name, dest.path, validate_path=False)
+            saved_dest = self.sync_tracker.get_destination(dest.name)
+            if saved_dest:
+                return saved_dest
 
         return dest
 
@@ -6962,7 +6963,7 @@ class SyncManager:
         sanitized = _re.sub(r'-+', '-', sanitized).strip('-')
         return sanitized or 'custom-dest'
 
-    def sync_to_destination(self, source_dir, dest_path, dest_key,
+    def sync_to_destination(self, source_dir, dest_path, sync_key,
                             dry_run=False, tag_applicator=None,
                             profile=None, playlist_name=None):
         """Sync files to any destination with incremental copy logic.
@@ -6970,7 +6971,7 @@ class SyncManager:
         Args:
             source_dir: Source directory containing MP3 files
             dest_path: Schemed path (usb:// or folder://) or raw filesystem path
-            dest_key: Tracking key name (destination name)
+            sync_key: Internal sync key UUID for tracking
             dry_run: Preview changes without copying
             tag_applicator: Optional TagApplicator for profile-based tagging
             profile: Optional OutputProfile (required if tag_applicator is set)
@@ -7000,7 +7001,7 @@ class SyncManager:
             self.logger.error(
                 f"Source directory does not exist: {source_path}")
             return SyncResult(success=False, source=str(source_dir),
-                              destination='', dest_key=dest_key or '',
+                              destination='',
                               duration=0, is_usb=is_usb)
 
         # Collect all .mp3 files to process
@@ -7084,7 +7085,7 @@ class SyncManager:
 
             return SyncResult(
                 success=True, source=str(source_path), destination=str(dest),
-                dest_key=dest_key, duration=duration, is_usb=is_usb,
+                duration=duration, is_usb=is_usb,
                 files_found=stats.files_found, files_copied=stats.files_copied,
                 files_skipped=stats.files_skipped,
                 files_failed=stats.files_failed)
@@ -7101,7 +7102,7 @@ class SyncManager:
             return SyncResult(
                 success=False, source=str(source_path),
                 destination=str(dest),
-                dest_key=dest_key, duration=duration, is_usb=is_usb,
+                duration=duration, is_usb=is_usb,
                 files_found=stats.files_found, files_copied=stats.files_copied,
                 files_skipped=stats.files_skipped,
                 files_failed=stats.files_failed)
@@ -7146,7 +7147,7 @@ class SyncManager:
                             pl_name = (playlist_name
                                        or source_path.parent.name)
                             self.sync_tracker.record_file(
-                                dest_key, pl_name, record_name)
+                                sync_key, pl_name, record_name)
                     else:
                         stats.files_skipped += 1
                         if self.logger.verbose:
@@ -7170,11 +7171,13 @@ class SyncManager:
 
         # Prompt to eject USB drive (only for USB destinations)
         if is_usb and not dry_run:
-            self._prompt_and_eject_usb(dest_key)
+            # Extract volume name from path for eject
+            volume_name = Path(fs_path).parts[2] if IS_MACOS and len(Path(fs_path).parts) > 2 else Path(fs_path).name
+            self._prompt_and_eject_usb(volume_name)
 
         return SyncResult(
             success=stats.files_failed == 0, source=str(source_path),
-            destination=str(dest), dest_key=dest_key, duration=duration,
+            destination=str(dest), duration=duration,
             is_usb=is_usb, files_found=stats.files_found,
             files_copied=stats.files_copied,
             files_skipped=stats.files_skipped,
@@ -7186,12 +7189,19 @@ class SyncManager:
             volume = self.select_usb_drive()
         if not volume:
             return SyncResult(success=False, source=str(source_dir),
-                              destination='', dest_key='', duration=0, is_usb=True)
+                              destination='', duration=0, is_usb=True)
 
         base_path = str(self._get_usb_base_path(volume))
         full_path = str(Path(base_path) / usb_dir) if usb_dir else base_path
+        # Resolve destination to get internal sync_key
+        sync_key = volume  # fallback
+        if self.sync_tracker:
+            result = self.sync_tracker.resolve_destination(
+                path=f'usb://{full_path}', drive_name=volume)
+            if result:
+                sync_key = result['destination'].sync_key
         return self.sync_to_destination(
-            source_dir, dest_path=f'usb://{full_path}', dest_key=volume,
+            source_dir, dest_path=f'usb://{full_path}', sync_key=sync_key,
             dry_run=dry_run)
 
     def _prompt_and_eject_usb(self, volume_name):
@@ -7847,7 +7857,7 @@ class PipelineOrchestrator:
                 f"\n=== STAGE 3: Sync to {sync_destination.name} ===")
             usb_result = sync_mgr.sync_to_destination(
                 library_dir, dest_path=sync_destination.path,
-                dest_key=sync_destination.sync_key, dry_run=dry_run)
+                sync_key=sync_destination.sync_key, dry_run=dry_run)
 
             if usb_result.success:
                 self.stats.stages_completed.append("sync")
