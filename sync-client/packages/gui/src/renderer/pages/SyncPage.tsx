@@ -3,8 +3,9 @@ import { useIPC } from '../hooks/useIPC.js';
 import { useAppState } from '../store/app-state.js';
 import { LinkDestinationModal } from '../components/LinkDestinationModal.js';
 import type { DriveInfo, Playlist, SyncProgress } from '@mporter/core';
-import { CLIENT_SYNC_KEY_PREFIX } from '@mporter/core';
 
+/** Prefix for client-generated sync keys (mirrors @mporter/core constant). */
+const CLIENT_SYNC_KEY_PREFIX = 'client-';
 const BYTES_PER_KB = 1024;
 const BYTES_PER_MB = 1024 * 1024;
 const BYTES_PER_GB = 1024 * 1024 * 1024;
