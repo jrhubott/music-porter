@@ -84,7 +84,7 @@ export interface SyncPlaylistStatus {
 }
 
 export interface SyncStatusDetail {
-  sync_key: string;
+  destinations: string[];
   last_sync_at: number;
   playlists: SyncPlaylistStatus[];
   total_files: number;
@@ -93,36 +93,18 @@ export interface SyncStatusDetail {
   new_playlists: number;
 }
 
-export interface SyncKeySummary {
-  key_name: string;
-  last_sync_at: number;
-  file_count: number;
-  playlist_count: number;
-}
-
 export interface SyncDestination {
   name: string;
   path: string;
-  scheme: string;
-  sync_key: string;
+  type: string;
+  available: boolean;
+  linked_destinations: string[];
 }
 
 export interface ResolveDestinationResponse {
-  destination: SyncDestination & { type: string; available: boolean };
+  destination: SyncDestination;
   created: boolean;
-  sync_status: {
-    sync_key: string;
-    total_files: number;
-    synced_files: number;
-    new_files: number;
-    playlists: Array<{
-      name: string;
-      total_files: number;
-      synced_files: number;
-      new_files: number;
-      is_new_playlist: boolean;
-    }>;
-  } | null;
+  sync_status: SyncStatusDetail | null;
 }
 
 export interface SyncDestinationsResponse {
@@ -146,18 +128,17 @@ export interface OkResponse {
 
 export interface LinkDestinationResponse {
   ok: boolean;
-  sync_key: string;
-  merge_stats?: { merged_count: number };
+  merge_stats?: { records_moved: number; records_merged: number; source_deleted: boolean };
   created?: boolean;
 }
 
-export interface PruneResponse {
-  pruned_count: number;
-  remaining_count: number;
+export interface ResetTrackingResponse {
+  reset: boolean;
+  files_cleared: number;
 }
 
 export interface SyncStatusSummary {
-  key_name: string;
+  destinations: string[];
   last_sync_at: number;
   total_files: number;
   synced_files: number;
@@ -172,7 +153,7 @@ export interface SyncManifestPlaylist {
 }
 
 export interface SyncManifest {
-  sync_key: string;
+  destination_name: string;
   server_origin: string;
   last_sync_at: string;
   playlists: Record<string, SyncManifestPlaylist>;
@@ -203,7 +184,7 @@ export interface SyncProgress {
 }
 
 export interface SyncPlan {
-  syncKey: string;
+  destinationName: string;
   playlists: SyncPlanPlaylist[];
   totalFiles: number;
 }
@@ -216,7 +197,7 @@ export interface SyncPlanPlaylist {
 }
 
 export interface SyncResult {
-  syncKey: string;
+  destinationName: string;
   copied: number;
   skipped: number;
   failed: number;

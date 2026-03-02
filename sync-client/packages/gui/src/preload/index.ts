@@ -14,11 +14,10 @@ import type {
   Playlist,
   PlaylistCacheStatus,
   PrefetchResult,
-  PruneResponse,
+  ResetTrackingResponse,
   ServerConfig,
   SettingsResponse,
   SyncDestinationsResponse,
-  SyncKeySummary,
   SyncPreferences,
   SyncProgress,
   SyncResult,
@@ -43,20 +42,17 @@ const electronAPI = {
   getSettings: (): Promise<SettingsResponse> => ipcRenderer.invoke('data:getSettings'),
   getFiles: (playlistKey: string): Promise<FileListResponse> =>
     ipcRenderer.invoke('data:getFiles', playlistKey),
-  getSyncStatus: (key: string): Promise<SyncStatusDetail> =>
-    ipcRenderer.invoke('data:getSyncStatus', key),
-  getSyncKeys: (): Promise<SyncKeySummary[]> => ipcRenderer.invoke('data:getSyncKeys'),
+  getSyncStatus: (destName: string): Promise<SyncStatusDetail> =>
+    ipcRenderer.invoke('data:getSyncStatus', destName),
   getSyncDestinations: (): Promise<SyncDestinationsResponse> =>
     ipcRenderer.invoke('data:getSyncDestinations'),
   getAbout: (): Promise<AboutResponse> => ipcRenderer.invoke('data:getAbout'),
   getSyncStatusSummary: (): Promise<SyncStatusSummary[]> =>
     ipcRenderer.invoke('data:getSyncStatusSummary'),
-  linkDestination: (name: string, syncKey: string | null, path?: string): Promise<LinkDestinationResponse> =>
-    ipcRenderer.invoke('data:linkDestination', name, syncKey, path),
-  pruneSyncKey: (key: string): Promise<PruneResponse> =>
-    ipcRenderer.invoke('data:pruneSyncKey', key),
-  renameSyncKey: (key: string, newKey: string): Promise<OkResponse> =>
-    ipcRenderer.invoke('data:renameSyncKey', key, newKey),
+  linkDestination: (name: string, targetDest: string | null): Promise<LinkDestinationResponse> =>
+    ipcRenderer.invoke('data:linkDestination', name, targetDest),
+  resetDestinationTracking: (name: string): Promise<ResetTrackingResponse> =>
+    ipcRenderer.invoke('data:resetDestinationTracking', name),
   addPlaylist: (key: string, url: string, name: string): Promise<OkResponse> =>
     ipcRenderer.invoke('data:addPlaylist', key, url, name),
   updatePlaylist: (key: string, url?: string, name?: string): Promise<OkResponse> =>
@@ -75,7 +71,7 @@ const electronAPI = {
   startSync: (opts: {
     dest: string;
     playlists?: string[];
-    syncKey?: string;
+    destinationName?: string;
     concurrency?: number;
     usbDriveName?: string;
     profile?: string;
@@ -83,8 +79,8 @@ const electronAPI = {
     offlineOnly?: boolean;
   }): Promise<SyncResult> => ipcRenderer.invoke('sync:start', opts),
   cancelSync: (): Promise<void> => ipcRenderer.invoke('sync:cancel'),
-  resolveSyncKey: (destPath: string, usbDriveName?: string): Promise<string | null> =>
-    ipcRenderer.invoke('sync:resolveSyncKey', destPath, usbDriveName),
+  resolveDestination: (destPath: string, usbDriveName?: string): Promise<string | null> =>
+    ipcRenderer.invoke('sync:resolveDestination', destPath, usbDriveName),
 
   // Drives
   listDrives: (): Promise<DriveInfo[]> => ipcRenderer.invoke('drives:list'),

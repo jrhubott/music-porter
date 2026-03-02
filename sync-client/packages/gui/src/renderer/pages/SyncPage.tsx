@@ -231,9 +231,9 @@ export function SyncPage() {
 
   async function loadSyncStatus(path: string, driveName?: string) {
     try {
-      const syncKey = await ipc.resolveSyncKey(path, driveName);
-      if (syncKey) {
-        const status = await ipc.getSyncStatus(syncKey);
+      const destName = await ipc.resolveDestination(path, driveName);
+      if (destName) {
+        const status = await ipc.getSyncStatus(destName);
         setDestSyncStatus(status);
       } else {
         setDestSyncStatus(null);
@@ -260,14 +260,14 @@ export function SyncPage() {
       const prefs = await ipc.getPreferences();
       setRecentDestinations(prefs.recentDestinations ?? []);
 
-      // First-sync detection: if the resolved key is new and other keys exist,
-      // prompt to link to an existing key
+      // First-sync detection: if the destination is newly created and other destinations exist,
+      // prompt to link to an existing destination
       try {
-        const resolvedKey = await ipc.resolveSyncKey(path);
-        if (resolvedKey) {
-          const keys = await ipc.getSyncKeys();
-          const keyExists = keys.some((k) => k.key_name === resolvedKey);
-          if (!keyExists && keys.length > 0) {
+        const destName = await ipc.resolveDestination(path);
+        if (destName) {
+          const destsResp = await ipc.getSyncDestinations();
+          const otherDests = destsResp.destinations.filter((d) => d.name !== destName);
+          if (otherDests.length > 0) {
             const folderName = path.split('/').pop() ?? path.split('\\').pop() ?? 'folder';
             setLinkTargetName(folderName);
             setLinkModalOpen(true);
@@ -682,7 +682,7 @@ export function SyncPage() {
           <div>Skipped: {lastSyncResult.skipped}</div>
           {lastSyncResult.failed > 0 && <div>Failed: {lastSyncResult.failed}</div>}
           <div>Duration: {formatDuration(lastSyncResult.durationMs)}</div>
-          <div>Sync Key: {lastSyncResult.syncKey}</div>
+          <div>Destination: {lastSyncResult.destinationName}</div>
           {lastSyncResult.destError && (
             <div className="mt-2 text-danger">
               <i className="bi bi-exclamation-triangle-fill me-1" />

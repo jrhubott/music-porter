@@ -206,12 +206,8 @@ export function registerIPCHandlers(): void {
     return apiClient.getFiles(playlistKey, true);
   });
 
-  ipcMain.handle('data:getSyncStatus', async (_event, key: string) => {
-    return apiClient.getSyncStatus(key);
-  });
-
-  ipcMain.handle('data:getSyncKeys', async () => {
-    return apiClient.getSyncKeys();
+  ipcMain.handle('data:getSyncStatus', async (_event, destName: string) => {
+    return apiClient.getSyncStatus(destName);
   });
 
   ipcMain.handle('data:getSyncDestinations', async () => {
@@ -228,17 +224,13 @@ export function registerIPCHandlers(): void {
 
   ipcMain.handle(
     'data:linkDestination',
-    async (_event, name: string, syncKey: string | null, path?: string) => {
-      return apiClient.linkDestination(name, syncKey, path);
+    async (_event, name: string, targetDest: string | null) => {
+      return apiClient.linkDestination(name, targetDest);
     },
   );
 
-  ipcMain.handle('data:pruneSyncKey', async (_event, key: string) => {
-    return apiClient.pruneSyncKey(key);
-  });
-
-  ipcMain.handle('data:renameSyncKey', async (_event, key: string, newKey: string) => {
-    return apiClient.renameSyncKey(key, newKey);
+  ipcMain.handle('data:resetDestinationTracking', async (_event, name: string) => {
+    return apiClient.resetDestinationTracking(name);
   });
 
   ipcMain.handle(
@@ -311,7 +303,7 @@ export function registerIPCHandlers(): void {
       opts: {
         dest: string;
         playlists?: string[];
-        syncKey?: string;
+        destinationName?: string;
         concurrency?: number;
         usbDriveName?: string;
         profile?: string;
@@ -326,7 +318,7 @@ export function registerIPCHandlers(): void {
 
       return engine.sync(opts.dest, {
         playlists: opts.playlists,
-        syncKey: opts.syncKey,
+        destinationName: opts.destinationName,
         usbDriveName: opts.usbDriveName,
         profile: opts.profile,
         force: opts.force,
@@ -351,7 +343,7 @@ export function registerIPCHandlers(): void {
   });
 
   ipcMain.handle(
-    'sync:resolveSyncKey',
+    'sync:resolveDestination',
     async (_event, destPath: string, usbDriveName?: string): Promise<string | null> => {
       try {
         // Use server-side resolution when connected
@@ -361,11 +353,11 @@ export function registerIPCHandlers(): void {
             path: `${scheme}${destPath}`,
             driveName: usbDriveName,
           });
-          return resolved.destination.sync_key;
+          return resolved.destination.name;
         }
         // Offline fallback: read from manifest
         const manifest = readManifest(destPath);
-        return manifest?.sync_key ?? null;
+        return manifest?.destination_name ?? null;
       } catch {
         return null;
       }
