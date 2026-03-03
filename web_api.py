@@ -1947,11 +1947,19 @@ def api_sync_status():
             group_total = total_library_files
             scope = set(playlist_stats.keys())
 
-        # Synced count scoped to the same playlists
-        synced_counts = ctx.sync_tracker.get_synced_counts(
-            sync_key, playlist_prefs
+        # Synced count: unfiltered (all playlists), capped per-playlist at
+        # library count to prevent stale-record inflation from deleted tracks
+        synced_counts = ctx.sync_tracker.get_synced_counts(sync_key)
+        total_synced = sum(
+            min(cnt, playlist_stats.get(pl, 0))
+            for pl, cnt in synced_counts.items()
         )
-        total_synced = sum(synced_counts.values())
+
+        # new_files uses pref-scoped synced so skipped playlists don't mask gaps
+        synced_in_scope = sum(
+            min(synced_counts.get(p, 0), playlist_stats.get(p, 0))
+            for p in scope
+        )
 
         synced_bytes = ctx.sync_tracker.get_synced_bytes(
             sync_key, playlist_prefs
@@ -1969,8 +1977,8 @@ def api_sync_status():
             'destinations': dest_names,
             'last_sync_at': last_sync,
             'total_files': group_total,
-            'synced_files': min(total_synced, group_total),
-            'new_files': max(0, group_total - total_synced),
+            'synced_files': total_synced,
+            'new_files': max(0, group_total - synced_in_scope),
             'new_playlists': new_playlists,
             'group_name': group_name,
             'playlist_prefs': playlist_prefs,
@@ -2018,7 +2026,8 @@ def api_sync_status_detail(dest_name):
 
     playlists = []
     group_total = 0
-    group_synced = 0
+    group_synced_all = 0   # all playlists — used for synced_files display
+    group_synced_pref = 0  # pref playlists only — used for new_files
     for name, total in sorted(playlist_stats.items()):
         raw_synced = synced_counts.get(name, 0)
         synced = min(raw_synced, total)
@@ -2043,9 +2052,10 @@ def api_sync_status_detail(dest_name):
             'sync_status': status,
         })
 
+        group_synced_all += synced
         if in_prefs:
             group_total += total
-            group_synced += synced
+            group_synced_pref += synced
 
     new_playlist_count = sum(1 for p in playlists if p['sync_status'] == 'new')
 
@@ -2054,8 +2064,8 @@ def api_sync_status_detail(dest_name):
         last_sync_at=last_sync,
         playlists=playlists,
         total_files=group_total,
-        synced_files=min(group_synced, group_total),
-        new_files=max(0, group_total - group_synced),
+        synced_files=group_synced_all,
+        new_files=max(0, group_total - group_synced_pref),
         new_playlists=new_playlist_count,
         playlist_prefs=playlist_prefs,
     )

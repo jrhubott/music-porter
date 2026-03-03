@@ -2550,7 +2550,7 @@ class SyncTracker:
         return SyncStatusResult(
             destinations=dest_names or [], last_sync_at=last_sync,
             playlists=playlists, total_files=total_files,
-            synced_files=min(total_synced, total_files),
+            synced_files=total_synced,
             new_files=max(0, total_new),
             new_playlists=new_playlist_count, group_name=group_name)
 
