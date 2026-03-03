@@ -75,6 +75,7 @@ Internal sync tracking identifiers (UUIDs). Not exposed to users — destination
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
 | key\_name | TEXT | PRIMARY KEY | Internal UUID identifier |
+| name | TEXT | | Optional human-readable group label (NULL = unset; UI falls back to primary destination name). Added in **migration 8 -> 9**. |
 | last\_sync\_at | REAL | NOT NULL DEFAULT 0 | Unix epoch of last sync |
 | created\_at | REAL | NOT NULL DEFAULT 0 | Unix epoch of creation |
 
@@ -237,6 +238,7 @@ Sync destination configuration previously stored in `config.yaml`, migrated to t
 | 5 | 6 | Added 14 metadata columns to `tracks` (genre through copyright). Restructured library directories and updated file paths in existing rows. |
 | 6 | 7 | Added `playlists` and `destinations` tables. Migrated playlist and destination data from `config.yaml` to the database. Added `idx_destinations_sync_key` index. |
 | 7 | 8 | Migrated sync\_keys key\_name values from human-readable names to UUIDs. Updated all references in sync\_files and destinations tables. Sync keys are now internal identifiers; destinations are the user-facing concept. |
+| 8 | 9 | Added nullable `name` column to `sync_keys` for optional destination group labels. |
 
 ## Notes
 

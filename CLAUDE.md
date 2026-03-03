@@ -148,6 +148,8 @@ djlint templates/ --reformat                                 # Templates (auto-f
 
 All three must pass clean before merging to main. Linting is recommended but not enforced at `/merge-to-dev` time.
 
+**Important:** Always run `ruff check` without `--select` overrides. Using `--select` bypasses the `ignore` list in `pyproject.toml` and surfaces intentionally suppressed rules. Never use `--select` unless explicitly asked.
+
 ### Branch Workflow (3-Tier)
 
 The project uses a 3-tier branch model: **feature -> dev -> main**.

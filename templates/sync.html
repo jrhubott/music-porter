@@ -295,6 +295,25 @@
     </div>
   </div>
 </div>
+<!-- Rename group modal -->
+<div class="modal fade" id="renameGroupModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title">Rename Group</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="text" class="form-control form-control-sm" id="renameGroupInput" placeholder="Group label (optional)">
+        <p class="text-muted small mt-2 mb-0">Leave blank to use the primary destination name.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="confirmRenameGroupBtn">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
 <!-- Rename destination modal -->
 <div class="modal fade" id="renameDestModal" tabindex="-1">
   <div class="modal-dialog">
@@ -523,17 +542,27 @@ function loadSyncStatusData() {
       const dests = k.destinations || [];
       const primaryDest = dests[0] || 'Unknown';
       const matchedDest = findDestMeta(primaryDest);
-      let icon = 'bi-folder2-open';
-      if (matchedDest?.type === 'usb') icon = 'bi-usb-drive';
-      else if (matchedDest?.type === 'web-client') icon = 'bi-pc-display';
+      // Priority: USB > Folder > Web-client
+      const groupTypes = dests.map(d => findDestMeta(d)?.type).filter(Boolean);
+      let icon = 'bi-pc-display';
+      if (groupTypes.some(t => t === 'folder')) icon = 'bi-folder2-open';
+      if (groupTypes.some(t => t === 'usb')) icon = 'bi-usb-drive';
       const isWebClient = matchedDest?.type === 'web-client';
       const syncDisabled = isWebClient || (!matchedDest || !matchedDest.available) ? 'disabled' : '';
       const syncTitle = isWebClient ? 'Use browser sync' : syncDisabled ? 'Destination unavailable' : 'Sync all playlists';
-      const destLabel = dests.length > 1
-        ? `${primaryDest} <span class="badge bg-info" title="${dests.join(', ')}">${dests.length} linked</span>`
-        : primaryDest;
+      const groupName = k.group_name || '';
+      const renameBtn = `<button class="btn btn-outline-secondary btn-sm py-0 px-1 ms-1" onclick="promptRenameGroup('${primaryDest}'); return false;" title="Rename group"><i class="bi bi-pencil"></i></button>`;
+      let destLabel;
+      if (groupName) {
+        const memberList = dests.join(', ');
+        destLabel = `<a href="#" onclick="showDetail('${primaryDest}'); return false;"><i class="bi ${icon} me-1"></i><strong>${groupName}</strong></a>${renameBtn}<br><small class="text-muted">${memberList}</small>`;
+      } else if (dests.length > 1) {
+        destLabel = `<a href="#" onclick="showDetail('${primaryDest}'); return false;"><i class="bi ${icon} me-1"></i>${primaryDest}</a> <span class="badge bg-info" title="${dests.join(', ')}">${dests.length} linked</span>${renameBtn}`;
+      } else {
+        destLabel = `<a href="#" onclick="showDetail('${primaryDest}'); return false;"><i class="bi ${icon} me-1"></i>${primaryDest}</a>${renameBtn}`;
+      }
       return `<tr>
-        <td><a href="#" onclick="showDetail('${primaryDest}'); return false;"><i class="bi ${icon} me-1"></i>${destLabel}</a></td>
+        <td>${destLabel}</td>
         <td class="text-end">${k.synced_files} / ${k.total_files}</td>
         <td class="text-end">${newBadge}</td>
         <td class="text-end">${plBadge}</td>
@@ -800,6 +829,40 @@ document.getElementById('confirmRenameDestBtn').addEventListener('click', functi
     showToast(msg, 'success');
     pendingRenameDest = null;
     loadDestinations();
+    loadSyncStatusData();
+  }).catch(err => showToast('Rename failed: ' + err, 'error'));
+});
+
+// ── Group Rename ──
+let pendingRenameGroupDest = null;
+function promptRenameGroup(primaryDest) {
+  pendingRenameGroupDest = primaryDest;
+  const currentName = findGroupName(primaryDest);
+  document.getElementById('renameGroupInput').value = currentName;
+  const modal = new bootstrap.Modal(document.getElementById('renameGroupModal'));
+  modal.show();
+  setTimeout(() => document.getElementById('renameGroupInput').select(), 300);
+}
+
+function findGroupName(primaryDest) {
+  // Look up current group_name from the cached sync status data
+  const group = allKeysData.find(
+    k => (k.destinations || []).includes(primaryDest));
+  return group ? (group.group_name || '') : '';
+}
+
+document.getElementById('confirmRenameGroupBtn').addEventListener('click', function() {
+  if (!pendingRenameGroupDest) return;
+  const newName = document.getElementById('renameGroupInput').value;
+  fetch('/api/sync/destinations/' + encodeURIComponent(pendingRenameGroupDest) + '/group-name', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name: newName})
+  }).then(r => r.json()).then(data => {
+    if (data.error) { showToast(data.error, 'error'); return; }
+    bootstrap.Modal.getInstance(document.getElementById('renameGroupModal')).hide();
+    showToast(newName ? `Group renamed to '${newName}'` : 'Group name cleared', 'success');
+    pendingRenameGroupDest = null;
     loadSyncStatusData();
   }).catch(err => showToast('Rename failed: ' + err, 'error'));
 });

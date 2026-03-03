@@ -1,3 +1,9 @@
+Version 2.38.8 (2026-03-02):
+• Updated rules
+• Add merge-to-dev SRS requirements and standalone script
+• Preserve group name when linking destination to named group
+• Add destination group rename and composition-based icons
+
 Version 2.38.6 (2026-03-02):
 • Add cut-release.py with automation flags, recovery menus, and SRS doc
 

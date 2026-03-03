@@ -1905,16 +1905,17 @@ def api_sync_status():
     for d in all_dests:
         key_groups.setdefault(d.sync_key, []).append(d.name)
 
+    keys = ctx.sync_tracker._get_keys()
+    key_meta = {k['key_name']: k for k in keys}
+
     results = []
     for sync_key, dest_names in key_groups.items():
         synced_counts = ctx.sync_tracker.get_synced_counts(sync_key)
         total_synced = sum(synced_counts.values())
 
-        # Get last_sync_at from sync_keys table
-        keys = ctx.sync_tracker._get_keys()
-        key_info = next(
-            (k for k in keys if k['key_name'] == sync_key), None)
-        last_sync = key_info['last_sync_at'] if key_info else 0
+        info = key_meta.get(sync_key)
+        last_sync = info['last_sync_at'] if info else 0
+        group_name = (info.get('name') or '') if info else ''
 
         results.append({
             'destinations': dest_names,
@@ -1923,6 +1924,7 @@ def api_sync_status():
             'synced_files': total_synced,
             'new_files': total_library_files - total_synced,
             'new_playlists': 0,
+            'group_name': group_name,
         })
     return jsonify(results)
 
@@ -2013,6 +2015,25 @@ def api_sync_destination_reset(name):
             source=ctx.detect_source(),
         )
     return jsonify(result)
+
+
+@api_bp.route('/api/sync/destinations/<name>/group-name', methods=['PUT'])
+def api_sync_destination_group_name(name):
+    """Set (or clear) the human-readable label for a destination's group.
+
+    Body: {"name": "My Group Label"}  (empty string clears the name)
+    Returns 404 if destination not found, 400 if body is missing.
+    """
+    ctx = _ctx()
+    data = request.get_json(silent=True)
+    if data is None or 'name' not in data:
+        return jsonify({'error': "'name' field required"}), 400
+
+    ok = ctx.sync_tracker.set_group_name(name, data['name'])
+    if not ok:
+        return jsonify({'error': f"Destination '{name}' not found"}), 404
+
+    return jsonify({'ok': True})
 
 
 @api_bp.route('/api/sync/client-record', methods=['POST'])
