@@ -80,7 +80,8 @@ export interface SyncPlaylistStatus {
   total_files: number;
   synced_files: number;
   new_files: number;
-  is_new_playlist: boolean;
+  is_new_playlist: boolean;                                      // kept for compat — now timestamp-based
+  sync_status?: 'synced' | 'new' | 'behind' | 'skipped';        // new in server v2.38.13+
 }
 
 export interface SyncStatusDetail {

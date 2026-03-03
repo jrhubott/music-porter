@@ -536,12 +536,15 @@ function showDetail(destName) {
     const detailSyncTitle = detailSyncDisabled ? 'Destination unavailable' : 'Sync playlist';
     tbody.innerHTML = data.playlists.map(p => {
       let statusBadge;
-      if (p.is_new_playlist) {
+      const s = p.sync_status;
+      if (s === 'skipped') {
+        statusBadge = '<span class="badge bg-secondary">Skipped</span>';
+      } else if (s === 'new' || p.is_new_playlist) {
         statusBadge = '<span class="badge bg-info">NEW</span>';
-      } else if (p.new_files > 0) {
+      } else if (s === 'behind' || p.new_files > 0) {
         statusBadge = `<span class="badge bg-warning text-dark">+${p.new_files}</span>`;
       } else {
-        statusBadge = '<span class="badge bg-success">synced</span>';
+        statusBadge = '<span class="badge bg-success">Synced</span>';
       }
       let prefCell;
       if (!prefs) {

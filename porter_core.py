@@ -2357,32 +2357,72 @@ class SyncTracker:
         finally:
             conn.close()
 
-    def get_synced_counts(self, sync_key):
-        """Return per-playlist synced file counts for a sync key."""
+    def get_synced_counts(self, sync_key, playlist_filter=None):
+        """Return per-playlist synced file counts for a sync key.
+
+        If playlist_filter is provided (list of playlist keys), only counts
+        files belonging to those playlists.
+        """
         conn = self._connect()
         try:
-            rows = conn.execute(
-                """SELECT playlist, COUNT(*) AS cnt
-                   FROM sync_files WHERE sync_key = ?
-                   GROUP BY playlist""",
-                (sync_key,),
-            ).fetchall()
+            if playlist_filter:
+                placeholders = ','.join('?' * len(playlist_filter))
+                rows = conn.execute(
+                    f"""SELECT playlist, COUNT(*) AS cnt
+                       FROM sync_files WHERE sync_key = ?
+                       AND playlist IN ({placeholders})
+                       GROUP BY playlist""",
+                    (sync_key, *playlist_filter),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT playlist, COUNT(*) AS cnt
+                       FROM sync_files WHERE sync_key = ?
+                       GROUP BY playlist""",
+                    (sync_key,),
+                ).fetchall()
             return {r['playlist']: r['cnt'] for r in rows}
         finally:
             conn.close()
 
-    def get_synced_bytes(self, sync_key: str) -> int:
-        """Return total bytes of synced files for a sync key via TrackDB join."""
+    def get_synced_bytes(self, sync_key: str, playlist_filter=None) -> int:
+        """Return total bytes of synced files for a sync key via TrackDB join.
+
+        If playlist_filter is provided (list of playlist keys), only counts
+        bytes for files belonging to those playlists.
+        """
         conn = self._connect()
         try:
-            row = conn.execute(
-                """SELECT COALESCE(SUM(t.file_size_bytes), 0) AS total
-                   FROM sync_files sf
-                   JOIN tracks t ON sf.file_path = t.file_path
-                   WHERE sf.sync_key = ?""",
-                (sync_key,),
-            ).fetchone()
+            if playlist_filter:
+                placeholders = ','.join('?' * len(playlist_filter))
+                row = conn.execute(
+                    f"""SELECT COALESCE(SUM(t.file_size_bytes), 0) AS total
+                       FROM sync_files sf
+                       JOIN tracks t ON sf.file_path = t.file_path
+                       WHERE sf.sync_key = ?
+                       AND sf.playlist IN ({placeholders})""",
+                    (sync_key, *playlist_filter),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """SELECT COALESCE(SUM(t.file_size_bytes), 0) AS total
+                       FROM sync_files sf
+                       JOIN tracks t ON sf.file_path = t.file_path
+                       WHERE sf.sync_key = ?""",
+                    (sync_key,),
+                ).fetchone()
             return int(row['total']) if row else 0
+        finally:
+            conn.close()
+
+    def _get_playlist_creation_times(self) -> dict:
+        """Return {playlist_key: created_at} for all known playlists."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT key, created_at FROM playlists"
+            ).fetchall()
+            return {r['key']: r['created_at'] for r in rows}
         finally:
             conn.close()
 
@@ -2449,6 +2489,7 @@ class SyncTracker:
         finally:
             conn.close()
 
+        creation_times = self._get_playlist_creation_times()
         playlists = []
         total_files = 0
         total_synced = 0
@@ -2470,7 +2511,18 @@ class SyncTracker:
             tracked = synced_files_by_playlist.get(playlist_name, set())
             synced = files_on_disk & tracked
             new = files_on_disk - tracked
-            is_new_playlist = len(tracked) == 0
+            playlist_created_at = creation_times.get(playlist_name, 0)
+            is_new_playlist = last_sync > 0 and playlist_created_at > last_sync
+
+            in_prefs = pref_set is None or playlist_name in pref_set
+            if not in_prefs:
+                sync_status = 'skipped'
+            elif is_new_playlist:
+                sync_status = 'new'
+            elif len(new) > 0:
+                sync_status = 'behind'
+            else:
+                sync_status = 'synced'
 
             playlists.append({
                 'name': playlist_name,
@@ -2478,11 +2530,11 @@ class SyncTracker:
                 'synced_files': len(synced),
                 'new_files': len(new),
                 'is_new_playlist': is_new_playlist,
+                'sync_status': sync_status,
             })
             # synced_files reflects the actual destination state (always unfiltered)
             total_synced += len(synced)
             # total_files/new_files/new_playlists count only pref playlists
-            in_prefs = pref_set is None or playlist_name in pref_set
             if in_prefs:
                 total_files += len(files_on_disk)
                 total_new += len(new)

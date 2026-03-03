@@ -48,6 +48,23 @@ final class APIClient {
         return response
     }
 
+    /// Unauthenticated health probe. Safe to call before auth is established.
+    /// Returns a HealthResponse for both 200 (healthy/degraded) and 503 (unhealthy).
+    /// Throws on network failure (connection refused, timeout, etc.).
+    func fetchHealth(baseURL: URL? = nil) async throws -> HealthResponse {
+        let base = baseURL ?? activeBaseURL
+        guard let base else { throw APIError.notConfigured }
+        guard var comps = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+            throw APIError.notConfigured
+        }
+        comps.path = "/health"
+        comps.queryItems = nil
+        guard let url = comps.url else { throw APIError.notConfigured }
+        let request = URLRequest(url: url)      // no Authorization header
+        let (data, _) = try await session.data(for: request)
+        return try JSONDecoder().decode(HealthResponse.self, from: data)
+    }
+
     func disconnect() {
         server = nil
         apiKey = nil

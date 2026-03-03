@@ -131,6 +131,9 @@ final class AppState {
     }
 
     /// Try local URL first, then fall back to external URL.
+    /// Uses an unauthenticated health probe to determine reachability before
+    /// attempting full auth, so a server with a bad API key shows as reachable
+    /// rather than offline.
     private func resolveConnection(server: ServerConnection) async throws -> AuthValidateResponse {
         var lastError: Error = APIError.notConfigured
 
@@ -139,27 +142,54 @@ final class AppState {
             ? Self.localTimeoutSeconds
             : Self.standardTimeoutSeconds
 
-        // Try local URL first
+        // Try local URL — health probe first to distinguish reachability from auth failure
         if let localURL = server.localURL {
-            apiClient.setActiveURL(localURL, type: .local)
-            do {
-                return try await validateWithTimeout(seconds: localTimeout)
-            } catch {
-                lastError = error
+            if await probeReachable(baseURL: localURL, timeoutSeconds: localTimeout) {
+                apiClient.setActiveURL(localURL, type: .local)
+                do {
+                    return try await validateWithTimeout(seconds: localTimeout)
+                } catch {
+                    lastError = error
+                }
             }
         }
 
         // Try external URL
         if let extStr = server.externalURL, let externalURL = URL(string: extStr) {
-            apiClient.setActiveURL(externalURL, type: .external)
-            do {
-                return try await validateWithTimeout(seconds: Self.standardTimeoutSeconds)
-            } catch {
-                lastError = error
+            if await probeReachable(baseURL: externalURL, timeoutSeconds: Self.standardTimeoutSeconds) {
+                apiClient.setActiveURL(externalURL, type: .external)
+                do {
+                    return try await validateWithTimeout(seconds: Self.standardTimeoutSeconds)
+                } catch {
+                    lastError = error
+                }
             }
         }
 
         throw lastError
+    }
+
+    /// Returns true if the server at baseURL responds to GET /health within the timeout.
+    /// A 503 response (server unhealthy) still means "reachable" — only a network
+    /// failure (connection refused, timeout) returns false.
+    private func probeReachable(baseURL: URL, timeoutSeconds: Int) async -> Bool {
+        await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                do {
+                    _ = try await self.apiClient.fetchHealth(baseURL: baseURL)
+                    return true
+                } catch {
+                    return false
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(timeoutSeconds))
+                return false
+            }
+            let result = await group.next() ?? false
+            group.cancelAll()
+            return result
+        }
     }
 
     /// Validate the connection with a timeout.

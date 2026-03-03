@@ -1921,24 +1921,50 @@ def api_sync_status():
     keys = ctx.sync_tracker._get_keys()
     key_meta = {k['key_name']: k for k in keys}
 
+    creation_times = ctx.sync_tracker._get_playlist_creation_times()
+
     results = []
     for sync_key, dest_names in key_groups.items():
-        synced_counts = ctx.sync_tracker.get_synced_counts(sync_key)
-        total_synced = sum(synced_counts.values())
-
         info = key_meta.get(sync_key)
         last_sync = info['last_sync_at'] if info else 0
         group_name = (info.get('name') or '') if info else ''
         playlist_prefs = info.get('playlist_prefs') if info else None
-        synced_bytes = ctx.sync_tracker.get_synced_bytes(sync_key)
+
+        # Scope total_files to the group's playlists (prefs or all)
+        if playlist_prefs:
+            group_total = sum(
+                playlist_stats.get(p, 0) for p in playlist_prefs
+            )
+            scope = set(playlist_prefs)
+        else:
+            group_total = total_library_files
+            scope = set(playlist_stats.keys())
+
+        # Synced count scoped to the same playlists
+        synced_counts = ctx.sync_tracker.get_synced_counts(
+            sync_key, playlist_prefs
+        )
+        total_synced = sum(synced_counts.values())
+
+        synced_bytes = ctx.sync_tracker.get_synced_bytes(
+            sync_key, playlist_prefs
+        )
+
+        # New playlists: created after last sync, within scope
+        new_playlists = 0
+        if last_sync > 0:
+            new_playlists = sum(
+                1 for p in scope
+                if creation_times.get(p, 0) > last_sync
+            )
 
         results.append({
             'destinations': dest_names,
             'last_sync_at': last_sync,
-            'total_files': total_library_files,
+            'total_files': group_total,
             'synced_files': total_synced,
-            'new_files': total_library_files - total_synced,
-            'new_playlists': 0,
+            'new_files': group_total - total_synced,
+            'new_playlists': new_playlists,
             'group_name': group_name,
             'playlist_prefs': playlist_prefs,
             'synced_bytes': synced_bytes,
@@ -1975,37 +2001,53 @@ def api_sync_status_detail(dest_name):
     }
     synced_counts = ctx.sync_tracker.get_synced_counts(sync_key)
 
+    keys = ctx.sync_tracker._get_keys()
+    key_info = next((k for k in keys if k['key_name'] == sync_key), None)
+    last_sync = key_info['last_sync_at'] if key_info else 0
+    playlist_prefs = key_info['playlist_prefs'] if key_info else None
+    pref_set = set(playlist_prefs) if playlist_prefs else None
+
+    creation_times = ctx.sync_tracker._get_playlist_creation_times()
+
     playlists = []
-    new_playlist_count = 0
+    group_total = 0
+    group_synced = 0
     for name, total in sorted(playlist_stats.items()):
         synced = synced_counts.get(name, 0)
         new = total - synced
-        is_new = synced == 0
+        in_prefs = pref_set is None or name in pref_set
+
+        if not in_prefs:
+            status = 'skipped'
+        elif last_sync > 0 and creation_times.get(name, 0) > last_sync:
+            status = 'new'
+        elif new > 0:
+            status = 'behind'
+        else:
+            status = 'synced'
+
         playlists.append({
             'name': name,
             'total_files': total,
             'synced_files': synced,
             'new_files': new,
-            'is_new_playlist': is_new,
+            'is_new_playlist': status == 'new',
+            'sync_status': status,
         })
-        if is_new:
-            new_playlist_count += 1
 
-    total_files = sum(playlist_stats.values())
-    total_synced = sum(synced_counts.values())
+        if in_prefs:
+            group_total += total
+            group_synced += synced
 
-    keys = ctx.sync_tracker._get_keys()
-    key_info = next((k for k in keys if k['key_name'] == sync_key), None)
-    last_sync = key_info['last_sync_at'] if key_info else 0
-    playlist_prefs = key_info['playlist_prefs'] if key_info else None
+    new_playlist_count = sum(1 for p in playlists if p['sync_status'] == 'new')
 
     result = mp.SyncStatusResult(
         destinations=group_names,
         last_sync_at=last_sync,
         playlists=playlists,
-        total_files=total_files,
-        synced_files=total_synced,
-        new_files=total_files - total_synced,
+        total_files=group_total,
+        synced_files=group_synced,
+        new_files=group_total - group_synced,
         new_playlists=new_playlist_count,
         playlist_prefs=playlist_prefs,
     )

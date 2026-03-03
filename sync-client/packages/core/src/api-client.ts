@@ -491,20 +491,20 @@ export class APIClient {
   // ── Health Check ──
 
   /**
-   * Lightweight health check — returns true if the server responds, false on any error.
-   * Uses a short timeout to avoid blocking.
+   * Lightweight health check — returns true if the server responds to GET /health,
+   * false on any network error. A 503 response (server unhealthy) still counts as
+   * reachable. Does not require an API key.
    */
   async ping(timeoutMs: number = HEALTH_CHECK_TIMEOUT_MS): Promise<boolean> {
     if (!this.activeURL) return false;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const base = this.activeURL.replace(/\/$/, '');
     try {
-      await this.get<unknown>('/api/status', controller.signal);
-      return true;
+      const response = await fetch(`${base}/health`, {
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      return response.status < 600;   // any HTTP response = server is reachable
     } catch {
       return false;
-    } finally {
-      clearTimeout(timer);
     }
   }
 
@@ -512,6 +512,7 @@ export class APIClient {
    * Dual-URL health check — tries local first (short timeout), then external.
    * Updates activeURL/connType when a different URL succeeds.
    * Does NOT clear activeURL on failure (let the monitor's threshold logic handle that).
+   * Uses GET /health (unauthenticated) for reachability — works without a valid API key.
    */
   async resolveHealthCheck(): Promise<HealthCheckResult> {
     const hasLocal = this.localURL !== undefined;
@@ -523,35 +524,37 @@ export class APIClient {
 
     // Try local first (preferred)
     if (hasLocal) {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), HEALTH_CHECK_LOCAL_TIMEOUT_MS);
       try {
-        await this.getFrom(this.localURL!, '/api/status', controller.signal);
-        const changed = this.connType !== 'local';
-        this.activeURL = this.localURL;
-        this.connType = 'local';
-        return { reachable: true, type: 'local', typeChanged: changed };
+        const base = this.localURL!.replace(/\/$/, '');
+        const response = await fetch(`${base}/health`, {
+          signal: AbortSignal.timeout(HEALTH_CHECK_LOCAL_TIMEOUT_MS),
+        });
+        if (response.status < 600) {
+          const changed = this.connType !== 'local';
+          this.activeURL = this.localURL;
+          this.connType = 'local';
+          return { reachable: true, type: 'local', typeChanged: changed };
+        }
       } catch {
         // Local unreachable — try external
-      } finally {
-        clearTimeout(timer);
       }
     }
 
     // Fall back to external
     if (hasExternal) {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
       try {
-        await this.getFrom(this.externalURL!, '/api/status', controller.signal);
-        const changed = this.connType !== 'external';
-        this.activeURL = this.externalURL;
-        this.connType = 'external';
-        return { reachable: true, type: 'external', typeChanged: changed };
+        const base = this.externalURL!.replace(/\/$/, '');
+        const response = await fetch(`${base}/health`, {
+          signal: AbortSignal.timeout(HEALTH_CHECK_TIMEOUT_MS),
+        });
+        if (response.status < 600) {
+          const changed = this.connType !== 'external';
+          this.activeURL = this.externalURL;
+          this.connType = 'external';
+          return { reachable: true, type: 'external', typeChanged: changed };
+        }
       } catch {
         // External also unreachable
-      } finally {
-        clearTimeout(timer);
       }
     }
 
@@ -634,20 +637,6 @@ export class APIClient {
       method: 'PUT',
       headers: this.authHeaders(),
       body: JSON.stringify(body),
-      signal,
-    });
-    this.checkResponse(response);
-    return (await response.json()) as T;
-  }
-
-  /** GET from a specific base URL (for health checks against explicit URLs). */
-  private async getFrom<T>(baseURL: string, path: string, signal?: AbortSignal): Promise<T> {
-    const base = baseURL.replace(/\/$/, '');
-    const p = path.startsWith('/') ? path : `/${path}`;
-    const url = `${base}${p}`;
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: this.authHeaders(),
       signal,
     });
     this.checkResponse(response);

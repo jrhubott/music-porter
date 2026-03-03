@@ -33,7 +33,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from flask import (
@@ -851,6 +851,9 @@ def _get_freshness_level(last_modified: datetime | None, today: date) -> str:
 # Flask Application Factory
 # ══════════════════════════════════════════════════════════════════
 
+_server_start_time = time.time()
+
+
 def create_app(project_root=None, no_auth=False, server_host=None,
                server_port=None, external_url=None,
                behind_proxy=False, proxy_count=1):
@@ -905,6 +908,61 @@ def create_app(project_root=None, no_auth=False, server_host=None,
     from web_api import api_bp
     app.register_blueprint(api_bp)
 
+    # ── Health probe (unauthenticated) ────────────────────────
+    @app.route('/health')
+    def health():
+        """Unauthenticated health check for external monitors and clients."""
+        checks = {}
+        overall = 'healthy'
+
+        # Database check
+        try:
+            conn = ctx.sync_tracker._connect()
+            conn.execute("PRAGMA user_version").fetchone()
+            conn.close()
+            checks['database'] = {'status': 'healthy', 'message': None}
+        except Exception as exc:
+            checks['database'] = {'status': 'unhealthy', 'message': str(exc)}
+            overall = 'unhealthy'
+
+        # Library check
+        audio_dir = Path(mp.get_audio_dir())
+        if audio_dir.is_dir():
+            checks['library'] = {'status': 'healthy', 'message': None}
+        else:
+            checks['library'] = {
+                'status': 'unhealthy',
+                'message': 'library/audio/ directory not found',
+            }
+            overall = 'unhealthy'
+
+        # Cookie check
+        cookie_mgr = mp.CookieManager(mp.DEFAULT_COOKIES, mp.Logger(verbose=False))
+        cs = cookie_mgr.validate()
+        if not cs.valid:
+            checks['cookies'] = {'status': 'unhealthy', 'message': cs.reason}
+            overall = 'unhealthy'
+        elif cs.days_until_expiration is not None and cs.days_until_expiration <= 14:
+            days = round(cs.days_until_expiration)
+            checks['cookies'] = {
+                'status': 'degraded',
+                'message': f'Cookie expires in {days} days',
+            }
+            if overall == 'healthy':
+                overall = 'degraded'
+        else:
+            checks['cookies'] = {'status': 'healthy', 'message': None}
+
+        result = {
+            'status': overall,
+            'version': mp.VERSION,
+            'uptime_s': round(time.time() - _server_start_time, 1),
+            'timestamp': datetime.now(UTC).isoformat(),
+            'checks': checks,
+        }
+        http_status = 503 if overall == 'unhealthy' else 200
+        return jsonify(result), http_status
+
     # ── CORS headers for iOS companion app ───────────────────
     @app.after_request
     def _add_cors_headers(response):
@@ -923,8 +981,8 @@ def create_app(project_root=None, no_auth=False, server_host=None,
         # Web mode (--no-auth): skip all authentication
         if app.config.get('NO_AUTH'):
             return None
-        # Always allow the login/logout pages and static files
-        if request.path in ('/login', '/logout'):
+        # Always allow the login/logout pages, static files, and health probe
+        if request.path in ('/login', '/logout', '/health'):
             return None
         # Check auth sources
         has_session = session.get('authenticated') is True

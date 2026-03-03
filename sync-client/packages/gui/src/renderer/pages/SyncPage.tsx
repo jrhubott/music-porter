@@ -540,10 +540,13 @@ export function SyncPage() {
                           (sp) => sp.name === p.key || sp.name === p.name,
                         );
                         if (!syncInfo) return null;
+                        const s = syncInfo.sync_status;
+                        if (s === 'skipped')
+                          return <small className="text-muted d-block mt-1">skipped</small>;
+                        if (s === 'new' || syncInfo.is_new_playlist)
+                          return <small className="text-warning d-block mt-1">all new</small>;
                         if (syncInfo.new_files === 0)
                           return <small className="text-success d-block mt-1">synced</small>;
-                        if (syncInfo.is_new_playlist)
-                          return <small className="text-warning d-block mt-1">all new</small>;
                         return <small className="text-info d-block mt-1">{syncInfo.new_files} new</small>;
                       })()}
                     </div>
