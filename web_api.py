@@ -1797,13 +1797,7 @@ def api_sync_destination_resolve():
     # Include sync status summary
     status = ctx.sync_tracker.get_destination_status(
         dest.name, mp.get_audio_dir())
-    response['sync_status'] = {
-        'destinations': status.destinations,
-        'total_files': status.total_files,
-        'synced_files': status.synced_files,
-        'new_files': status.new_files,
-        'playlists': status.playlists,
-    }
+    response['sync_status'] = status.to_dict()
 
     return jsonify(response)
 
