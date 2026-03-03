@@ -425,6 +425,16 @@ export class APIClient {
     );
   }
 
+  async savePlaylistPrefs(
+    destName: string,
+    playlistKeys: string[] | null,
+  ): Promise<OkResponse> {
+    return this.put<OkResponse>(
+      `/api/sync/destinations/${encodeURIComponent(destName)}/playlist-prefs`,
+      { playlist_keys: playlistKeys },
+    );
+  }
+
   async getSyncStatusSummary(): Promise<SyncStatusSummary[]> {
     return this.get<SyncStatusSummary[]>('/api/sync/status');
   }

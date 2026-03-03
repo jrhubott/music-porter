@@ -30,6 +30,7 @@ interface AppState {
   togglePlaylist: (key: string) => void;
   selectAllPlaylists: () => void;
   clearSelection: () => void;
+  setSelectedPlaylists: (keys: Set<string>) => void;
 
   // Profiles
   serverProfiles: Record<string, ProfileInfo>;
@@ -132,6 +133,7 @@ export const useAppState = create<AppState>((set) => ({
       selectedPlaylists: new Set(state.playlists.map((p) => p.key)),
     })),
   clearSelection: () => set({ selectedPlaylists: new Set() }),
+  setSelectedPlaylists: (keys) => set({ selectedPlaylists: new Set(keys) }),
 
   // Profiles
   serverProfiles: {},
