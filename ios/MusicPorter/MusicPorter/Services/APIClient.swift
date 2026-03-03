@@ -391,6 +391,15 @@ final class APIClient {
         try await get("/api/files/\(playlist)/sync-status")
     }
 
+    /// Get tracks removed from a playlist, optionally since a given Unix timestamp.
+    func getRemovedFiles(playlist: String, since: Double? = nil) async throws -> RemovedFilesResponse {
+        var queryItems: [URLQueryItem]?
+        if let since {
+            queryItems = [URLQueryItem(name: "since", value: String(since))]
+        }
+        return try await get("/api/files/\(playlist)/removed", queryItems: queryItems)
+    }
+
     func recordClientSync(
         destination: String,
         playlist: String,
@@ -793,6 +802,31 @@ struct LibraryStatsResponse: Codable {
         case totalExported = "total_exported"
         case totalUnconverted = "total_unconverted"
         case scanDuration = "scan_duration"
+    }
+}
+
+struct RemovedTrack: Codable {
+    let id: Int
+    let uuid: String
+    let playlist: String
+    let title: String
+    let artist: String
+    let album: String
+    let displayFilename: String
+    let removedAt: Double
+
+    enum CodingKeys: String, CodingKey {
+        case id, uuid, playlist, title, artist, album
+        case displayFilename = "display_filename"
+        case removedAt = "removed_at"
+    }
+}
+
+struct RemovedFilesResponse: Codable {
+    let removedTracks: [RemovedTrack]
+
+    enum CodingKeys: String, CodingKey {
+        case removedTracks = "removed_tracks"
     }
 }
 

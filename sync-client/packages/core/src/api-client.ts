@@ -35,6 +35,7 @@ import type {
   SyncStatusSummary,
   LinkDestinationResponse,
   ResetTrackingResponse,
+  RemovedFilesResponse,
 } from './types.js';
 import type { MetadataCache } from './cache/metadata-cache.js';
 
@@ -361,6 +362,14 @@ export class APIClient {
     }
     const size = parseInt(response.headers.get('content-length') ?? '0', 10);
     return { body: response.body, size };
+  }
+
+  /** Get tracks removed from a playlist, optionally since a given Unix timestamp. */
+  async getRemovedFiles(playlistKey: string, since?: number): Promise<RemovedFilesResponse> {
+    const params = since !== undefined ? `?since=${since}` : '';
+    return this.get<RemovedFilesResponse>(
+      `/api/files/${encodeURIComponent(playlistKey)}/removed${params}`,
+    );
   }
 
   /** Build a direct URL for downloading a file (for external use). Pass profile for tagged output. */

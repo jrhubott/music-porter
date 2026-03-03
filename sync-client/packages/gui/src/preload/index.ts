@@ -80,6 +80,7 @@ const electronAPI = {
     profile?: string;
     force?: boolean;
     offlineOnly?: boolean;
+    cleanDestination?: boolean;
   }): Promise<SyncResult> => ipcRenderer.invoke('sync:start', opts),
   cancelSync: (): Promise<void> => ipcRenderer.invoke('sync:cancel'),
   resolveDestination: (destPath: string, usbDriveName?: string): Promise<string | null> =>

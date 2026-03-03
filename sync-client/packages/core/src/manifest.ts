@@ -47,6 +47,17 @@ export function createManifest(destinationName: string, serverOrigin: string): S
   };
 }
 
+/** Remove a specific file entry from the manifest's playlist files map. */
+export function removeManifestFile(
+  manifest: SyncManifest,
+  playlistKey: string,
+  filePath: string,
+): void {
+  const playlist = manifest.playlists[playlistKey];
+  if (!playlist) return;
+  delete playlist.files[filePath];
+}
+
 /** Update the manifest with synced files for a playlist. */
 export function updateManifestPlaylist(
   manifest: SyncManifest,

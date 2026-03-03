@@ -329,6 +329,7 @@ export function registerIPCHandlers(): void {
         profile?: string;
         force?: boolean;
         offlineOnly?: boolean;
+        cleanDestination?: boolean;
       },
     ): Promise<SyncResult> => {
       activeSyncAbort = new AbortController();
@@ -347,6 +348,7 @@ export function registerIPCHandlers(): void {
         cacheManager,
         metadataCache,
         offlineOnly: opts.offlineOnly,
+        cleanDestination: opts.cleanDestination,
         onProgress: (progress: SyncProgress) => {
           event.sender.send('sync:progress', progress);
         },

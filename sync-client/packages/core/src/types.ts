@@ -75,6 +75,21 @@ export interface FileListResponse {
   files: FileInfo[];
 }
 
+export interface RemovedTrack {
+  id: number;
+  uuid: string;
+  playlist: string;
+  title: string;
+  artist: string;
+  album: string;
+  display_filename: string;
+  removed_at: number;
+}
+
+export interface RemovedFilesResponse {
+  removed_tracks: RemovedTrack[];
+}
+
 export interface SyncPlaylistStatus {
   name: string;
   total_files: number;
