@@ -16,6 +16,7 @@ final class AppState {
     let discovery = ServerDiscovery()
     let musicKit = MusicKitService()
     let usbExport = USBExportService()
+    let folderSync = FolderSyncService()
     let audioPlayer = AudioPlayerService()
 
     // Cache preferences (always available, not tied to connection)

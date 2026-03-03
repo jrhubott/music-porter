@@ -370,6 +370,21 @@ final class APIClient {
         try await get("/api/files/\(playlist)/sync-status")
     }
 
+    func recordClientSync(
+        destination: String,
+        playlist: String,
+        files: [String],
+        destPath: String? = nil
+    ) async throws {
+        var body: [String: Any] = [
+            "destination": destination,
+            "playlist": playlist,
+            "files": files,
+        ]
+        if let destPath { body["dest_path"] = destPath }
+        let _: OkResponse = try await postAny("/api/sync/client-record", body: body)
+    }
+
     // MARK: - Tasks
 
     func getTasks() async throws -> [TaskInfo] {
