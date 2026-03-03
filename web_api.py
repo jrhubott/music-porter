@@ -1782,6 +1782,11 @@ def api_sync_destination_resolve():
     if not path and not name:
         return jsonify({'error': 'At least path or name is required'}), 400
 
+    # Auto-prefix ios:// for iOS clients providing a bare path
+    if path and not any(path.startswith(s) for s in mp.KNOWN_DEST_SCHEMES):
+        if ctx.detect_source() == 'ios':
+            path = f'ios://{path}'
+
     result = ctx.sync_tracker.resolve_destination(
         path=path, name=name, drive_name=drive_name,
         link_to=link_to)
@@ -1846,8 +1851,10 @@ def api_sync_run():
     if not dest:
         return jsonify({'error': f"Destination '{dest_name}' not found"}), 404
 
-    if dest.is_web_client:
-        return jsonify({'error': 'web-client destinations can only be synced from the browser'}), 400
+    if dest.type in mp.VIRTUAL_DEST_TYPES:
+        labels = {'web-client': 'the browser', 'ios': 'the iOS app'}
+        source = labels.get(dest.type, dest.type)
+        return jsonify({'error': f'{dest.type} destinations can only be synced from {source}'}), 400
 
     # Persist playlist prefs before dispatching (so they survive cancellation)
     ctx.sync_tracker.save_playlist_prefs(dest_name, playlist_keys)
@@ -1962,8 +1969,8 @@ def api_sync_status():
             'destinations': dest_names,
             'last_sync_at': last_sync,
             'total_files': group_total,
-            'synced_files': total_synced,
-            'new_files': group_total - total_synced,
+            'synced_files': min(total_synced, group_total),
+            'new_files': max(0, group_total - total_synced),
             'new_playlists': new_playlists,
             'group_name': group_name,
             'playlist_prefs': playlist_prefs,
@@ -2013,8 +2020,9 @@ def api_sync_status_detail(dest_name):
     group_total = 0
     group_synced = 0
     for name, total in sorted(playlist_stats.items()):
-        synced = synced_counts.get(name, 0)
-        new = total - synced
+        raw_synced = synced_counts.get(name, 0)
+        synced = min(raw_synced, total)
+        new = max(0, total - raw_synced)
         in_prefs = pref_set is None or name in pref_set
 
         if not in_prefs:
@@ -2046,8 +2054,8 @@ def api_sync_status_detail(dest_name):
         last_sync_at=last_sync,
         playlists=playlists,
         total_files=group_total,
-        synced_files=group_synced,
-        new_files=group_total - group_synced,
+        synced_files=min(group_synced, group_total),
+        new_files=max(0, group_total - group_synced),
         new_playlists=new_playlist_count,
         playlist_prefs=playlist_prefs,
     )
@@ -2150,8 +2158,11 @@ def api_sync_client_record():
         # Auto-create destination from path if provided
         dest_path = data.get('dest_path', '').strip()
         if dest_path:
-            dest_type = data.get('dest_type', 'folder')
-            scheme = 'usb://' if dest_type == 'usb' else 'folder://'
+            dest_type = data.get('dest_type', '')
+            if not dest_type and ctx.detect_source() == 'ios':
+                dest_type = 'ios'
+            schemes = {'usb': 'usb://', 'ios': 'ios://'}
+            scheme = schemes.get(dest_type, 'folder://')
             schemed_path = f'{scheme}{dest_path}'
             link_to = data.get('link_to', '')
             sync_key = None

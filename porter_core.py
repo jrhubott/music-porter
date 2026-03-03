@@ -22,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, ClassVar, Optional, Protocol, runtime_checkable
+from typing import Any, ClassVar, Protocol, runtime_checkable
 
 # ══════════════════════════════════════════════════════════════════
 # Section 0: Platform Detection
@@ -68,6 +68,12 @@ TXXX_TRACK_UUID = "TrackUUID"
 
 # Destination name validation pattern
 VALID_DEST_NAME_RE = r'^[a-zA-Z0-9_-]+$'
+
+# Virtual (non-filesystem) destination types — not backed by a server-visible path
+VIRTUAL_DEST_TYPES = {'web-client', 'ios'}
+
+# All recognized destination URI schemes
+KNOWN_DEST_SCHEMES = ('usb://', 'folder://', 'web-client://', 'ios://')
 
 # Schema version constants — increment and add a migration case when changing
 # the config.yaml structure or DB tables/columns.
@@ -2544,7 +2550,8 @@ class SyncTracker:
         return SyncStatusResult(
             destinations=dest_names or [], last_sync_at=last_sync,
             playlists=playlists, total_files=total_files,
-            synced_files=total_synced, new_files=total_new,
+            synced_files=min(total_synced, total_files),
+            new_files=max(0, total_new),
             new_playlists=new_playlist_count, group_name=group_name)
 
     def get_destination_status(self, dest_name, export_base_dir):
@@ -2899,8 +2906,7 @@ class SyncTracker:
             return False
 
         # Normalize to schemed path
-        if (not path.startswith('usb://') and not path.startswith('folder://')
-                and not path.startswith('web-client://')):
+        if not any(path.startswith(s) for s in KNOWN_DEST_SCHEMES):
             path = f'folder://{path}'
 
         # Auto-generate sync_key UUID if not provided
@@ -2910,7 +2916,7 @@ class SyncTracker:
         # Validate filesystem path if needed
         if validate_path:
             dest_tmp = SyncDestination(name, path, sync_key=sync_key)
-            if not dest_tmp.is_web_client:
+            if dest_tmp.type not in VIRTUAL_DEST_TYPES:
                 raw = dest_tmp.raw_path
                 if dest_tmp.is_usb:
                     volume_path = Path(raw).parts[:3] if IS_MACOS else Path(raw).parts[:1]
@@ -3937,6 +3943,8 @@ class SyncDestination:
             return 'usb'
         if self.path.startswith('web-client://'):
             return 'web-client'
+        if self.path.startswith('ios://'):
+            return 'ios'
         return 'folder'
 
     @property
@@ -3947,6 +3955,8 @@ class SyncDestination:
             return self.path[9:]
         if self.path.startswith('web-client://'):
             return self.path[13:]
+        if self.path.startswith('ios://'):
+            return self.path[6:]
         return self.path
 
     @property
@@ -3959,7 +3969,7 @@ class SyncDestination:
 
     @property
     def available(self) -> bool:
-        if self.is_web_client:
+        if self.type in VIRTUAL_DEST_TYPES:
             return True
         return Path(self.raw_path).is_dir()
 
@@ -6273,9 +6283,9 @@ class CookieStatus:
         self.valid = False
         self.exists = False
         self.has_required_cookie = False
-        self.expiration_timestamp: Optional[int] = None
-        self.expiration_date: Optional[datetime] = None
-        self.days_until_expiration: Optional[float] = None
+        self.expiration_timestamp: int | None = None
+        self.expiration_date: datetime | None = None
+        self.days_until_expiration: float | None = None
         self.reason = ""  # Human-readable message
 
 
@@ -6619,11 +6629,11 @@ class CookieManager:
         from selenium import webdriver
         from selenium.common.exceptions import WebDriverException
         from selenium.webdriver.chrome.service import Service as ChromeService
-        from selenium.webdriver.edge.service import Service as EdgeService
-        from selenium.webdriver.firefox.service import Service as FirefoxService
         from selenium.webdriver.chrome.webdriver import WebDriver as _ChromeDriver
-        from selenium.webdriver.firefox.webdriver import WebDriver as _FirefoxDriver
+        from selenium.webdriver.edge.service import Service as EdgeService
         from selenium.webdriver.edge.webdriver import WebDriver as _EdgeDriver
+        from selenium.webdriver.firefox.service import Service as FirefoxService
+        from selenium.webdriver.firefox.webdriver import WebDriver as _FirefoxDriver
 
         try:
             # Try to import webdriver-manager
@@ -7888,7 +7898,7 @@ class PipelineStatistics:
         self.download_stats = None  # DownloadStatistics object
 
         # Conversion stats
-        self.conversion_stats: Optional[ConversionStatistics] = None
+        self.conversion_stats: ConversionStatistics | None = None
 
         # Tagging stats
         self.tagging_stats = None
@@ -7896,7 +7906,7 @@ class PipelineStatistics:
         # Sync stats
         self.sync_success = False
         self.sync_destination = None
-        self.sync_stats: Optional[dict] = None
+        self.sync_stats: dict | None = None
 
         # Overall
         self.start_time = time.time()
@@ -7929,7 +7939,7 @@ class AggregateStatistics:
         self.successful_playlists = 0
         self.failed_playlists = 0
         self.start_time = time.time()
-        self.end_time: Optional[float] = None
+        self.end_time: float | None = None
         self.usb_destination = None
 
     def add_playlist_result(self, orchestrator_stats):

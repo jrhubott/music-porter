@@ -220,6 +220,7 @@ export function registerIPCHandlers(): void {
     const response = await apiClient.getSyncDestinations();
     return response.destinations.filter((d) => {
       if (d.type === 'web-client') return false;
+      if (d.type === 'ios') return false;
       if (d.type === 'usb') return false;
       const rawPath = d.path.replace(/^(usb|folder):\/\//, '');
       return existsSync(rawPath);

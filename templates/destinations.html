@@ -399,7 +399,7 @@ function renderGroupsTable(data) {
     const lastSyncRel = formatRelativeTime(k.last_sync_at);
     const lastSyncAbs = k.last_sync_at ? new Date(k.last_sync_at * 1000).toLocaleString() : 'Never';
     const stalenessClass = getStalenessClass(k.last_sync_at);
-    const pct = k.total_files > 0 ? Math.round(k.synced_files / k.total_files * 100) : 0;
+    const pct = k.total_files > 0 ? Math.min(100, Math.round(k.synced_files / k.total_files * 100)) : 0;
     const newBadge = k.new_files > 0
       ? `<span class="badge bg-warning text-dark">${k.new_files}</span>`
       : `<span class="text-success">0</span>`;
@@ -413,9 +413,12 @@ function renderGroupsTable(data) {
     let icon = 'bi-pc-display';
     if (groupTypes.some(t => t === 'folder')) icon = 'bi-folder2-open';
     if (groupTypes.some(t => t === 'usb')) icon = 'bi-usb-drive';
-    const isWebClient = matchedDest?.type === 'web-client';
-    const syncDisabled = isWebClient || (!matchedDest || !matchedDest.available) ? 'disabled' : '';
-    const syncTitle = isWebClient ? 'Use browser sync' : syncDisabled ? 'Destination unavailable' : 'Sync all playlists';
+    if (groupTypes.some(t => t === 'ios')) icon = 'bi-phone';
+    const isVirtualDest = matchedDest?.type === 'web-client' || matchedDest?.type === 'ios';
+    const syncDisabled = isVirtualDest || (!matchedDest || !matchedDest.available) ? 'disabled' : '';
+    const syncTitle = matchedDest?.type === 'web-client' ? 'Use browser sync'
+        : matchedDest?.type === 'ios' ? 'Use iOS app to sync'
+        : syncDisabled ? 'Destination unavailable' : 'Sync all playlists';
     const groupName = k.group_name || '';
     const renameBtn = `<button class="btn btn-outline-secondary btn-sm py-0 px-1 ms-1" onclick="promptRenameGroup('${primaryDest}'); return false;" title="Rename group"><i class="bi bi-pencil"></i></button>`;
     const hasDetails = k.destination_details && k.destination_details.length > 1;
@@ -464,10 +467,13 @@ function toggleGroupExpand(btn, idx) {
     let typeIcon, typeBadge;
     if (d.type === 'usb') { typeIcon = 'bi-usb-drive'; typeBadge = '<span class="badge bg-info">USB</span>'; }
     else if (d.type === 'web-client') { typeIcon = 'bi-pc-display'; typeBadge = '<span class="badge bg-primary">Client</span>'; }
+    else if (d.type === 'ios') { typeIcon = 'bi-phone'; typeBadge = '<span class="badge bg-success">iOS</span>'; }
     else { typeIcon = 'bi-folder2-open'; typeBadge = '<span class="badge bg-secondary">Folder</span>'; }
     const availBadge = d.type === 'web-client'
       ? '<span class="badge bg-secondary">Browser</span>'
-      : d.available
+      : d.type === 'ios'
+        ? '<span class="badge bg-secondary">iOS App</span>'
+        : d.available
         ? '<span class="badge bg-success">Available</span>'
         : '<span class="badge bg-danger">Not Found</span>';
     return `<tr class="table-active">
@@ -607,12 +613,14 @@ function renderDestsTable(saved) {
   tbody.innerHTML = saved.map(d => {
     let avail;
     if (d.type === 'web-client') avail = '<span class="badge bg-secondary">Browser</span>';
+    else if (d.type === 'ios') avail = '<span class="badge bg-secondary">iOS App</span>';
     else avail = d.available
       ? '<span class="badge bg-success">Yes</span>'
       : '<span class="badge bg-danger">No</span>';
     let typeBadge;
     if (d.type === 'usb') typeBadge = '<span class="badge bg-info">USB</span>';
     else if (d.type === 'web-client') typeBadge = '<span class="badge bg-primary">Client</span>';
+    else if (d.type === 'ios') typeBadge = '<span class="badge bg-success">iOS</span>';
     else typeBadge = '<span class="badge bg-secondary">Folder</span>';
     const linked = d.linked_destinations || [];
     const linkedBadge = linked.length > 0
