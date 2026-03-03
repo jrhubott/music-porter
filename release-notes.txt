@@ -1,3 +1,18 @@
+Version 2.38.10 (2026-03-02):
+• Add sync readiness indicators across all surfaces
+• Add Destinations page; move tracking sections from Sync
+• Set dev version to 2.38.9-dev+f822f00
+• Remove navigationBarTitleDisplayMode from PlaylistSelectionSheet
+• Docs: document playlist prefs endpoint and DB column
+• iOS: add playlist prefs to models, API client, and sync status view
+• Sync client: playlist prefs persistence and Pref column
+• Web UI: replace source dropdown with multi-select checklist
+• Update sync API: playlist_keys support and playlist-prefs endpoint
+• Add DB v10 migration and playlist prefs support
+• Set branch version to 2.38.9-playlist-prefs-per-dest
+• iOS companion app updated to v1.7.1
+• Sync client updated to v1.5.3
+
 Version 2.38.8 (2026-03-02):
 • Updated rules
 • Add merge-to-dev SRS requirements and standalone script
