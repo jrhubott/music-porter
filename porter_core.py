@@ -2371,6 +2371,21 @@ class SyncTracker:
         finally:
             conn.close()
 
+    def get_synced_bytes(self, sync_key: str) -> int:
+        """Return total bytes of synced files for a sync key via TrackDB join."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """SELECT COALESCE(SUM(t.file_size_bytes), 0) AS total
+                   FROM sync_files sf
+                   JOIN tracks t ON sf.file_path = t.file_path
+                   WHERE sf.sync_key = ?""",
+                (sync_key,),
+            ).fetchone()
+            return int(row['total']) if row else 0
+        finally:
+            conn.close()
+
     def get_synced_files(self, sync_key, playlist=None):
         """Return set of tracked file paths for a sync key.
 

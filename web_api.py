@@ -1912,10 +1912,17 @@ def api_sync_status():
     }
     total_library_files = sum(playlist_stats.values())
 
-    # Group destinations by sync_key
+    # Group destinations by sync_key; build per-key dest details map
     key_groups = {}
+    dest_details_map = {}
     for d in all_dests:
         key_groups.setdefault(d.sync_key, []).append(d.name)
+        dest_details_map.setdefault(d.sync_key, []).append({
+            'name': d.name,
+            'path': d.path,
+            'type': d.type,
+            'available': d.available,
+        })
 
     keys = ctx.sync_tracker._get_keys()
     key_meta = {k['key_name']: k for k in keys}
@@ -1929,6 +1936,7 @@ def api_sync_status():
         last_sync = info['last_sync_at'] if info else 0
         group_name = (info.get('name') or '') if info else ''
         playlist_prefs = info.get('playlist_prefs') if info else None
+        synced_bytes = ctx.sync_tracker.get_synced_bytes(sync_key)
 
         results.append({
             'destinations': dest_names,
@@ -1939,6 +1947,8 @@ def api_sync_status():
             'new_playlists': 0,
             'group_name': group_name,
             'playlist_prefs': playlist_prefs,
+            'synced_bytes': synced_bytes,
+            'destination_details': dest_details_map.get(sync_key, []),
         })
     return jsonify(results)
 

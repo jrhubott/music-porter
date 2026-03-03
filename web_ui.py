@@ -1007,6 +1007,10 @@ def create_app(project_root=None, no_auth=False, server_host=None,
     def sync_page():
         return render_template('sync.html')
 
+    @app.route('/destinations')
+    def destinations_page():
+        return render_template('destinations.html')
+
     @app.route('/usb')
     def usb_page():
         return redirect(url_for('sync_page'))
