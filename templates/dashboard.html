@@ -801,17 +801,13 @@ function loadSyncStatus() {
       const isUsb = dests.some(d => usbNames.has(d));
       const icon = isUsb ? 'bi-usb-drive' : 'bi-folder2-open';
       const pct = k.total_files > 0 ? Math.round(k.synced_files / k.total_files * 100) : 0;
-      const hasPref = k.playlist_prefs && k.playlist_prefs.length > 0;
-      const prefIcon = hasPref
-        ? ` <i class="bi bi-funnel-fill text-info" title="Playlist prefs active — ${k.playlist_prefs.length} playlist(s)"></i>`
-        : '';
       const relTime = syncFormatRelative(k.last_sync_at);
       const absTime = k.last_sync_at ? new Date(k.last_sync_at * 1000).toLocaleString() : 'Never';
       const stalenessClass = syncStalenessClass(k.last_sync_at);
       const statusBadge = syncStatusBadge(k);
       return `<div class="mb-1">
         <i class="bi ${icon} me-1"></i><strong>${label}</strong>
-        ${statusBadge}${prefIcon}
+        ${statusBadge}
         <span class="${stalenessClass} small ms-2" title="${absTime}">${relTime}</span>
         <span class="text-muted small ms-2">${k.synced_files}/${k.total_files} (${pct}%)</span>
       </div>`;
