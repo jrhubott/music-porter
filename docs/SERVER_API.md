@@ -1088,6 +1088,7 @@ Background task: sync MP3s to a destination with profile-specific tags applied o
 | `profile` | string | No | config default | Output profile for tagging |
 | `dry_run` | boolean | No | `false` | Preview without syncing |
 | `verbose` | boolean | No | `false` | Enable verbose logging |
+| `clean_destination` | boolean | No | server setting | When `true`, remove orphaned files at the destination (tracked in SyncTracker but no longer in the library). Overrides the `clean_sync_destination` server setting. |
 
 **Response:** `{"task_id": "..."}` — see [Background Task Model](#background-task-model)
 
@@ -1110,6 +1111,7 @@ Summary of sync status per destination group. Destinations sharing the same trac
 | `synced_files` | integer | Files synced to this group |
 | `new_files` | integer | Files not yet synced |
 | `new_playlists` | integer | Playlists with no synced files |
+| `orphaned_files` | integer | Sync records in SyncTracker whose source track no longer exists in the library |
 
 ---
 
@@ -1140,6 +1142,37 @@ Per-playlist sync breakdown for a destination's tracking group.
 | `new_files` | integer | Total unsynced files |
 | `new_playlists` | integer | Count of new (unsynced) playlists |
 | `playlist_prefs` | string[] \| null | Saved playlist selection for this group. `null` = sync all; array = only listed playlist keys |
+| `orphaned_files` | integer | Sync records in SyncTracker whose source track no longer exists in the library |
+
+---
+
+### GET /api/sync/status/\<dest\_name\>/orphaned
+
+Return detailed orphaned file list for a destination's sync group.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `dest_name` | string | Destination name |
+
+**Response:**
+
+```json
+{
+  "orphaned_files": [
+    {
+      "id": 42,
+      "file_path": "Artist - Title.mp3",
+      "playlist": "my_playlist",
+      "track_uuid": "abc-123",
+      "synced_at": 1709400000.0
+    }
+  ]
+}
+```
+
+**Status codes:** 404 if destination not found
 
 ---
 

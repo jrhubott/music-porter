@@ -923,6 +923,7 @@ def api_pipeline_run():
     eq_data = data.get('eq', {})
     no_eq = data.get('no_eq', False)
     cleanup_removed_tracks = data.get('cleanup_removed_tracks')
+    clean_destination_param = data.get('clean_destination')
 
     if not auto and not playlist_key and not url:
         return jsonify({'error': 'Specify playlist, url, or auto'}), 400
@@ -958,6 +959,11 @@ def api_pipeline_run():
         cleanup_enabled = (cleanup_removed_tracks
                            if cleanup_removed_tracks is not None
                            else cleanup_default)
+        clean_dest_default = config.get_setting(
+            'clean_sync_destination', mp.DEFAULT_CLEAN_SYNC_DESTINATION)
+        clean_dest_enabled = (clean_destination_param
+                              if clean_destination_param is not None
+                              else clean_dest_default)
         removed_track_db = mp.RemovedTrackDB(str(ctx.project_root / mp.DEFAULT_DB_FILE))
         orchestrator = mp.PipelineOrchestrator(
             logger, deps, config,
@@ -1002,6 +1008,7 @@ def api_pipeline_run():
                     dry_run=dry_run, verbose=verbose,
                     quality_preset=quality_preset,
                     cleanup_removed_tracks_enabled=cleanup_enabled,
+                    clean_destination_enabled=clean_dest_enabled,
                 )
                 aggregate.add_playlist_result(orchestrator.stats)
             if all_playlists:
@@ -1020,6 +1027,7 @@ def api_pipeline_run():
                 dry_run=dry_run, verbose=verbose,
                 quality_preset=quality_preset,
                 cleanup_removed_tracks_enabled=cleanup_enabled,
+                clean_destination_enabled=clean_dest_enabled,
             )
             result_dict = _serialize_pipeline_result(pipeline_result)
             result_dict['success'] = pipeline_result.success
@@ -1863,6 +1871,7 @@ def api_sync_run():
     profile_name = data.get('profile', '')
     dry_run = data.get('dry_run', False)
     verbose = data.get('verbose', False)
+    clean_destination = data.get('clean_destination')
 
     # Resolve playlist keys: prefer playlist_keys list; fall back to
     # legacy playlist_key (single string) for backward compatibility.
@@ -1904,6 +1913,14 @@ def api_sync_run():
 
     def _run(task_id):
         logger = ctx.make_logger(task_id, verbose=verbose)
+        config = mp.ConfigManager(logger=logger, audit_logger=ctx.audit_logger,
+                                  audit_source=ctx.detect_source())
+        clean_default = config.get_setting(
+            'clean_sync_destination', mp.DEFAULT_CLEAN_SYNC_DESTINATION)
+        clean_dest = (clean_destination
+                      if clean_destination is not None
+                      else clean_default)
+
         display = ctx.make_display_handler(task_id)
         task = ctx.task_manager.get(task_id)
 
@@ -1922,13 +1939,17 @@ def api_sync_run():
             source_dir, dest_path=dest.path, sync_key=dest.sync_key,
             dry_run=dry_run,
             tag_applicator=tag_applicator, profile=profile,
-            playlist_name=playlist_name, playlist_keys=playlist_keys)
+            playlist_name=playlist_name, playlist_keys=playlist_keys,
+            clean_destination=clean_dest)
         return {
             'success': result.success,
             'files_found': result.files_found,
             'files_copied': result.files_copied,
             'files_skipped': result.files_skipped,
             'files_failed': result.files_failed,
+            'orphaned_detected': result.orphaned_detected,
+            'orphaned_cleaned': result.orphaned_cleaned,
+            'orphaned_bytes_freed': result.orphaned_bytes_freed,
         }
 
     task_id = ctx.task_manager.submit('sync', desc, _run,
@@ -2013,6 +2034,7 @@ def api_sync_status():
                 if creation_times.get(p, 0) > last_sync
             )
 
+        orphaned_count = ctx.sync_tracker.get_orphaned_count(sync_key)
         results.append({
             'destinations': dest_names,
             'last_sync_at': last_sync,
@@ -2024,6 +2046,7 @@ def api_sync_status():
             'playlist_prefs': playlist_prefs,
             'synced_bytes': synced_bytes,
             'destination_details': dest_details_map.get(sync_key, []),
+            'orphaned_files': orphaned_count,
         })
     return jsonify(results)
 
@@ -2099,6 +2122,7 @@ def api_sync_status_detail(dest_name):
 
     new_playlist_count = sum(1 for p in playlists if p['sync_status'] == 'new')
 
+    orphaned_count = ctx.sync_tracker.get_orphaned_count(sync_key)
     result = mp.SyncStatusResult(
         destinations=group_names,
         last_sync_at=last_sync,
@@ -2108,8 +2132,28 @@ def api_sync_status_detail(dest_name):
         new_files=max(0, group_total - group_synced_pref),
         new_playlists=new_playlist_count,
         playlist_prefs=playlist_prefs,
+        orphaned_files=orphaned_count,
     )
     return jsonify(result.to_dict())
+
+
+@api_bp.route('/api/sync/status/<dest_name>/orphaned')
+def api_sync_status_orphaned(dest_name):
+    """Return detailed orphaned file list for a destination's sync group.
+
+    An orphaned file is one recorded in sync_files whose source track no
+    longer exists in the library (track_uuid is set but the tracks table
+    has no matching row).
+
+    Returns:
+        {orphaned_files: [{file_path, playlist, track_uuid, synced_at}]}
+    """
+    ctx = _ctx()
+    dest = ctx.sync_tracker.get_destination(dest_name)
+    if not dest:
+        return jsonify({'error': 'Destination not found'}), 404
+    orphaned = ctx.sync_tracker.get_orphaned_files(dest.sync_key)
+    return jsonify({'orphaned_files': orphaned})
 
 
 @api_bp.route('/api/sync/destinations/<name>/reset', methods=['POST'])

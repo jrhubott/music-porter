@@ -2305,7 +2305,7 @@ class SyncTracker:
         finally:
             conn.close()
 
-    def record_file(self, sync_key, playlist, file_path):
+    def record_file(self, sync_key, playlist, file_path, track_uuid=None):
         """Record a single synced file for a sync key and playlist."""
         now = time.time()
         with self._write_lock:
@@ -2319,11 +2319,11 @@ class SyncTracker:
                 )
                 conn.execute(
                     """INSERT INTO sync_files
-                           (sync_key, file_path, playlist, synced_at)
-                       VALUES (?, ?, ?, ?)
+                           (sync_key, file_path, playlist, synced_at, track_uuid)
+                       VALUES (?, ?, ?, ?, ?)
                        ON CONFLICT(sync_key, file_path, playlist)
-                       DO UPDATE SET synced_at = ?""",
-                    (sync_key, file_path, playlist, now, now),
+                       DO UPDATE SET synced_at = ?, track_uuid = ?""",
+                    (sync_key, file_path, playlist, now, track_uuid, now, track_uuid),
                 )
                 conn.commit()
             finally:
@@ -2367,6 +2367,70 @@ class SyncTracker:
                     "DELETE FROM sync_keys WHERE key_name = ?", (sync_key,)
                 )
                 conn.commit()
+            finally:
+                conn.close()
+
+    def get_orphaned_files(self, sync_key):
+        """Return sync_files records whose source track no longer exists in TrackDB.
+
+        A file is orphaned when its track_uuid is set but no matching row exists
+        in the tracks table (i.e. the track was deleted from the library).
+
+        Returns a list of dicts: {id, file_path, playlist, track_uuid, synced_at}
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT sf.id, sf.file_path, sf.playlist,
+                          sf.track_uuid, sf.synced_at
+                   FROM sync_files sf
+                   LEFT JOIN tracks t ON sf.track_uuid = t.uuid
+                   WHERE sf.sync_key = ?
+                     AND sf.track_uuid IS NOT NULL
+                     AND t.uuid IS NULL""",
+                (sync_key,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_orphaned_count(self, sync_key):
+        """Return the count of orphaned sync_files records for a sync key."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """SELECT COUNT(*) AS cnt
+                   FROM sync_files sf
+                   LEFT JOIN tracks t ON sf.track_uuid = t.uuid
+                   WHERE sf.sync_key = ?
+                     AND sf.track_uuid IS NOT NULL
+                     AND t.uuid IS NULL""",
+                (sync_key,),
+            ).fetchone()
+            return row['cnt'] if row else 0
+        finally:
+            conn.close()
+
+    def delete_orphaned_records(self, sync_key):
+        """Delete orphaned sync_files records for a sync key.
+
+        Returns the number of records deleted.
+        """
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                cursor = conn.execute(
+                    """DELETE FROM sync_files
+                       WHERE sync_key = ?
+                         AND track_uuid IS NOT NULL
+                         AND track_uuid NOT IN (
+                             SELECT uuid FROM tracks
+                         )""",
+                    (sync_key,),
+                )
+                deleted = cursor.rowcount
+                conn.commit()
+                return deleted
             finally:
                 conn.close()
 
@@ -2582,12 +2646,14 @@ class SyncTracker:
                 if is_new_playlist:
                     new_playlist_count += 1
 
+        orphaned = self.get_orphaned_count(sync_key)
         return SyncStatusResult(
             destinations=dest_names or [], last_sync_at=last_sync,
             playlists=playlists, total_files=total_files,
             synced_files=total_synced,
             new_files=max(0, total_new),
-            new_playlists=new_playlist_count, group_name=group_name)
+            new_playlists=new_playlist_count, group_name=group_name,
+            orphaned_files=orphaned)
 
     def get_destination_status(self, dest_name, export_base_dir):
         """Get sync status for the group containing a destination.
@@ -7324,7 +7390,7 @@ class SyncManager:
     def sync_to_destination(self, source_dir, dest_path, sync_key,
                             dry_run=False, tag_applicator=None,
                             profile=None, playlist_name=None,
-                            playlist_keys=None):
+                            playlist_keys=None, clean_destination=False):
         """Sync files to any destination with incremental copy logic.
 
         Args:
@@ -7527,7 +7593,8 @@ class SyncManager:
                             pl_name = (playlist_name
                                        or source_path.parent.name)
                             self.sync_tracker.record_file(
-                                sync_key, pl_name, record_name)
+                                sync_key, pl_name, record_name,
+                                track_uuid=track_meta.get('uuid') if track_meta else None)
                     else:
                         stats.files_skipped += 1
                         if self.logger.verbose:
@@ -7547,6 +7614,47 @@ class SyncManager:
             progress.close()
 
         self.logger.ok("Sync complete")
+
+        # ── Orphan detection and optional destination cleanup ─────────
+        orphaned_detected = 0
+        orphaned_cleaned = 0
+        orphaned_bytes_freed = 0
+        if self.sync_tracker and not dry_run:
+            orphan_records = self.sync_tracker.get_orphaned_files(sync_key)
+            orphaned_detected = len(orphan_records)
+            if orphaned_detected > 0:
+                self.logger.info(
+                    f"Orphaned files at destination: {orphaned_detected}")
+                for rec in orphan_records:
+                    self.logger.info(
+                        f"  Orphan: {rec['file_path']} "
+                        f"(playlist: {rec['playlist']})")
+                if clean_destination:
+                    if orphaned_detected == len(list(
+                            Path(dest).rglob("*.mp3"))) if Path(dest).exists() else 0:
+                        self.logger.warn(
+                            "All files at destination are orphans — proceeding with cleanup")
+                    for rec in orphan_records:
+                        try:
+                            orphan_path = Path(dest) / rec['playlist'] / rec['file_path']
+                            if not orphan_path.exists():
+                                # Try without playlist subdirectory
+                                orphan_path = Path(dest) / rec['file_path']
+                            if orphan_path.exists():
+                                orphaned_bytes_freed += orphan_path.stat().st_size
+                                orphan_path.unlink()
+                                orphaned_cleaned += 1
+                                self.logger.info(
+                                    f"  Removed orphan: {rec['file_path']}")
+                        except OSError as exc:
+                            self.logger.warn(
+                                f"  Could not remove orphan {rec['file_path']}: {exc}")
+                    if orphaned_cleaned > 0:
+                        self.sync_tracker.delete_orphaned_records(sync_key)
+                        self.logger.ok(
+                            f"Destination cleanup: {orphaned_cleaned} file(s) removed, "
+                            f"{_format_bytes(orphaned_bytes_freed)} freed")
+
         duration = time.time() - start_time
 
         # Prompt to eject USB drive (only for USB destinations)
@@ -7561,7 +7669,10 @@ class SyncManager:
             is_usb=is_usb, files_found=stats.files_found,
             files_copied=stats.files_copied,
             files_skipped=stats.files_skipped,
-            files_failed=stats.files_failed)
+            files_failed=stats.files_failed,
+            orphaned_detected=orphaned_detected,
+            orphaned_cleaned=orphaned_cleaned,
+            orphaned_bytes_freed=orphaned_bytes_freed)
 
     def sync_to_usb(self, source_dir, usb_dir=DEFAULT_USB_DIR, dry_run=False, volume=None):
         """Backwards-compatible wrapper: sync files to a USB drive."""
@@ -8369,20 +8480,25 @@ class PipelineOrchestrator:
         self.project_root = Path(project_root) if project_root else Path('.')
         self.cleanup_removed_tracks_enabled = cleanup_removed_tracks_enabled
         self.removed_track_db = removed_track_db
+        self.clean_destination_enabled = False  # set via run_full_pipeline param
 
     def run_full_pipeline(self, playlist=None, url=None, auto=False,
                          sync_destination=None,
                          dry_run=False, verbose=False, quality_preset=None,
                          validate_cookies=True, auto_refresh_cookies=False,
-                         cleanup_removed_tracks_enabled=None):
+                         cleanup_removed_tracks_enabled=None,
+                         clean_destination_enabled=None):
         """Execute the complete pipeline: download → convert → sync.
 
         Args:
             sync_destination: SyncDestination object for post-pipeline sync (optional)
             cleanup_removed_tracks_enabled: override instance default for removed track cleanup
+            clean_destination_enabled: when True, remove orphaned files from the sync destination
         """
         if cleanup_removed_tracks_enabled is None:
             cleanup_removed_tracks_enabled = self.cleanup_removed_tracks_enabled
+        if clean_destination_enabled is None:
+            clean_destination_enabled = self.clean_destination_enabled
         self.stats.start_time = time.time()
         convert_result = None
         usb_result = None
@@ -8515,7 +8631,8 @@ class PipelineOrchestrator:
                 f"\n=== STAGE 3: Sync to {sync_destination.name} ===")
             usb_result = sync_mgr.sync_to_destination(
                 library_dir, dest_path=sync_destination.path,
-                sync_key=sync_destination.sync_key, dry_run=dry_run)
+                sync_key=sync_destination.sync_key, dry_run=dry_run,
+                clean_destination=clean_destination_enabled)
 
             if usb_result.success:
                 self.stats.stages_completed.append("sync")
