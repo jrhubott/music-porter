@@ -1,6 +1,6 @@
 # Database Schema Reference
 
-SQLite database stored at `data/music-porter.db`. Current version: **DB_SCHEMA_VERSION = 11** (defined in `porter_core.py` ~line 81).
+SQLite database stored at `data/music-porter.db`. Current version: **DB_SCHEMA_VERSION = 12** (defined in `porter_core.py` ~line 81).
 
 ## PRAGMA Settings
 
@@ -101,7 +101,7 @@ Per-file sync records. Added in **migration 0 -> 1**.
 
 **Constraints:** `UNIQUE(sync_key, file_path, playlist)`
 
-**Indexes:** `idx_sync_files_key(sync_key)`, `idx_sync_files_playlist(sync_key, playlist)`
+**Indexes:** `idx_sync_files_key(sync_key)`, `idx_sync_files_playlist(sync_key, playlist)`, `idx_sync_files_track_uuid(track_uuid)` (added in **migration 11 -> 12**)
 
 **Class:** `SyncTracker`
 
@@ -266,10 +266,11 @@ Populated by `cleanup_removed_tracks()` when library cleanup is enabled after a 
 | 8 | 9 | Added nullable `name` column to `sync_keys` for optional destination group labels. |
 | 9 | 10 | Added nullable `playlist_prefs` column to `sync_keys` for per-group saved playlist selection (JSON array or NULL). |
 | 10 | 11 | Added `removed_tracks` table for historical removal tracking. Added nullable `track_uuid` column to `sync_files` for orphan detection. |
+| 11 | 12 | Added `idx_sync_files_track_uuid` index on `sync_files(track_uuid)` for efficient orphan detection JOIN/WHERE queries. |
 
 ## Notes
 
 - Migrations run sequentially at startup via `migrate_db_schema()` before any DB class is instantiated.
 - Each `if current < N:` block is idempotent and sets the version to exactly N.
-- Fresh installs run through all migrations 0 -> 1 -> 2 -> ... -> 11.
+- Fresh installs run through all migrations 0 -> 1 -> 2 -> ... -> 12.
 - Never modify existing migration blocks; always add a new `if current < N:` block.

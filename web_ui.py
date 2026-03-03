@@ -60,12 +60,19 @@ _migration_events = mp.migrate_data_dir()
 _migration_events += mp.migrate_db_schema()
 _migration_events += mp.migrate_config_schema()
 
-# Prune old log files at startup (uses default retention; config not loaded yet)
-mp.prune_logs()
-
-# Load output profiles from config at import time so OUTPUT_PROFILES is
-# populated before any request handler accesses it.
+# Load config so retention settings are available for all prune calls
 _startup_config = mp.ConfigManager(logger=mp.Logger(verbose=False))
+
+# Prune stale data at startup using configured retention settings
+mp.prune_logs(retention_days=_startup_config.get_setting(
+    'log_retention_days', mp.DEFAULT_LOG_RETENTION_DAYS))
+mp.prune_audit_entries(retention_days=_startup_config.get_setting(
+    'audit_retention_days', mp.DEFAULT_AUDIT_RETENTION_DAYS))
+mp.prune_task_history(retention_days=_startup_config.get_setting(
+    'task_history_retention_days', mp.DEFAULT_TASK_HISTORY_RETENTION_DAYS))
+mp.prune_removed_tracks(retention_days=_startup_config.get_setting(
+    'removed_tracks_retention_days', mp.DEFAULT_REMOVED_TRACKS_RETENTION_DAYS))
+
 mp.load_output_profiles(_startup_config)
 
 
@@ -734,6 +741,110 @@ class PipelineScheduler:
 
 
 # ══════════════════════════════════════════════════════════════════
+# MaintenanceScheduler — daily data pruning
+# ══════════════════════════════════════════════════════════════════
+
+MAINTENANCE_INTERVAL_S = 86400  # 24 hours
+
+
+class MaintenanceScheduler:
+    """Runs daily maintenance tasks (data pruning) using a threading.Timer chain.
+
+    Always enabled — no config toggle. Fires once per day, runs all prune
+    functions, and persists next_run_time to scheduled_jobs so restarts resume
+    from the correct point rather than resetting the 24 h clock.
+
+    Lifecycle: created in start_server(), stored on AppContext.
+    start() schedules the first timer. stop() cancels any pending timer.
+    """
+
+    def __init__(self, ctx, jobs_db):
+        self._ctx = ctx
+        self._jobs_db = jobs_db
+        self._timer = None
+        self._lock = threading.RLock()
+
+    def start(self):
+        """Resume from persisted state or schedule first run 24 h from now."""
+        with self._lock:
+            persisted = self._jobs_db.get('maintenance')
+            now = time.time()
+
+            if persisted:
+                nrt = persisted.get('next_run_time')
+                if nrt is not None and nrt > now:
+                    # Persisted time in the future — resume with remaining delay
+                    self._schedule_next(nrt - now)
+                    return
+                # Missed or no persisted next_run_time — startup already ran
+                # prune at module load; schedule next run 24 h from now.
+
+            self._schedule_next(MAINTENANCE_INTERVAL_S)
+
+    def stop(self):
+        """Cancel any pending timer. Called at server shutdown."""
+        with self._lock:
+            if self._timer:
+                self._timer.cancel()
+                self._timer = None
+
+    def _schedule_next(self, delay_seconds):
+        """Schedule the next maintenance run after delay_seconds."""
+        self._timer = threading.Timer(delay_seconds, self._on_timer)
+        self._timer.daemon = True
+        self._timer.name = 'MaintenanceScheduler'
+        self._timer.start()
+        next_run = time.time() + delay_seconds
+        self._jobs_db.upsert('maintenance', next_run_time=next_run)
+
+    def _on_timer(self):
+        """Timer callback — runs all prune functions then schedules next run."""
+        with self._lock:
+            self._timer = None
+        self._execute()
+        with self._lock:
+            self._schedule_next(MAINTENANCE_INTERVAL_S)
+
+    def _execute(self):
+        """Run all prune functions with current config-based retention values."""
+        try:
+            config = self._ctx.get_config()
+            db_path = mp.DEFAULT_DB_FILE
+            mp.prune_logs(retention_days=config.get_setting(
+                'log_retention_days', mp.DEFAULT_LOG_RETENTION_DAYS))
+            mp.prune_audit_entries(
+                db_path=db_path,
+                retention_days=config.get_setting(
+                    'audit_retention_days', mp.DEFAULT_AUDIT_RETENTION_DAYS))
+            mp.prune_task_history(
+                db_path=db_path,
+                retention_days=config.get_setting(
+                    'task_history_retention_days',
+                    mp.DEFAULT_TASK_HISTORY_RETENTION_DAYS))
+            mp.prune_removed_tracks(
+                db_path=db_path,
+                retention_days=config.get_setting(
+                    'removed_tracks_retention_days',
+                    mp.DEFAULT_REMOVED_TRACKS_RETENTION_DAYS))
+            self._jobs_db.upsert(
+                'maintenance',
+                last_run_time=time.time(),
+                last_run_status='completed',
+                last_run_error='',
+            )
+        except Exception as exc:
+            try:
+                self._jobs_db.upsert(
+                    'maintenance',
+                    last_run_time=time.time(),
+                    last_run_status='failed',
+                    last_run_error=str(exc),
+                )
+            except Exception:
+                pass
+
+
+# ══════════════════════════════════════════════════════════════════
 # AppContext — shared state for Flask routes (replaces closures)
 # ══════════════════════════════════════════════════════════════════
 
@@ -754,6 +865,7 @@ class AppContext:
     api_key: str
     project_root: Path
     scheduler: 'PipelineScheduler | None' = None
+    maintenance_scheduler: 'MaintenanceScheduler | None' = None
     _config_cache: mp.ConfigManager | None = field(default=None, repr=False)
 
     # ── Request-scoped helpers ─────────────────────────────────
@@ -1233,11 +1345,13 @@ def start_server(host='127.0.0.1', port=5555, no_auth=False,
                       server_port=port, external_url=external_url,
                       behind_proxy=behind_proxy, proxy_count=proxy_count)
 
-    # Initialize and start the pipeline scheduler
+    # Initialize and start the pipeline scheduler and maintenance scheduler
     ctx = app.config['CTX']
     jobs_db = mp.ScheduledJobsDB()
     ctx.scheduler = PipelineScheduler(ctx, jobs_db)
     ctx.scheduler.start()
+    ctx.maintenance_scheduler = MaintenanceScheduler(ctx, jobs_db)
+    ctx.maintenance_scheduler.start()
 
     # Bonjour/mDNS advertisement
     bonjour = None
@@ -1249,6 +1363,7 @@ def start_server(host='127.0.0.1', port=5555, no_auth=False,
         app.run(host=host, port=port, debug=False, threaded=True)
     finally:
         ctx.scheduler.stop()
+        ctx.maintenance_scheduler.stop()
         if bonjour:
             bonjour.stop()
 

@@ -59,6 +59,9 @@ ARTWORK_SUBDIR = "artwork"
 DEFAULT_IMPORTER = "gamdl"
 DEFAULT_LOG_DIR = "logs"
 DEFAULT_LOG_RETENTION_DAYS = 7
+DEFAULT_AUDIT_RETENTION_DAYS = 90
+DEFAULT_TASK_HISTORY_RETENTION_DAYS = 90
+DEFAULT_REMOVED_TRACKS_RETENTION_DAYS = 365
 DEFAULT_CLEANUP_REMOVED_TRACKS = False
 DEFAULT_CLEAN_SYNC_DESTINATION = False
 DEFAULT_CONFIG_FILE = "data/config.yaml"
@@ -81,7 +84,7 @@ KNOWN_DEST_SCHEMES = ('usb://', 'folder://', 'web-client://', 'ios://')
 # Schema version constants — increment and add a migration case when changing
 # the config.yaml structure or DB tables/columns.
 CONFIG_SCHEMA_VERSION = 4
-DB_SCHEMA_VERSION = 11
+DB_SCHEMA_VERSION = 12
 
 # Excluded USB volumes by OS
 if IS_MACOS:
@@ -370,6 +373,8 @@ def _validate_profile(name, data):
 _KNOWN_SETTINGS_KEYS = {
     'output_type', 'workers', 'quality_preset',
     'api_key', 'server_name', 'log_retention_days', 'scheduler',
+    'audit_retention_days', 'task_history_retention_days',
+    'removed_tracks_retention_days',
 }
 
 
@@ -832,6 +837,90 @@ def prune_logs(log_dir=DEFAULT_LOG_DIR, retention_days=DEFAULT_LOG_RETENTION_DAY
             count += 1
     if count and logger:
         logger.info(f"Pruned {count} log file{'s' if count != 1 else ''}"
+                    f" older than {retention_days} days")
+    return count
+
+
+def prune_audit_entries(db_path=DEFAULT_DB_FILE,
+                        retention_days=DEFAULT_AUDIT_RETENTION_DAYS,
+                        logger=None):
+    """Delete audit entries older than retention_days. Returns count deleted."""
+    if retention_days <= 0:
+        return 0
+    cutoff_epoch = time.time() - (retention_days * 86400)
+    cutoff_iso = datetime.fromtimestamp(cutoff_epoch, UTC).isoformat()
+    count = 0
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            cur = conn.execute(
+                "DELETE FROM audit_entries WHERE timestamp < ?", (cutoff_iso,))
+            count = cur.rowcount
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as exc:
+        if logger:
+            logger.warning(f"prune_audit_entries failed: {exc}")
+        return 0
+    if count and logger:
+        logger.info(f"Pruned {count} audit entr{'ies' if count != 1 else 'y'}"
+                    f" older than {retention_days} days")
+    return count
+
+
+def prune_task_history(db_path=DEFAULT_DB_FILE,
+                       retention_days=DEFAULT_TASK_HISTORY_RETENTION_DAYS,
+                       logger=None):
+    """Delete task history entries older than retention_days. Returns count deleted."""
+    if retention_days <= 0:
+        return 0
+    cutoff = time.time() - (retention_days * 86400)
+    count = 0
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            cur = conn.execute(
+                "DELETE FROM task_history WHERE started_at < ?", (cutoff,))
+            count = cur.rowcount
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as exc:
+        if logger:
+            logger.warning(f"prune_task_history failed: {exc}")
+        return 0
+    if count and logger:
+        logger.info(f"Pruned {count} task history"
+                    f" entr{'ies' if count != 1 else 'y'}"
+                    f" older than {retention_days} days")
+    return count
+
+
+def prune_removed_tracks(db_path=DEFAULT_DB_FILE,
+                         retention_days=DEFAULT_REMOVED_TRACKS_RETENTION_DAYS,
+                         logger=None):
+    """Delete removed_tracks entries older than retention_days. Returns count deleted."""
+    if retention_days <= 0:
+        return 0
+    cutoff = time.time() - (retention_days * 86400)
+    count = 0
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            cur = conn.execute(
+                "DELETE FROM removed_tracks WHERE removed_at < ?", (cutoff,))
+            count = cur.rowcount
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as exc:
+        if logger:
+            logger.warning(f"prune_removed_tracks failed: {exc}")
+        return 0
+    if count and logger:
+        logger.info(f"Pruned {count} removed track"
+                    f" record{'s' if count != 1 else ''}"
                     f" older than {retention_days} days")
     return count
 
@@ -1394,6 +1483,19 @@ def migrate_db_schema(logger=None):
                 logger.info(
                     "DB migration 10→11: added removed_tracks table and "
                     "track_uuid column to sync_files")
+
+        # ── Version 11 → 12: index on sync_files.track_uuid ──────────────
+        if current < 12:
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sync_files_track_uuid"
+                " ON sync_files(track_uuid)")
+            conn.execute("PRAGMA user_version = 12")
+            conn.commit()
+            changes.append("added idx_sync_files_track_uuid index")
+            if logger:
+                logger.info(
+                    "DB migration 11→12: added idx_sync_files_track_uuid"
+                    " index on sync_files(track_uuid)")
 
         return [MigrationEvent(
             'schema_migrate',

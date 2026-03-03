@@ -237,6 +237,33 @@
   </div>
 </div>
 
+<!-- Data Retention -->
+<div class="card mt-4">
+  <div class="card-body">
+    <h6 class="card-title"><i class="bi bi-trash3"></i> Data Retention</h6>
+    <p class="text-muted small mb-3">Set how long records are kept before being automatically pruned at startup and daily. Set to 0 to keep forever.</p>
+    <form id="retentionForm">
+      <div class="row g-3">
+        <div class="col-md-4">
+          <label class="form-label">Audit Log Retention (days)</label>
+          <input type="number" class="form-control form-control-sm" id="retentionAudit" min="0" placeholder="90">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Task History Retention (days)</label>
+          <input type="number" class="form-control form-control-sm" id="retentionTaskHistory" min="0" placeholder="90">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Removed Tracks Retention (days)</label>
+          <input type="number" class="form-control form-control-sm" id="retentionRemovedTracks" min="0" placeholder="365">
+        </div>
+      </div>
+      <div class="mt-3">
+        <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-check"></i> Save Retention Settings</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <!-- Library Maintenance -->
 <div class="card mt-4">
   <div class="card-body">
@@ -313,6 +340,9 @@ function loadSettings() {
     document.getElementById('settingLogRetention').value = data.settings.log_retention_days || 7;
     document.getElementById('settingCleanupRemovedTracks').checked = !!data.settings.cleanup_removed_tracks;
     document.getElementById('settingCleanSyncDestination').checked = !!data.settings.clean_sync_destination;
+    document.getElementById('retentionAudit').value = data.settings.audit_retention_days ?? 90;
+    document.getElementById('retentionTaskHistory').value = data.settings.task_history_retention_days ?? 90;
+    document.getElementById('retentionRemovedTracks').value = data.settings.removed_tracks_retention_days ?? 365;
   });
 }
 
@@ -331,6 +361,17 @@ document.getElementById('settingsForm').addEventListener('submit', function(e) {
 });
 
 loadSettings();
+
+document.getElementById('retentionForm').addEventListener('submit', function(e) {
+  e.preventDefault();
+  const data = {
+    audit_retention_days: parseInt(document.getElementById('retentionAudit').value) || 0,
+    task_history_retention_days: parseInt(document.getElementById('retentionTaskHistory').value) || 0,
+    removed_tracks_retention_days: parseInt(document.getElementById('retentionRemovedTracks').value) || 0,
+  };
+  fetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
+    .then(r=>r.json()).then(() => { showToast('Retention settings saved', 'success'); });
+});
 
 // ── Cookie Management ──
 function loadCookieStatus() {
