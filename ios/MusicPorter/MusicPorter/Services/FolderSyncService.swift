@@ -53,6 +53,8 @@ final class FolderSyncService {
     /// - Parameters:
     ///   - destURL: Security-scoped folder URL chosen by the user.
     ///   - playlistKeys: Playlists to sync; pass empty array to sync all server playlists.
+    ///   - playlistPrefs: Playlists to persist as preferences on the server. Pass `nil` to
+    ///     indicate "sync all" (server stores `null`); pass an array for a specific selection.
     ///   - api: Connected API client.
     ///   - audioCacheManager: Optional local audio cache for cache-first strategy.
     ///   - profile: Output profile name forwarded to the server download endpoint.
@@ -60,6 +62,7 @@ final class FolderSyncService {
     func sync(
         destURL: URL,
         playlistKeys: [String],
+        playlistPrefs: [String]?,
         api: APIClient,
         audioCacheManager: AudioCacheManager?,
         profile: String,
@@ -78,6 +81,7 @@ final class FolderSyncService {
             await self.performSync(
                 destURL: destURL,
                 playlistKeys: playlistKeys,
+                playlistPrefs: playlistPrefs,
                 api: api,
                 audioCacheManager: audioCacheManager,
                 profile: profile,
@@ -95,6 +99,7 @@ final class FolderSyncService {
     private func performSync(
         destURL: URL,
         playlistKeys: [String],
+        playlistPrefs: [String]?,
         api: APIClient,
         audioCacheManager: AudioCacheManager?,
         profile: String,
@@ -111,6 +116,8 @@ final class FolderSyncService {
                 name: destURL.lastPathComponent
             )
             destName = response.destination.name
+            // Save playlist preferences to server (non-fatal if fails).
+            try? await api.savePlaylistPrefs(destination: destName, playlistKeys: playlistPrefs)
         } catch {
             lastResult = FolderSyncResult(
                 success: false,

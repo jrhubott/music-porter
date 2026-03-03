@@ -660,9 +660,11 @@ struct LibraryView: View {
         let keys = selectedSyncPlaylistKeys.isEmpty
             ? vm.playlists.map(\.key)
             : Array(selectedSyncPlaylistKeys)
+        let prefsToSave: [String]? = selectedSyncPlaylistKeys.isEmpty ? nil : Array(selectedSyncPlaylistKeys)
         await appState.folderSync.sync(
             destURL: destURL,
             playlistKeys: keys,
+            playlistPrefs: prefsToSave,
             api: appState.apiClient,
             audioCacheManager: appState.audioCacheManager,
             profile: appState.activeProfile,
@@ -676,7 +678,11 @@ struct LibraryView: View {
             path: folderURL.path,
             name: folderURL.lastPathComponent
         ))?.syncStatus {
-            selectedSyncPlaylistKeys = Set(status.playlists.map(\.name))
+            if let prefs = status.playlistPrefs {
+                selectedSyncPlaylistKeys = Set(prefs)
+            } else {
+                selectedSyncPlaylistKeys = Set(status.playlists.map(\.name))
+            }
             return
         }
         // Offline fallback: read local manifest
