@@ -79,6 +79,8 @@ export function SyncPage() {
   const [localDestinations, setLocalDestinations] = useState<SyncDestination[]>([]);
   const [linkModalOpen, setLinkModalOpen] = useState(false);
   const [linkTargetName, setLinkTargetName] = useState('');
+  const [linkDestinations, setLinkDestinations] = useState<SyncDestination[]>([]);
+  const [pendingLinkPath, setPendingLinkPath] = useState('');
 
   useEffect(() => {
     if (isOffline) {
@@ -266,30 +268,57 @@ export function SyncPage() {
 
   async function selectFolder() {
     const path = await ipc.selectFolder();
-    if (path) {
-      setDestPath(path);
-      setSelectedDrive(null);
-      loadSyncStatus(path);
+    if (!path) return;
 
-      // First-sync detection: if the destination is newly created and other destinations exist,
-      // prompt to link to an existing destination
-      try {
-        const destName = await ipc.resolveDestination(path);
-        if (destName) {
-          const destsResp = await ipc.getSyncDestinations();
-          const otherDests = destsResp.destinations.filter((d) => d.name !== destName);
-          if (otherDests.length > 0) {
-            const folderName = path.split('/').pop() ?? path.split('\\').pop() ?? 'folder';
-            setLinkTargetName(folderName);
-            setLinkModalOpen(true);
-          }
-          // Refresh local destinations after resolve (may have created a new one)
-          setLocalDestinations(await ipc.getLocalDestinations());
-        }
-      } catch {
-        // Non-critical — skip first-sync prompt on error
+    setSelectedDrive(null);
+
+    try {
+      const destsResp = await ipc.getSyncDestinations();
+      const folderPath = `folder://${path}`;
+      const alreadyExists = destsResp.destinations.some((d) => d.path === folderPath);
+
+      if (alreadyExists || destsResp.destinations.length === 0) {
+        // Existing destination OR no other dests to link to — set path and create/find directly
+        setDestPath(path);
+        loadSyncStatus(path);
+        setLocalDestinations(await ipc.getLocalDestinations());
+        return;
       }
+
+      // New destination AND other dests exist — defer creation and destPath, show link modal
+      setPendingLinkPath(path);
+      setLinkDestinations(destsResp.destinations);
+      setLinkTargetName(path.split('/').pop() ?? path.split('\\').pop() ?? 'folder');
+      setLinkModalOpen(true);
+    } catch {
+      setDestSyncStatus(null);
     }
+  }
+
+  async function handleLinkChoice(targetDest: string) {
+    const destName = await ipc.resolveDestination(pendingLinkPath);
+    if (!destName) throw new Error('Failed to create destination');
+    await ipc.linkDestination(destName, targetDest);
+    setLinkModalOpen(false);
+    await loadSyncStatus(pendingLinkPath, selectedDrive?.name);
+    const updatedDests = await ipc.getLocalDestinations();
+    setLocalDestinations(updatedDests);
+    setDestPath(pendingLinkPath);
+    setPendingLinkPath('');
+  }
+
+  async function handleNoLink() {
+    setLinkModalOpen(false);
+    await loadSyncStatus(pendingLinkPath);
+    const updatedDests = await ipc.getLocalDestinations();
+    setLocalDestinations(updatedDests);
+    setDestPath(pendingLinkPath);
+    setPendingLinkPath('');
+  }
+
+  function handleCancelLink() {
+    setLinkModalOpen(false);
+    setPendingLinkPath('');
   }
 
   async function startSync(force = false) {
@@ -735,15 +764,11 @@ export function SyncPage() {
 
       <LinkDestinationModal
         show={linkModalOpen}
-        destinationName={linkTargetName}
-        destinationPath={destPath}
-        onClose={() => setLinkModalOpen(false)}
-        onLinked={() => {
-          // Refresh sync status after linking
-          if (destPath) {
-            loadSyncStatus(destPath, selectedDrive?.name);
-          }
-        }}
+        folderName={linkTargetName}
+        destinations={linkDestinations}
+        onLink={handleLinkChoice}
+        onNo={handleNoLink}
+        onCancelled={handleCancelLink}
       />
     </div>
   );

@@ -2409,7 +2409,8 @@ class SyncTracker:
             conn.close()
 
     def _get_sync_status_for_key(self, sync_key, export_base_dir,
-                                dest_names=None, group_name=''):
+                                dest_names=None, group_name='',
+                                prefs=None):
         """Diff export directory against tracked files for a sync key (internal).
 
         Returns SyncStatusResult with per-playlist breakdown.
@@ -2453,6 +2454,7 @@ class SyncTracker:
         total_synced = 0
         total_new = 0
         new_playlist_count = 0
+        pref_set = set(prefs) if prefs else None
 
         for subdir in sorted(export_path.iterdir()):
             if not subdir.is_dir():
@@ -2477,11 +2479,15 @@ class SyncTracker:
                 'new_files': len(new),
                 'is_new_playlist': is_new_playlist,
             })
-            total_files += len(files_on_disk)
+            # synced_files reflects the actual destination state (always unfiltered)
             total_synced += len(synced)
-            total_new += len(new)
-            if is_new_playlist:
-                new_playlist_count += 1
+            # total_files/new_files/new_playlists count only pref playlists
+            in_prefs = pref_set is None or playlist_name in pref_set
+            if in_prefs:
+                total_files += len(files_on_disk)
+                total_new += len(new)
+                if is_new_playlist:
+                    new_playlist_count += 1
 
         return SyncStatusResult(
             destinations=dest_names or [], last_sync_at=last_sync,
@@ -2520,7 +2526,7 @@ class SyncTracker:
 
         result = self._get_sync_status_for_key(
             dest.sync_key, export_base_dir, dest_names=group_names,
-            group_name=group_name)
+            group_name=group_name, prefs=prefs)
         result.playlist_prefs = prefs
         return result
 
@@ -2558,7 +2564,7 @@ class SyncTracker:
             gname = key_group_names.get(sync_key, '')
             status = self._get_sync_status_for_key(
                 sync_key, export_base_dir, dest_names=names,
-                group_name=gname)
+                group_name=gname, prefs=key_prefs.get(sync_key))
             status.playlist_prefs = key_prefs.get(sync_key)
             results.append(status)
         return results

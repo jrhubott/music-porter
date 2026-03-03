@@ -2,11 +2,37 @@ import { useState, useEffect } from 'react';
 import { useIPC } from '../hooks/useIPC.js';
 import { useAppState } from '../store/app-state.js';
 import { LinkDestinationModal } from '../components/LinkDestinationModal.js';
+import type { SyncDestination } from '@mporter/core';
 
 const BYTES_PER_GB = 1024 * 1024 * 1024;
+const SECS_PER_HOUR = 3600;
+const SECS_PER_DAY = 86400;
+const SECS_PER_WEEK = 604800;
+const SECS_PER_MONTH = 2592000;
+const STALENESS_WARN_DAYS = 7;
+const STALENESS_DANGER_DAYS = 30;
 
 function formatGB(bytes: number): string {
   return `${(bytes / BYTES_PER_GB).toFixed(1)} GB`;
+}
+
+function formatRelativeTime(ts: number): string {
+  if (!ts) return 'Never';
+  const age = Math.floor(Date.now() / 1000) - ts;
+  if (age < 60) return 'just now';
+  if (age < SECS_PER_HOUR) return `${Math.floor(age / 60)} min ago`;
+  if (age < SECS_PER_DAY) return `${Math.floor(age / SECS_PER_HOUR)} hr ago`;
+  if (age < SECS_PER_WEEK) return `${Math.floor(age / SECS_PER_DAY)} days ago`;
+  if (age < SECS_PER_MONTH) return `${Math.floor(age / SECS_PER_WEEK)} wk ago`;
+  return `${Math.floor(age / SECS_PER_MONTH)} mo ago`;
+}
+
+function getStalenessClass(ts: number): string {
+  if (!ts) return 'text-secondary';
+  const ageDays = (Date.now() / 1000 - ts) / SECS_PER_DAY;
+  if (ageDays > STALENESS_DANGER_DAYS) return 'text-danger';
+  if (ageDays > STALENESS_WARN_DAYS) return 'text-warning';
+  return 'text-secondary';
 }
 
 export function DestinationsPage() {
@@ -26,7 +52,7 @@ export function DestinationsPage() {
 
   const [linkModalOpen, setLinkModalOpen] = useState(false);
   const [linkTargetName, setLinkTargetName] = useState('');
-  const [linkTargetPath, setLinkTargetPath] = useState<string | undefined>();
+  const [linkAvailableDestinations, setLinkAvailableDestinations] = useState<SyncDestination[]>([]);
 
   useEffect(() => {
     loadData();
@@ -70,10 +96,27 @@ export function DestinationsPage() {
     }
   }
 
-  function openLinkModal(name: string, path?: string) {
+  async function openLinkModal(name: string) {
     setLinkTargetName(name);
-    setLinkTargetPath(path);
+    try {
+      const response = await ipc.getSyncDestinations();
+      setLinkAvailableDestinations(response.destinations.filter((d) => d.name !== name));
+    } catch {
+      setLinkAvailableDestinations([]);
+    }
     setLinkModalOpen(true);
+  }
+
+  async function handleLinkChoice(targetDest: string) {
+    const result = await ipc.linkDestination(linkTargetName, targetDest);
+    if (!result.ok) throw new Error('Failed to link destination');
+    setLinkModalOpen(false);
+    loadDestinations();
+    loadSyncStatusSummary();
+  }
+
+  function handleCloseLink() {
+    setLinkModalOpen(false);
   }
 
   async function handleUnlink(name: string) {
@@ -172,7 +215,7 @@ export function DestinationsPage() {
                 <div className="d-flex gap-1">
                   <button
                     className="btn btn-sm btn-outline-info"
-                    onClick={() => openLinkModal(d.name, d.path)}
+                    onClick={() => openLinkModal(d.name)}
                     title="Link with another destination"
                   >
                     <i className="bi bi-link-45deg" />
@@ -216,6 +259,7 @@ export function DestinationsPage() {
                     <th className="text-end">Total</th>
                     <th className="text-end">Synced</th>
                     <th className="text-end">New</th>
+                    <th className="text-end">New PL</th>
                     <th>Last Sync</th>
                   </tr>
                 </thead>
@@ -223,6 +267,21 @@ export function DestinationsPage() {
                   {syncStatusSummary.map((s) => {
                     const groupLabel = s.destinations.join(', ');
                     const groupKey = groupLabel;
+                    const pct = s.total_files > 0 ? Math.round(s.synced_files / s.total_files * 100) : 0;
+                    const hasPref = s.playlist_prefs && s.playlist_prefs.length > 0;
+                    const lastSyncAbs = s.last_sync_at
+                      ? new Date(s.last_sync_at * 1000).toLocaleString()
+                      : 'Never';
+                    let statusBadge;
+                    if (!s.last_sync_at) {
+                      statusBadge = <span className="badge bg-danger">Never synced</span>;
+                    } else if (s.new_playlists > 0) {
+                      statusBadge = <span className="badge bg-warning text-dark">{s.new_playlists} new playlist(s)</span>;
+                    } else if (s.new_files > 0) {
+                      statusBadge = <span className="badge bg-info">{s.new_files} files behind</span>;
+                    } else {
+                      statusBadge = <span className="badge bg-success">Up to date</span>;
+                    }
                     return (
                       <tr
                         key={groupKey}
@@ -231,23 +290,40 @@ export function DestinationsPage() {
                         style={{ cursor: 'pointer' }}
                       >
                         <td>
-                          <i className={`bi bi-chevron-${selectedDestGroup === groupKey ? 'down' : 'right'} me-1`} />
-                          {groupLabel}
+                          <div>
+                            <i className={`bi bi-chevron-${selectedDestGroup === groupKey ? 'down' : 'right'} me-1`} />
+                            {groupLabel}
+                          </div>
+                          <div className="ms-3 mt-1">{statusBadge}</div>
                         </td>
                         <td className="text-end">{s.total_files}</td>
-                        <td className="text-end">{s.synced_files}</td>
+                        <td className="text-end">
+                          {s.synced_files}{' '}
+                          <small className="text-muted">({pct}%)</small>
+                        </td>
                         <td className="text-end">
                           {s.new_files > 0 ? (
                             <span className="text-info">{s.new_files}</span>
                           ) : (
                             <span className="text-success">0</span>
                           )}
+                          {hasPref && (
+                            <i
+                              className="bi bi-funnel-fill ms-1 text-info"
+                              title={`Playlist prefs active — ${s.playlist_prefs!.length} playlist(s)`}
+                            />
+                          )}
+                        </td>
+                        <td className="text-end">
+                          {s.new_playlists > 0 ? (
+                            <span className="badge bg-info">{s.new_playlists}</span>
+                          ) : (
+                            <span className="text-muted">0</span>
+                          )}
                         </td>
                         <td>
-                          <small className="text-secondary">
-                            {s.last_sync_at
-                              ? new Date(s.last_sync_at * 1000).toLocaleString()
-                              : 'Never'}
+                          <small className={getStalenessClass(s.last_sync_at)} title={lastSyncAbs}>
+                            {formatRelativeTime(s.last_sync_at)}
                           </small>
                         </td>
                       </tr>
@@ -326,13 +402,11 @@ export function DestinationsPage() {
 
       <LinkDestinationModal
         show={linkModalOpen}
-        destinationName={linkTargetName}
-        destinationPath={linkTargetPath}
-        onClose={() => setLinkModalOpen(false)}
-        onLinked={() => {
-          loadDestinations();
-          loadSyncStatusSummary();
-        }}
+        folderName={linkTargetName}
+        destinations={linkAvailableDestinations}
+        onLink={handleLinkChoice}
+        onNo={handleCloseLink}
+        onCancelled={handleCloseLink}
       />
     </div>
   );

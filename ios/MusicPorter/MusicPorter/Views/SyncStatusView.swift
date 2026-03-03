@@ -97,6 +97,19 @@ struct SyncStatusView: View {
         }
     }
 
+    // MARK: - Staleness helpers
+
+    private let stalenessWarnInterval: TimeInterval = 7 * 86400
+    private let stalenessDangerInterval: TimeInterval = 30 * 86400
+
+    private func stalenessColor(for group: SyncStatusSummary) -> Color {
+        guard group.lastSyncAt > 0 else { return .secondary }
+        let age = Date().timeIntervalSince1970 - group.lastSyncAt
+        if age > stalenessDangerInterval { return .red }
+        if age > stalenessWarnInterval { return .yellow }
+        return .secondary
+    }
+
     // MARK: - Destination Groups
 
     private var groupsSection: some View {
@@ -115,19 +128,30 @@ struct SyncStatusView: View {
                                     .font(.subheadline.weight(.medium))
                             }
                             HStack(spacing: 8) {
-                                Text("\(group.syncedFiles)/\(group.totalFiles) files")
+                                let pct = group.totalFiles > 0
+                                    ? Int(Double(group.syncedFiles) / Double(group.totalFiles) * 100)
+                                    : 0
+                                Text("\(group.syncedFiles)/\(group.totalFiles) (\(pct)%) files")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                 if let date = group.lastSyncDate {
                                     Text(date, style: .relative)
                                         .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(stalenessColor(for: group))
                                 }
                             }
                         }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 4) {
-                            if group.newFiles > 0 {
+                            if group.lastSyncDate == nil {
+                                Text("Never synced")
+                                    .font(.caption)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(.red.opacity(0.2))
+                                    .foregroundStyle(.red)
+                                    .clipShape(Capsule())
+                            } else if group.newFiles > 0 {
                                 Text("+\(group.newFiles) new")
                                     .font(.caption)
                                     .padding(.horizontal, 6)

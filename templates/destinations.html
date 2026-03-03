@@ -262,6 +262,45 @@ let allGroupsData = []; // cached /api/sync/status response
 let totalLibraryBytes = 0;
 
 // ── Helpers ──
+const SECS_PER_HOUR = 3600;
+const SECS_PER_DAY = 86400;
+const SECS_PER_WEEK = 604800;
+const SECS_PER_MONTH = 2592000;
+const STALENESS_WARN_SECS = 7 * SECS_PER_DAY;
+const STALENESS_DANGER_SECS = 30 * SECS_PER_DAY;
+
+function formatRelativeTime(ts) {
+  if (!ts || ts === 0) return 'Never';
+  const age = Math.floor(Date.now() / 1000) - ts;
+  if (age < 60) return 'just now';
+  if (age < SECS_PER_HOUR) return Math.floor(age / 60) + ' min ago';
+  if (age < SECS_PER_DAY) return Math.floor(age / SECS_PER_HOUR) + ' hr ago';
+  if (age < SECS_PER_WEEK) return Math.floor(age / SECS_PER_DAY) + ' days ago';
+  if (age < SECS_PER_MONTH) return Math.floor(age / SECS_PER_WEEK) + ' wk ago';
+  return Math.floor(age / SECS_PER_MONTH) + ' mo ago';
+}
+
+function getStalenessClass(ts) {
+  if (!ts || ts === 0) return '';
+  const age = Math.floor(Date.now() / 1000) - ts;
+  if (age > STALENESS_DANGER_SECS) return 'text-danger';
+  if (age > STALENESS_WARN_SECS) return 'text-warning';
+  return '';
+}
+
+function getGroupStatusBadge(k) {
+  if (!k.last_sync_at || k.last_sync_at === 0) {
+    return '<span class="badge bg-danger">Never synced</span>';
+  }
+  if (k.new_playlists > 0) {
+    return `<span class="badge bg-warning text-dark">${k.new_playlists} new playlist(s)</span>`;
+  }
+  if (k.new_files > 0) {
+    return `<span class="badge bg-info">${k.new_files} files behind</span>`;
+  }
+  return '<span class="badge bg-success">Up to date</span>';
+}
+
 function formatBytes(bytes) {
   if (!bytes || bytes === 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -357,10 +396,17 @@ function loadSyncStatusData() {
 function renderGroupsTable(data) {
   const tbody = document.getElementById('destGroupsTableBody');
   tbody.innerHTML = data.map((k, idx) => {
-    const lastSync = k.last_sync_at ? new Date(k.last_sync_at * 1000).toLocaleString() : 'Never';
+    const lastSyncRel = formatRelativeTime(k.last_sync_at);
+    const lastSyncAbs = k.last_sync_at ? new Date(k.last_sync_at * 1000).toLocaleString() : 'Never';
+    const stalenessClass = getStalenessClass(k.last_sync_at);
+    const pct = k.total_files > 0 ? Math.round(k.synced_files / k.total_files * 100) : 0;
+    const hasPref = k.playlist_prefs && k.playlist_prefs.length > 0;
+    const prefIcon = hasPref
+      ? ` <i class="bi bi-funnel-fill ms-1 text-info" title="Playlist prefs active — ${k.playlist_prefs.length} playlist(s)"></i>`
+      : '';
     const newBadge = k.new_files > 0
-      ? `<span class="badge bg-warning text-dark">${k.new_files}</span>`
-      : `<span class="text-success">0</span>`;
+      ? `<span class="badge bg-warning text-dark">${k.new_files}</span>${prefIcon}`
+      : `<span class="text-success">0</span>${prefIcon}`;
     const plBadge = k.new_playlists > 0
       ? `<span class="badge bg-info">${k.new_playlists}</span>`
       : `<span class="text-muted">0</span>`;
@@ -380,22 +426,23 @@ function renderGroupsTable(data) {
     const expandBtn = hasDetails
       ? `<button class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="toggleGroupExpand(this, ${idx})" title="Show destinations"><i class="bi bi-chevron-right"></i></button>`
       : '';
+    const statusBadge = getGroupStatusBadge(k);
     let destLabel;
     if (groupName) {
       const memberList = dests.join(', ');
-      destLabel = `<a href="#" onclick="showDetail('${primaryDest}'); return false;"><i class="bi ${icon} me-1"></i><strong>${groupName}</strong></a>${renameBtn}<br><small class="text-muted">${memberList}</small>`;
+      destLabel = `<a href="#" onclick="showDetail('${primaryDest}'); return false;"><i class="bi ${icon} me-1"></i><strong>${groupName}</strong></a>${renameBtn}<br><small class="text-muted">${memberList}</small><br><span class="ms-4">${statusBadge}</span>`;
     } else if (dests.length > 1) {
-      destLabel = `<a href="#" onclick="showDetail('${primaryDest}'); return false;"><i class="bi ${icon} me-1"></i>${primaryDest}</a> <span class="badge bg-info" title="${dests.join(', ')}">${dests.length} linked</span>${renameBtn}`;
+      destLabel = `<a href="#" onclick="showDetail('${primaryDest}'); return false;"><i class="bi ${icon} me-1"></i>${primaryDest}</a> <span class="badge bg-info" title="${dests.join(', ')}">${dests.length} linked</span>${renameBtn}<br><span class="ms-4">${statusBadge}</span>`;
     } else {
-      destLabel = `<a href="#" onclick="showDetail('${primaryDest}'); return false;"><i class="bi ${icon} me-1"></i>${primaryDest}</a>${renameBtn}`;
+      destLabel = `<a href="#" onclick="showDetail('${primaryDest}'); return false;"><i class="bi ${icon} me-1"></i>${primaryDest}</a>${renameBtn}<br><span class="ms-4">${statusBadge}</span>`;
     }
     return `<tr data-group-idx="${idx}">
       <td class="text-center" style="width:32px">${expandBtn}</td>
       <td>${destLabel}</td>
-      <td class="text-end">${k.synced_files} / ${k.total_files}</td>
+      <td class="text-end">${k.synced_files} / ${k.total_files} <small class="text-muted">(${pct}%)</small></td>
       <td class="text-end">${newBadge}</td>
       <td class="text-end">${plBadge}</td>
-      <td class="text-end">${lastSync}</td>
+      <td class="text-end ${stalenessClass}" title="${lastSyncAbs}">${lastSyncRel}</td>
       <td class="text-center">
         <button class="btn btn-outline-primary btn-sm py-0 px-1" onclick="syncToKey('${primaryDest}', 'library')" title="${syncTitle}" ${syncDisabled}>
           <i class="bi bi-arrow-repeat"></i>

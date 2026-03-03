@@ -743,6 +743,45 @@ function sortTable(key) {
 loadSummary();
 
 // ── Sync Status ──
+const SYNC_SECS_PER_DAY = 86400;
+const SYNC_SECS_PER_WEEK = 604800;
+const SYNC_SECS_PER_MONTH = 2592000;
+const SYNC_SECS_PER_HOUR = 3600;
+const SYNC_STALENESS_WARN_SECS = 7 * SYNC_SECS_PER_DAY;
+const SYNC_STALENESS_DANGER_SECS = 30 * SYNC_SECS_PER_DAY;
+
+function syncFormatRelative(ts) {
+  if (!ts || ts === 0) return 'Never';
+  const age = Math.floor(Date.now() / 1000) - ts;
+  if (age < 60) return 'just now';
+  if (age < SYNC_SECS_PER_HOUR) return Math.floor(age / 60) + ' min ago';
+  if (age < SYNC_SECS_PER_DAY) return Math.floor(age / SYNC_SECS_PER_HOUR) + ' hr ago';
+  if (age < SYNC_SECS_PER_WEEK) return Math.floor(age / SYNC_SECS_PER_DAY) + ' days ago';
+  if (age < SYNC_SECS_PER_MONTH) return Math.floor(age / SYNC_SECS_PER_WEEK) + ' wk ago';
+  return Math.floor(age / SYNC_SECS_PER_MONTH) + ' mo ago';
+}
+
+function syncStalenessClass(ts) {
+  if (!ts || ts === 0) return '';
+  const age = Math.floor(Date.now() / 1000) - ts;
+  if (age > SYNC_STALENESS_DANGER_SECS) return 'text-danger';
+  if (age > SYNC_STALENESS_WARN_SECS) return 'text-warning';
+  return 'text-muted';
+}
+
+function syncStatusBadge(k) {
+  if (!k.last_sync_at || k.last_sync_at === 0) {
+    return '<span class="badge bg-danger ms-1">Never synced</span>';
+  }
+  if (k.new_playlists > 0) {
+    return `<span class="badge bg-warning text-dark ms-1">${k.new_playlists} new playlist(s)</span>`;
+  }
+  if (k.new_files > 0) {
+    return `<span class="badge bg-info ms-1">${k.new_files} files behind</span>`;
+  }
+  return '<span class="badge bg-success ms-1">Up to date</span>';
+}
+
 function loadSyncStatus() {
   Promise.all([
     fetch('/api/sync/status').then(r => r.json()),
@@ -761,13 +800,21 @@ function loadSyncStatus() {
       const label = dests.join(', ') || '(unknown)';
       const isUsb = dests.some(d => usbNames.has(d));
       const icon = isUsb ? 'bi-usb-drive' : 'bi-folder2-open';
-      const newBadge = k.new_files > 0
-        ? `<span class="badge bg-warning text-dark ms-1">+${k.new_files} new</span>`
-        : '<span class="badge bg-success ms-1">synced</span>';
-      const plBadge = k.new_playlists > 0
-        ? ` <span class="badge bg-info ms-1">${k.new_playlists} new playlist${k.new_playlists > 1 ? 's' : ''}</span>`
+      const pct = k.total_files > 0 ? Math.round(k.synced_files / k.total_files * 100) : 0;
+      const hasPref = k.playlist_prefs && k.playlist_prefs.length > 0;
+      const prefIcon = hasPref
+        ? ` <i class="bi bi-funnel-fill text-info" title="Playlist prefs active — ${k.playlist_prefs.length} playlist(s)"></i>`
         : '';
-      return `<div><i class="bi ${icon} me-1"></i><strong>${label}</strong> ${newBadge}${plBadge} <span class="text-muted small">${k.synced_files}/${k.total_files} files</span></div>`;
+      const relTime = syncFormatRelative(k.last_sync_at);
+      const absTime = k.last_sync_at ? new Date(k.last_sync_at * 1000).toLocaleString() : 'Never';
+      const stalenessClass = syncStalenessClass(k.last_sync_at);
+      const statusBadge = syncStatusBadge(k);
+      return `<div class="mb-1">
+        <i class="bi ${icon} me-1"></i><strong>${label}</strong>
+        ${statusBadge}${prefIcon}
+        <span class="${stalenessClass} small ms-2" title="${absTime}">${relTime}</span>
+        <span class="text-muted small ms-2">${k.synced_files}/${k.total_files} (${pct}%)</span>
+      </div>`;
     }).join('');
   }).catch(() => {});
 }
