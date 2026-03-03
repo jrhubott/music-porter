@@ -140,11 +140,12 @@ final class FolderSyncService {
                 playlists: [:]
             ))
 
-        // Phase 1: Fetch all file lists and count total files.
+        // Phase 1: Fetch all file lists (with profile for correct display_filename
+        // and output_subdir) and count total files.
         var allFiles: [(playlistKey: String, response: FileListResponse)] = []
         for playlistKey in playlistKeys {
             guard !Task.isCancelled && !isCancelled else { break }
-            guard let response = try? await api.getFiles(playlist: playlistKey) else { continue }
+            guard let response = try? await api.getFiles(playlist: playlistKey, profile: profile) else { continue }
             allFiles.append((playlistKey, response))
             totalFiles += response.files.count
         }
@@ -152,15 +153,6 @@ final class FolderSyncService {
         // Phase 2: Process each playlist.
         for (playlistKey, response) in allFiles {
             guard !Task.isCancelled && !isCancelled else { break }
-
-            let playlistDir = destURL.appendingPathComponent(playlistKey)
-            do {
-                try FileManager.default.createDirectory(at: playlistDir, withIntermediateDirectories: true)
-            } catch {
-                filesFailed += response.files.count
-                updateProgress()
-                continue
-            }
 
             let manifestFiles = manifest.playlists[playlistKey]?.files ?? [:]
             var playlistSynced: [String] = []
@@ -170,13 +162,30 @@ final class FolderSyncService {
 
                 let displayName = track.displayFilename ?? track.filename
                 currentFileName = displayName
-                let destFile = playlistDir.appendingPathComponent(displayName)
+
+                // Resolve destination directory from the profile's output_subdir.
+                // Empty subdir means flat placement directly in destURL.
+                let subdir = track.outputSubdir ?? ""
+                let trackDestDir = subdir.isEmpty
+                    ? destURL
+                    : destURL.appendingPathComponent(subdir)
+                let destFile = trackDestDir.appendingPathComponent(displayName)
                 let existsOnDisk = FileManager.default.fileExists(atPath: destFile.path)
 
                 // Incremental skip: already in manifest and file is present on disk.
                 if manifestFiles[displayName] != nil && existsOnDisk {
                     filesSkipped += 1
                     playlistSynced.append(displayName)
+                    updateProgress()
+                    continue
+                }
+
+                // Ensure destination directory exists (idempotent).
+                do {
+                    try FileManager.default.createDirectory(
+                        at: trackDestDir, withIntermediateDirectories: true)
+                } catch {
+                    filesFailed += 1
                     updateProgress()
                     continue
                 }

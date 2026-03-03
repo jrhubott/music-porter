@@ -157,8 +157,12 @@ final class APIClient {
 
     // MARK: - Files
 
-    func getFiles(playlist: String) async throws -> FileListResponse {
-        try await get("/api/files/\(playlist)")
+    func getFiles(playlist: String, profile: String? = nil) async throws -> FileListResponse {
+        var queryItems: [URLQueryItem]?
+        if let profile, !profile.isEmpty {
+            queryItems = [URLQueryItem(name: "profile", value: profile)]
+        }
+        return try await get("/api/files/\(playlist)", queryItems: queryItems)
     }
 
     /// Fetch a playlist's file list with ETag support via MetadataCache.
