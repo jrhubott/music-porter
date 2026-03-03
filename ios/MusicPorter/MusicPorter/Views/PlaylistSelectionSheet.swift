@@ -60,7 +60,6 @@ struct PlaylistSelectionSheet: View {
                 }
             }
             .navigationTitle("Sync to \(destName)")
-            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
