@@ -12,6 +12,7 @@ import {
   VERSION,
   getConfigDir,
   readManifest,
+  readManifestPlaylistKeys,
 } from '@mporter/core';
 import type {
   BackgroundPrefetchStatus,
@@ -381,6 +382,10 @@ export function registerIPCHandlers(): void {
       }
     },
   );
+
+  ipcMain.handle('manifest:getPlaylistKeys', (_event, destPath: string): string[] => {
+    return readManifestPlaylistKeys(destPath);
+  });
 
   // ── Drives ──
 

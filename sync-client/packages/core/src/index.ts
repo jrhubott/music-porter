@@ -143,4 +143,5 @@ export {
   getManifestFiles,
   createManifest,
   updateManifestPlaylist,
+  readManifestPlaylistKeys,
 } from './manifest.js';

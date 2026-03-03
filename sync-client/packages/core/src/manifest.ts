@@ -21,6 +21,12 @@ export function writeManifest(destDir: string, manifest: SyncManifest): void {
   writeFileSync(path, JSON.stringify(manifest, null, 2), 'utf-8');
 }
 
+/** Returns playlist keys recorded in the manifest at destDir, or [] if none. */
+export function readManifestPlaylistKeys(destDir: string): string[] {
+  const manifest = readManifest(destDir);
+  return manifest ? Object.keys(manifest.playlists) : [];
+}
+
 /** Get the cached file map for a playlist from the manifest. */
 export function getManifestFiles(
   manifest: SyncManifest | null,

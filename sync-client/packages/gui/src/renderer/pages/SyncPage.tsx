@@ -256,6 +256,11 @@ export function SyncPage() {
       }
     } catch {
       setDestSyncStatus(null);
+      // Offline fallback: read local manifest for playlist pre-selection
+      const keys = await ipc.readManifestPlaylistKeys(path).catch(() => []);
+      if (keys.length > 0) {
+        setSelectedPlaylists(new Set(keys));
+      }
     }
   }
 

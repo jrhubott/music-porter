@@ -195,6 +195,10 @@ const electronAPI = {
     return () => ipcRenderer.removeListener('cache:backgroundPrefetchStatus', handler);
   },
 
+  // Manifest
+  readManifestPlaylistKeys: (destPath: string): Promise<string[]> =>
+    ipcRenderer.invoke('manifest:getPlaylistKeys', destPath),
+
   // App info
   getVersion: (): Promise<string> => ipcRenderer.invoke('app:getVersion'),
 };

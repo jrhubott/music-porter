@@ -18,7 +18,7 @@ struct LibraryView: View {
     @State private var selectedSyncFolder: URL?
     @State private var showFolderSetupPicker = false
     @State private var forceResync = false
-    @AppStorage("lastExportPlaylistKey") private var lastExportPlaylistKey: String = ""
+    @State private var selectedSyncPlaylistKeys: Set<String> = []
 
     // Cache state
     @State private var playlistCacheStatus: [String: PlaylistCacheStatus] = [:]
@@ -80,7 +80,11 @@ struct LibraryView: View {
             .sheet(isPresented: $showFolderSetupPicker) {
                 DocumentExportPicker { url in
                     showFolderSetupPicker = false
-                    if let url { selectedSyncFolder = url }
+                    if let url {
+                        selectedSyncFolder = url
+                        selectedSyncPlaylistKeys = []
+                        Task { await preSelectPlaylists(for: url) }
+                    }
                 }
             }
             .refreshable {
@@ -114,13 +118,15 @@ struct LibraryView: View {
 
     private var playlistsContent: some View {
         List {
+            playlistsSection
             actionBar
+            
             prefetchProgressSection
+            
             exportProgressSection
             exportResultSection
             folderSyncProgressSection
             folderSyncResultSection
-            playlistsSection
             localStorageSection
             errorSection
         }
@@ -231,12 +237,10 @@ struct LibraryView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
 
-                Picker("Playlist", selection: $lastExportPlaylistKey) {
-                    Text("All Playlists").tag("")
-                    ForEach(vm.playlists) { pl in
-                        Text(pl.name).tag(pl.key)
-                    }
-                }
+                let syncCount = selectedSyncPlaylistKeys.count
+                Text(syncCount == 0 ? "All playlists" : "\(syncCount) playlist\(syncCount == 1 ? "" : "s") selected")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 Toggle("Force re-sync all files", isOn: $forceResync)
                     .font(.caption)
@@ -484,6 +488,21 @@ struct LibraryView: View {
                         .foregroundStyle(isPinned ? .blue : .secondary)
                 }
                 .buttonStyle(.borderless)
+
+                if selectedSyncFolder != nil {
+                    let isSelected = selectedSyncPlaylistKeys.contains(playlist.key)
+                    Button {
+                        if isSelected {
+                            selectedSyncPlaylistKeys.remove(playlist.key)
+                        } else {
+                            selectedSyncPlaylistKeys.insert(playlist.key)
+                        }
+                    } label: {
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(isSelected ? .blue : .secondary)
+                    }
+                    .buttonStyle(.borderless)
+                }
             }
         }
         .swipeActions(edge: .trailing) {
@@ -607,7 +626,9 @@ struct LibraryView: View {
     // MARK: - Helpers
 
     private var hasExportableFiles: Bool {
-        !vm.exportDirs.isEmpty && vm.exportDirs.contains { $0.files > 0 }
+        let serverHas = !vm.exportDirs.isEmpty && vm.exportDirs.contains { $0.files > 0 }
+        let cacheHas = playlistCacheStatus.values.contains { $0.cached > 0 }
+        return serverHas || cacheHas
     }
 
     // MARK: - Actions
@@ -636,9 +657,9 @@ struct LibraryView: View {
 
     private func doFolderSync(_ destURL: URL) async {
         appState.folderSync.reset()
-        let keys = lastExportPlaylistKey.isEmpty
+        let keys = selectedSyncPlaylistKeys.isEmpty
             ? vm.playlists.map(\.key)
-            : [lastExportPlaylistKey]
+            : Array(selectedSyncPlaylistKeys)
         await appState.folderSync.sync(
             destURL: destURL,
             playlistKeys: keys,
@@ -647,6 +668,24 @@ struct LibraryView: View {
             profile: appState.activeProfile,
             forceResync: forceResync
         )
+    }
+
+    private func preSelectPlaylists(for folderURL: URL) async {
+        // Online: authoritative data from server
+        if let status = (try? await appState.apiClient.resolveDestination(
+            path: folderURL.path,
+            name: folderURL.lastPathComponent
+        ))?.syncStatus {
+            selectedSyncPlaylistKeys = Set(status.playlists.map(\.name))
+            return
+        }
+        // Offline fallback: read local manifest
+        let accessing = folderURL.startAccessingSecurityScopedResource()
+        defer { if accessing { folderURL.stopAccessingSecurityScopedResource() } }
+        if let manifest = SyncManifest.read(from: folderURL) {
+            selectedSyncPlaylistKeys = Set(manifest.playlists.keys)
+        }
+        // New folder (no manifest) → stays empty → sync all
     }
 
     private func exportToFolder(_ destDir: URL) async {
