@@ -63,6 +63,8 @@
 		A1000003E /* OfflineBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003E /* OfflineBanner.swift */; };
 		A1000003F /* ConnectionConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003F /* ConnectionConstants.swift */; };
 		A10000040 /* ConnectionMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000040 /* ConnectionMonitor.swift */; };
+		A10000041 /* SyncManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000041 /* SyncManifest.swift */; };
+		A10000042 /* FolderSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000042 /* FolderSyncService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -124,6 +126,8 @@
 		A2000003E /* OfflineBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineBanner.swift; sourceTree = "<group>"; };
 		A2000003F /* ConnectionConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionConstants.swift; sourceTree = "<group>"; };
 		A20000040 /* ConnectionMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionMonitor.swift; sourceTree = "<group>"; };
+		A20000041 /* SyncManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncManifest.swift; sourceTree = "<group>"; };
+		A20000042 /* FolderSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderSyncService.swift; sourceTree = "<group>"; };
 		A30000001 /* MusicPorter.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MusicPorter.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -175,6 +179,7 @@
 				A20000019 /* ExportDirectory.swift */,
 				A2000002C /* USBSyncStatus.swift */,
 				A2000002E /* EQConfig.swift */,
+				A20000041 /* SyncManifest.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -191,6 +196,7 @@
 				A20000029 /* AudioPlayerService.swift */,
 				A2000003F /* ConnectionConstants.swift */,
 				A20000040 /* ConnectionMonitor.swift */,
+				A20000042 /* FolderSyncService.swift */,
 				A50000011 /* Cache */,
 			);
 			path = Services;
@@ -399,6 +405,8 @@
 				A1000003F /* ConnectionConstants.swift in Sources */,
 				2858E4FE2F56B415003E6934 /* PlaylistSelectionSheet.swift in Sources */,
 				A10000040 /* ConnectionMonitor.swift in Sources */,
+				A10000041 /* SyncManifest.swift in Sources */,
+				A10000042 /* FolderSyncService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
