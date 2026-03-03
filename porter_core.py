@@ -72,7 +72,7 @@ VALID_DEST_NAME_RE = r'^[a-zA-Z0-9_-]+$'
 # Schema version constants — increment and add a migration case when changing
 # the config.yaml structure or DB tables/columns.
 CONFIG_SCHEMA_VERSION = 4
-DB_SCHEMA_VERSION = 9
+DB_SCHEMA_VERSION = 10
 
 # Excluded USB volumes by OS
 if IS_MACOS:
@@ -1342,6 +1342,18 @@ def migrate_db_schema(logger=None):
                 logger.info(
                     "DB migration 8→9: added name column to sync_keys")
 
+        # ── Version 9 → 10: playlist_prefs on sync_keys ──────────────────
+        if current < 10:
+            conn.execute(
+                "ALTER TABLE sync_keys ADD COLUMN playlist_prefs TEXT")
+            conn.execute("PRAGMA user_version = 10")
+            conn.commit()
+            changes.append("added playlist_prefs column to sync_keys")
+            if logger:
+                logger.info(
+                    "DB migration 9→10: added playlist_prefs column "
+                    "to sync_keys")
+
         return [MigrationEvent(
             'schema_migrate',
             f"DB schema migrated from version {from_version} to {DB_SCHEMA_VERSION}",
@@ -2221,9 +2233,10 @@ class SyncTracker:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS sync_keys (
-                    key_name    TEXT PRIMARY KEY,
-                    last_sync_at REAL NOT NULL DEFAULT 0,
-                    created_at  REAL NOT NULL DEFAULT 0
+                    key_name       TEXT PRIMARY KEY,
+                    last_sync_at   REAL NOT NULL DEFAULT 0,
+                    created_at     REAL NOT NULL DEFAULT 0,
+                    playlist_prefs TEXT
                 )
             """)
             conn.execute("""
@@ -2320,19 +2333,27 @@ class SyncTracker:
         """List all tracked sync keys (internal).
 
         Returns list of dicts: {key_name, name, last_sync_at, created_at,
-        total_synced_files}.
+        playlist_prefs, total_synced_files}.
         """
         conn = self._connect()
         try:
             rows = conn.execute("""
                 SELECT k.key_name, k.name, k.last_sync_at, k.created_at,
+                       k.playlist_prefs,
                        COUNT(f.id) AS total_synced_files
                 FROM sync_keys k
                 LEFT JOIN sync_files f ON f.sync_key = k.key_name
                 GROUP BY k.key_name
                 ORDER BY k.last_sync_at DESC
             """).fetchall()
-            return [dict(r) for r in rows]
+            result = []
+            for r in rows:
+                d = dict(r)
+                raw = d.get('playlist_prefs')
+                d['playlist_prefs'] = (
+                    json.loads(raw) if raw else None)
+                result.append(d)
+            return result
         finally:
             conn.close()
 
@@ -2472,16 +2493,21 @@ class SyncTracker:
             ).fetchall()
             group_names = [r['name'] for r in rows]
             key_row = conn.execute(
-                "SELECT name FROM sync_keys WHERE key_name = ?",
+                "SELECT name, playlist_prefs FROM sync_keys "
+                "WHERE key_name = ?",
                 (dest.sync_key,),
             ).fetchone()
             group_name = (key_row['name'] or '') if key_row else ''
+            raw_prefs = key_row['playlist_prefs'] if key_row else None
+            prefs = json.loads(raw_prefs) if raw_prefs else None
         finally:
             conn.close()
 
-        return self._get_sync_status_for_key(
+        result = self._get_sync_status_for_key(
             dest.sync_key, export_base_dir, dest_names=group_names,
             group_name=group_name)
+        result.playlist_prefs = prefs
+        return result
 
     def get_destination_groups(self, export_base_dir):
         """Get sync status for all destination groups.
@@ -2495,14 +2521,19 @@ class SyncTracker:
         for d in all_dests:
             key_to_dests.setdefault(d.sync_key, []).append(d)
 
-        # Fetch group names from sync_keys in one query
+        # Fetch group names and prefs from sync_keys in one query
         conn = self._connect()
         try:
             rows = conn.execute(
-                "SELECT key_name, name FROM sync_keys"
+                "SELECT key_name, name, playlist_prefs FROM sync_keys"
             ).fetchall()
             key_group_names = {r['key_name']: (r['name'] or '')
                                for r in rows}
+            key_prefs = {}
+            for r in rows:
+                raw = r['playlist_prefs']
+                key_prefs[r['key_name']] = (
+                    json.loads(raw) if raw else None)
         finally:
             conn.close()
 
@@ -2513,6 +2544,7 @@ class SyncTracker:
             status = self._get_sync_status_for_key(
                 sync_key, export_base_dir, dest_names=names,
                 group_name=gname)
+            status.playlist_prefs = key_prefs.get(sync_key)
             results.append(status)
         return results
 
@@ -2580,6 +2612,55 @@ class SyncTracker:
                 (dest.sync_key,),
             ).fetchone()
             return (row['name'] or '') if row else ''
+        finally:
+            conn.close()
+
+    def save_playlist_prefs(self, dest_name: str,
+                            playlist_keys: list | None) -> bool:
+        """Persist playlist preferences for a destination's sync group.
+
+        Stores the given playlist_keys list as JSON in sync_keys.
+        Pass None (or empty list) to reset to "sync all".
+        Returns False if the destination is not found.
+        """
+        dest = self.get_destination(dest_name)
+        if not dest:
+            return False
+        # Normalise: treat [] same as None (all playlists)
+        stored = (json.dumps(playlist_keys)
+                  if playlist_keys else None)
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE sync_keys SET playlist_prefs = ? "
+                    "WHERE key_name = ?",
+                    (stored, dest.sync_key),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        return True
+
+    def get_playlist_prefs(self, dest_name: str) -> list | None:
+        """Return playlist preferences for a destination's sync group.
+
+        Returns a list of playlist keys or None (= all playlists).
+        Returns None if the destination is not found.
+        """
+        dest = self.get_destination(dest_name)
+        if not dest:
+            return None
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT playlist_prefs FROM sync_keys WHERE key_name = ?",
+                (dest.sync_key,),
+            ).fetchone()
+            if not row:
+                return None
+            raw = row['playlist_prefs']
+            return json.loads(raw) if raw else None
         finally:
             conn.close()
 
@@ -2801,13 +2882,18 @@ class SyncTracker:
         conn = self._connect()
         try:
             row = conn.execute(
-                "SELECT name, path, sync_key FROM destinations "
-                "WHERE name = ? COLLATE NOCASE",
+                """SELECT d.name, d.path, d.sync_key, k.playlist_prefs
+                   FROM destinations d
+                   LEFT JOIN sync_keys k ON k.key_name = d.sync_key
+                   WHERE d.name = ? COLLATE NOCASE""",
                 (name,),
             ).fetchone()
             if row:
+                raw = row['playlist_prefs']
+                prefs = json.loads(raw) if raw else None
                 return SyncDestination(row['name'], row['path'],
-                                       sync_key=row['sync_key'])
+                                       sync_key=row['sync_key'],
+                                       playlist_prefs=prefs)
             return None
         finally:
             conn.close()
@@ -2817,7 +2903,10 @@ class SyncTracker:
         conn = self._connect()
         try:
             rows = conn.execute(
-                "SELECT name, path, sync_key FROM destinations ORDER BY rowid"
+                """SELECT d.name, d.path, d.sync_key, k.playlist_prefs
+                   FROM destinations d
+                   LEFT JOIN sync_keys k ON k.key_name = d.sync_key
+                   ORDER BY d.rowid"""
             ).fetchall()
             # Build sync_key → [names] map for linked_destinations
             key_to_names = {}
@@ -2828,9 +2917,11 @@ class SyncTracker:
             for r in rows:
                 linked = [n for n in key_to_names.get(r['sync_key'], [])
                           if n != r['name']]
+                raw = r['playlist_prefs']
+                prefs = json.loads(raw) if raw else None
                 dests.append(SyncDestination(
                     r['name'], r['path'], sync_key=r['sync_key'],
-                    linked_destinations=linked))
+                    linked_destinations=linked, playlist_prefs=prefs))
             return dests
         finally:
             conn.close()
@@ -3765,6 +3856,7 @@ class SyncDestination:
     path: str  # usb:///Volumes/X/RZR/Music or folder:///path/to/dir
     sync_key: str = ''  # internal UUID; never shown to users
     linked_destinations: list = field(default_factory=list)
+    playlist_prefs: list | None = None  # None = all playlists
 
     @property
     def type(self) -> str:
@@ -3801,7 +3893,8 @@ class SyncDestination:
     def to_api_dict(self) -> dict:
         return {'name': self.name, 'path': self.path,
                 'type': self.type, 'available': self.available,
-                'linked_destinations': self.linked_destinations}
+                'linked_destinations': self.linked_destinations,
+                'playlist_prefs': self.playlist_prefs}
 
 
 class ConfigManager:
@@ -4962,6 +5055,7 @@ class SyncStatusResult:
     new_files: int = 0
     new_playlists: int = 0
     group_name: str = ''
+    playlist_prefs: list | None = None  # None = all playlists
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -7076,7 +7170,8 @@ class SyncManager:
 
     def sync_to_destination(self, source_dir, dest_path, sync_key,
                             dry_run=False, tag_applicator=None,
-                            profile=None, playlist_name=None):
+                            profile=None, playlist_name=None,
+                            playlist_keys=None):
         """Sync files to any destination with incremental copy logic.
 
         Args:
@@ -7087,6 +7182,8 @@ class SyncManager:
             tag_applicator: Optional TagApplicator for profile-based tagging
             profile: Optional OutputProfile (required if tag_applicator is set)
             playlist_name: Display name of playlist (for template variables)
+            playlist_keys: Optional list of playlist keys to restrict sync to.
+                None or empty list means sync all playlists.
 
         When tag_applicator and profile are provided, files are tagged on-the-fly
         during copy using the profile's template settings.  When omitted, files
@@ -7115,6 +7212,10 @@ class SyncManager:
                               destination='',
                               duration=0, is_usb=is_usb)
 
+        # Normalise playlist filter: None/[] → no filter (all playlists)
+        playlist_filter: set | None = (
+            set(playlist_keys) if playlist_keys else None)
+
         # Collect all .mp3 files to process
         mp3_files = []
         if source_path.is_file():
@@ -7125,6 +7226,21 @@ class SyncManager:
                 for file in files:
                     if file.endswith('.mp3'):
                         mp3_files.append(Path(root) / file)
+
+        # Filter by playlist if requested (requires TrackDB via tag_applicator)
+        if playlist_filter is not None:
+            if tag_applicator and tag_applicator.track_db:
+                track_db = tag_applicator.track_db
+                filtered = []
+                for f in mp3_files:
+                    db_path = f"{get_audio_dir()}/{f.name}"
+                    meta = track_db.get_track_by_path(db_path)
+                    if meta and meta.get('playlist') in playlist_filter:
+                        filtered.append(f)
+                mp3_files = filtered
+            else:
+                self.logger.warn(
+                    "playlist_keys filter ignored: TrackDB not available")
 
         stats.files_found = len(mp3_files)
         self.logger.info(f"Files to process: {stats.files_found}")
