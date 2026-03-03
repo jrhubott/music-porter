@@ -1,3 +1,7 @@
+Version 2.38.12 (2026-03-02):
+• Remove pref funnel icon from all surfaces
+• Sync client updated to v1.5.4
+
 Version 2.38.10 (2026-03-02):
 • Add sync readiness indicators across all surfaces
 • Add Destinations page; move tracking sections from Sync

@@ -268,7 +268,6 @@ export function DestinationsPage() {
                     const groupLabel = s.destinations.join(', ');
                     const groupKey = groupLabel;
                     const pct = s.total_files > 0 ? Math.round(s.synced_files / s.total_files * 100) : 0;
-                    const hasPref = s.playlist_prefs && s.playlist_prefs.length > 0;
                     const lastSyncAbs = s.last_sync_at
                       ? new Date(s.last_sync_at * 1000).toLocaleString()
                       : 'Never';
@@ -306,12 +305,6 @@ export function DestinationsPage() {
                             <span className="text-info">{s.new_files}</span>
                           ) : (
                             <span className="text-success">0</span>
-                          )}
-                          {hasPref && (
-                            <i
-                              className="bi bi-funnel-fill ms-1 text-info"
-                              title={`Playlist prefs active — ${s.playlist_prefs!.length} playlist(s)`}
-                            />
                           )}
                         </td>
                         <td className="text-end">

@@ -1,5 +1,5 @@
 /** Sync client version — bumped independently from the server. */
-export const VERSION = '1.5.3';
+export const VERSION = '1.5.4';
 
 /** Manifest filename stored in sync destination root. */
 export const MANIFEST_FILENAME = '.music-porter-sync.json';

@@ -400,13 +400,9 @@ function renderGroupsTable(data) {
     const lastSyncAbs = k.last_sync_at ? new Date(k.last_sync_at * 1000).toLocaleString() : 'Never';
     const stalenessClass = getStalenessClass(k.last_sync_at);
     const pct = k.total_files > 0 ? Math.round(k.synced_files / k.total_files * 100) : 0;
-    const hasPref = k.playlist_prefs && k.playlist_prefs.length > 0;
-    const prefIcon = hasPref
-      ? ` <i class="bi bi-funnel-fill ms-1 text-info" title="Playlist prefs active — ${k.playlist_prefs.length} playlist(s)"></i>`
-      : '';
     const newBadge = k.new_files > 0
-      ? `<span class="badge bg-warning text-dark">${k.new_files}</span>${prefIcon}`
-      : `<span class="text-success">0</span>${prefIcon}`;
+      ? `<span class="badge bg-warning text-dark">${k.new_files}</span>`
+      : `<span class="text-success">0</span>`;
     const plBadge = k.new_playlists > 0
       ? `<span class="badge bg-info">${k.new_playlists}</span>`
       : `<span class="text-muted">0</span>`;
