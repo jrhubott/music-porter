@@ -59,6 +59,8 @@ struct SyncStatusDetail: Codable {
     let syncedFiles: Int
     let newFiles: Int
     let newPlaylists: Int
+    /// Saved playlist preferences for this group. nil = sync all playlists.
+    let playlistPrefs: [String]?
 
     /// Display label for the destination group.
     var displayLabel: String { destinations.joined(separator: ", ") }
@@ -75,6 +77,7 @@ struct SyncStatusDetail: Codable {
         case syncedFiles = "synced_files"
         case newFiles = "new_files"
         case newPlaylists = "new_playlists"
+        case playlistPrefs = "playlist_prefs"
     }
 }
 
@@ -96,6 +99,8 @@ struct SyncDestination: Identifiable, Codable {
     let type: String
     let available: Bool
     let linkedDestinations: [String]
+    /// Saved playlist preferences. nil = sync all playlists.
+    let playlistPrefs: [String]?
 
     var id: String { name }
 
@@ -105,6 +110,7 @@ struct SyncDestination: Identifiable, Codable {
     enum CodingKeys: String, CodingKey {
         case name, path, type, available
         case linkedDestinations = "linked_destinations"
+        case playlistPrefs = "playlist_prefs"
     }
 }
 

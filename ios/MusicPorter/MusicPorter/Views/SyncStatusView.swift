@@ -14,6 +14,9 @@ struct SyncStatusView: View {
     @State private var destToReset: String?
     @State private var showDeleteDestConfirm = false
     @State private var destToDelete: String?
+    @State private var playlistSelectionDest: String? = nil
+    @State private var playlistSelection: Set<String> = []
+    @State private var showPlaylistSelectionSheet = false
 
     var body: some View {
         List {
@@ -76,6 +79,21 @@ struct SyncStatusView: View {
             }
         } message: {
             Text("Remove saved destination \"\(destToDelete ?? "")\"?")
+        }
+        .sheet(isPresented: $showPlaylistSelectionSheet) {
+            if let destName = playlistSelectionDest {
+                PlaylistSelectionSheet(
+                    destName: destName,
+                    allPlaylists: detail?.playlists.map(\.name) ?? [],
+                    initialSelection: playlistSelection,
+                    onSync: { selection in
+                        showPlaylistSelectionSheet = false
+                        Task {
+                            await syncDestination(destName, playlistKeys: selection.isEmpty ? nil : Array(selection))
+                        }
+                    }
+                )
+            }
         }
     }
 
@@ -154,7 +172,7 @@ struct SyncStatusView: View {
                 }
                 .swipeActions(edge: .leading) {
                     Button {
-                        Task { await syncDestination(group.primaryDestination) }
+                        openPlaylistSelectionSheet(for: group)
                     } label: {
                         Label("Sync", systemImage: "arrow.triangle.2.circlepath")
                     }
@@ -185,6 +203,11 @@ struct SyncStatusView: View {
                     HStack {
                         Text(playlist.name)
                             .font(.subheadline)
+                        if let prefs = detail.playlistPrefs, prefs.contains(playlist.name) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.blue.opacity(0.8))
+                        }
                         Spacer()
                         Text("\(playlist.syncedFiles)/\(playlist.totalFiles)")
                             .font(.caption)
@@ -324,13 +347,40 @@ struct SyncStatusView: View {
 
     // MARK: - Sync Actions
 
-    private func syncDestination(_ destName: String) async {
+    private func openPlaylistSelectionSheet(for group: SyncStatusSummary) {
+        let destName = group.primaryDestination
+        playlistSelectionDest = destName
+        let prefs: [String]?
+        if let d = detail, d.destinations.first == destName {
+            prefs = d.playlistPrefs
+        } else {
+            prefs = destinations.first(where: { $0.name == destName })?.playlistPrefs
+        }
+        playlistSelection = prefs.map(Set.init) ?? []
+        if selectedGroup != destName || detail == nil {
+            selectedGroup = destName
+            Task {
+                await loadDetail(destName)
+                showPlaylistSelectionSheet = true
+            }
+        } else {
+            showPlaylistSelectionSheet = true
+        }
+    }
+
+    private func syncDestination(_ destName: String, playlistKeys: [String]? = nil) async {
         let activeProfile = appState.activeProfile
+        do {
+            try await appState.apiClient.savePlaylistPrefs(destination: destName, playlistKeys: playlistKeys)
+        } catch {
+            // non-fatal: prefs save failure doesn't block the sync
+        }
         await vm.run(api: appState.apiClient) {
             try await appState.apiClient.syncToDestination(
                 sourceDir: "library",
                 destination: destName,
-                profile: activeProfile
+                profile: activeProfile,
+                playlistKeys: playlistKeys
             )
         }
         await load()
