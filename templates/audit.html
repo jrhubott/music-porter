@@ -217,8 +217,9 @@ function collapseConsecutive(entries) {
     if (last && last.entry.operation === entry.operation) {
       last.count++;
       last.lastEntry = entry;
+      last.entries.push(entry);
     } else {
-      groups.push({ entry, count: 1, lastEntry: entry });
+      groups.push({ entry, count: 1, lastEntry: entry, entries: [entry] });
     }
   }
   return groups;
@@ -260,11 +261,35 @@ async function loadAudit() {
   if (displayGroups.length === 0) {
     tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No entries found</td></tr>';
   } else {
+    let groupIdx = 0;
     tbody.innerHTML = displayGroups.map(g => {
       const e = g.entry;
+      const gid = groupIdx++;
+      const expandBtn = g.count > 1
+        ? `<button id="grp-toggle-${gid}" class="btn btn-link btn-sm p-0 me-1 text-muted" onclick="toggleGroup(${gid})" title="Expand group"><i class="bi bi-chevron-right"></i></button>`
+        : '';
       const opCell = g.count > 1
-        ? `<code>${e.operation}</code> <span class="badge bg-secondary">&times;${g.count}</span>`
+        ? `${expandBtn}<code>${e.operation}</code> <span class="badge bg-secondary">&times;${g.count}</span>`
         : `<code>${e.operation}</code>`;
+      const detailBtn = (entry) => {
+        const disabled = !entry.params ? ' disabled' : '';
+        const onclick = entry.params
+          ? ` onclick='showParams(${JSON.stringify(JSON.stringify(entry))})'`
+          : '';
+        return `<button class="btn btn-outline-secondary btn-sm py-0 px-1${disabled}"${onclick}${disabled ? ' disabled' : ''}><i class="bi bi-code-square"></i></button>`;
+      };
+      const subRows = g.count > 1
+        ? g.entries.map(se => `
+          <tr class="grp-detail-${gid} d-none" style="background:rgba(255,255,255,0.04)">
+            <td class="text-nowrap small ps-3 text-muted">${formatTime(se.timestamp)}</td>
+            <td></td>
+            <td class="small">${se.description}</td>
+            <td>${statusBadge(se.status)}</td>
+            <td class="small">${formatDuration(se.duration_s)}</td>
+            <td>${sourceBadge(se.source)}</td>
+            <td>${detailBtn(se)}</td>
+          </tr>`).join('')
+        : '';
       return `
         <tr>
           <td class="text-nowrap small">${formatTime(e.timestamp)}</td>
@@ -273,8 +298,8 @@ async function loadAudit() {
           <td>${statusBadge(e.status)}</td>
           <td class="small">${formatDuration(e.duration_s)}</td>
           <td>${sourceBadge(e.source)}</td>
-          <td>${e.params ? '<button class="btn btn-outline-secondary btn-sm py-0 px-1" onclick=\'showParams(' + JSON.stringify(JSON.stringify(e)) + ')\'><i class="bi bi-code-square"></i></button>' : ''}</td>
-        </tr>
+          <td>${detailBtn(e)}</td>
+        </tr>${subRows}
       `;
     }).join('');
   }
@@ -333,6 +358,18 @@ function showParams(jsonStr) {
   };
   document.getElementById('paramsContent').textContent = JSON.stringify(content, null, 2);
   new bootstrap.Modal(document.getElementById('paramsModal')).show();
+}
+
+function toggleGroup(groupId) {
+  const rows = document.querySelectorAll(`.grp-detail-${groupId}`);
+  const btn = document.getElementById(`grp-toggle-${groupId}`);
+  const isHidden = rows[0] && rows[0].classList.contains('d-none');
+  rows.forEach(r => r.classList.toggle('d-none', !isHidden));
+  if (btn) {
+    btn.querySelector('i').className = isHidden
+      ? 'bi bi-chevron-down'
+      : 'bi bi-chevron-right';
+  }
 }
 
 // Event listeners

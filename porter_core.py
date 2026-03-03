@@ -2536,6 +2536,28 @@ class SyncTracker:
             finally:
                 conn.close()
 
+    def get_all_orphaned_files(self):
+        """Return sync_files records across ALL sync keys whose track no longer exists.
+
+        A file is orphaned when its track_uuid is set but no matching row exists
+        in the tracks table (i.e. the track was deleted from the library).
+
+        Returns a list of dicts: {id, file_path, playlist, track_uuid, sync_key, synced_at}
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT sf.id, sf.file_path, sf.playlist,
+                          sf.track_uuid, sf.sync_key, sf.synced_at
+                   FROM sync_files sf
+                   LEFT JOIN tracks t ON sf.track_uuid = t.uuid
+                   WHERE sf.track_uuid IS NOT NULL
+                     AND t.uuid IS NULL""",
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
     def _get_keys(self):
         """List all tracked sync keys (internal).
 
@@ -3945,6 +3967,42 @@ class TrackDB:
         finally:
             conn.close()
 
+    def get_orphaned_playlist_tracks(self):
+        """Return tracks whose playlist column references a non-existent playlist.
+
+        Cross-table query against the playlists table. Returns a list of track
+        dicts for tracks with a playlist key that no longer exists.
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT t.*
+                   FROM tracks t
+                   WHERE t.playlist NOT IN (SELECT key FROM playlists)
+                   ORDER BY t.playlist, t.title""",
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_removed_track_conflicts(self):
+        """Return tracks that appear in both the tracks and removed_tracks tables.
+
+        Returns a list of track dicts for tracks whose UUID is present in both
+        tables, indicating a potential data inconsistency.
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT t.*
+                   FROM tracks t
+                   WHERE t.uuid IN (SELECT uuid FROM removed_tracks)
+                   ORDER BY t.playlist, t.title""",
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
     def get_playlist_fingerprint(self, playlist):
         """Return a lightweight fingerprint (count + max_updated_at + total_size).
 
@@ -4808,6 +4866,10 @@ def audit_library(track_db, project_root=None, logger=None,
         'sizes_updated': 0,
         'duplicates_removed': 0,
         'sync_records_removed': 0,
+        'sync_uuid_orphans_removed': 0,
+        'orphan_source_m4as_removed': 0,
+        'orphaned_playlist_tracks_removed': 0,
+        'removed_active_conflicts': 0,
         'details': [],
     }
 
@@ -5035,13 +5097,46 @@ def audit_library(track_db, project_root=None, logger=None,
                     f"orphan artwork: {rel_art}")
                 stats['orphan_artwork_removed'] += 1
 
+    # Orphan source M4As
+    logger.info("=== Phase 3c: Finding orphan source M4A files ===")
+    source_base = root / SOURCE_SUBDIR / DEFAULT_IMPORTER
+    if source_base.exists():
+        all_source_m4as = {
+            str(p.relative_to(root))
+            for p in source_base.rglob('*.m4a')
+        }
+        all_db_m4as = {
+            t.get('source_m4a_path') or ''
+            for t in track_db.get_all_tracks()
+        }
+        for m4a_rel in sorted(all_source_m4as):
+            if cancel_event and cancel_event.is_set():
+                logger.warn("Audit cancelled by user")
+                return stats
+            if m4a_rel not in all_db_m4as:
+                m4a_path = root / m4a_rel
+                if allow_updates:
+                    try:
+                        m4a_path.unlink()
+                    except OSError as exc:
+                        logger.warn(f"Could not delete orphan M4A {m4a_rel}: {exc}")
+                else:
+                    logger.dry_run(
+                        f"Would delete orphan source M4A: {m4a_rel}")
+                _detail(
+                    f"{'Deleted' if allow_updates else 'Would delete'} "
+                    f"orphan source M4A: {m4a_rel}")
+                stats['orphan_source_m4as_removed'] += 1
+    else:
+        logger.info("  Source directory not found — skipping M4A scan")
+
     # ── Phase 4: Cross-check sync DB against track DB ─────────────
     if sync_tracker:
         if cancel_event and cancel_event.is_set():
             logger.warn("Audit cancelled by user")
             return stats
 
-        logger.info("=== Phase 3: Verifying sync records against track DB ===")
+        logger.info("=== Phase 4: Verifying sync records against track DB ===")
         all_sync_files = sync_tracker.get_all_sync_files()
         # Get all playlists that still have tracks
         db_playlists = set(track_db.get_all_playlists())
@@ -5064,8 +5159,97 @@ def audit_library(track_db, project_root=None, logger=None,
                 stats['sync_records_removed'] = len(stale_ids)
                 logger.dry_run(
                     f"Would remove {len(stale_ids)} stale sync records")
+
+        # UUID-level orphans: sync_files referencing deleted track UUIDs
+        stale_id_set = set(stale_ids)
+        uuid_orphans = sync_tracker.get_all_orphaned_files()
+        uuid_orphan_ids = [sf['id'] for sf in uuid_orphans
+                           if sf['id'] not in stale_id_set]
+        for sf in uuid_orphans:
+            if sf['id'] in stale_id_set:
+                continue
+            _detail(
+                f"Orphaned sync record (deleted track): key={sf['sync_key']}, "
+                f"uuid={sf['track_uuid']}, file={sf['file_path']}")
+        if uuid_orphan_ids:
+            if allow_updates:
+                removed = sync_tracker.delete_sync_files_by_ids(uuid_orphan_ids)
+                stats['sync_uuid_orphans_removed'] = removed
+                logger.info(
+                    f"Removed {removed} UUID-orphaned sync records")
+            else:
+                stats['sync_uuid_orphans_removed'] = len(uuid_orphan_ids)
+                logger.dry_run(
+                    f"Would remove {len(uuid_orphan_ids)} UUID-orphaned sync records")
     else:
         logger.info("Phase 4: Skipped (no sync tracker)")
+
+    # ── Phase 5: Orphaned playlist tracks ─────────────────────────
+    if cancel_event and cancel_event.is_set():
+        logger.warn("Audit cancelled by user")
+        return stats
+
+    logger.info("=== Phase 5: Detecting tracks with missing playlist references ===")
+    orphaned_pl_tracks = track_db.get_orphaned_playlist_tracks()
+    if orphaned_pl_tracks:
+        for track in orphaned_pl_tracks:
+            if cancel_event and cancel_event.is_set():
+                logger.warn("Audit cancelled by user")
+                return stats
+            uuid = track['uuid']
+            playlist = track.get('playlist', '')
+            title = track.get('title', '')
+            if allow_updates:
+                # Delete MP3
+                mp3_rel = track.get('file_path')
+                if mp3_rel:
+                    mp3_path = root / mp3_rel
+                    try:
+                        if mp3_path.exists():
+                            mp3_path.unlink()
+                    except OSError as exc:
+                        logger.warn(f"Could not delete MP3 for orphaned track {uuid}: {exc}")
+                # Delete artwork
+                art_rel = track.get('cover_art_path')
+                if art_rel:
+                    art_path = root / art_rel
+                    try:
+                        if art_path.exists():
+                            art_path.unlink()
+                    except OSError as exc:
+                        logger.warn(f"Could not delete artwork for orphaned track {uuid}: {exc}")
+                # Delete TrackDB record
+                track_db.delete_track(uuid)
+            else:
+                logger.dry_run(
+                    f"Would remove track {uuid} ({title!r}) "
+                    f"— playlist {playlist!r} no longer exists")
+            _detail(
+                f"{'Removed' if allow_updates else 'Would remove'} "
+                f"orphaned track {uuid} ({title!r}) from deleted playlist {playlist!r}")
+            stats['orphaned_playlist_tracks_removed'] += 1
+    else:
+        logger.info("  No orphaned playlist tracks found")
+
+    # ── Phase 6: Active/removed conflicts (report-only) ───────────
+    if cancel_event and cancel_event.is_set():
+        logger.warn("Audit cancelled by user")
+        return stats
+
+    logger.info("=== Phase 6: Detecting active/removed table conflicts ===")
+    conflicts = track_db.get_removed_track_conflicts()
+    if conflicts:
+        for track in conflicts:
+            _detail(
+                f"Conflict: uuid={track['uuid']} ({track.get('title', '')!r}) "
+                f"appears in both tracks and removed_tracks tables — "
+                f"manual review recommended")
+        stats['removed_active_conflicts'] = len(conflicts)
+        logger.warn(
+            f"  {len(conflicts)} track(s) appear in both tracks and removed_tracks "
+            f"— manual review recommended")
+    else:
+        logger.info("  No active/removed conflicts found")
 
     # ── Summary ───────────────────────────────────────────────────
     stats['allow_updates'] = allow_updates
@@ -5082,6 +5266,18 @@ def audit_library(track_db, project_root=None, logger=None,
     logger.info(f"  Sizes {verb}updated:         {stats['sizes_updated']}")
     logger.info(f"  Duplicates {verb}removed:    {stats['duplicates_removed']}")
     logger.info(f"  Sync records {verb}removed:  {stats['sync_records_removed']}")
+    logger.info(
+        f"  Sync UUID orphans {verb}removed: "
+        f"{stats['sync_uuid_orphans_removed']}")
+    logger.info(
+        f"  Orphan M4As {verb}removed:   {stats['orphan_source_m4as_removed']}")
+    logger.info(
+        f"  Orphan playlist tracks {verb}removed: "
+        f"{stats['orphaned_playlist_tracks_removed']}")
+    if stats['removed_active_conflicts'] > 0:
+        logger.warn(
+            f"  Active/removed conflicts:    "
+            f"{stats['removed_active_conflicts']} (manual review needed)")
 
     return stats
 
@@ -8129,7 +8325,8 @@ def detect_removed_tracks(playlist_key, playlist_track_names,
 
 
 def cleanup_removed_tracks(removed_tracks, track_db, sync_tracker,
-                           removed_track_db, logger, project_root):
+                           removed_track_db, logger, project_root,
+                           audit_logger=None, audit_source='cli'):
     """Cascade-delete removed tracks from the library.
 
     For each removed track: records the removal, then deletes the source M4A,
@@ -8226,6 +8423,19 @@ def cleanup_removed_tracks(removed_tracks, track_db, sync_tracker,
     logger.ok(
         f"Library cleanup: {tracks_cleaned} track(s) removed, "
         f"{_format_bytes(bytes_freed)} freed")
+    if audit_logger and tracks_cleaned > 0:
+        playlist_key = removed_tracks[0].get('playlist', '') if removed_tracks else ''
+        audit_logger.log(
+            'track_removal',
+            f"Track removal: {tracks_cleaned} track(s) from {playlist_key}",
+            'completed',
+            params={
+                'playlist_key': playlist_key,
+                'tracks_cleaned': tracks_cleaned,
+                'bytes_freed': bytes_freed,
+            },
+            source=audit_source,
+        )
     return {'tracks_cleaned': tracks_cleaned, 'bytes_freed': bytes_freed}
 
 
@@ -8439,6 +8649,8 @@ class PipelineStatistics:
         self.stages_completed = []
         self.stages_failed = []
         self.stages_skipped = []
+        self.tracks_removed = 0
+        self.bytes_freed_from_removal = 0
 
 
 class PlaylistResult:
@@ -8709,7 +8921,11 @@ class PipelineOrchestrator:
                 removed_track_db=self.removed_track_db,
                 logger=self.logger,
                 project_root=self.project_root,
+                audit_logger=self.audit_logger,
+                audit_source=self._audit_source,
             )
+            self.stats.tracks_removed = cleanup_result.get('tracks_cleaned', 0)
+            self.stats.bytes_freed_from_removal = cleanup_result.get('bytes_freed', 0)
 
         # ── Cancellation check before Stage 3 ────────────────────────
         if _is_cancelled(self.cancel_event):
@@ -8758,6 +8974,8 @@ class PipelineOrchestrator:
                     'playlist_key': self.stats.playlist_key,
                     'stages_completed': list(self.stats.stages_completed),
                     'stages_failed': list(self.stats.stages_failed),
+                    'tracks_removed': self.stats.tracks_removed,
+                    'bytes_freed_from_removal': self.stats.bytes_freed_from_removal,
                 },
                 duration_s=duration, source=self._audit_source)
 
