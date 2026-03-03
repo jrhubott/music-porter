@@ -922,6 +922,7 @@ def api_pipeline_run():
     sync_dest_name = data.get('sync_destination')
     eq_data = data.get('eq', {})
     no_eq = data.get('no_eq', False)
+    cleanup_removed_tracks = data.get('cleanup_removed_tracks')
 
     if not auto and not playlist_key and not url:
         return jsonify({'error': 'Specify playlist, url, or auto'}), 400
@@ -952,6 +953,12 @@ def api_pipeline_run():
         elif eq_data and any(eq_data.values()):
             eq_cli_override = mp.EQConfig.from_dict(eq_data)
 
+        cleanup_default = config.get_setting(
+            'cleanup_removed_tracks', mp.DEFAULT_CLEANUP_REMOVED_TRACKS)
+        cleanup_enabled = (cleanup_removed_tracks
+                           if cleanup_removed_tracks is not None
+                           else cleanup_default)
+        removed_track_db = mp.RemovedTrackDB(str(ctx.project_root / mp.DEFAULT_DB_FILE))
         orchestrator = mp.PipelineOrchestrator(
             logger, deps, config,
             quality_preset=quality_preset,
@@ -966,6 +973,8 @@ def api_pipeline_run():
             eq_config_manager=eq_mgr,
             eq_config_override=eq_cli_override,
             project_root=ctx.project_root,
+            cleanup_removed_tracks_enabled=cleanup_enabled,
+            removed_track_db=removed_track_db,
         )
 
         # Resolve sync destination by name
@@ -992,6 +1001,7 @@ def api_pipeline_run():
                     sync_destination=sync_destination,
                     dry_run=dry_run, verbose=verbose,
                     quality_preset=quality_preset,
+                    cleanup_removed_tracks_enabled=cleanup_enabled,
                 )
                 aggregate.add_playlist_result(orchestrator.stats)
             if all_playlists:
@@ -1009,6 +1019,7 @@ def api_pipeline_run():
                 sync_destination=sync_destination,
                 dry_run=dry_run, verbose=verbose,
                 quality_preset=quality_preset,
+                cleanup_removed_tracks_enabled=cleanup_enabled,
             )
             result_dict = _serialize_pipeline_result(pipeline_result)
             result_dict['success'] = pipeline_result.success
@@ -1279,6 +1290,35 @@ def api_files_sync_status(playlist_key):
     if not ctx.sync_tracker:
         return jsonify({})
     return jsonify(ctx.sync_tracker.get_file_sync_map(playlist_key))
+
+
+@api_bp.route('/api/files/<playlist_key>/removed')
+def api_files_removed(playlist_key):
+    """Return tracks removed from a playlist since a given timestamp.
+
+    Query params:
+        since (float, optional): Unix timestamp; only tracks removed after
+            this point are returned. If omitted, all removals are returned.
+
+    Returns:
+        {removed_tracks: [{uuid, title, artist, album, display_filename,
+                           removed_at}]}
+    """
+    ctx = _ctx()
+    since_raw = request.args.get('since')
+    since = None
+    if since_raw:
+        try:
+            since = float(since_raw)
+        except ValueError:
+            return jsonify({'error': 'Invalid since parameter'}), 400
+
+    removed_track_db = mp.RemovedTrackDB(str(ctx.project_root / mp.DEFAULT_DB_FILE))
+    if since is not None:
+        tracks = removed_track_db.get_removed_since(playlist_key, since)
+    else:
+        tracks = removed_track_db.get_removed_by_playlist(playlist_key)
+    return jsonify({'removed_tracks': tracks})
 
 
 @api_bp.route('/api/files/<playlist_key>/<filename>')

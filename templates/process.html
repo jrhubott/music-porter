@@ -64,7 +64,7 @@
           </div>
 
           <!-- Options -->
-          <div class="d-flex gap-3 mt-3">
+          <div class="d-flex gap-3 mt-3 flex-wrap">
             <div class="form-check">
               <input class="form-check-input" type="checkbox" id="pipelineDryRun">
               <label class="form-check-label" for="pipelineDryRun">Dry Run</label>
@@ -72,6 +72,10 @@
             <div class="form-check">
               <input class="form-check-input" type="checkbox" id="pipelineVerbose">
               <label class="form-check-label" for="pipelineVerbose">Verbose</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="pipelineCleanup">
+              <label class="form-check-label" for="pipelineCleanup">Clean up removed tracks</label>
             </div>
             <div class="form-check">
               <input class="form-check-input" type="checkbox" id="pipelineSync" onchange="toggleSyncDest()">
@@ -295,6 +299,9 @@
 let _activeProfile = 'ride-command';
 fetch('/api/settings').then(r=>r.json()).then(d => {
   _activeProfile = (d.settings && d.settings.output_type) || 'ride-command';
+  if (d.settings && d.settings.cleanup_removed_tracks) {
+    document.getElementById('pipelineCleanup').checked = true;
+  }
 });
 
 // ══════════════════════════════════════════════════
@@ -363,6 +370,7 @@ document.getElementById('pipelineForm').addEventListener('submit', function(e) {
   const data = {
     dry_run: document.getElementById('pipelineDryRun').checked,
     verbose: document.getElementById('pipelineVerbose').checked,
+    cleanup_removed_tracks: document.getElementById('pipelineCleanup').checked,
   };
   // Sync destination
   const syncChecked = document.getElementById('pipelineSync').checked;
@@ -408,6 +416,7 @@ document.getElementById('runAllBtn').addEventListener('click', function() {
     auto: true,
     dry_run: document.getElementById('pipelineDryRun').checked,
     verbose: document.getElementById('pipelineVerbose').checked,
+    cleanup_removed_tracks: document.getElementById('pipelineCleanup').checked,
   };
   // Sync destination
   const syncChecked2 = document.getElementById('pipelineSync').checked;
@@ -533,6 +542,37 @@ function renderSingleSummary(r) {
         '<div class="card-body py-2" style="font-size:.85rem">' + body + '</div>' +
       '</div></div>';
   });
+
+  // Removed tracks + cleanup summary
+  const removed = r.removed_tracks || [];
+  const cleanup = r.cleanup_stats;
+  if (removed.length > 0 || cleanup) {
+    let rbody = '';
+    rbody += '<div class="d-flex justify-content-between"><span class="text-muted">Removed from playlist</span><span>' + removed.length + '</span></div>';
+    if (cleanup) {
+      rbody += summaryRow('Cleaned up', cleanup.tracks_cleaned);
+      if (cleanup.bytes_freed) {
+        rbody += summaryRow('Space freed', formatBytes(cleanup.bytes_freed));
+      }
+    } else if (removed.length > 0) {
+      rbody += '<small class="text-muted">Enable "Clean up removed tracks" to purge</small>';
+    }
+    cards.innerHTML += '<div class="col-md-6 col-xl-3">' +
+      '<div class="card h-100">' +
+        '<div class="card-header d-flex justify-content-between align-items-center py-2">' +
+          '<span><i class="bi bi-trash me-1"></i>Removed Tracks</span>' +
+          '<span class="badge bg-warning text-dark">' + removed.length + '</span>' +
+        '</div>' +
+        '<div class="card-body py-2" style="font-size:.85rem">' + rbody + '</div>' +
+      '</div></div>';
+  }
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
 }
 
 function renderAggregateSummary(r) {

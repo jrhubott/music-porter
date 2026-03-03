@@ -644,6 +644,7 @@ Background task: full pipeline (download + convert + optional sync) for one or a
 | `sync_destination` | string | No | — | Destination name to sync after pipeline |
 | `eq` | object | No | — | EQ config override: `{loudnorm, bass_boost, treble_boost, compressor}` |
 | `no_eq` | boolean | No | `false` | Disable all EQ processing |
+| `cleanup_removed_tracks` | boolean | No | server setting | When `true`, cascade-delete tracks removed from the Apple Music playlist (source M4A, library MP3, artwork, TrackDB record, sync records). Overrides the `cleanup_removed_tracks` server setting. |
 
 *At least one of `playlist`, `url`, or `auto` is required.
 
@@ -850,6 +851,45 @@ Per-file sync status map for a playlist. Lightweight endpoint with no ID3 reads.
   "def456.mp3": []
 }
 ```
+
+---
+
+### GET /api/files/\<key\>/removed
+
+Return tracks that have been removed from a playlist's library (via library cleanup) since an optional timestamp. Used by sync clients to clean up their local caches and destination directories.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `key` | string | Playlist key |
+
+**Query parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `since` | float | No | Unix timestamp; only tracks removed after this point are returned. If omitted, all removals for the playlist are returned. |
+
+**Response:**
+
+```json
+{
+  "removed_tracks": [
+    {
+      "id": 1,
+      "uuid": "abc-123",
+      "playlist": "my_playlist",
+      "title": "Track Title",
+      "artist": "Artist Name",
+      "album": "Album Name",
+      "display_filename": "Artist Name - Track Title.mp3",
+      "removed_at": 1709500000.0
+    }
+  ]
+}
+```
+
+**Status codes:** 400 if `since` is not a valid float
 
 ---
 

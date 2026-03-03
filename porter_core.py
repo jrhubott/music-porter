@@ -18,6 +18,7 @@ import sys
 import threading
 import time
 import uuid
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -58,6 +59,8 @@ ARTWORK_SUBDIR = "artwork"
 DEFAULT_IMPORTER = "gamdl"
 DEFAULT_LOG_DIR = "logs"
 DEFAULT_LOG_RETENTION_DAYS = 7
+DEFAULT_CLEANUP_REMOVED_TRACKS = False
+DEFAULT_CLEAN_SYNC_DESTINATION = False
 DEFAULT_CONFIG_FILE = "data/config.yaml"
 DEFAULT_COOKIES = "data/cookies.txt"
 DEFAULT_DB_FILE = "data/music-porter.db"
@@ -78,7 +81,7 @@ KNOWN_DEST_SCHEMES = ('usb://', 'folder://', 'web-client://', 'ios://')
 # Schema version constants — increment and add a migration case when changing
 # the config.yaml structure or DB tables/columns.
 CONFIG_SCHEMA_VERSION = 4
-DB_SCHEMA_VERSION = 10
+DB_SCHEMA_VERSION = 11
 
 # Excluded USB volumes by OS
 if IS_MACOS:
@@ -1359,6 +1362,38 @@ def migrate_db_schema(logger=None):
                 logger.info(
                     "DB migration 9→10: added playlist_prefs column "
                     "to sync_keys")
+
+        # ── Version 10 → 11: removed_tracks table + track_uuid on sync_files
+        if current < 11:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS removed_tracks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    uuid TEXT NOT NULL,
+                    playlist TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    artist TEXT NOT NULL,
+                    album TEXT NOT NULL,
+                    display_filename TEXT,
+                    removed_at REAL NOT NULL
+                )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_removed_tracks_playlist"
+                " ON removed_tracks(playlist)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_removed_tracks_removed_at"
+                " ON removed_tracks(removed_at)")
+            conn.execute(
+                "ALTER TABLE sync_files ADD COLUMN track_uuid TEXT")
+            conn.execute("PRAGMA user_version = 11")
+            conn.commit()
+            changes.append(
+                "added removed_tracks table and track_uuid column to "
+                "sync_files")
+            if logger:
+                logger.info(
+                    "DB migration 10→11: added removed_tracks table and "
+                    "track_uuid column to sync_files")
 
         return [MigrationEvent(
             'schema_migrate',
@@ -2879,6 +2914,26 @@ class SyncTracker:
                 cursor = conn.execute(
                     f"DELETE FROM sync_files WHERE id IN ({placeholders})",
                     list(ids),
+                )
+                conn.commit()
+                return cursor.rowcount
+            finally:
+                conn.close()
+
+    def delete_sync_files_by_track_uuid(self, track_uuid):
+        """Delete sync_file records for a specific library track UUID.
+
+        Used during library cleanup to purge tracking records for removed
+        tracks. Returns count of deleted records.
+        """
+        if not track_uuid:
+            return 0
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                cursor = conn.execute(
+                    "DELETE FROM sync_files WHERE track_uuid = ?",
+                    (track_uuid,),
                 )
                 conn.commit()
                 return cursor.rowcount
@@ -5105,6 +5160,7 @@ class DownloadResult:
     downloaded: int = 0
     skipped: int = 0
     failed: int = 0
+    playlist_track_names: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -5122,6 +5178,9 @@ class SyncResult:
     files_copied: int = 0
     files_skipped: int = 0
     files_failed: int = 0
+    orphaned_detected: int = 0
+    orphaned_cleaned: int = 0
+    orphaned_bytes_freed: int = 0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -5139,6 +5198,7 @@ class SyncStatusResult:
     new_playlists: int = 0
     group_name: str = ''
     playlist_prefs: list | None = None  # None = all playlists
+    orphaned_files: int = 0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -5176,6 +5236,8 @@ class PipelineResult:
     conversion_result: ConversionResult | None = None
     usb_result: SyncResult | None = None
     usb_destination: str | None = None
+    removed_tracks: list = field(default_factory=list)
+    cleanup_stats: dict | None = None
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -6154,6 +6216,9 @@ class Downloader:
             )
             verbose = self.logger.verbose
             unrecognized_lines = []
+            # Collect every track name gamdl processes (all current playlist
+            # tracks — gamdl emits "Downloading" for each, even skips)
+            playlist_track_names = []
 
             try:
                 assert process.stdout is not None  # stdout=PIPE always sets this
@@ -6192,6 +6257,9 @@ class Downloader:
                             match = re.search(r'Downloading "([^"]+)"', cleaned)
                             if match:
                                 track_name = match.group(1)
+                                # Collect for removed-track detection; gamdl
+                                # emits this for all current playlist tracks
+                                playlist_track_names.append(track_name)
                                 msg = f"Downloading: {track_name}"
                                 if verbose:
                                     self.logger.info(msg)
@@ -6249,7 +6317,8 @@ class Downloader:
                     success=True, key=key, album_name=album_name,
                     duration=duration, playlist_total=stats.playlist_total,
                     downloaded=stats.downloaded, skipped=stats.skipped,
-                    failed=stats.failed)
+                    failed=stats.failed,
+                    playlist_track_names=playlist_track_names)
             else:
                 self.logger.error(f"Download failed with exit code {process.returncode}")
                 if unrecognized_lines:
@@ -6261,7 +6330,8 @@ class Downloader:
                     success=False, key=key, album_name=album_name,
                     duration=duration, playlist_total=stats.playlist_total,
                     downloaded=stats.downloaded, skipped=stats.skipped,
-                    failed=stats.failed)
+                    failed=stats.failed,
+                    playlist_track_names=playlist_track_names)
 
         except Exception as e:
             self.logger.error(f"Failed to download {key}: {e}")
@@ -7704,6 +7774,249 @@ class SummaryManager:
 
 
 # ══════════════════════════════════════════════════════════════════
+# Section 8c: Track Removal Detection & Cleanup
+# ══════════════════════════════════════════════════════════════════
+
+
+class RemovedTrackDB:
+    """Manages the removed_tracks table for historical removal queries.
+
+    Tracks are inserted here when library cleanup cascades a removal, allowing
+    clients to query which tracks have been removed since a given timestamp.
+    """
+
+    def __init__(self, db_path=DEFAULT_DB_FILE):
+        self._db_path = db_path
+        self._write_lock = threading.Lock()
+
+    def _connect(self):
+        conn = sqlite3.connect(self._db_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        return conn
+
+    def record_removal(self, uuid, playlist, title, artist, album,
+                       display_filename=None):
+        """Insert a record for a track that was removed from the library."""
+        now = time.time()
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    """INSERT INTO removed_tracks
+                           (uuid, playlist, title, artist, album,
+                            display_filename, removed_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (uuid, playlist, title, artist, album,
+                     display_filename, now),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def get_removed_since(self, playlist, since_timestamp):
+        """Return removed tracks for a playlist after a given timestamp."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT uuid, playlist, title, artist, album,
+                          display_filename, removed_at
+                   FROM removed_tracks
+                   WHERE playlist = ? AND removed_at >= ?
+                   ORDER BY removed_at ASC""",
+                (playlist, since_timestamp),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_removed_by_playlist(self, playlist):
+        """Return all removed tracks for a playlist."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT uuid, playlist, title, artist, album,
+                          display_filename, removed_at
+                   FROM removed_tracks
+                   WHERE playlist = ?
+                   ORDER BY removed_at ASC""",
+                (playlist,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+
+def detect_removed_tracks(playlist_key, playlist_track_names,
+                          track_db, logger=None):
+    """Identify tracks in the library that are no longer in the Apple Music
+    playlist.
+
+    Compares the list of track names gamdl processed during this download
+    run (the complete current playlist) against what is recorded in TrackDB.
+    Tracks in TrackDB that do not appear in the current playlist are returned
+    as removed.
+
+    Args:
+        playlist_key: Playlist identifier used in TrackDB queries.
+        playlist_track_names: List of track names from gamdl "Downloading"
+            messages — one entry per current playlist track.
+        track_db: TrackDB instance for library queries.
+        logger: Optional logger for informational messages.
+
+    Returns:
+        List of track dicts (from TrackDB) that were removed, or empty list
+        if detection is not possible or encounters an error (SRS 23.6.1).
+    """
+    if not playlist_track_names or track_db is None:
+        if logger:
+            logger.info(
+                "Removed track detection skipped: insufficient data "
+                "(no track names captured from gamdl output)")
+        return []
+
+    try:
+        db_tracks = track_db.get_tracks_by_playlist(playlist_key)
+        if not db_tracks:
+            return []
+
+        # Build a Counter of current playlist titles for duplicate handling
+        current_counts = Counter(playlist_track_names)
+        # Build a Counter of library titles
+        db_counts = Counter(t['title'] for t in db_tracks)
+
+        # Titles with more library entries than current playlist entries are
+        # candidates for removal
+        removed_titles = {}
+        for title, db_count in db_counts.items():
+            current_count = current_counts.get(title, 0)
+            if db_count > current_count:
+                removed_titles[title] = db_count - current_count
+
+        if not removed_titles:
+            return []
+
+        # Collect specific removed track records; when multiple tracks share
+        # a title, prefer the oldest (by created_at) as the removed ones
+        removed = []
+        for title, excess_count in removed_titles.items():
+            matching = sorted(
+                [t for t in db_tracks if t['title'] == title],
+                key=lambda t: t.get('created_at', 0),
+            )
+            removed.extend(matching[:excess_count])
+
+        return removed
+
+    except Exception as exc:
+        if logger:
+            logger.info(
+                f"Removed track detection skipped due to error: {exc}")
+        return []
+
+
+def cleanup_removed_tracks(removed_tracks, track_db, sync_tracker,
+                           removed_track_db, logger, project_root):
+    """Cascade-delete removed tracks from the library.
+
+    For each removed track: records the removal, then deletes the source M4A,
+    library MP3, artwork file, TrackDB record, and SyncTracker records.
+
+    Args:
+        removed_tracks: List of track dicts from detect_removed_tracks().
+        track_db: TrackDB instance.
+        sync_tracker: SyncTracker instance (may be None).
+        removed_track_db: RemovedTrackDB instance for historical tracking.
+        logger: Logger instance.
+        project_root: Path to the project root for resolving file paths.
+
+    Returns:
+        Dict with ``tracks_cleaned`` and ``bytes_freed`` counts.
+    """
+    tracks_cleaned = 0
+    bytes_freed = 0
+
+    if not removed_tracks:
+        return {'tracks_cleaned': 0, 'bytes_freed': 0}
+
+    root = Path(project_root)
+
+    for track in removed_tracks:
+        uuid = track.get('uuid', '')
+        title = track.get('title', '')
+        artist = track.get('artist', '')
+        album = track.get('album', '')
+        playlist = track.get('playlist', '')
+
+        # Build display filename from track metadata for historical record
+        display_filename = f"{artist} - {title}.mp3" if artist else f"{title}.mp3"
+
+        # 1. Record in removed_tracks table for client queries
+        try:
+            removed_track_db.record_removal(
+                uuid=uuid, playlist=playlist, title=title,
+                artist=artist, album=album,
+                display_filename=display_filename)
+        except Exception as exc:
+            logger.warn(f"Could not record removal for '{title}': {exc}")
+
+        # 2. Delete source M4A
+        src_m4a = track.get('source_m4a_path')
+        if src_m4a:
+            src_path = root / src_m4a
+            try:
+                if src_path.exists():
+                    bytes_freed += src_path.stat().st_size
+                    src_path.unlink()
+            except OSError as exc:
+                logger.warn(f"Could not delete source M4A for '{title}': {exc}")
+
+        # 3. Delete library MP3
+        mp3_path_rel = track.get('file_path')
+        if mp3_path_rel:
+            mp3_path = root / mp3_path_rel
+            try:
+                if mp3_path.exists():
+                    bytes_freed += mp3_path.stat().st_size
+                    mp3_path.unlink()
+            except OSError as exc:
+                logger.warn(f"Could not delete MP3 for '{title}': {exc}")
+
+        # 4. Delete artwork
+        art_path_rel = track.get('cover_art_path')
+        if art_path_rel:
+            art_path = root / art_path_rel
+            try:
+                if art_path.exists():
+                    bytes_freed += art_path.stat().st_size
+                    art_path.unlink()
+            except OSError as exc:
+                logger.warn(f"Could not delete artwork for '{title}': {exc}")
+
+        # 5. Delete TrackDB record
+        try:
+            track_db.delete_track(uuid)
+        except Exception as exc:
+            logger.warn(f"Could not delete TrackDB record for '{title}': {exc}")
+
+        # 6. Delete SyncTracker records by track_uuid
+        if sync_tracker and uuid:
+            try:
+                sync_tracker.delete_sync_files_by_track_uuid(uuid)
+            except Exception as exc:
+                logger.warn(
+                    f"Could not delete sync records for '{title}': {exc}")
+
+        logger.info(f"Cleaned up removed track: {title} — {artist}")
+        tracks_cleaned += 1
+
+    logger.ok(
+        f"Library cleanup: {tracks_cleaned} track(s) removed, "
+        f"{_format_bytes(bytes_freed)} freed")
+    return {'tracks_cleaned': tracks_cleaned, 'bytes_freed': bytes_freed}
+
+
+# ══════════════════════════════════════════════════════════════════
 # Section 8b: Data Management (Deletion)
 # ══════════════════════════════════════════════════════════════════
 
@@ -8034,7 +8347,8 @@ class PipelineOrchestrator:
                  cancel_event=None, audit_logger=None, audit_source='cli',
                  sync_tracker=None, track_db=None, playlist_db=None,
                  eq_config_manager=None, eq_config_override=None,
-                 project_root=None):
+                 project_root=None,
+                 cleanup_removed_tracks_enabled=False, removed_track_db=None):
         self.logger = logger or Logger()
         self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
         self.display_handler = display_handler or NullDisplayHandler()
@@ -8053,19 +8367,27 @@ class PipelineOrchestrator:
         self.cookie_path = cookie_path
         self.workers = workers
         self.project_root = Path(project_root) if project_root else Path('.')
+        self.cleanup_removed_tracks_enabled = cleanup_removed_tracks_enabled
+        self.removed_track_db = removed_track_db
 
     def run_full_pipeline(self, playlist=None, url=None, auto=False,
                          sync_destination=None,
                          dry_run=False, verbose=False, quality_preset=None,
-                         validate_cookies=True, auto_refresh_cookies=False):
+                         validate_cookies=True, auto_refresh_cookies=False,
+                         cleanup_removed_tracks_enabled=None):
         """Execute the complete pipeline: download → convert → sync.
 
         Args:
             sync_destination: SyncDestination object for post-pipeline sync (optional)
+            cleanup_removed_tracks_enabled: override instance default for removed track cleanup
         """
+        if cleanup_removed_tracks_enabled is None:
+            cleanup_removed_tracks_enabled = self.cleanup_removed_tracks_enabled
         self.stats.start_time = time.time()
         convert_result = None
         usb_result = None
+        removed_tracks_found = []
+        cleanup_result = None
 
         # ── Stage 1: Determine source ─────────────────────────────────
         if url:
@@ -8113,6 +8435,21 @@ class PipelineOrchestrator:
                 stages_failed=["cancelled"],
                 stages_skipped=list(self.stats.stages_skipped))
 
+        # ── Removed track detection (between Stage 1 and Stage 2) ────
+        dl_stats = self.stats.download_stats
+        if dl_stats and self.stats.playlist_key and self.track_db:
+            removed_tracks_found = detect_removed_tracks(
+                self.stats.playlist_key,
+                dl_stats.playlist_track_names,
+                self.track_db,
+                logger=self.logger,
+            )
+            if removed_tracks_found:
+                self.logger.info(
+                    f"Removed from playlist: {len(removed_tracks_found)} track(s)")
+                for t in removed_tracks_found:
+                    self.logger.info(f"  Removed: {t['title']} — {t['artist']}")
+
         # ── Stage 2: Convert M4A → clean library MP3 ─────────────────
         self.logger.info("\n=== STAGE 2: Convert M4A → MP3 ===")
         music_dir = str(self.project_root / get_source_dir(self.stats.playlist_key))
@@ -8144,6 +8481,17 @@ class PipelineOrchestrator:
         else:
             self.stats.stages_failed.append("convert")
             self.logger.error("Conversion stage failed")
+
+        # ── Library cleanup (removed tracks) ─────────────────────────
+        if cleanup_removed_tracks_enabled and removed_tracks_found:
+            cleanup_result = cleanup_removed_tracks(
+                removed_tracks_found,
+                track_db=self.track_db,
+                sync_tracker=self.sync_tracker,
+                removed_track_db=self.removed_track_db,
+                logger=self.logger,
+                project_root=self.project_root,
+            )
 
         # ── Cancellation check before Stage 3 ────────────────────────
         if _is_cancelled(self.cancel_event):
@@ -8206,6 +8554,8 @@ class PipelineOrchestrator:
             conversion_result=convert_result,
             usb_result=usb_result,
             usb_destination=self.stats.sync_destination,
+            removed_tracks=removed_tracks_found,
+            cleanup_stats=cleanup_result,
         )
 
     def _download_from_url(self, url, auto, dry_run, verbose,

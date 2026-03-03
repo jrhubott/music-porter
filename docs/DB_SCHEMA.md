@@ -1,6 +1,6 @@
 # Database Schema Reference
 
-SQLite database stored at `data/music-porter.db`. Current version: **DB_SCHEMA_VERSION = 8** (defined in `porter_core.py` ~line 71).
+SQLite database stored at `data/music-porter.db`. Current version: **DB_SCHEMA_VERSION = 11** (defined in `porter_core.py` ~line 81).
 
 ## PRAGMA Settings
 
@@ -97,6 +97,7 @@ Per-file sync records. Added in **migration 0 -> 1**.
 | file\_path | TEXT | NOT NULL | Relative path to audio file |
 | playlist | TEXT | NOT NULL | Playlist identifier |
 | synced\_at | REAL | NOT NULL | Unix epoch of sync |
+| track\_uuid | TEXT | | UUID of the source track in the `tracks` table (NULL for legacy records). Added in **migration 10 -> 11**. Used for orphan detection (LEFT JOIN with `tracks`). |
 
 **Constraints:** `UNIQUE(sync_key, file_path, playlist)`
 
@@ -227,6 +228,29 @@ Sync destination configuration previously stored in `config.yaml`, migrated to t
 
 ---
 
+### removed\_tracks
+
+Historical record of tracks removed from the library during playlist cleanup. Added in **migration 10 -> 11**.
+
+Populated by `cleanup_removed_tracks()` when library cleanup is enabled after a pipeline run. Used by `GET /api/files/<key>/removed` so sync clients can query which tracks were deleted since their last sync.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| id | INTEGER | PRIMARY KEY AUTOINCREMENT | Auto-generated row ID |
+| uuid | TEXT | NOT NULL | UUID of the removed track (same as `tracks.uuid` before deletion) |
+| playlist | TEXT | NOT NULL | Playlist key the track belonged to |
+| title | TEXT | NOT NULL | Track title |
+| artist | TEXT | NOT NULL | Track artist |
+| album | TEXT | NOT NULL | Track album |
+| display\_filename | TEXT | | Human-readable filename (`Artist - Title.mp3`) used by sync clients for cache/destination cleanup |
+| removed\_at | REAL | NOT NULL | Unix epoch timestamp when the track was removed |
+
+**Indexes:** `idx_removed_tracks_playlist(playlist)`, `idx_removed_tracks_removed_at(removed_at)`
+
+**Class:** `RemovedTrackDB`
+
+---
+
 ## Migration History
 
 | From | To | Changes |
@@ -241,10 +265,11 @@ Sync destination configuration previously stored in `config.yaml`, migrated to t
 | 7 | 8 | Migrated sync\_keys key\_name values from human-readable names to UUIDs. Updated all references in sync\_files and destinations tables. Sync keys are now internal identifiers; destinations are the user-facing concept. |
 | 8 | 9 | Added nullable `name` column to `sync_keys` for optional destination group labels. |
 | 9 | 10 | Added nullable `playlist_prefs` column to `sync_keys` for per-group saved playlist selection (JSON array or NULL). |
+| 10 | 11 | Added `removed_tracks` table for historical removal tracking. Added nullable `track_uuid` column to `sync_files` for orphan detection. |
 
 ## Notes
 
 - Migrations run sequentially at startup via `migrate_db_schema()` before any DB class is instantiated.
 - Each `if current < N:` block is idempotent and sets the version to exactly N.
-- Fresh installs run through all migrations 0 -> 1 -> 2 -> ... -> 10.
+- Fresh installs run through all migrations 0 -> 1 -> 2 -> ... -> 11.
 - Never modify existing migration blocks; always add a new `if current < N:` block.

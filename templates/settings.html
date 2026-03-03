@@ -24,6 +24,19 @@
             <input type="number" class="form-control form-control-sm" id="settingLogRetention" min="1" max="365">
             <div class="form-text">Log files older than this are pruned at startup (default: 7)</div>
           </div>
+          <div class="mb-3">
+            <label class="form-label d-block">Library Cleanup Defaults</label>
+            <div class="form-check form-switch mb-2">
+              <input class="form-check-input" type="checkbox" id="settingCleanupRemovedTracks">
+              <label class="form-check-label" for="settingCleanupRemovedTracks">Clean up removed tracks by default</label>
+              <div class="form-text">Automatically purge source M4A, MP3, artwork, and DB records for tracks removed from Apple Music playlists.</div>
+            </div>
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="settingCleanSyncDestination">
+              <label class="form-check-label" for="settingCleanSyncDestination">Clean sync destinations by default</label>
+              <div class="form-text">During sync, remove orphaned files at the destination for tracks no longer in the library.</div>
+            </div>
+          </div>
           <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-check"></i> Save Settings</button>
         </form>
       </div>
@@ -298,7 +311,8 @@ function loadSettings() {
     document.getElementById('settingExternalUrl').value = data.settings.external_url || '';
     document.getElementById('settingWorkers').value = data.settings.workers || 6;
     document.getElementById('settingLogRetention').value = data.settings.log_retention_days || 7;
-
+    document.getElementById('settingCleanupRemovedTracks').checked = !!data.settings.cleanup_removed_tracks;
+    document.getElementById('settingCleanSyncDestination').checked = !!data.settings.clean_sync_destination;
   });
 }
 
@@ -309,6 +323,8 @@ document.getElementById('settingsForm').addEventListener('submit', function(e) {
     external_url: externalUrl || null,
     workers: parseInt(document.getElementById('settingWorkers').value),
     log_retention_days: parseInt(document.getElementById('settingLogRetention').value),
+    cleanup_removed_tracks: document.getElementById('settingCleanupRemovedTracks').checked,
+    clean_sync_destination: document.getElementById('settingCleanSyncDestination').checked,
   };
   fetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
     .then(r=>r.json()).then(() => { showToast('Settings saved', 'success'); });
