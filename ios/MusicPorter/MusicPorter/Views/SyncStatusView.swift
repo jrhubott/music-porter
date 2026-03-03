@@ -14,6 +14,9 @@ struct SyncStatusView: View {
     @State private var destToReset: String?
     @State private var showDeleteDestConfirm = false
     @State private var destToDelete: String?
+    @State private var playlistSelectionDest: String? = nil
+    @State private var playlistSelection: Set<String> = []
+    @State private var showPlaylistSelectionSheet = false
 
     var body: some View {
         List {
@@ -77,6 +80,34 @@ struct SyncStatusView: View {
         } message: {
             Text("Remove saved destination \"\(destToDelete ?? "")\"?")
         }
+        .sheet(isPresented: $showPlaylistSelectionSheet) {
+            if let destName = playlistSelectionDest {
+                PlaylistSelectionSheet(
+                    destName: destName,
+                    allPlaylists: detail?.playlists.map(\.name) ?? [],
+                    initialSelection: playlistSelection,
+                    onSync: { selection in
+                        showPlaylistSelectionSheet = false
+                        Task {
+                            await syncDestination(destName, playlistKeys: selection.isEmpty ? nil : Array(selection))
+                        }
+                    }
+                )
+            }
+        }
+    }
+
+    // MARK: - Staleness helpers
+
+    private let stalenessWarnInterval: TimeInterval = 7 * 86400
+    private let stalenessDangerInterval: TimeInterval = 30 * 86400
+
+    private func stalenessColor(for group: SyncStatusSummary) -> Color {
+        guard group.lastSyncAt > 0 else { return .secondary }
+        let age = Date().timeIntervalSince1970 - group.lastSyncAt
+        if age > stalenessDangerInterval { return .red }
+        if age > stalenessWarnInterval { return .yellow }
+        return .secondary
     }
 
     // MARK: - Destination Groups
@@ -97,19 +128,30 @@ struct SyncStatusView: View {
                                     .font(.subheadline.weight(.medium))
                             }
                             HStack(spacing: 8) {
-                                Text("\(group.syncedFiles)/\(group.totalFiles) files")
+                                let pct = group.totalFiles > 0
+                                    ? Int(Double(group.syncedFiles) / Double(group.totalFiles) * 100)
+                                    : 0
+                                Text("\(group.syncedFiles)/\(group.totalFiles) (\(pct)%) files")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                 if let date = group.lastSyncDate {
                                     Text(date, style: .relative)
                                         .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(stalenessColor(for: group))
                                 }
                             }
                         }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 4) {
-                            if group.newFiles > 0 {
+                            if group.lastSyncDate == nil {
+                                Text("Never synced")
+                                    .font(.caption)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(.red.opacity(0.2))
+                                    .foregroundStyle(.red)
+                                    .clipShape(Capsule())
+                            } else if group.newFiles > 0 {
                                 Text("+\(group.newFiles) new")
                                     .font(.caption)
                                     .padding(.horizontal, 6)
@@ -154,7 +196,7 @@ struct SyncStatusView: View {
                 }
                 .swipeActions(edge: .leading) {
                     Button {
-                        Task { await syncDestination(group.primaryDestination) }
+                        openPlaylistSelectionSheet(for: group)
                     } label: {
                         Label("Sync", systemImage: "arrow.triangle.2.circlepath")
                     }
@@ -185,6 +227,11 @@ struct SyncStatusView: View {
                     HStack {
                         Text(playlist.name)
                             .font(.subheadline)
+                        if let prefs = detail.playlistPrefs, prefs.contains(playlist.name) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.blue.opacity(0.8))
+                        }
                         Spacer()
                         Text("\(playlist.syncedFiles)/\(playlist.totalFiles)")
                             .font(.caption)
@@ -324,13 +371,40 @@ struct SyncStatusView: View {
 
     // MARK: - Sync Actions
 
-    private func syncDestination(_ destName: String) async {
+    private func openPlaylistSelectionSheet(for group: SyncStatusSummary) {
+        let destName = group.primaryDestination
+        playlistSelectionDest = destName
+        let prefs: [String]?
+        if let d = detail, d.destinations.first == destName {
+            prefs = d.playlistPrefs
+        } else {
+            prefs = destinations.first(where: { $0.name == destName })?.playlistPrefs
+        }
+        playlistSelection = prefs.map(Set.init) ?? []
+        if selectedGroup != destName || detail == nil {
+            selectedGroup = destName
+            Task {
+                await loadDetail(destName)
+                showPlaylistSelectionSheet = true
+            }
+        } else {
+            showPlaylistSelectionSheet = true
+        }
+    }
+
+    private func syncDestination(_ destName: String, playlistKeys: [String]? = nil) async {
         let activeProfile = appState.activeProfile
+        do {
+            try await appState.apiClient.savePlaylistPrefs(destination: destName, playlistKeys: playlistKeys)
+        } catch {
+            // non-fatal: prefs save failure doesn't block the sync
+        }
         await vm.run(api: appState.apiClient) {
             try await appState.apiClient.syncToDestination(
                 sourceDir: "library",
                 destination: destName,
-                profile: activeProfile
+                profile: activeProfile,
+                playlistKeys: playlistKeys
             )
         }
         await load()

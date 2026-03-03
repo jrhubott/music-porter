@@ -1,18 +1,17 @@
 import { useState, useEffect } from 'react';
-import { useIPC } from '../hooks/useIPC.js';
 import type { SyncDestination } from '@mporter/core';
 
 interface LinkDestinationModalProps {
   show: boolean;
-  destinationName: string;
-  destinationPath?: string;
-  onClose: () => void;
-  onLinked: () => void;
+  folderName: string;
+  destinations: SyncDestination[];
+  onLink: (targetDest: string) => Promise<void>;
+  onNo: () => void;
+  onCancelled: () => void;
 }
 
-export function LinkDestinationModal({ show, destinationName, destinationPath, onClose, onLinked }: LinkDestinationModalProps) {
-  const ipc = useIPC();
-  const [otherDestinations, setOtherDestinations] = useState<SyncDestination[]>([]);
+export function LinkDestinationModal(props: LinkDestinationModalProps) {
+  const { show, folderName, destinations, onLink, onNo, onCancelled } = props;
   const [selectedDest, setSelectedDest] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -21,22 +20,8 @@ export function LinkDestinationModal({ show, destinationName, destinationPath, o
     if (show) {
       setSelectedDest('');
       setError('');
-      loadDestinations();
     }
-  }, [show, destinationName]);
-
-  async function loadDestinations() {
-    try {
-      const response = await ipc.getSyncDestinations();
-      const others = response.destinations.filter((d) => d.name !== destinationName);
-      setOtherDestinations(others);
-      if (others.length > 0) {
-        setSelectedDest(others[0]!.name);
-      }
-    } catch {
-      setOtherDestinations([]);
-    }
-  }
+  }, [show, destinations]);
 
   async function handleLink() {
     if (!selectedDest) {
@@ -46,13 +31,8 @@ export function LinkDestinationModal({ show, destinationName, destinationPath, o
     setLoading(true);
     setError('');
     try {
-      const result = await ipc.linkDestination(destinationName, selectedDest);
-      if (result.ok) {
-        onLinked();
-        onClose();
-      } else {
-        setError('Failed to link destination.');
-      }
+      await onLink(selectedDest);
+      // parent closes modal on success
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Link failed');
     } finally {
@@ -71,26 +51,20 @@ export function LinkDestinationModal({ show, destinationName, destinationPath, o
               <i className="bi bi-link-45deg me-2" />
               Link Destination
             </h5>
-            <button className="btn-close btn-close-white" onClick={onClose} />
+            <button className="btn-close btn-close-white" onClick={onNo} />
           </div>
           <div className="modal-body">
             <p className="text-secondary mb-3">
-              Link <strong>{destinationName}</strong> to share sync tracking with another destination.
-              {destinationPath && (
-                <>
-                  <br />
-                  <small className="text-secondary">{destinationPath}</small>
-                </>
-              )}
+              Link <strong>{folderName}</strong> to share sync tracking with another destination?
             </p>
 
-            {otherDestinations.length === 0 ? (
+            {destinations.length === 0 ? (
               <div className="text-secondary">
                 No other destinations available to link with.
               </div>
             ) : (
               <div className="list-group list-group-flush">
-                {otherDestinations.map((d) => (
+                {destinations.map((d) => (
                   <button
                     key={d.name}
                     className={`list-group-item list-group-item-action border-secondary ${selectedDest === d.name ? 'active' : ''}`}
@@ -115,19 +89,19 @@ export function LinkDestinationModal({ show, destinationName, destinationPath, o
             )}
           </div>
           <div className="modal-footer border-secondary">
-            <button className="btn btn-secondary" onClick={onClose} disabled={loading}>
+            <button className="btn btn-secondary me-auto" onClick={onCancelled} disabled={loading}>
               Cancel
+            </button>
+            <button className="btn btn-outline-secondary" onClick={onNo} disabled={loading}>
+              No
             </button>
             <button
               className="btn btn-primary"
               onClick={handleLink}
-              disabled={loading || otherDestinations.length === 0}
+              disabled={loading || !selectedDest}
             >
               {loading ? (
-                <>
-                  <span className="spinner-border spinner-border-sm me-1" />
-                  Linking...
-                </>
+                <><span className="spinner-border spinner-border-sm me-1" />Linking...</>
               ) : (
                 'Link'
               )}

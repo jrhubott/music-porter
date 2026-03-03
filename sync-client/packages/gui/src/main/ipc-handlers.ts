@@ -245,6 +245,13 @@ export function registerIPCHandlers(): void {
   });
 
   ipcMain.handle(
+    'sync:savePlaylistPrefs',
+    async (_event, destName: string, playlistKeys: string[] | null): Promise<OkResponse> => {
+      return apiClient.savePlaylistPrefs(destName, playlistKeys);
+    },
+  );
+
+  ipcMain.handle(
     'data:addPlaylist',
     async (_event, key: string, url: string, name: string): Promise<OkResponse> => {
       return apiClient.addPlaylist(key, url, name);

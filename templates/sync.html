@@ -37,10 +37,14 @@
     <form id="syncForm">
       <div class="row g-3">
         <div class="col-md-4">
-          <label class="form-label">Source Directory</label>
-          <select class="form-select form-select-sm" id="syncSource">
-            <option value="">Loading...</option>
-          </select>
+          <label class="form-label">Playlists <small class="text-muted">(leave all unchecked to sync all)</small></label>
+          <div id="playlistChecklist" class="border rounded p-2" style="max-height:140px;overflow-y:auto;background:var(--bs-body-bg)">
+            <span class="text-muted small">Loading...</span>
+          </div>
+          <div class="d-flex gap-2 mt-1">
+            <button type="button" id="selectAllSources" class="btn btn-sm btn-outline-secondary">Select All</button>
+            <button type="button" id="clearSources" class="btn btn-sm btn-outline-secondary">Clear</button>
+          </div>
         </div>
         <div class="col-md-4">
           <label class="form-label">Destination</label>
@@ -127,213 +131,6 @@
   </div>
 </div>
 
-<!-- Section 2: Sync Status / Tracking -->
-<div class="row g-3 mb-4" id="syncStatsRow">
-  <div class="col-md-4">
-    <div class="card text-center">
-      <div class="card-body py-2">
-        <div class="text-muted small">Destination Groups</div>
-        <div class="fs-4 fw-bold" id="syncStatKeys">-</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-4">
-    <div class="card text-center">
-      <div class="card-body py-2">
-        <div class="text-muted small">Synced Files</div>
-        <div class="fs-4 fw-bold text-success" id="syncStatSynced">-</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-4">
-    <div class="card text-center">
-      <div class="card-body py-2">
-        <div class="text-muted small">New Files</div>
-        <div class="fs-4 fw-bold text-warning" id="syncStatNew">-</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div id="syncEmpty" class="d-none text-center py-5">
-  <i class="bi bi-arrow-left-right fs-1 text-muted"></i>
-  <h5 class="mt-3">No sync history</h5>
-  <p class="text-muted mb-0">Sync files to a destination to start tracking.</p>
-</div>
-
-<div class="card d-none mb-4" id="keysCard">
-  <div class="card-body">
-    <h6 class="card-title"><i class="bi bi-arrow-left-right"></i> Destination Groups</h6>
-    <div class="table-responsive mt-2">
-      <table class="table table-sm table-hover align-middle mb-0">
-        <thead>
-          <tr>
-            <th>Destinations</th>
-            <th class="text-end">Synced</th>
-            <th class="text-end">New Files</th>
-            <th class="text-end">New Playlists</th>
-            <th class="text-end">Last Sync</th>
-            <th class="text-center">Actions</th>
-          </tr>
-        </thead>
-        <tbody id="keysTableBody"></tbody>
-      </table>
-    </div>
-  </div>
-</div>
-
-<!-- Detail accordion -->
-<div class="card mt-4 d-none mb-4" id="detailCard">
-  <div class="card-header d-flex justify-content-between align-items-center">
-    <span><i class="bi bi-list-nested"></i> Playlist Breakdown: <strong id="detailKeyName">-</strong></span>
-    <div>
-      <button class="btn btn-outline-danger btn-sm me-1" onclick="promptResetTracking()" title="Reset all sync tracking for this group"><i class="bi bi-arrow-counterclockwise"></i> Reset Tracking</button>
-      <button class="btn btn-outline-secondary btn-sm" onclick="hideDetail()"><i class="bi bi-x"></i> Close</button>
-    </div>
-  </div>
-  <div class="card-body">
-    <div class="table-responsive">
-      <table class="table table-sm table-hover align-middle mb-0">
-        <thead>
-          <tr>
-            <th>Playlist</th>
-            <th class="text-end">Total</th>
-            <th class="text-end">Synced</th>
-            <th class="text-end">New</th>
-            <th class="text-center">Status</th>
-            <th class="text-center">Actions</th>
-          </tr>
-        </thead>
-        <tbody id="detailTableBody"></tbody>
-      </table>
-    </div>
-  </div>
-</div>
-
-<!-- Section 3: Manage Destinations -->
-<div class="card mb-4">
-  <div class="card-header"><i class="bi bi-folder-plus"></i> Saved Destinations</div>
-  <div class="card-body">
-    <div class="table-responsive" id="destsTable">
-      <table class="table table-sm table-hover align-middle mb-0">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Type</th>
-            <th>Path</th>
-            <th class="text-center">Linked</th>
-            <th class="text-center">Available</th>
-            <th class="text-center">Actions</th>
-          </tr>
-        </thead>
-        <tbody id="destsTableBody">
-          <tr><td colspan="6" class="text-center text-muted">Loading...</td></tr>
-        </tbody>
-      </table>
-    </div>
-    <hr>
-    <form id="addDestForm" class="row g-2 align-items-end">
-      <div class="col-md-3">
-        <label class="form-label">Name</label>
-        <input type="text" class="form-control form-control-sm" id="newDestName" placeholder="my-nas" pattern="[a-zA-Z0-9_-]+">
-      </div>
-      <div class="col-md-4">
-        <label class="form-label">Path</label>
-        <input type="text" class="form-control form-control-sm" id="newDestPath" placeholder="/Volumes/NAS/Music">
-      </div>
-      <div class="col-md-3">
-        <label class="form-label">Link to <span class="text-muted">(optional)</span></label>
-        <select class="form-select form-select-sm" id="newDestLinkTo">
-          <option value="">None</option>
-        </select>
-      </div>
-      <div class="col-md-2">
-        <button type="submit" class="btn btn-outline-primary btn-sm w-100"><i class="bi bi-plus"></i> Add</button>
-      </div>
-    </form>
-  </div>
-</div>
-
-<!-- Reset tracking modal -->
-<div class="modal fade" id="resetTrackingModal" tabindex="-1">
-  <div class="modal-dialog">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h6 class="modal-title">Reset Sync Tracking</h6>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <p>Reset all sync tracking data for <strong id="resetTrackingName">-</strong>?</p>
-        <p class="text-muted small mb-0">This clears all tracking records so the next sync treats everything as new. Files at the destination are not affected.</p>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-danger btn-sm" id="confirmResetBtn">Reset</button>
-      </div>
-    </div>
-  </div>
-</div>
-<!-- Link destination modal -->
-<div class="modal fade" id="linkDestModal" tabindex="-1">
-  <div class="modal-dialog">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h6 class="modal-title">Link Destination</h6>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <p>Link <strong id="linkDestName">-</strong> to share tracking with another destination:</p>
-        <select class="form-select form-select-sm mb-3" id="linkDestKeySelect">
-          <option value="">Select a destination...</option>
-        </select>
-        <p class="text-muted small mb-0">Existing tracking data will be merged into the selected destination's group.</p>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-primary btn-sm" id="confirmLinkBtn">Link</button>
-      </div>
-    </div>
-  </div>
-</div>
-<!-- Rename group modal -->
-<div class="modal fade" id="renameGroupModal" tabindex="-1">
-  <div class="modal-dialog">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h6 class="modal-title">Rename Group</h6>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <input type="text" class="form-control form-control-sm" id="renameGroupInput" placeholder="Group label (optional)">
-        <p class="text-muted small mt-2 mb-0">Leave blank to use the primary destination name.</p>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-primary btn-sm" id="confirmRenameGroupBtn">Save</button>
-      </div>
-    </div>
-  </div>
-</div>
-<!-- Rename destination modal -->
-<div class="modal fade" id="renameDestModal" tabindex="-1">
-  <div class="modal-dialog">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h6 class="modal-title">Rename Destination</h6>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <p>Rename <strong id="renameDestOldName">-</strong> to:</p>
-        <input type="text" class="form-control form-control-sm" id="renameDestNewName" placeholder="New destination name" pattern="[A-Za-z0-9_-]+">
-        <p class="text-muted small mt-2 mb-0">The destination's tracking data will be preserved.</p>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-primary btn-sm" id="confirmRenameDestBtn">Rename</button>
-      </div>
-    </div>
-  </div>
-</div>
 {% endblock content %}
 
 {% block scripts %}
@@ -428,51 +225,60 @@ function loadDestinations() {
     }
 
     sel.innerHTML = opts;
-    renderDestsTable(dests.filter(d => !d.auto_detected));
-    renderSyncStatusForDest();
-    loadSyncStatusData();
   });
 }
 
 document.getElementById('syncDest').addEventListener('change', function() {
-  renderSyncStatusForDest();
+  // Auto-apply saved playlist prefs for the selected destination
+  const idx = parseInt(this.value);
+  const meta = destsMeta[idx];
+  if (meta) applyPlaylistPrefs(meta.playlist_prefs || null);
 });
 document.getElementById('refreshDests').addEventListener('click', loadDestinations);
 
 // ── Source loading ──
 function loadSources() {
   fetch('/api/directories/export').then(r => r.json()).then(dirs => {
-    const sel = document.getElementById('syncSource');
     fetch('/api/status').then(r => r.json()).then(status => {
-      const profile = status.profile;
-      cachedProfile = profile;
-      let opts = `<option value="">All playlists</option>`;
-      opts += dirs.map(d => `<option value="${d.name}">${d.name} (${d.files} files)</option>`).join('');
-      sel.innerHTML = opts;
+      cachedProfile = status.profile;
+      const container = document.getElementById('playlistChecklist');
+      if (!dirs.length) {
+        container.innerHTML = '<span class="text-muted small">No playlists found</span>';
+        return;
+      }
+      container.innerHTML = dirs.map(d =>
+        `<div class="form-check form-check-sm mb-1">
+          <input class="form-check-input playlist-source-check" type="checkbox"
+                 id="pcheck_${d.name}" value="${d.name}">
+          <label class="form-check-label small" for="pcheck_${d.name}">
+            ${d.name} <span class="text-muted">(${d.files})</span>
+          </label>
+        </div>`
+      ).join('');
     });
   });
 }
 
-// ── Sync helpers for action buttons ──
-function findDestMeta(destName) {
-  return destsMeta.find(d => d.name !== '__custom__' && d.name === destName);
+function getCheckedPlaylists() {
+  return [...document.querySelectorAll('.playlist-source-check:checked')].map(el => el.value);
 }
 
-function syncToKey(destName, playlistKey) {
-  const meta = findDestMeta(destName);
-  if (!meta) { showToast('Destination not found: ' + destName, 'warning'); return; }
-  const data = { source_dir: 'library/audio', playlist_key: playlistKey, destination: meta.name };
-
-  document.getElementById('syncStatus').textContent = 'Running';
-  document.getElementById('syncStatus').className = 'badge bg-primary badge-running';
-
-  submitOperation('/api/sync/run', data, 'syncLog', function(msg) {
-    const badge = document.getElementById('syncStatus');
-    if (msg.status === 'completed') { badge.textContent = 'Completed'; badge.className = 'badge bg-success'; }
-    else { badge.textContent = msg.status; badge.className = 'badge bg-danger'; }
-    loadSyncStatusData();
+function applyPlaylistPrefs(prefs) {
+  // Uncheck all first
+  document.querySelectorAll('.playlist-source-check').forEach(el => { el.checked = false; });
+  if (!prefs || !prefs.length) return; // null/[] = all (leave all unchecked)
+  prefs.forEach(key => {
+    const el = document.getElementById('pcheck_' + key);
+    if (el) el.checked = true;
   });
 }
+
+document.getElementById('selectAllSources').addEventListener('click', function() {
+  document.querySelectorAll('.playlist-source-check').forEach(el => { el.checked = true; });
+});
+document.getElementById('clearSources').addEventListener('click', function() {
+  document.querySelectorAll('.playlist-source-check').forEach(el => { el.checked = false; });
+});
 
 // ── Sync form submit ──
 document.getElementById('syncForm').addEventListener('submit', function(e) {
@@ -481,11 +287,12 @@ document.getElementById('syncForm').addEventListener('submit', function(e) {
   const meta = destsMeta[idx];
   if (!meta) { showToast('Select a destination', 'warning'); return; }
 
-  const playlistKey = document.getElementById('syncSource').value;
+  const checked = getCheckedPlaylists();
+  const playlistKeys = checked.length > 0 ? checked : null;
 
   const data = {
     source_dir: 'library/audio',
-    playlist_key: playlistKey,
+    playlist_keys: playlistKeys,
     destination: meta.name,
     dry_run: document.getElementById('syncDryRun').checked,
     verbose: document.getElementById('syncVerbose').checked,
@@ -498,373 +305,7 @@ document.getElementById('syncForm').addEventListener('submit', function(e) {
     const badge = document.getElementById('syncStatus');
     if (msg.status === 'completed') { badge.textContent = 'Completed'; badge.className = 'badge bg-success'; }
     else { badge.textContent = msg.status; badge.className = 'badge bg-danger'; }
-    loadSyncStatusData();
   });
-});
-
-// ── Sync status tracking ──
-let allKeysData = [];
-
-function loadSyncStatusData() {
-  fetch('/api/sync/status').then(r => r.json()).then(data => {
-    allKeysData = data;
-    const empty = document.getElementById('syncEmpty');
-    const card = document.getElementById('keysCard');
-
-    if (!data.length) {
-      empty.classList.remove('d-none');
-      card.classList.add('d-none');
-      document.getElementById('syncStatKeys').textContent = '0';
-      document.getElementById('syncStatSynced').textContent = '0';
-      document.getElementById('syncStatNew').textContent = '0';
-      return;
-    }
-
-    empty.classList.add('d-none');
-    card.classList.remove('d-none');
-
-    let totalSynced = 0, totalNew = 0;
-    data.forEach(k => { totalSynced += k.synced_files; totalNew += k.new_files; });
-
-    document.getElementById('syncStatKeys').textContent = data.length;
-    document.getElementById('syncStatSynced').textContent = totalSynced.toLocaleString();
-    document.getElementById('syncStatNew').textContent = totalNew.toLocaleString();
-
-    const tbody = document.getElementById('keysTableBody');
-    tbody.innerHTML = data.map(k => {
-      const lastSync = k.last_sync_at ? new Date(k.last_sync_at * 1000).toLocaleString() : 'Never';
-      const newBadge = k.new_files > 0
-        ? `<span class="badge bg-warning text-dark">${k.new_files}</span>`
-        : `<span class="text-success">0</span>`;
-      const plBadge = k.new_playlists > 0
-        ? `<span class="badge bg-info">${k.new_playlists}</span>`
-        : `<span class="text-muted">0</span>`;
-      const dests = k.destinations || [];
-      const primaryDest = dests[0] || 'Unknown';
-      const matchedDest = findDestMeta(primaryDest);
-      // Priority: USB > Folder > Web-client
-      const groupTypes = dests.map(d => findDestMeta(d)?.type).filter(Boolean);
-      let icon = 'bi-pc-display';
-      if (groupTypes.some(t => t === 'folder')) icon = 'bi-folder2-open';
-      if (groupTypes.some(t => t === 'usb')) icon = 'bi-usb-drive';
-      const isWebClient = matchedDest?.type === 'web-client';
-      const syncDisabled = isWebClient || (!matchedDest || !matchedDest.available) ? 'disabled' : '';
-      const syncTitle = isWebClient ? 'Use browser sync' : syncDisabled ? 'Destination unavailable' : 'Sync all playlists';
-      const groupName = k.group_name || '';
-      const renameBtn = `<button class="btn btn-outline-secondary btn-sm py-0 px-1 ms-1" onclick="promptRenameGroup('${primaryDest}'); return false;" title="Rename group"><i class="bi bi-pencil"></i></button>`;
-      let destLabel;
-      if (groupName) {
-        const memberList = dests.join(', ');
-        destLabel = `<a href="#" onclick="showDetail('${primaryDest}'); return false;"><i class="bi ${icon} me-1"></i><strong>${groupName}</strong></a>${renameBtn}<br><small class="text-muted">${memberList}</small>`;
-      } else if (dests.length > 1) {
-        destLabel = `<a href="#" onclick="showDetail('${primaryDest}'); return false;"><i class="bi ${icon} me-1"></i>${primaryDest}</a> <span class="badge bg-info" title="${dests.join(', ')}">${dests.length} linked</span>${renameBtn}`;
-      } else {
-        destLabel = `<a href="#" onclick="showDetail('${primaryDest}'); return false;"><i class="bi ${icon} me-1"></i>${primaryDest}</a>${renameBtn}`;
-      }
-      return `<tr>
-        <td>${destLabel}</td>
-        <td class="text-end">${k.synced_files} / ${k.total_files}</td>
-        <td class="text-end">${newBadge}</td>
-        <td class="text-end">${plBadge}</td>
-        <td class="text-end">${lastSync}</td>
-        <td class="text-center">
-          ${csyncHasFSA ? `<button class="btn btn-outline-success btn-sm py-0 px-1 me-1" onclick="clientSyncToKey('${primaryDest}', null)" title="Sync via browser (File System Access)"><i class="bi bi-pc-display"></i></button>` : ''}
-          <button class="btn btn-outline-primary btn-sm py-0 px-1 me-1" onclick="syncToKey('${primaryDest}', 'library')" title="${syncTitle}" ${syncDisabled}>
-            <i class="bi bi-arrow-repeat"></i>
-          </button>
-        </td>
-      </tr>`;
-    }).join('');
-
-    renderSyncStatusForDest();
-    populateLinkToDropdown();
-  }).catch(err => {
-    showToast('Failed to load sync status: ' + err, 'error');
-  });
-}
-
-function renderSyncStatusForDest() {
-  // No inline sync status card needed — stats cards above show totals
-}
-
-function showDetail(destName) {
-  fetch('/api/sync/status/' + encodeURIComponent(destName)).then(r => r.json()).then(data => {
-    const card = document.getElementById('detailCard');
-    card.classList.remove('d-none');
-    const dests = data.destinations || [destName];
-    document.getElementById('detailKeyName').textContent = dests.join(', ');
-    // Store primary dest name for reset action
-    card.dataset.destName = destName;
-
-    const tbody = document.getElementById('detailTableBody');
-    if (!data.playlists || !data.playlists.length) {
-      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No export files found</td></tr>';
-      return;
-    }
-    const detailMeta = findDestMeta(destName);
-    const detailSyncDisabled = (!detailMeta || !detailMeta.available) ? 'disabled' : '';
-    const detailSyncTitle = detailSyncDisabled ? 'Destination unavailable' : 'Sync playlist';
-    tbody.innerHTML = data.playlists.map(p => {
-      let statusBadge;
-      if (p.is_new_playlist) {
-        statusBadge = '<span class="badge bg-info">NEW</span>';
-      } else if (p.new_files > 0) {
-        statusBadge = `<span class="badge bg-warning text-dark">+${p.new_files}</span>`;
-      } else {
-        statusBadge = '<span class="badge bg-success">synced</span>';
-      }
-      return `<tr>
-        <td>${p.name}</td>
-        <td class="text-end">${p.total_files}</td>
-        <td class="text-end">${p.synced_files}</td>
-        <td class="text-end">${p.new_files}</td>
-        <td class="text-center">${statusBadge}</td>
-        <td class="text-center">
-          ${csyncHasFSA ? `<button class="btn btn-outline-success btn-sm py-0 px-1 me-1" onclick="clientSyncToKey('${destName}', ['${p.name}'])" title="Sync playlist via browser"><i class="bi bi-pc-display"></i></button>` : ''}
-          <button class="btn btn-outline-primary btn-sm py-0 px-1 me-1" onclick="syncToKey('${destName}', '${p.name}')" title="${detailSyncTitle}" ${detailSyncDisabled}>
-            <i class="bi bi-arrow-repeat"></i>
-          </button>
-        </td>
-      </tr>`;
-    }).join('');
-  });
-}
-
-function hideDetail() {
-  document.getElementById('detailCard').classList.add('d-none');
-}
-
-function promptResetTracking() {
-  const destName = document.getElementById('detailCard').dataset.destName;
-  if (!destName) return;
-  document.getElementById('resetTrackingName').textContent = destName;
-  new bootstrap.Modal(document.getElementById('resetTrackingModal')).show();
-}
-
-document.getElementById('confirmResetBtn').addEventListener('click', function() {
-  const destName = document.getElementById('detailCard').dataset.destName;
-  if (!destName) return;
-  fetch('/api/sync/destinations/' + encodeURIComponent(destName) + '/reset', {method: 'POST'})
-    .then(r => r.json())
-    .then(data => {
-      bootstrap.Modal.getInstance(document.getElementById('resetTrackingModal')).hide();
-      showToast(`Reset tracking for '${destName}' (${data.files_cleared} record(s) cleared)`, 'success');
-      hideDetail();
-      loadSyncStatusData();
-    })
-    .catch(err => showToast('Reset failed: ' + err, 'error'));
-});
-
-// ── Saved destinations table ──
-function renderDestsTable(saved) {
-  const tbody = document.getElementById('destsTableBody');
-  if (!saved || !saved.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No saved destinations</td></tr>';
-    return;
-  }
-  tbody.innerHTML = saved.map(d => {
-    let avail;
-    if (d.type === 'web-client') avail = '<span class="badge bg-secondary">Browser</span>';
-    else avail = d.available
-      ? '<span class="badge bg-success">Yes</span>'
-      : '<span class="badge bg-danger">No</span>';
-    let typeBadge;
-    if (d.type === 'usb') typeBadge = '<span class="badge bg-info">USB</span>';
-    else if (d.type === 'web-client') typeBadge = '<span class="badge bg-primary">Client</span>';
-    else typeBadge = '<span class="badge bg-secondary">Folder</span>';
-    const linked = d.linked_destinations || [];
-    const linkedBadge = linked.length > 0
-      ? `<span class="badge bg-info" title="${linked.join(', ')}">${linked.length} linked</span>`
-      : '<span class="text-muted">-</span>';
-    const linkBtn = linked.length > 0
-      ? `<button class="btn btn-outline-warning btn-sm py-0 px-1 me-1" onclick="unlinkDest('${d.name}')" title="Unlink"><i class="bi bi-link-45deg"></i></button>`
-      : `<button class="btn btn-outline-info btn-sm py-0 px-1 me-1" onclick="promptLinkDest('${d.name}')" title="Link to destination"><i class="bi bi-link"></i></button>`;
-    return `<tr>
-      <td>${d.name}</td>
-      <td>${typeBadge}</td>
-      <td><code>${d.path}</code></td>
-      <td class="text-center">${linkedBadge}</td>
-      <td class="text-center">${avail}</td>
-      <td class="text-center">
-        ${linkBtn}
-        <button class="btn btn-outline-warning btn-sm py-0 px-1 me-1" onclick="promptRenameDest('${d.name}')" title="Rename">
-          <i class="bi bi-pencil"></i>
-        </button>
-        <button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="removeDest('${d.name}')" title="Remove">
-          <i class="bi bi-trash"></i>
-        </button>
-      </td>
-    </tr>`;
-  }).join('');
-}
-
-document.getElementById('addDestForm').addEventListener('submit', function(e) {
-  e.preventDefault();
-  const name = document.getElementById('newDestName').value.trim();
-  const path = document.getElementById('newDestPath').value.trim();
-  if (!name || !path) { showToast('Name and path required', 'warning'); return; }
-
-  const payload = {name, path};
-  const linkTo = document.getElementById('newDestLinkTo').value;
-  if (linkTo) payload.link_to = linkTo;
-
-  fetch('/api/sync/destinations', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(payload)
-  }).then(r => r.json()).then(data => {
-    if (data.error) { showToast(data.error, 'error'); return; }
-    const msg = linkTo ? `Added destination '${name}' linked to '${linkTo}'` : `Added destination '${name}'`;
-    showToast(msg, 'success');
-    document.getElementById('newDestName').value = '';
-    document.getElementById('newDestPath').value = '';
-    document.getElementById('newDestLinkTo').value = '';
-    loadDestinations();
-  }).catch(err => showToast('Failed: ' + err, 'error'));
-});
-
-function removeDest(name) {
-  if (!confirm(`Remove saved destination "${name}"?`)) return;
-  fetch('/api/sync/destinations/' + encodeURIComponent(name), {method: 'DELETE'})
-    .then(r => r.json())
-    .then(data => {
-      if (data.error) { showToast(data.error, 'error'); return; }
-      showToast(`Removed destination '${name}'`, 'success');
-      loadDestinations();
-    })
-    .catch(err => showToast('Failed: ' + err, 'error'));
-}
-
-// ── Destination linking ──
-let pendingLinkDest = null;
-
-function populateLinkToDropdown() {
-  // Build list of all destination names for linking
-  const destNames = destsMeta
-    .filter(d => d.name !== '__custom__')
-    .map(d => d.name)
-    .sort();
-
-  // Populate add-form dropdown
-  const addSelect = document.getElementById('newDestLinkTo');
-  addSelect.innerHTML = '<option value="">None</option>' +
-    destNames.map(n => `<option value="${n}">${n}</option>`).join('');
-
-  // Populate modal dropdown
-  const modalSelect = document.getElementById('linkDestKeySelect');
-  modalSelect.innerHTML = '<option value="">Select a destination...</option>' +
-    destNames.map(n => `<option value="${n}">${n}</option>`).join('');
-}
-
-function promptLinkDest(name) {
-  pendingLinkDest = name;
-  document.getElementById('linkDestName').textContent = name;
-  populateLinkToDropdown();
-  new bootstrap.Modal(document.getElementById('linkDestModal')).show();
-}
-
-document.getElementById('confirmLinkBtn').addEventListener('click', function() {
-  if (!pendingLinkDest) return;
-  const targetDest = document.getElementById('linkDestKeySelect').value;
-  if (!targetDest) { showToast('Select a destination to link to', 'warning'); return; }
-
-  fetch('/api/sync/destinations/' + encodeURIComponent(pendingLinkDest) + '/link', {
-    method: 'PUT',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({destination: targetDest})
-  }).then(r => r.json()).then(data => {
-    if (data.error) { showToast(data.error, 'error'); return; }
-    bootstrap.Modal.getInstance(document.getElementById('linkDestModal')).hide();
-    let msg = `Linked '${pendingLinkDest}' to '${targetDest}'`;
-    if (data.merge_stats && data.merge_stats.source_deleted) {
-      msg += ` (${data.merge_stats.records_moved} moved, ${data.merge_stats.records_merged} merged)`;
-    }
-    showToast(msg, 'success');
-    pendingLinkDest = null;
-    loadDestinations();
-    loadSyncStatusData();
-  }).catch(err => showToast('Link failed: ' + err, 'error'));
-});
-
-function unlinkDest(name) {
-  if (!confirm(`Unlink destination "${name}" from its group?`)) return;
-  fetch('/api/sync/destinations/' + encodeURIComponent(name) + '/link', {
-    method: 'PUT',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({destination: null})
-  }).then(r => r.json()).then(data => {
-    if (data.error) { showToast(data.error, 'error'); return; }
-    showToast(`Unlinked destination '${name}'`, 'success');
-    loadDestinations();
-    loadSyncStatusData();
-  }).catch(err => showToast('Unlink failed: ' + err, 'error'));
-}
-
-let pendingRenameDest = null;
-function promptRenameDest(name) {
-  pendingRenameDest = name;
-  document.getElementById('renameDestOldName').textContent = name;
-  document.getElementById('renameDestNewName').value = name;
-  const modal = new bootstrap.Modal(document.getElementById('renameDestModal'));
-  modal.show();
-  setTimeout(() => document.getElementById('renameDestNewName').select(), 300);
-}
-
-document.getElementById('confirmRenameDestBtn').addEventListener('click', function() {
-  if (!pendingRenameDest) return;
-  const newName = document.getElementById('renameDestNewName').value.trim();
-  if (!newName) { showToast('Enter a new name', 'warning'); return; }
-  if (!/^[A-Za-z0-9_-]+$/.test(newName)) { showToast('Name must be alphanumeric, hyphens, or underscores', 'warning'); return; }
-  if (newName === pendingRenameDest) { showToast('New name must be different', 'warning'); return; }
-
-  fetch('/api/sync/destinations/' + encodeURIComponent(pendingRenameDest) + '/rename', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({new_name: newName})
-  }).then(r => r.json()).then(data => {
-    if (data.error) { showToast(data.error, 'error'); return; }
-    bootstrap.Modal.getInstance(document.getElementById('renameDestModal')).hide();
-    let msg = `Renamed '${pendingRenameDest}' to '${newName}'`;
-    if (data.tracking_renamed) msg += ' (tracking key also renamed)';
-    showToast(msg, 'success');
-    pendingRenameDest = null;
-    loadDestinations();
-    loadSyncStatusData();
-  }).catch(err => showToast('Rename failed: ' + err, 'error'));
-});
-
-// ── Group Rename ──
-let pendingRenameGroupDest = null;
-function promptRenameGroup(primaryDest) {
-  pendingRenameGroupDest = primaryDest;
-  const currentName = findGroupName(primaryDest);
-  document.getElementById('renameGroupInput').value = currentName;
-  const modal = new bootstrap.Modal(document.getElementById('renameGroupModal'));
-  modal.show();
-  setTimeout(() => document.getElementById('renameGroupInput').select(), 300);
-}
-
-function findGroupName(primaryDest) {
-  // Look up current group_name from the cached sync status data
-  const group = allKeysData.find(
-    k => (k.destinations || []).includes(primaryDest));
-  return group ? (group.group_name || '') : '';
-}
-
-document.getElementById('confirmRenameGroupBtn').addEventListener('click', function() {
-  if (!pendingRenameGroupDest) return;
-  const newName = document.getElementById('renameGroupInput').value;
-  fetch('/api/sync/destinations/' + encodeURIComponent(pendingRenameGroupDest) + '/group-name', {
-    method: 'PUT',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({name: newName})
-  }).then(r => r.json()).then(data => {
-    if (data.error) { showToast(data.error, 'error'); return; }
-    bootstrap.Modal.getInstance(document.getElementById('renameGroupModal')).hide();
-    showToast(newName ? `Group renamed to '${newName}'` : 'Group name cleared', 'success');
-    pendingRenameGroupDest = null;
-    loadSyncStatusData();
-  }).catch(err => showToast('Rename failed: ' + err, 'error'));
 });
 
 // ── Client-Side Sync ──
@@ -1201,7 +642,6 @@ async function clientSyncToKey(destName, playlists) {
   document.getElementById('csyncEta').textContent = '';
   document.getElementById('csyncAbortBtn').classList.add('d-none');
   setClientSyncBusy(false);
-  loadSyncStatusData();
   loadDestinations();
 }
 

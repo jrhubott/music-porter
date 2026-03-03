@@ -318,11 +318,21 @@ final class APIClient {
         let _: OkResponse = try await delete("/api/sync/destinations/\(name)")
     }
 
-    func syncToDestination(sourceDir: String, destination: String, profile: String? = nil) async throws -> String {
+    func syncToDestination(sourceDir: String, destination: String, profile: String? = nil, playlistKeys: [String]? = nil) async throws -> String {
         var body: [String: Any] = ["source_dir": sourceDir, "destination": destination]
         if let profile { body["profile"] = profile }
+        if let playlistKeys { body["playlist_keys"] = playlistKeys }
         let response: TaskIdResponse = try await postAny("/api/sync/run", body: body)
         return response.taskId
+    }
+
+    func savePlaylistPrefs(destination: String, playlistKeys: [String]?) async throws {
+        let encoded = destination.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? destination
+        if let playlistKeys {
+            let _: OkResponse = try await put("/api/sync/destinations/\(encoded)/playlist-prefs", body: ["playlist_keys": playlistKeys])
+        } else {
+            let _: OkResponse = try await putAny("/api/sync/destinations/\(encoded)/playlist-prefs", body: ["playlist_keys": NSNull()])
+        }
     }
 
     // MARK: - Sync Status
