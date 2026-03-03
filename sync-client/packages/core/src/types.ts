@@ -91,6 +91,7 @@ export interface SyncStatusDetail {
   synced_files: number;
   new_files: number;
   new_playlists: number;
+  playlist_prefs: string[] | null;
 }
 
 export interface SyncDestination {
@@ -99,6 +100,7 @@ export interface SyncDestination {
   type: string;
   available: boolean;
   linked_destinations: string[];
+  playlist_prefs: string[] | null;
 }
 
 export interface ResolveDestinationResponse {
@@ -144,6 +146,7 @@ export interface SyncStatusSummary {
   synced_files: number;
   new_files: number;
   new_playlists: number;
+  playlist_prefs?: string[] | null;
 }
 
 // ── Sync Manifest ──

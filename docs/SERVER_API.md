@@ -909,6 +909,7 @@ List all sync destinations (saved from DB + auto-detected USB drives in web mode
 | `destinations[].type` | string | Destination type: `"usb"`, `"folder"`, or `"web-client"` |
 | `destinations[].available` | boolean | Whether the destination path is currently accessible |
 | `destinations[].linked_destinations` | string[] | Names of other destinations sharing the same sync tracking group |
+| `destinations[].playlist_prefs` | string[] \| null | Saved playlist selection for this group. `null` = sync all playlists; array = sync only listed playlist keys |
 
 ---
 
@@ -1042,7 +1043,8 @@ Background task: sync MP3s to a destination with profile-specific tags applied o
 |-------|------|----------|---------|-------------|
 | `destination` | string | Yes | — | Destination name from config |
 | `source_dir` | string | No | `library/audio/` | Source directory for MP3 files |
-| `playlist_key` | string | No | — | Playlist key for display name resolution |
+| `playlist_keys` | string[] | No | — | Playlist keys to sync. `null` or omitted = sync all playlists. Saves as the destination's playlist preference. |
+| `playlist_key` | string | No | — | *(Deprecated)* Single playlist key — use `playlist_keys` instead. Accepts a single string for backward compatibility. |
 | `profile` | string | No | config default | Output profile for tagging |
 | `dry_run` | boolean | No | `false` | Preview without syncing |
 | `verbose` | boolean | No | `false` | Enable verbose logging |
@@ -1097,6 +1099,29 @@ Per-playlist sync breakdown for a destination's tracking group.
 | `synced_files` | integer | Total synced files |
 | `new_files` | integer | Total unsynced files |
 | `new_playlists` | integer | Count of new (unsynced) playlists |
+| `playlist_prefs` | string[] \| null | Saved playlist selection for this group. `null` = sync all; array = only listed playlist keys |
+
+---
+
+### PUT /api/sync/destinations/\<name\>/playlist-prefs
+
+Save the playlist preference for a destination's tracking group without triggering a sync. This is the canonical way for clients to persist playlist selection independently of running a sync.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `name` | string | Destination name |
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `playlist_keys` | string[] \| null | Yes | Playlist keys to save. `null` resets to "sync all". |
+
+**Response:** `{"ok": true}`
+
+**Status codes:** 404 if destination not found
 
 ---
 

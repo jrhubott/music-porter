@@ -276,6 +276,9 @@ export function DestinationsPage() {
                         <th className="text-end">Synced</th>
                         <th className="text-end">Total</th>
                         <th className="text-end">New</th>
+                        <th className="text-center">
+                          {selectedDestGroupDetail.playlist_prefs ? 'Pref' : 'Pref (All)'}
+                        </th>
                         <th>Status</th>
                       </tr>
                     </thead>
@@ -291,12 +294,23 @@ export function DestinationsPage() {
                           : p.new_files > 0
                             ? `${p.new_files} new`
                             : 'Current';
+                        const prefs = selectedDestGroupDetail.playlist_prefs;
+                        const inPref = prefs ? prefs.includes(p.name) : null;
                         return (
                           <tr key={p.name}>
                             <td>{p.name}</td>
                             <td className="text-end">{p.synced_files}</td>
                             <td className="text-end">{p.total_files}</td>
                             <td className="text-end">{p.new_files}</td>
+                            <td className="text-center">
+                              {inPref === null ? (
+                                <span className="text-muted">–</span>
+                              ) : inPref ? (
+                                <i className="bi bi-check-circle-fill text-success" title="In saved prefs" />
+                              ) : (
+                                <span className="text-muted">–</span>
+                              )}
+                            </td>
                             <td><span className={`badge ${badgeClass}`}>{badgeText}</span></td>
                           </tr>
                         );

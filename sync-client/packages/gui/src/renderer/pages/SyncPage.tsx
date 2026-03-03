@@ -39,6 +39,7 @@ export function SyncPage() {
     togglePlaylist,
     selectAllPlaylists,
     clearSelection,
+    setSelectedPlaylists,
     serverProfiles,
     setServerProfiles,
     activeProfile,
@@ -240,6 +241,14 @@ export function SyncPage() {
       if (destName) {
         const status = await ipc.getSyncStatus(destName);
         setDestSyncStatus(status);
+        // Auto-apply saved playlist prefs for this destination
+        const destMeta = localDestinations.find((d) => d.name === destName);
+        const prefs = destMeta?.playlist_prefs ?? status.playlist_prefs ?? null;
+        if (prefs && prefs.length > 0) {
+          setSelectedPlaylists(new Set(prefs));
+        } else {
+          clearSelection();
+        }
       } else {
         setDestSyncStatus(null);
       }
@@ -291,10 +300,22 @@ export function SyncPage() {
     setEjected(false);
 
     const syncDrive = selectedDrive;
+    const selectedKeys = selectedPlaylists.size > 0 ? [...selectedPlaylists] : null;
+
+    // Save playlist prefs before sync so they persist even if sync is aborted
+    try {
+      const destName = await ipc.resolveDestination(destPath, syncDrive?.name);
+      if (destName) {
+        await ipc.savePlaylistPrefs(destName, selectedKeys);
+      }
+    } catch {
+      // Non-critical — proceed with sync even if pref save fails
+    }
+
     try {
       const result = await ipc.startSync({
         dest: destPath,
-        playlists: selectedPlaylists.size > 0 ? [...selectedPlaylists] : undefined,
+        playlists: selectedKeys ?? undefined,
         usbDriveName: syncDrive?.name,
         profile: activeProfile || undefined,
         force,

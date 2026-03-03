@@ -1820,11 +1820,19 @@ def api_sync_run():
     ctx = _ctx()
     data = request.get_json(force=True)
     source_dir = data.get('source_dir', mp.get_audio_dir())
-    playlist_key = data.get('playlist_key', '')
     dest_name = data.get('destination', '')
     profile_name = data.get('profile', '')
     dry_run = data.get('dry_run', False)
     verbose = data.get('verbose', False)
+
+    # Resolve playlist keys: prefer playlist_keys list; fall back to
+    # legacy playlist_key (single string) for backward compatibility.
+    raw_keys = data.get('playlist_keys')
+    if raw_keys is None:
+        legacy = data.get('playlist_key', '')
+        raw_keys = [legacy] if legacy else None
+    # Normalise: empty list → None (all playlists)
+    playlist_keys = raw_keys if raw_keys else None
 
     if not dest_name:
         return jsonify({'error': 'destination is required'}), 400
@@ -1847,7 +1855,10 @@ def api_sync_run():
     if dest.is_web_client:
         return jsonify({'error': 'web-client destinations can only be synced from the browser'}), 400
 
-    sync_label = playlist_key or 'all'
+    # Persist playlist prefs before dispatching (so they survive cancellation)
+    ctx.sync_tracker.save_playlist_prefs(dest_name, playlist_keys)
+
+    sync_label = (', '.join(playlist_keys) if playlist_keys else 'all')
     desc = f'Sync: {sync_label} → {dest.name}'
 
     def _run(task_id):
@@ -1858,9 +1869,10 @@ def api_sync_run():
         tag_applicator = mp.TagApplicator(ctx.track_db,
                                           project_root=str(ctx.project_root))
 
-        # Resolve playlist display name
-        pl_rec = ctx.playlist_db.get(playlist_key) if playlist_key else None
-        playlist_name = pl_rec['name'] if pl_rec else playlist_key
+        # Resolve playlist display name (first key for single-playlist compat)
+        first_key = playlist_keys[0] if playlist_keys else ''
+        pl_rec = ctx.playlist_db.get(first_key) if first_key else None
+        playlist_name = pl_rec['name'] if pl_rec else first_key
 
         sync_mgr = mp.SyncManager(logger, display_handler=display,
                                   cancel_event=task.cancel_event,
@@ -1869,7 +1881,7 @@ def api_sync_run():
             source_dir, dest_path=dest.path, sync_key=dest.sync_key,
             dry_run=dry_run,
             tag_applicator=tag_applicator, profile=profile,
-            playlist_name=playlist_name)
+            playlist_name=playlist_name, playlist_keys=playlist_keys)
         return {
             'success': result.success,
             'files_found': result.files_found,
@@ -1916,6 +1928,7 @@ def api_sync_status():
         info = key_meta.get(sync_key)
         last_sync = info['last_sync_at'] if info else 0
         group_name = (info.get('name') or '') if info else ''
+        playlist_prefs = info.get('playlist_prefs') if info else None
 
         results.append({
             'destinations': dest_names,
@@ -1925,6 +1938,7 @@ def api_sync_status():
             'new_files': total_library_files - total_synced,
             'new_playlists': 0,
             'group_name': group_name,
+            'playlist_prefs': playlist_prefs,
         })
     return jsonify(results)
 
@@ -1979,6 +1993,7 @@ def api_sync_status_detail(dest_name):
     keys = ctx.sync_tracker._get_keys()
     key_info = next((k for k in keys if k['key_name'] == sync_key), None)
     last_sync = key_info['last_sync_at'] if key_info else 0
+    playlist_prefs = key_info['playlist_prefs'] if key_info else None
 
     result = mp.SyncStatusResult(
         destinations=group_names,
@@ -1988,6 +2003,7 @@ def api_sync_status_detail(dest_name):
         synced_files=total_synced,
         new_files=total_files - total_synced,
         new_playlists=new_playlist_count,
+        playlist_prefs=playlist_prefs,
     )
     return jsonify(result.to_dict())
 
@@ -2030,6 +2046,31 @@ def api_sync_destination_group_name(name):
         return jsonify({'error': "'name' field required"}), 400
 
     ok = ctx.sync_tracker.set_group_name(name, data['name'])
+    if not ok:
+        return jsonify({'error': f"Destination '{name}' not found"}), 404
+
+    return jsonify({'ok': True})
+
+
+@api_bp.route('/api/sync/destinations/<name>/playlist-prefs', methods=['PUT'])
+def api_sync_destination_playlist_prefs(name):
+    """Persist playlist preferences for a destination's sync group.
+
+    Body: {"playlist_keys": ["key1", "key2"]} or {"playlist_keys": null}
+    Passing null (or an empty list) resets to "sync all playlists".
+    Returns 404 if destination not found, 400 if body is missing.
+    """
+    ctx = _ctx()
+    data = request.get_json(silent=True)
+    if data is None or 'playlist_keys' not in data:
+        return jsonify({'error': "'playlist_keys' field required"}), 400
+
+    playlist_keys = data['playlist_keys']
+    # Normalise: empty list treated same as null (all playlists)
+    if isinstance(playlist_keys, list) and len(playlist_keys) == 0:
+        playlist_keys = None
+
+    ok = ctx.sync_tracker.save_playlist_prefs(name, playlist_keys)
     if not ok:
         return jsonify({'error': f"Destination '{name}' not found"}), 404
 

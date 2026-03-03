@@ -84,6 +84,8 @@ const electronAPI = {
   cancelSync: (): Promise<void> => ipcRenderer.invoke('sync:cancel'),
   resolveDestination: (destPath: string, usbDriveName?: string): Promise<string | null> =>
     ipcRenderer.invoke('sync:resolveDestination', destPath, usbDriveName),
+  savePlaylistPrefs: (destName: string, playlistKeys: string[] | null): Promise<OkResponse> =>
+    ipcRenderer.invoke('sync:savePlaylistPrefs', destName, playlistKeys),
 
   // Drives
   listDrives: (): Promise<DriveInfo[]> => ipcRenderer.invoke('drives:list'),
