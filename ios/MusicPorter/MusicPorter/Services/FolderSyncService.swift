@@ -74,7 +74,8 @@ final class FolderSyncService {
         progress = 0
 
         let task = Task { [weak self] in
-            await self?.performSync(
+            guard let self else { return }
+            await self.performSync(
                 destURL: destURL,
                 playlistKeys: playlistKeys,
                 api: api,
