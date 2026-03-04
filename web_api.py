@@ -1340,6 +1340,9 @@ def api_files_list(playlist_key):
     """
     ctx = _ctx()
 
+    # Ensure profiles.yaml changes are reflected without requiring a server restart
+    mp.load_output_profiles(ctx.get_config())
+
     # DB-driven file list — all MP3s are in flat library/audio/
     tracks = ctx.track_db.get_tracks_by_playlist(playlist_key)
     if not tracks:
@@ -1349,7 +1352,13 @@ def api_files_list(playlist_key):
     profile_name = request.args.get('profile')
     fingerprint = ctx.track_db.get_playlist_fingerprint(playlist_key)
     if fingerprint:
-        etag_source = f"{fingerprint}:{profile_name or ''}"
+        profile_template_sig = ''
+        if profile_name:
+            _p = mp.OUTPUT_PROFILES.get(profile_name)
+            if _p:
+                # Include filename+directory templates so ETag changes when the profile template changes
+                profile_template_sig = f"{_p.filename}\x00{_p.directory}"
+        etag_source = f"{fingerprint}:{profile_name or ''}:{profile_template_sig}"
         etag_hash = hashlib.md5(etag_source.encode()).hexdigest()
         etag = f'"{etag_hash}"'
         if_none_match = request.headers.get('If-None-Match')

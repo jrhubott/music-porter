@@ -272,6 +272,7 @@ DEFAULT_OUTPUT_PROFILES: dict = {
 }
 
 OUTPUT_PROFILES: dict = {}  # Populated at runtime by load_output_profiles()
+_profiles_file_mtime: float = 0.0  # tracks last-seen mtime of profiles.yaml
 DEFAULT_OUTPUT_TYPE = "ride-command"
 
 # Valid ID3 version tokens for the id3_versions list
@@ -533,9 +534,24 @@ def validate_config(conf_path=DEFAULT_CONFIG_FILE):
 def load_output_profiles(config):
     """Populate the module-level OUTPUT_PROFILES dict from a ConfigManager instance.
 
-    Must be called after ConfigManager has loaded config.yaml.
+    Re-reads profiles.yaml from disk if the file has been modified since last
+    load — no server restart needed to pick up profile edits.
     Raises ValueError if settings.output_type references a nonexistent profile.
     """
+    global _profiles_file_mtime
+
+    # Check if profiles.yaml changed on disk since last load
+    profiles_path = Path(DEFAULT_PROFILES_FILE)
+    try:
+        current_mtime = profiles_path.stat().st_mtime
+    except OSError:
+        current_mtime = 0.0
+
+    if current_mtime != _profiles_file_mtime:
+        # File was created, modified, or replaced — reload into config
+        config._load_profiles(profiles_path)
+        _profiles_file_mtime = current_mtime
+
     OUTPUT_PROFILES.clear()
     for name, profile in config.output_profiles.items():
         OUTPUT_PROFILES[name] = profile
@@ -545,7 +561,7 @@ def load_output_profiles(config):
     if selected not in OUTPUT_PROFILES:
         available = ", ".join(OUTPUT_PROFILES.keys())
         raise ValueError(
-            f"settings.output_type '{selected}' not found in output_types. "
+            f"settings.output_type '{selected}' not found in output profiles. "
             f"Available profiles: {available}")
 
 
