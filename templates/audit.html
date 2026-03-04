@@ -281,7 +281,7 @@ async function loadAudit() {
         return `<button class="btn btn-outline-secondary btn-sm py-0 px-1"${onclickAttr}${disabledAttr}><i class="bi bi-code-square"></i></button>`;
       };
       const subRows = g.count > 1
-        ? g.entries.map(se => `
+        ? g.entries.slice(1).map(se => `
           <tr class="grp-detail-${gid} d-none" style="background:rgba(255,255,255,0.04)">
             <td class="text-nowrap small ps-3 text-muted">${formatTime(se.timestamp)}</td>
             <td></td>
