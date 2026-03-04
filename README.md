@@ -285,8 +285,8 @@ Cross-platform sync client (`sync-client/` subdirectory) with both a CLI tool (`
 
 ### High Priority
 
-1. **Playlist sync detection** - Compare local library to Apple Music, download only new/changed tracks
-2. **Incremental updates** - Smart detection of changed tracks without full re-download
+1. ~~**Playlist sync detection** - Compare local library to Apple Music, download only new/changed tracks~~ *(implemented in v2.39.0)*
+2. ~~**Incremental updates** - Smart detection of changed tracks without full re-download~~ *(implemented in v2.39.0)*
 3. ~~**Multi-threaded conversion** - Parallel processing for faster batch conversions~~ *(implemented in v1.3.0)*
 4. **Batch tag operations** - Apply tag changes to multiple playlists at once
 5. ~~**Configuration presets** - Save and load common conversion/tagging configurations~~ *(implemented in v1.8.0)*
@@ -296,17 +296,17 @@ Cross-platform sync client (`sync-client/` subdirectory) with both a CLI tool (`
 1. ~~**Web UI** - Browser-based interface for remote management~~ *(implemented in v2.0.0)*
 2. ~~**Automatic USB detection** - Start sync when USB drive is plugged in~~ *(implemented in v2.37.0 — sync client auto-detects USB drives and supports per-drive auto-sync)*
 3. ~~**Progress indicators** - Real-time progress bars for long-running operations~~ *(implemented in v1.4.0)*
-4. **Download resume** - Resume interrupted downloads
+4. ~~**Download resume** - Resume interrupted downloads~~ *(implemented in v2.39.0)*
 5. ~~**Cover art management** - Embed, extract, and update album artwork~~ *(implemented in v1.5.0)*
 6. **Playlist merging** - Combine multiple playlists into one
 7. **Smart playlists** - Auto-generate playlists based on criteria (genre, artist, etc.)
 8. ~~**Duplicate detection** - Find and remove duplicate tracks across playlists~~ *(implemented in v2.16.0)*
-9. **Tag validation** - Verify tag integrity and fix common issues
+9. ~~**Tag validation** - Verify tag integrity and fix common issues~~ *(implemented in v2.39.0)*
 10. **Export formats** - Support for additional formats (FLAC, AAC, OGG)
-11. **Cover art resize on embed/convert** - Add `--cover-art-size` flag to `embed`, `update`, `convert`, and `pipeline` commands for automatic resizing during processing
+11. ~~**Cover art resize on embed/convert** - Add `--cover-art-size` flag to `embed`, `update`, `convert`, and `pipeline` commands for automatic resizing during processing~~ *(implemented in v2.39.0)*
 12. **Lock screen artwork** - Load album artwork image into MPNowPlayingInfoCenter for lock screen and Control Center display during iOS playback
 13. ~~**Web file browser** - File-level browsing page with per-file USB sync indicators showing which drives each track has been synced to~~ *(implemented in v2.37.0)*
-14. **Sync key owns paths** - Restructure config so sync keys are first-class entities that own multiple destination paths, replacing the current destination-links-to-key model with a more intuitive key-centric architecture
+14. ~~**Sync key owns paths** - Restructure config so sync keys are first-class entities that own multiple destination paths, replacing the current destination-links-to-key model with a more intuitive key-centric architecture~~ *(implemented in v2.39.0)*
 
 ### Low Priority / Nice to Have
 
@@ -320,7 +320,7 @@ Cross-platform sync client (`sync-client/` subdirectory) with both a CLI tool (`
 8. **Backup and restore** - Backup entire library with metadata
 9. ~~**Cloud storage sync** - Sync to Dropbox, Google Drive, etc.~~ *(partially addressed in v2.26.0 — sync destinations support any mounted path including NAS/network shares)*
 10. ~~**Mobile app** - iOS/Android app for remote control~~ *(implemented in v2.9.0)*
-11. **Scheduling** - Automatic periodic syncing on schedule
+11. ~~**Scheduling** - Automatic periodic syncing on schedule~~ *(implemented in v2.39.0)*
 12. **Notification system** - Email/SMS alerts for completed operations
 13. ~~**Custom filename templates** - Configurable output filename patterns~~ *(implemented in v2.3.0)*
 14. ~~**Equalizer presets** - Apply audio processing (normalization, compression)~~ *(implemented in v2.32.0)*

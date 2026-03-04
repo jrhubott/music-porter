@@ -3,7 +3,7 @@ import SwiftUI
 @main
 struct MusicPorterApp: App {
     /// Independent iOS app version — only bump when iOS code changes.
-    static let appVersion = "1.7.1"
+    static let appVersion = "2.39.0"
 
     @State private var appState = AppState()
 
