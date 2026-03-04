@@ -108,6 +108,10 @@ struct SettingsView: View {
                         } label: {
                             Label("Server Dashboard", systemImage: "gauge.medium")
                         }
+                        Toggle("Remove orphaned files after sync", isOn: Binding(
+                            get: { appState.cleanDestination },
+                            set: { appState.cleanDestination = $0 }
+                        ))
                     }
                 }
 

@@ -1112,7 +1112,6 @@ def api_pipeline_run():
         clean_dest_enabled = (clean_destination_param
                               if clean_destination_param is not None
                               else clean_dest_default)
-        removed_track_db = mp.RemovedTrackDB(str(ctx.project_root / mp.DEFAULT_DB_FILE))
         orchestrator = mp.PipelineOrchestrator(
             logger, deps, config,
             quality_preset=quality_preset,
@@ -1128,7 +1127,6 @@ def api_pipeline_run():
             eq_config_override=eq_cli_override,
             project_root=ctx.project_root,
             cleanup_removed_tracks_enabled=cleanup_enabled,
-            removed_track_db=removed_track_db,
         )
 
         # Resolve sync destination by name
@@ -1447,57 +1445,6 @@ def api_files_sync_status(playlist_key):
         return jsonify({})
     return jsonify(ctx.sync_tracker.get_file_sync_map(playlist_key))
 
-
-@api_bp.route('/api/files/<playlist_key>/removed')
-def api_files_removed(playlist_key):
-    """Return tracks removed from a playlist since a given timestamp.
-
-    Includes both explicitly-removed tracks (from RemovedTrackDB) and
-    hidden tracks (hidden=1 in TrackDB) so sync clients treat both as deleted.
-
-    Query params:
-        since (float, optional): Unix timestamp; only tracks removed/hidden
-            after this point are returned. If omitted, all entries are returned.
-
-    Returns:
-        {removed_tracks: [{uuid, title, artist, album, display_filename,
-                           removed_at}]}
-    """
-    ctx = _ctx()
-    since_raw = request.args.get('since')
-    since = None
-    if since_raw:
-        try:
-            since = float(since_raw)
-        except ValueError:
-            return jsonify({'error': 'Invalid since parameter'}), 400
-
-    removed_track_db = mp.RemovedTrackDB(str(ctx.project_root / mp.DEFAULT_DB_FILE))
-    if since is not None:
-        explicit_removed = removed_track_db.get_removed_since(playlist_key, since)
-    else:
-        explicit_removed = removed_track_db.get_removed_by_playlist(playlist_key)
-
-    # Also include hidden tracks from TrackDB
-    hidden_tracks = ctx.track_db.get_hidden_tracks(playlist_key, since=since)
-    hidden_as_removed = [
-        {
-            'uuid': t['uuid'],
-            'title': t.get('title', ''),
-            'artist': t.get('artist', ''),
-            'album': t.get('album', ''),
-            'display_filename': _build_display_filename(t),
-            'removed_at': t.get('hidden_at'),
-        }
-        for t in hidden_tracks
-    ]
-
-    # Merge, deduplicating by UUID (explicit removal wins)
-    existing_uuids = {r['uuid'] for r in explicit_removed}
-    merged = explicit_removed + [
-        h for h in hidden_as_removed if h['uuid'] not in existing_uuids
-    ]
-    return jsonify({'removed_tracks': merged})
 
 
 @api_bp.route('/api/files/<playlist_key>/<filename>')

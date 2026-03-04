@@ -854,45 +854,6 @@ Per-file sync status map for a playlist. Lightweight endpoint with no ID3 reads.
 
 ---
 
-### GET /api/files/\<key\>/removed
-
-Return tracks that have been removed from a playlist's library (via library cleanup) since an optional timestamp. Used by sync clients to clean up their local caches and destination directories.
-
-**Path parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `key` | string | Playlist key |
-
-**Query parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `since` | float | No | Unix timestamp; only tracks removed after this point are returned. If omitted, all removals for the playlist are returned. |
-
-**Response:**
-
-```json
-{
-  "removed_tracks": [
-    {
-      "id": 1,
-      "uuid": "abc-123",
-      "playlist": "my_playlist",
-      "title": "Track Title",
-      "artist": "Artist Name",
-      "album": "Album Name",
-      "display_filename": "Artist Name - Track Title.mp3",
-      "removed_at": 1709500000.0
-    }
-  ]
-}
-```
-
-**Status codes:** 400 if `since` is not a valid float
-
----
-
 ### GET /api/files/\<key\>/download-all
 
 Stream a ZIP archive of all MP3s in a playlist. Files are stored uncompressed (ZIP_STORED) for streaming efficiency. Archive entries use human-readable display filenames.

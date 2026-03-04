@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, createWriteStream } from 'node:fs';
-import { access, rename, unlink } from 'node:fs/promises';
+import { access, readdir, rename, rmdir, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
@@ -16,7 +16,6 @@ import {
   getManifestFiles,
   createManifest,
   updateManifestPlaylist,
-  removeManifestFile,
 } from './manifest.js';
 
 export interface SyncOptions {
@@ -185,44 +184,6 @@ export class SyncEngine {
       const syncedFiles: Record<string, number> = {};
       const filesToDownload: FileInfo[] = [];
 
-      // Remove cache/destination files for tracks removed from server (SRS 23.5.2, 23.5.3)
-      if (!options.dryRun) {
-        try {
-          const since = manifest?.last_sync_at
-            ? Date.parse(manifest.last_sync_at) / 1000
-            : undefined;
-          const { removed_tracks } = await this.client.getRemovedFiles(key, since);
-          for (const removed of removed_tracks) {
-            if (cache) {
-              const wasRemoved = cache.removeEntry(removed.uuid);
-              if (wasRemoved) {
-                log('info', `Removed from cache: ${removed.display_filename} (track removed from server)`);
-              }
-            }
-            if (options.cleanDestination) {
-              const diskName = removed.display_filename;
-              for (const mKey of Object.keys(manifestFiles)) {
-                const parts = mKey.split('/');
-                if (parts[parts.length - 1] === diskName) {
-                  const filePath = join(destDir, mKey);
-                  try {
-                    await unlink(filePath);
-                  } catch {
-                    // File may not exist — ignore
-                  }
-                  delete manifestFiles[mKey];
-                  removeManifestFile(newManifest, key, mKey);
-                  log('info', `Removed from destination: ${diskName} (track removed from server)`);
-                  break;
-                }
-              }
-            }
-          }
-        } catch {
-          // Non-fatal — continue sync without cleanup
-        }
-      }
-
       // Check which files need downloading
       for (const file of files) {
         if (options.signal?.aborted) {
@@ -389,6 +350,30 @@ export class SyncEngine {
       }
 
       if (aborted) break;
+    }
+
+    // Scan-based destination cleanup (mirror mode)
+    if (options.cleanDestination && !aborted && !options.dryRun && existsSync(destDir)) {
+      try {
+        const expectedPaths = new Set<string>();
+        for (const playlist of Object.values(newManifest.playlists)) {
+          for (const relPath of Object.keys(playlist.files)) {
+            expectedPaths.add(join(destDir, relPath));
+          }
+        }
+        const mp3s = await findMp3s(destDir);
+        for (const absPath of mp3s) {
+          if (!expectedPaths.has(absPath)) {
+            try {
+              await unlink(absPath);
+              log('info', `Removed orphan: ${absPath.slice(destDir.length + 1)}`);
+            } catch { /* ignore */ }
+          }
+        }
+        await pruneEmptyDirs(destDir);
+      } catch {
+        // Non-fatal — cleanup failure does not abort the sync
+      }
     }
 
     const phase = aborted ? 'aborted' : 'complete';
@@ -661,4 +646,44 @@ export class SyncEngine {
     }
   }
 
+}
+
+/** Recursively collect all .mp3 file paths under a directory. */
+async function findMp3s(dir: string): Promise<string[]> {
+  const results: string[] = [];
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return results;
+  }
+  for (const entry of entries) {
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...await findMp3s(fullPath));
+    } else if (entry.isFile() && entry.name.endsWith('.mp3')) {
+      results.push(fullPath);
+    }
+  }
+  return results;
+}
+
+/** Remove empty subdirectories under a directory (deepest first). */
+async function pruneEmptyDirs(dir: string): Promise<void> {
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      const subdir = join(dir, entry.name);
+      await pruneEmptyDirs(subdir);
+      try {
+        const remaining = await readdir(subdir);
+        if (remaining.length === 0) await rmdir(subdir);
+      } catch { /* ignore */ }
+    }
+  }
 }

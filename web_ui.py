@@ -70,9 +70,6 @@ mp.prune_audit_entries(retention_days=_startup_config.get_setting(
     'audit_retention_days', mp.DEFAULT_AUDIT_RETENTION_DAYS))
 mp.prune_task_history(retention_days=_startup_config.get_setting(
     'task_history_retention_days', mp.DEFAULT_TASK_HISTORY_RETENTION_DAYS))
-mp.prune_removed_tracks(retention_days=_startup_config.get_setting(
-    'removed_tracks_retention_days', mp.DEFAULT_REMOVED_TRACKS_RETENTION_DAYS))
-
 mp.load_output_profiles(_startup_config)
 
 
@@ -821,11 +818,6 @@ class MaintenanceScheduler:
                 retention_days=config.get_setting(
                     'task_history_retention_days',
                     mp.DEFAULT_TASK_HISTORY_RETENTION_DAYS))
-            mp.prune_removed_tracks(
-                db_path=db_path,
-                retention_days=config.get_setting(
-                    'removed_tracks_retention_days',
-                    mp.DEFAULT_REMOVED_TRACKS_RETENTION_DAYS))
             self._jobs_db.upsert(
                 'maintenance',
                 last_run_time=time.time(),
