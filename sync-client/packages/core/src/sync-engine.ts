@@ -353,10 +353,15 @@ export class SyncEngine {
     }
 
     // Scan-based destination cleanup (mirror mode)
+    // expectedPaths is built from only the synced playlists — files from other playlists
+    // are treated as orphans and removed. This makes the destination an exact mirror of
+    // the selected playlists.
     if (options.cleanDestination && !aborted && !options.dryRun && existsSync(destDir)) {
       try {
         const expectedPaths = new Set<string>();
-        for (const playlist of Object.values(newManifest.playlists)) {
+        for (const { key } of playlistFileList) {
+          const playlist = newManifest.playlists[key];
+          if (!playlist) continue;
           for (const relPath of Object.keys(playlist.files)) {
             expectedPaths.add(join(destDir, relPath));
           }
