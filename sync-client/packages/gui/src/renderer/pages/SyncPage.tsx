@@ -237,29 +237,33 @@ export function SyncPage() {
   const profile = serverProfiles[activeProfile];
   const usbDir = profile?.usb_dir ?? '';
 
-  async function loadSyncStatus(path: string, driveName?: string) {
+  async function loadSyncStatus(path: string, driveName?: string, applyPrefs = true) {
     try {
       const destName = await ipc.resolveDestination(path, driveName);
       if (destName) {
         const status = await ipc.getSyncStatus(destName);
         setDestSyncStatus(status);
-        // Auto-apply saved playlist prefs for this destination
-        const destMeta = localDestinations.find((d) => d.name === destName);
-        const prefs = destMeta?.playlist_prefs ?? status.playlist_prefs ?? null;
-        if (prefs && prefs.length > 0) {
-          setSelectedPlaylists(new Set(prefs));
-        } else {
-          clearSelection();
+        if (applyPrefs) {
+          // Auto-apply saved playlist prefs for this destination
+          const destMeta = localDestinations.find((d) => d.name === destName);
+          const prefs = destMeta?.playlist_prefs ?? status.playlist_prefs ?? null;
+          if (prefs && prefs.length > 0) {
+            setSelectedPlaylists(new Set(prefs));
+          } else {
+            clearSelection();
+          }
         }
       } else {
         setDestSyncStatus(null);
       }
     } catch {
       setDestSyncStatus(null);
-      // Offline fallback: read local manifest for playlist pre-selection
-      const keys = await ipc.readManifestPlaylistKeys(path).catch(() => []);
-      if (keys.length > 0) {
-        setSelectedPlaylists(new Set(keys));
+      if (applyPrefs) {
+        // Offline fallback: read local manifest for playlist pre-selection
+        const keys = await ipc.readManifestPlaylistKeys(path).catch(() => []);
+        if (keys.length > 0) {
+          setSelectedPlaylists(new Set(keys));
+        }
       }
     }
   }
@@ -381,8 +385,8 @@ export function SyncPage() {
           setDrives(updated);
         }
       } else {
-        // Refresh sync status so badges reflect the completed sync
-        loadSyncStatus(destPath, syncDrive?.name);
+        // Refresh sync status so badges reflect the completed sync (don't re-apply prefs)
+        loadSyncStatus(destPath, syncDrive?.name, false);
       }
     } catch {
       // Error handled via progress
