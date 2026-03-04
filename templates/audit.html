@@ -162,6 +162,7 @@ let currentOffset = 0;
 let currentRawConsumed = 0;
 let offsetHistory = [];
 let autoRefreshInterval = null;
+let auditEntryMap = {};
 
 function statusBadge(status) {
   const map = {
@@ -226,6 +227,7 @@ function collapseConsecutive(entries) {
 }
 
 async function loadAudit() {
+  auditEntryMap = {};
   const f = getFilters();
   const filterParams = {};
   if (f.operation) filterParams.operation = f.operation;
@@ -272,11 +274,11 @@ async function loadAudit() {
         ? `${expandBtn}<code>${e.operation}</code> <span class="badge bg-secondary">&times;${g.count}</span>`
         : `<code>${e.operation}</code>`;
       const detailBtn = (entry) => {
-        const disabled = !entry.params ? ' disabled' : '';
-        const onclick = entry.params
-          ? ` onclick='showParams(${JSON.stringify(JSON.stringify(entry))})'`
-          : '';
-        return `<button class="btn btn-outline-secondary btn-sm py-0 px-1${disabled}"${onclick}${disabled ? ' disabled' : ''}><i class="bi bi-code-square"></i></button>`;
+        auditEntryMap[entry.id] = entry;
+        const hasParams = !!entry.params;
+        const disabledAttr = hasParams ? '' : ' disabled';
+        const onclickAttr = hasParams ? ` onclick="showParams(${entry.id})"` : '';
+        return `<button class="btn btn-outline-secondary btn-sm py-0 px-1"${onclickAttr}${disabledAttr}><i class="bi bi-code-square"></i></button>`;
       };
       const subRows = g.count > 1
         ? g.entries.map(se => `
@@ -344,8 +346,9 @@ function loadStats() {
   });
 }
 
-function showParams(jsonStr) {
-  const entry = JSON.parse(jsonStr);
+function showParams(id) {
+  const entry = auditEntryMap[id];
+  if (!entry) return;
   const content = {
     id: entry.id,
     timestamp: entry.timestamp,
