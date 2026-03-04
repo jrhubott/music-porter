@@ -431,6 +431,7 @@ func recordClientSync(
         filesCopied: Int,
         filesSkipped: Int,
         filesFailed: Int,
+        orphanedCleaned: Int = 0,
         error: String? = nil
     ) async {
         var body: [String: Any] = [
@@ -439,6 +440,7 @@ func recordClientSync(
             "files_copied": filesCopied,
             "files_skipped": filesSkipped,
             "files_failed": filesFailed,
+            "orphaned_cleaned": orphanedCleaned,
         ]
         if let err = error { body["error"] = err }
         let _: OkResponse? = try? await postAny("/api/sync/client-complete", body: body)

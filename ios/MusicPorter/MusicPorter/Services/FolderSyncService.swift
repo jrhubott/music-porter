@@ -283,6 +283,7 @@ final class FolderSyncService {
         }
 
         // Scan-based destination cleanup (mirror mode).
+        var orphansCleaned = 0
         if cleanDestination && !(isCancelled || Task.isCancelled) {
             let fm = FileManager.default
             if let enumerator = fm.enumerator(
@@ -294,7 +295,9 @@ final class FolderSyncService {
                     where fileURL.pathExtension.lowercased() == "mp3"
                 {
                     if !syncedFileURLs.contains(fileURL) {
-                        try? fm.removeItem(at: fileURL)
+                        if (try? fm.removeItem(at: fileURL)) != nil {
+                            orphansCleaned += 1
+                        }
                     }
                 }
             }
@@ -326,7 +329,8 @@ final class FolderSyncService {
             status: finalStatus,
             filesCopied: filesCopied,
             filesSkipped: filesSkipped,
-            filesFailed: filesFailed
+            filesFailed: filesFailed,
+            orphanedCleaned: orphansCleaned
         )
 
         lastResult = FolderSyncResult(

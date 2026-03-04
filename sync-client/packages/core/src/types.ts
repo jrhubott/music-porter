@@ -220,6 +220,7 @@ export interface SyncResult {
   copied: number;
   skipped: number;
   failed: number;
+  cleaned: number;
   aborted: boolean;
   durationMs: number;
   destError?: string;

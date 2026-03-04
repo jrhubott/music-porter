@@ -432,6 +432,7 @@ export class APIClient {
     copied: number,
     skipped: number,
     failed: number,
+    cleaned = 0,
     error?: string,
   ): Promise<void> {
     const body: Record<string, unknown> = {
@@ -440,6 +441,7 @@ export class APIClient {
       files_copied: copied,
       files_skipped: skipped,
       files_failed: failed,
+      orphaned_cleaned: cleaned,
     };
     if (error) body['error'] = error;
     const url = this.buildURL('/api/sync/client-complete');

@@ -170,6 +170,7 @@ export class SyncEngine {
     let totalCopied = 0;
     let totalSkipped = 0;
     let totalFailed = 0;
+    let totalCleaned = 0;
     let processed = 0;
     let aborted = false;
     let destConflict: string | undefined;
@@ -371,6 +372,7 @@ export class SyncEngine {
           if (!expectedPaths.has(absPath)) {
             try {
               await unlink(absPath);
+              totalCleaned++;
               log('info', `Removed orphan: ${absPath.slice(destDir.length + 1)}`);
             } catch { /* ignore */ }
           }
@@ -396,7 +398,7 @@ export class SyncEngine {
       const finalStatus = aborted ? 'cancelled' : 'completed';
       try {
         await this.client.completeSyncRun(
-          syncTaskId, finalStatus, totalCopied, totalSkipped, totalFailed,
+          syncTaskId, finalStatus, totalCopied, totalSkipped, totalFailed, totalCleaned,
         );
       } catch {
         log('warn', 'Failed to complete sync run record on server');
@@ -408,6 +410,7 @@ export class SyncEngine {
       copied: totalCopied,
       skipped: totalSkipped,
       failed: totalFailed,
+      cleaned: totalCleaned,
       aborted,
       durationMs: Date.now() - startTime,
       destError: destConflict,
@@ -554,6 +557,7 @@ export class SyncEngine {
       copied: totalCopied,
       skipped: totalSkipped,
       failed: totalFailed,
+      cleaned: 0,
       aborted,
       durationMs: Date.now() - startTime,
     };
