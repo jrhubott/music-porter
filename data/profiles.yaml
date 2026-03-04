@@ -14,7 +14,7 @@ output:
     id3_versions:
     - v2.3
     artwork_size: 100
-    filename: '{artist} - {title}'
+    filename: '{playlist_key} - {artist} - {title}'
     directory: ''
     usb_dir: RZR/Music
   basic:
