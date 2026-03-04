@@ -70,6 +70,7 @@ RE_UNIMPLEMENTED_FEATURE = re.compile(r"^(\d+\.\s+)(?!~~)(.*)")
 # Commit message prefixes to exclude from release notes (housekeeping)
 HOUSEKEEPING_PREFIXES = (
     "set next dev version",
+    "set dev version",
     "update version to",
     "merge branch",
     "merge remote-tracking",
