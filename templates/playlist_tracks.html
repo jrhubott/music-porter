@@ -1,0 +1,487 @@
+{% extends "base.html" %}
+{% block title %}Track Browser - Music Porter{% endblock title %}
+{% block content %}
+<style>
+  .track-row.is-hidden { opacity: 0.45; }
+  .track-row.is-hidden td { color: #888; }
+  .art-cell { width: 52px; }
+  .art-thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; }
+  .art-placeholder { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; background: #2a2a3e; border-radius: 4px; color: #666; font-size: 1.1rem; }
+  .title-col { min-width: 160px; }
+  .album-col { min-width: 120px; }
+  .actions-col { min-width: 140px; white-space: nowrap; }
+  .sort-arrow { font-size: .7rem; opacity: .6; margin-left: 2px; }
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { background: rgba(255,255,255,.05); }
+  .filter-chip { cursor: pointer; }
+  .filter-chip.active { background-color: var(--bs-primary) !important; border-color: var(--bs-primary) !important; color: #fff; }
+  #tableContainer { max-height: calc(100vh - 280px); overflow-y: auto; }
+  #trackTable thead th { position: sticky; top: 0; z-index: 10; background: #212529; }
+  .inline-confirm { display: none; }
+  .spinner-sm { width: 1rem; height: 1rem; }
+</style>
+
+<div class="d-flex align-items-center mb-3 gap-2 flex-wrap">
+  <a href="/sources" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-arrow-left"></i> Sources
+  </a>
+  <h5 class="mb-0" id="pageTitle">Tracks</h5>
+  <span class="badge bg-secondary" id="visibleCount">0</span>
+  <div class="ms-auto d-flex gap-2 flex-wrap align-items-center">
+    <input type="text" class="form-control form-control-sm" id="searchBox" placeholder="Search title, artist, album…" style="width:200px">
+    <button class="btn btn-sm btn-outline-secondary" id="lockAllBtn" title="Lock all tracks">
+      <i class="bi bi-lock-fill"></i> Lock All
+    </button>
+    <button class="btn btn-sm btn-outline-secondary" id="unlockAllBtn" title="Unlock all tracks">
+      <i class="bi bi-unlock-fill"></i> Unlock All
+    </button>
+  </div>
+</div>
+
+<!-- Filter toolbar -->
+<div class="d-flex gap-2 mb-3 flex-wrap">
+  <div class="btn-group btn-group-sm" role="group" aria-label="Conversion status">
+    <button type="button" class="btn btn-outline-secondary filter-chip active" data-filter="status" data-value="all">All</button>
+    <button type="button" class="btn btn-outline-secondary filter-chip" data-filter="status" data-value="converted">Converted</button>
+    <button type="button" class="btn btn-outline-secondary filter-chip" data-filter="status" data-value="source_only">Source Only</button>
+  </div>
+  <div class="btn-group btn-group-sm" role="group" aria-label="Lock state">
+    <button type="button" class="btn btn-outline-secondary filter-chip active" data-filter="lock" data-value="all">All</button>
+    <button type="button" class="btn btn-outline-secondary filter-chip" data-filter="lock" data-value="locked">Locked</button>
+    <button type="button" class="btn btn-outline-secondary filter-chip" data-filter="lock" data-value="unlocked">Unlocked</button>
+  </div>
+  <button type="button" class="btn btn-sm btn-outline-secondary filter-chip" data-filter="hidden" data-value="show" id="showHiddenBtn">
+    <i class="bi bi-eye-slash"></i> Show Hidden
+  </button>
+</div>
+
+<!-- Track table -->
+<div id="tableContainer">
+  <table class="table table-sm table-hover align-middle mb-0" id="trackTable">
+    <thead class="table-dark">
+      <tr>
+        <th class="art-cell"></th>
+        <th class="sortable title-col" data-sort="title">Title / Artist <span class="sort-arrow" id="sort-title">▲</span></th>
+        <th class="sortable album-col" data-sort="album">Album <span class="sort-arrow d-none" id="sort-album"></span></th>
+        <th class="sortable" data-sort="duration_s">Duration <span class="sort-arrow d-none" id="sort-duration_s"></span></th>
+        <th class="sortable" data-sort="has_mp3">Status <span class="sort-arrow d-none" id="sort-has_mp3"></span></th>
+        <th class="actions-col">Actions</th>
+      </tr>
+    </thead>
+    <tbody id="trackTbody">
+      <tr><td colspan="6" class="text-center text-muted py-4">Loading…</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Edit Metadata Modal -->
+<div class="modal fade" id="editModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Edit Track Metadata</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" style="max-height:65vh;overflow-y:auto">
+        <input type="hidden" id="editUuid">
+        <div class="row g-3">
+          <div class="col-md-8"><label class="form-label small">Title</label><input type="text" class="form-control form-control-sm" id="editTitle"></div>
+          <div class="col-md-4"><label class="form-label small">Year</label><input type="number" class="form-control form-control-sm" id="editYear"></div>
+          <div class="col-md-6"><label class="form-label small">Artist</label><input type="text" class="form-control form-control-sm" id="editArtist"></div>
+          <div class="col-md-6"><label class="form-label small">Album Artist</label><input type="text" class="form-control form-control-sm" id="editAlbumArtist"></div>
+          <div class="col-md-6"><label class="form-label small">Album</label><input type="text" class="form-control form-control-sm" id="editAlbum"></div>
+          <div class="col-md-6"><label class="form-label small">Genre</label><input type="text" class="form-control form-control-sm" id="editGenre"></div>
+          <div class="col-md-3"><label class="form-label small">Track #</label><input type="number" class="form-control form-control-sm" id="editTrackNumber"></div>
+          <div class="col-md-3"><label class="form-label small">Track Total</label><input type="number" class="form-control form-control-sm" id="editTrackTotal"></div>
+          <div class="col-md-3"><label class="form-label small">Disc #</label><input type="number" class="form-control form-control-sm" id="editDiscNumber"></div>
+          <div class="col-md-3"><label class="form-label small">Disc Total</label><input type="number" class="form-control form-control-sm" id="editDiscTotal"></div>
+          <div class="col-md-6"><label class="form-label small">Composer</label><input type="text" class="form-control form-control-sm" id="editComposer"></div>
+          <div class="col-md-3"><label class="form-label small">BPM</label><input type="number" class="form-control form-control-sm" id="editBpm"></div>
+          <div class="col-md-3"><label class="form-label small">Compilation</label><div class="form-check mt-2"><input class="form-check-input" type="checkbox" id="editCompilation"><label class="form-check-label small" for="editCompilation">Yes</label></div></div>
+          <div class="col-md-6"><label class="form-label small">Grouping</label><input type="text" class="form-control form-control-sm" id="editGrouping"></div>
+          <div class="col-md-6"><label class="form-label small">Copyright</label><input type="text" class="form-control form-control-sm" id="editCopyright"></div>
+          <div class="col-12"><label class="form-label small">Comment</label><input type="text" class="form-control form-control-sm" id="editComment"></div>
+          <div class="col-12"><label class="form-label small">Lyrics</label><textarea class="form-control form-control-sm" id="editLyrics" rows="4"></textarea></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="editSaveBtn">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const PLAYLIST_KEY = {{ playlist_key | tojson }};
+let tracks = [];
+let sortCol = 'title';
+let sortAsc = true;
+let filterStatus = 'all';   // all | converted | source_only
+let filterLock   = 'all';   // all | locked | unlocked
+let showHidden   = false;
+let searchText   = '';
+
+// ── Load ─────────────────────────────────────────────────────────
+async function loadTracks() {
+  const r = await fetch(`/api/playlists/${PLAYLIST_KEY}/tracks`);
+  if (!r.ok) { document.getElementById('trackTbody').innerHTML = '<tr><td colspan="6" class="text-center text-danger">Failed to load tracks</td></tr>'; return; }
+  tracks = await r.json();
+
+  // Load playlist name for page title
+  try {
+    const pr = await fetch('/api/playlists');
+    if (pr.ok) {
+      const playlists = await pr.json();
+      const pl = playlists.find(p => p.key === PLAYLIST_KEY);
+      if (pl) document.getElementById('pageTitle').textContent = pl.name;
+    }
+  } catch (_) {}
+
+  renderTable();
+}
+
+// ── Format helpers ────────────────────────────────────────────────
+function fmtDuration(s) {
+  if (!s && s !== 0) return '';
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${m}:${String(sec).padStart(2,'0')}`;
+}
+
+function hasMp3(track) {
+  return !!track.file_path;
+}
+
+// ── Sorting ───────────────────────────────────────────────────────
+function getVal(track, col) {
+  if (col === 'has_mp3') return hasMp3(track) ? 1 : 0;
+  return (track[col] || '').toString().toLowerCase();
+}
+
+function sortedTracks(list) {
+  return [...list].sort((a, b) => {
+    const av = getVal(a, sortCol), bv = getVal(b, sortCol);
+    if (av < bv) return sortAsc ? -1 : 1;
+    if (av > bv) return sortAsc ? 1 : -1;
+    return 0;
+  });
+}
+
+// ── Filter ────────────────────────────────────────────────────────
+function visibleTracks() {
+  return sortedTracks(tracks.filter(t => {
+    if (!showHidden && t.hidden) return false;
+    if (filterStatus === 'converted' && !hasMp3(t)) return false;
+    if (filterStatus === 'source_only' && hasMp3(t)) return false;
+    if (filterLock === 'locked' && !t.locked) return false;
+    if (filterLock === 'unlocked' && t.locked) return false;
+    if (searchText) {
+      const q = searchText.toLowerCase();
+      const haystack = `${t.title||''} ${t.artist||''} ${t.album||''}`.toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    return true;
+  }));
+}
+
+// ── Render ────────────────────────────────────────────────────────
+function renderTable() {
+  const visible = visibleTracks();
+  document.getElementById('visibleCount').textContent = visible.length;
+
+  const tbody = document.getElementById('trackTbody');
+  if (visible.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">No tracks match current filters</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = visible.map(t => renderRow(t)).join('');
+
+  // Attach IntersectionObserver for lazy art loading
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        const el = entry.target;
+        const uuid = el.dataset.uuid;
+        const track = tracks.find(t => t.uuid === uuid);
+        if (track && track.cover_art_path) {
+          const img = document.createElement('img');
+          img.className = 'art-thumb';
+          img.src = `/api/files/${PLAYLIST_KEY}/${track.uuid}.mp3/artwork`;
+          img.onerror = () => { img.replaceWith(placeholderEl()); };
+          el.replaceWith(img);
+        }
+        observer.unobserve(el);
+      }
+    });
+  }, { rootMargin: '200px' });
+
+  tbody.querySelectorAll('.art-placeholder[data-uuid]').forEach(el => observer.observe(el));
+}
+
+function placeholderEl() {
+  const d = document.createElement('div');
+  d.className = 'art-placeholder';
+  d.innerHTML = '<i class="bi bi-music-note"></i>';
+  return d;
+}
+
+function renderRow(t) {
+  const hiddenClass = t.hidden ? ' is-hidden' : '';
+
+  // Art cell
+  const artCell = t.cover_art_path
+    ? `<div class="art-placeholder" data-uuid="${t.uuid}"><i class="bi bi-music-note"></i></div>`
+    : `<div class="art-placeholder"><i class="bi bi-music-note"></i></div>`;
+
+  // Title/Artist cell
+  const lockIcon = t.locked ? ' <i class="bi bi-lock-fill text-warning small" title="Locked"></i>' : '';
+  const hiddenBadge = t.hidden ? ' <span class="badge bg-secondary ms-1">hidden</span>' : '';
+  const titleCell = `<div class="fw-semibold">${esc(t.title||'')}${lockIcon}${hiddenBadge}</div>
+    <div class="small text-muted">${esc(t.artist||'')}</div>`;
+
+  // Status badge
+  const statusBadge = hasMp3(t)
+    ? '<span class="badge bg-success">Converted</span>'
+    : '<span class="badge bg-warning text-dark">Source only</span>';
+
+  // Actions
+  let actions;
+  if (t.hidden) {
+    actions = `
+      <button class="btn btn-sm btn-outline-secondary py-0 px-1 act-unhide" data-uuid="${t.uuid}" title="Unhide"><i class="bi bi-eye"></i></button>`;
+  } else {
+    const dlHref = hasMp3(t) ? `/api/files/${PLAYLIST_KEY}/${t.uuid}.mp3` : '#';
+    const dlDisabled = hasMp3(t) ? '' : ' disabled';
+    const lockBtn = t.locked
+      ? `<button class="btn btn-sm btn-outline-warning py-0 px-1 act-unlock" data-uuid="${t.uuid}" title="Unlock"><i class="bi bi-lock-fill"></i></button>`
+      : `<button class="btn btn-sm btn-outline-secondary py-0 px-1 act-lock" data-uuid="${t.uuid}" title="Lock"><i class="bi bi-unlock-fill"></i></button>`;
+    actions = `
+      <button class="btn btn-sm btn-outline-primary py-0 px-1 act-edit" data-uuid="${t.uuid}" title="Edit metadata"><i class="bi bi-pencil"></i></button>
+      <a href="${dlHref}" class="btn btn-sm btn-outline-secondary py-0 px-1${dlDisabled}" title="Download" download><i class="bi bi-download"></i></a>
+      <button class="btn btn-sm btn-outline-secondary py-0 px-1 act-reconvert" data-uuid="${t.uuid}" title="Re-convert"><i class="bi bi-arrow-clockwise"></i></button>
+      ${lockBtn}
+      <button class="btn btn-sm btn-outline-danger py-0 px-1 act-hide-start" data-uuid="${t.uuid}" title="Hide track"><i class="bi bi-eye-slash"></i></button>
+      <span class="inline-confirm d-none" id="confirm-${t.uuid}">
+        <small class="text-warning me-1">Hide?</small>
+        <button class="btn btn-sm btn-warning py-0 px-1 act-hide-confirm" data-uuid="${t.uuid}">Yes</button>
+        <button class="btn btn-sm btn-secondary py-0 px-1 act-hide-cancel" data-uuid="${t.uuid}">No</button>
+      </span>`;
+  }
+
+  return `<tr class="track-row${hiddenClass}" data-uuid="${t.uuid}">
+    <td class="art-cell">${artCell}</td>
+    <td class="title-col">${titleCell}</td>
+    <td class="album-col small">${esc(t.album||'')}</td>
+    <td class="small">${fmtDuration(t.duration_s)}</td>
+    <td>${statusBadge}</td>
+    <td class="actions-col">${actions}</td>
+  </tr>`;
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Event delegation ──────────────────────────────────────────────
+document.getElementById('trackTbody').addEventListener('click', async e => {
+  const btn = e.target.closest('button, a.act-edit');
+  if (!btn) return;
+  const uuid = btn.dataset.uuid;
+
+  if (btn.classList.contains('act-edit')) { openEdit(uuid); return; }
+  if (btn.classList.contains('act-hide-start')) {
+    const row = document.querySelector(`tr[data-uuid="${uuid}"]`);
+    row.querySelectorAll('.act-edit,.act-reconvert,.act-lock,.act-unlock,.act-hide-start').forEach(b => b.classList.add('d-none'));
+    row.querySelector(`.inline-confirm`).classList.remove('d-none');
+    return;
+  }
+  if (btn.classList.contains('act-hide-cancel')) {
+    const row = document.querySelector(`tr[data-uuid="${uuid}"]`);
+    row.querySelectorAll('.act-edit,.act-reconvert,.act-lock,.act-unlock,.act-hide-start').forEach(b => b.classList.remove('d-none'));
+    row.querySelector('.inline-confirm').classList.add('d-none');
+    return;
+  }
+  if (btn.classList.contains('act-hide-confirm')) { await doHide(uuid, true); return; }
+  if (btn.classList.contains('act-unhide')) { await doHide(uuid, false); return; }
+  if (btn.classList.contains('act-lock')) { await doLock(uuid, true); return; }
+  if (btn.classList.contains('act-unlock')) { await doLock(uuid, false); return; }
+  if (btn.classList.contains('act-reconvert')) { await doReconvert(uuid, btn); return; }
+});
+
+// ── Actions ───────────────────────────────────────────────────────
+async function doHide(uuid, hidden) {
+  const action = hidden ? 'hide' : 'unhide';
+  const r = await fetch(`/api/playlists/${PLAYLIST_KEY}/tracks/${uuid}/${action}`, {method:'POST'});
+  if (!r.ok) { alert('Failed: ' + (await r.json()).error); return; }
+  const t = tracks.find(t => t.uuid === uuid);
+  if (t) t.hidden = hidden ? 1 : 0;
+  renderTable();
+}
+
+async function doLock(uuid, locked) {
+  const action = locked ? 'lock' : 'unlock';
+  const r = await fetch(`/api/playlists/${PLAYLIST_KEY}/tracks/${uuid}/${action}`, {method:'POST'});
+  if (!r.ok) { alert('Failed: ' + (await r.json()).error); return; }
+  const t = tracks.find(t => t.uuid === uuid);
+  if (t) t.locked = locked ? 1 : 0;
+  renderTable();
+}
+
+async function doReconvert(uuid, btn) {
+  const origHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-sm"></span>';
+  const r = await fetch(`/api/playlists/${PLAYLIST_KEY}/tracks/${uuid}/reconvert`, {method:'POST'});
+  if (!r.ok) {
+    btn.disabled = false; btn.innerHTML = origHtml;
+    alert('Failed: ' + (await r.json()).error);
+    return;
+  }
+  const {task_id} = await r.json();
+  // Poll task until done
+  const poll = async () => {
+    const tr = await fetch(`/api/tasks/${task_id}`);
+    if (!tr.ok) { btn.disabled = false; btn.innerHTML = origHtml; return; }
+    const task = await tr.json();
+    if (task.status === 'running' || task.status === 'pending') {
+      setTimeout(poll, 1500);
+    } else {
+      btn.disabled = false; btn.innerHTML = origHtml;
+      if (task.status === 'completed') {
+        // Reload track from server to get updated file_path
+        const tr2 = await fetch(`/api/playlists/${PLAYLIST_KEY}/tracks`);
+        if (tr2.ok) {
+          tracks = await tr2.json();
+          renderTable();
+        }
+      } else {
+        alert('Re-convert failed: ' + (task.error || 'Unknown error'));
+      }
+    }
+  };
+  poll();
+}
+
+// ── Edit modal ────────────────────────────────────────────────────
+const editModal = new bootstrap.Modal(document.getElementById('editModal'));
+function openEdit(uuid) {
+  const t = tracks.find(t => t.uuid === uuid);
+  if (!t) return;
+  document.getElementById('editUuid').value = uuid;
+  document.getElementById('editTitle').value = t.title || '';
+  document.getElementById('editArtist').value = t.artist || '';
+  document.getElementById('editAlbum').value = t.album || '';
+  document.getElementById('editAlbumArtist').value = t.album_artist || '';
+  document.getElementById('editGenre').value = t.genre || '';
+  document.getElementById('editYear').value = t.year || '';
+  document.getElementById('editTrackNumber').value = t.track_number || '';
+  document.getElementById('editTrackTotal').value = t.track_total || '';
+  document.getElementById('editDiscNumber').value = t.disc_number || '';
+  document.getElementById('editDiscTotal').value = t.disc_total || '';
+  document.getElementById('editComposer').value = t.composer || '';
+  document.getElementById('editBpm').value = t.bpm || '';
+  document.getElementById('editCompilation').checked = !!t.compilation;
+  document.getElementById('editGrouping').value = t.grouping || '';
+  document.getElementById('editCopyright').value = t.copyright || '';
+  document.getElementById('editComment').value = t.comment || '';
+  document.getElementById('editLyrics').value = t.lyrics || '';
+  editModal.show();
+}
+
+document.getElementById('editSaveBtn').addEventListener('click', async () => {
+  const uuid = document.getElementById('editUuid').value;
+  const payload = {
+    title: document.getElementById('editTitle').value,
+    artist: document.getElementById('editArtist').value,
+    album: document.getElementById('editAlbum').value,
+    album_artist: document.getElementById('editAlbumArtist').value || null,
+    genre: document.getElementById('editGenre').value || null,
+    year: document.getElementById('editYear').value ? parseInt(document.getElementById('editYear').value) : null,
+    track_number: document.getElementById('editTrackNumber').value ? parseInt(document.getElementById('editTrackNumber').value) : null,
+    track_total: document.getElementById('editTrackTotal').value ? parseInt(document.getElementById('editTrackTotal').value) : null,
+    disc_number: document.getElementById('editDiscNumber').value ? parseInt(document.getElementById('editDiscNumber').value) : null,
+    disc_total: document.getElementById('editDiscTotal').value ? parseInt(document.getElementById('editDiscTotal').value) : null,
+    composer: document.getElementById('editComposer').value || null,
+    bpm: document.getElementById('editBpm').value ? parseInt(document.getElementById('editBpm').value) : null,
+    compilation: document.getElementById('editCompilation').checked ? 1 : null,
+    grouping: document.getElementById('editGrouping').value || null,
+    copyright: document.getElementById('editCopyright').value || null,
+    comment: document.getElementById('editComment').value || null,
+    lyrics: document.getElementById('editLyrics').value || null,
+  };
+  const r = await fetch(`/api/playlists/${PLAYLIST_KEY}/tracks/${uuid}`, {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) { alert('Save failed: ' + (await r.json()).error); return; }
+  const t = tracks.find(t => t.uuid === uuid);
+  if (t) Object.assign(t, payload);
+  editModal.hide();
+  renderTable();
+});
+
+// ── Sort / filter / search wiring ─────────────────────────────────
+document.querySelectorAll('th.sortable').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.sort;
+    if (sortCol === col) { sortAsc = !sortAsc; }
+    else { sortCol = col; sortAsc = true; }
+    // Update sort arrows
+    document.querySelectorAll('.sort-arrow').forEach(a => { a.textContent = ''; a.classList.add('d-none'); });
+    const arrow = document.getElementById(`sort-${col}`);
+    if (arrow) { arrow.textContent = sortAsc ? '▲' : '▼'; arrow.classList.remove('d-none'); }
+    renderTable();
+  });
+});
+
+document.querySelectorAll('.filter-chip[data-filter="status"]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-chip[data-filter="status"]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    filterStatus = btn.dataset.value;
+    renderTable();
+  });
+});
+
+document.querySelectorAll('.filter-chip[data-filter="lock"]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-chip[data-filter="lock"]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    filterLock = btn.dataset.value;
+    renderTable();
+  });
+});
+
+document.getElementById('showHiddenBtn').addEventListener('click', function() {
+  showHidden = !showHidden;
+  this.classList.toggle('active', showHidden);
+  renderTable();
+});
+
+document.getElementById('searchBox').addEventListener('input', function() {
+  searchText = this.value.trim();
+  renderTable();
+});
+
+document.getElementById('lockAllBtn').addEventListener('click', async () => {
+  if (!confirm('Lock all tracks in this playlist? The Converter will skip metadata updates for locked tracks.')) return;
+  const r = await fetch(`/api/playlists/${PLAYLIST_KEY}/lock-all`, {method:'POST'});
+  if (!r.ok) { alert('Failed'); return; }
+  tracks.forEach(t => { t.locked = 1; });
+  renderTable();
+});
+
+document.getElementById('unlockAllBtn').addEventListener('click', async () => {
+  const r = await fetch(`/api/playlists/${PLAYLIST_KEY}/unlock-all`, {method:'POST'});
+  if (!r.ok) { alert('Failed'); return; }
+  tracks.forEach(t => { t.locked = 0; });
+  renderTable();
+});
+
+// ── Init ──────────────────────────────────────────────────────────
+loadTracks();
+</script>
+{% endblock content %}
