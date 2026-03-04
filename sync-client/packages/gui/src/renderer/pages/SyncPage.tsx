@@ -76,6 +76,7 @@ export function SyncPage() {
   const [autoSyncDrives, setAutoSyncDrives] = useState<string[]>([]);
   const [ejectAfterSync, setEjectAfterSync] = useState(false);
   const [ejected, setEjected] = useState(false);
+  const [cleanDestination, setCleanDestination] = useState(false);
   const [localDestinations, setLocalDestinations] = useState<SyncDestination[]>([]);
   const [linkModalOpen, setLinkModalOpen] = useState(false);
   const [linkTargetName, setLinkTargetName] = useState('');
@@ -136,6 +137,7 @@ export function SyncPage() {
       setServerProfiles(settingsData.profiles);
       setAutoSyncDrives(prefs.autoSyncDrives);
       setEjectAfterSync(prefs.ejectAfterSync);
+      setCleanDestination(Boolean(settingsData.settings['clean_sync_destination']));
       setAutoPinNewPlaylists(autoPin);
       setLocalDestinations(localDests);
 
@@ -256,6 +258,11 @@ export function SyncPage() {
       }
     } catch {
       setDestSyncStatus(null);
+      // Offline fallback: read local manifest for playlist pre-selection
+      const keys = await ipc.readManifestPlaylistKeys(path).catch(() => []);
+      if (keys.length > 0) {
+        setSelectedPlaylists(new Set(keys));
+      }
     }
   }
 
@@ -349,6 +356,7 @@ export function SyncPage() {
         profile: activeProfile || undefined,
         force,
         offlineOnly: isOffline,
+        cleanDestination,
       });
       setLastSyncResult(result);
 
@@ -535,10 +543,13 @@ export function SyncPage() {
                           (sp) => sp.name === p.key || sp.name === p.name,
                         );
                         if (!syncInfo) return null;
+                        const s = syncInfo.sync_status;
+                        if (s === 'skipped')
+                          return <small className="text-muted d-block mt-1">skipped</small>;
+                        if (s === 'new' || syncInfo.is_new_playlist)
+                          return <small className="text-warning d-block mt-1">all new</small>;
                         if (syncInfo.new_files === 0)
                           return <small className="text-success d-block mt-1">synced</small>;
-                        if (syncInfo.is_new_playlist)
-                          return <small className="text-warning d-block mt-1">all new</small>;
                         return <small className="text-info d-block mt-1">{syncInfo.new_files} new</small>;
                       })()}
                     </div>
@@ -665,6 +676,22 @@ export function SyncPage() {
             Syncing {selectedPlaylists.size} playlist(s):{' '}
             {[...selectedPlaylists].join(', ')}
           </small>
+        </div>
+      )}
+
+      {/* Sync options */}
+      {!isOffline && (
+        <div className="form-check mb-3">
+          <input
+            type="checkbox"
+            id="cleanDestination"
+            className="form-check-input"
+            checked={cleanDestination}
+            onChange={(e) => setCleanDestination(e.target.checked)}
+          />
+          <label className="form-check-label" htmlFor="cleanDestination">
+            Remove destination files for tracks deleted from server
+          </label>
         </div>
       )}
 

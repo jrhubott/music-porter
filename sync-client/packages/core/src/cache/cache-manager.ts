@@ -221,6 +221,29 @@ export class CacheManager {
     return { playlistKey: key, total: totalFiles, cached, pinned };
   }
 
+  // ── Removal ──
+
+  /**
+   * Remove a cached entry by UUID — deletes the audio file from disk and removes
+   * the index entry. Returns true if the entry existed, false if not found.
+   */
+  removeEntry(uuid: string): boolean {
+    const entry = this.index.entries[uuid];
+    if (!entry) return false;
+    const filePath = this.entryPath(entry);
+    try {
+      if (existsSync(filePath)) {
+        unlinkSync(filePath);
+      }
+    } catch {
+      // Best-effort deletion
+    }
+    delete this.index.entries[uuid];
+    this.persistIndex();
+    removeEmptyDirs(this.cacheDir);
+    return true;
+  }
+
   // ── Staleness ──
 
   /**

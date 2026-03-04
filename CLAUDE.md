@@ -18,6 +18,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **No magic numbers** — define named constants for numeric values; avoid bare literals in logic
 
+## Architecture Principles
+
+- **Keep complexity in the server code wherever possible.** Add/update API methods to simplify client operations. Clients should call simple endpoints; the server handles the heavy lifting.
+
 ## Requirements Handling
 
 ### Workflow

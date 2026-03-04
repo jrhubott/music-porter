@@ -236,7 +236,15 @@ struct SyncStatusView: View {
                         Text("\(playlist.syncedFiles)/\(playlist.totalFiles)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        if playlist.isNewPlaylist {
+                        if playlist.syncStatus == "skipped" {
+                            Text("Skipped")
+                                .font(.caption2.weight(.bold))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(.gray.opacity(0.2))
+                                .foregroundStyle(.secondary)
+                                .clipShape(Capsule())
+                        } else if playlist.syncStatus == "new" || playlist.isNewPlaylist {
                             Text("NEW")
                                 .font(.caption2.weight(.bold))
                                 .padding(.horizontal, 5)

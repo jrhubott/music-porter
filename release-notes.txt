@@ -1,3 +1,28 @@
+Version 2.39.0 (2026-03-03):
+• Exclude first entry from group expand sub-rows to prevent duplicate display
+• Fix Entry Details button broken by single quotes in onclick attribute
+• Audit improvements: track removal trail, library audit phases, WebUI UX
+• DB index optimization + automatic data purge (SRS maintenance)
+• Phase 3: Client cache cleanup for removed tracks (SRS 23.5)
+• Phase 2: Orphan tracking and sync destination cleanup (SRS 23.3, 23.4)
+• Phase 1: Removed track detection and library cleanup (SRS 23.1, 23.2)
+• Start feature/track-removal-handling branch (v2.38.13)
+• Show all-destination synced count regardless of pref scope
+• Cap sync progress at 100% and add ios:// destination type
+• Fix sync status scoping, add sync_status field, and /health endpoint
+• Start feature/sync-status-fix branch
+• Pass playlist prefs to server on folder sync
+• Redesign LibraryView folder sync UI with per-row checkboxes and offline pre-selection
+• Fix folder sync to respect output profile and directory structure
+• Fix resolve destination response missing sync_status fields
+• Fix Task type inference in FolderSyncService
+• Register SyncManifest.swift and FolderSyncService.swift in Xcode project
+• Implement SRS-22 iOS folder sync (FolderSyncService)
+• Set branch version to 2.38.13-ios-folder-sync
+• Added PlaylistSelectionSheet.swift
+• iOS companion app updated to v2.39.0
+• Sync client updated to v2.39.0
+
 Version 2.38.12 (2026-03-02):
 • Remove pref funnel icon from all surfaces
 • Sync client updated to v1.5.4

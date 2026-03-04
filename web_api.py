@@ -922,6 +922,8 @@ def api_pipeline_run():
     sync_dest_name = data.get('sync_destination')
     eq_data = data.get('eq', {})
     no_eq = data.get('no_eq', False)
+    cleanup_removed_tracks = data.get('cleanup_removed_tracks')
+    clean_destination_param = data.get('clean_destination')
 
     if not auto and not playlist_key and not url:
         return jsonify({'error': 'Specify playlist, url, or auto'}), 400
@@ -952,6 +954,17 @@ def api_pipeline_run():
         elif eq_data and any(eq_data.values()):
             eq_cli_override = mp.EQConfig.from_dict(eq_data)
 
+        cleanup_default = config.get_setting(
+            'cleanup_removed_tracks', mp.DEFAULT_CLEANUP_REMOVED_TRACKS)
+        cleanup_enabled = (cleanup_removed_tracks
+                           if cleanup_removed_tracks is not None
+                           else cleanup_default)
+        clean_dest_default = config.get_setting(
+            'clean_sync_destination', mp.DEFAULT_CLEAN_SYNC_DESTINATION)
+        clean_dest_enabled = (clean_destination_param
+                              if clean_destination_param is not None
+                              else clean_dest_default)
+        removed_track_db = mp.RemovedTrackDB(str(ctx.project_root / mp.DEFAULT_DB_FILE))
         orchestrator = mp.PipelineOrchestrator(
             logger, deps, config,
             quality_preset=quality_preset,
@@ -966,6 +979,8 @@ def api_pipeline_run():
             eq_config_manager=eq_mgr,
             eq_config_override=eq_cli_override,
             project_root=ctx.project_root,
+            cleanup_removed_tracks_enabled=cleanup_enabled,
+            removed_track_db=removed_track_db,
         )
 
         # Resolve sync destination by name
@@ -992,6 +1007,8 @@ def api_pipeline_run():
                     sync_destination=sync_destination,
                     dry_run=dry_run, verbose=verbose,
                     quality_preset=quality_preset,
+                    cleanup_removed_tracks_enabled=cleanup_enabled,
+                    clean_destination_enabled=clean_dest_enabled,
                 )
                 aggregate.add_playlist_result(orchestrator.stats)
             if all_playlists:
@@ -1009,6 +1026,8 @@ def api_pipeline_run():
                 sync_destination=sync_destination,
                 dry_run=dry_run, verbose=verbose,
                 quality_preset=quality_preset,
+                cleanup_removed_tracks_enabled=cleanup_enabled,
+                clean_destination_enabled=clean_dest_enabled,
             )
             result_dict = _serialize_pipeline_result(pipeline_result)
             result_dict['success'] = pipeline_result.success
@@ -1279,6 +1298,35 @@ def api_files_sync_status(playlist_key):
     if not ctx.sync_tracker:
         return jsonify({})
     return jsonify(ctx.sync_tracker.get_file_sync_map(playlist_key))
+
+
+@api_bp.route('/api/files/<playlist_key>/removed')
+def api_files_removed(playlist_key):
+    """Return tracks removed from a playlist since a given timestamp.
+
+    Query params:
+        since (float, optional): Unix timestamp; only tracks removed after
+            this point are returned. If omitted, all removals are returned.
+
+    Returns:
+        {removed_tracks: [{uuid, title, artist, album, display_filename,
+                           removed_at}]}
+    """
+    ctx = _ctx()
+    since_raw = request.args.get('since')
+    since = None
+    if since_raw:
+        try:
+            since = float(since_raw)
+        except ValueError:
+            return jsonify({'error': 'Invalid since parameter'}), 400
+
+    removed_track_db = mp.RemovedTrackDB(str(ctx.project_root / mp.DEFAULT_DB_FILE))
+    if since is not None:
+        tracks = removed_track_db.get_removed_since(playlist_key, since)
+    else:
+        tracks = removed_track_db.get_removed_by_playlist(playlist_key)
+    return jsonify({'removed_tracks': tracks})
 
 
 @api_bp.route('/api/files/<playlist_key>/<filename>')
@@ -1782,6 +1830,11 @@ def api_sync_destination_resolve():
     if not path and not name:
         return jsonify({'error': 'At least path or name is required'}), 400
 
+    # Auto-prefix ios:// for iOS clients providing a bare path
+    if path and not any(path.startswith(s) for s in mp.KNOWN_DEST_SCHEMES):
+        if ctx.detect_source() == 'ios':
+            path = f'ios://{path}'
+
     result = ctx.sync_tracker.resolve_destination(
         path=path, name=name, drive_name=drive_name,
         link_to=link_to)
@@ -1797,13 +1850,7 @@ def api_sync_destination_resolve():
     # Include sync status summary
     status = ctx.sync_tracker.get_destination_status(
         dest.name, mp.get_audio_dir())
-    response['sync_status'] = {
-        'destinations': status.destinations,
-        'total_files': status.total_files,
-        'synced_files': status.synced_files,
-        'new_files': status.new_files,
-        'playlists': status.playlists,
-    }
+    response['sync_status'] = status.to_dict()
 
     return jsonify(response)
 
@@ -1824,6 +1871,7 @@ def api_sync_run():
     profile_name = data.get('profile', '')
     dry_run = data.get('dry_run', False)
     verbose = data.get('verbose', False)
+    clean_destination = data.get('clean_destination')
 
     # Resolve playlist keys: prefer playlist_keys list; fall back to
     # legacy playlist_key (single string) for backward compatibility.
@@ -1852,8 +1900,10 @@ def api_sync_run():
     if not dest:
         return jsonify({'error': f"Destination '{dest_name}' not found"}), 404
 
-    if dest.is_web_client:
-        return jsonify({'error': 'web-client destinations can only be synced from the browser'}), 400
+    if dest.type in mp.VIRTUAL_DEST_TYPES:
+        labels = {'web-client': 'the browser', 'ios': 'the iOS app'}
+        source = labels.get(dest.type, dest.type)
+        return jsonify({'error': f'{dest.type} destinations can only be synced from {source}'}), 400
 
     # Persist playlist prefs before dispatching (so they survive cancellation)
     ctx.sync_tracker.save_playlist_prefs(dest_name, playlist_keys)
@@ -1863,6 +1913,14 @@ def api_sync_run():
 
     def _run(task_id):
         logger = ctx.make_logger(task_id, verbose=verbose)
+        config = mp.ConfigManager(logger=logger, audit_logger=ctx.audit_logger,
+                                  audit_source=ctx.detect_source())
+        clean_default = config.get_setting(
+            'clean_sync_destination', mp.DEFAULT_CLEAN_SYNC_DESTINATION)
+        clean_dest = (clean_destination
+                      if clean_destination is not None
+                      else clean_default)
+
         display = ctx.make_display_handler(task_id)
         task = ctx.task_manager.get(task_id)
 
@@ -1881,13 +1939,17 @@ def api_sync_run():
             source_dir, dest_path=dest.path, sync_key=dest.sync_key,
             dry_run=dry_run,
             tag_applicator=tag_applicator, profile=profile,
-            playlist_name=playlist_name, playlist_keys=playlist_keys)
+            playlist_name=playlist_name, playlist_keys=playlist_keys,
+            clean_destination=clean_dest)
         return {
             'success': result.success,
             'files_found': result.files_found,
             'files_copied': result.files_copied,
             'files_skipped': result.files_skipped,
             'files_failed': result.files_failed,
+            'orphaned_detected': result.orphaned_detected,
+            'orphaned_cleaned': result.orphaned_cleaned,
+            'orphaned_bytes_freed': result.orphaned_bytes_freed,
         }
 
     task_id = ctx.task_manager.submit('sync', desc, _run,
@@ -1927,28 +1989,64 @@ def api_sync_status():
     keys = ctx.sync_tracker._get_keys()
     key_meta = {k['key_name']: k for k in keys}
 
+    creation_times = ctx.sync_tracker._get_playlist_creation_times()
+
     results = []
     for sync_key, dest_names in key_groups.items():
-        synced_counts = ctx.sync_tracker.get_synced_counts(sync_key)
-        total_synced = sum(synced_counts.values())
-
         info = key_meta.get(sync_key)
         last_sync = info['last_sync_at'] if info else 0
         group_name = (info.get('name') or '') if info else ''
         playlist_prefs = info.get('playlist_prefs') if info else None
-        synced_bytes = ctx.sync_tracker.get_synced_bytes(sync_key)
 
+        # Scope total_files to the group's playlists (prefs or all)
+        if playlist_prefs:
+            group_total = sum(
+                playlist_stats.get(p, 0) for p in playlist_prefs
+            )
+            scope = set(playlist_prefs)
+        else:
+            group_total = total_library_files
+            scope = set(playlist_stats.keys())
+
+        # Synced count: unfiltered (all playlists), capped per-playlist at
+        # library count to prevent stale-record inflation from deleted tracks
+        synced_counts = ctx.sync_tracker.get_synced_counts(sync_key)
+        total_synced = sum(
+            min(cnt, playlist_stats.get(pl, 0))
+            for pl, cnt in synced_counts.items()
+        )
+
+        # new_files uses pref-scoped synced so skipped playlists don't mask gaps
+        synced_in_scope = sum(
+            min(synced_counts.get(p, 0), playlist_stats.get(p, 0))
+            for p in scope
+        )
+
+        synced_bytes = ctx.sync_tracker.get_synced_bytes(
+            sync_key, playlist_prefs
+        )
+
+        # New playlists: created after last sync, within scope
+        new_playlists = 0
+        if last_sync > 0:
+            new_playlists = sum(
+                1 for p in scope
+                if creation_times.get(p, 0) > last_sync
+            )
+
+        orphaned_count = ctx.sync_tracker.get_orphaned_count(sync_key)
         results.append({
             'destinations': dest_names,
             'last_sync_at': last_sync,
-            'total_files': total_library_files,
+            'total_files': group_total,
             'synced_files': total_synced,
-            'new_files': total_library_files - total_synced,
-            'new_playlists': 0,
+            'new_files': max(0, group_total - synced_in_scope),
+            'new_playlists': new_playlists,
             'group_name': group_name,
             'playlist_prefs': playlist_prefs,
             'synced_bytes': synced_bytes,
             'destination_details': dest_details_map.get(sync_key, []),
+            'orphaned_files': orphaned_count,
         })
     return jsonify(results)
 
@@ -1981,41 +2079,81 @@ def api_sync_status_detail(dest_name):
     }
     synced_counts = ctx.sync_tracker.get_synced_counts(sync_key)
 
+    keys = ctx.sync_tracker._get_keys()
+    key_info = next((k for k in keys if k['key_name'] == sync_key), None)
+    last_sync = key_info['last_sync_at'] if key_info else 0
+    playlist_prefs = key_info['playlist_prefs'] if key_info else None
+    pref_set = set(playlist_prefs) if playlist_prefs else None
+
+    creation_times = ctx.sync_tracker._get_playlist_creation_times()
+
     playlists = []
-    new_playlist_count = 0
+    group_total = 0
+    group_synced_all = 0   # all playlists — used for synced_files display
+    group_synced_pref = 0  # pref playlists only — used for new_files
     for name, total in sorted(playlist_stats.items()):
-        synced = synced_counts.get(name, 0)
-        new = total - synced
-        is_new = synced == 0
+        raw_synced = synced_counts.get(name, 0)
+        synced = min(raw_synced, total)
+        new = max(0, total - raw_synced)
+        in_prefs = pref_set is None or name in pref_set
+
+        if not in_prefs:
+            status = 'skipped'
+        elif last_sync > 0 and creation_times.get(name, 0) > last_sync:
+            status = 'new'
+        elif new > 0:
+            status = 'behind'
+        else:
+            status = 'synced'
+
         playlists.append({
             'name': name,
             'total_files': total,
             'synced_files': synced,
             'new_files': new,
-            'is_new_playlist': is_new,
+            'is_new_playlist': status == 'new',
+            'sync_status': status,
         })
-        if is_new:
-            new_playlist_count += 1
 
-    total_files = sum(playlist_stats.values())
-    total_synced = sum(synced_counts.values())
+        group_synced_all += synced
+        if in_prefs:
+            group_total += total
+            group_synced_pref += synced
 
-    keys = ctx.sync_tracker._get_keys()
-    key_info = next((k for k in keys if k['key_name'] == sync_key), None)
-    last_sync = key_info['last_sync_at'] if key_info else 0
-    playlist_prefs = key_info['playlist_prefs'] if key_info else None
+    new_playlist_count = sum(1 for p in playlists if p['sync_status'] == 'new')
 
+    orphaned_count = ctx.sync_tracker.get_orphaned_count(sync_key)
     result = mp.SyncStatusResult(
         destinations=group_names,
         last_sync_at=last_sync,
         playlists=playlists,
-        total_files=total_files,
-        synced_files=total_synced,
-        new_files=total_files - total_synced,
+        total_files=group_total,
+        synced_files=group_synced_all,
+        new_files=max(0, group_total - group_synced_pref),
         new_playlists=new_playlist_count,
         playlist_prefs=playlist_prefs,
+        orphaned_files=orphaned_count,
     )
     return jsonify(result.to_dict())
+
+
+@api_bp.route('/api/sync/status/<dest_name>/orphaned')
+def api_sync_status_orphaned(dest_name):
+    """Return detailed orphaned file list for a destination's sync group.
+
+    An orphaned file is one recorded in sync_files whose source track no
+    longer exists in the library (track_uuid is set but the tracks table
+    has no matching row).
+
+    Returns:
+        {orphaned_files: [{file_path, playlist, track_uuid, synced_at}]}
+    """
+    ctx = _ctx()
+    dest = ctx.sync_tracker.get_destination(dest_name)
+    if not dest:
+        return jsonify({'error': 'Destination not found'}), 404
+    orphaned = ctx.sync_tracker.get_orphaned_files(dest.sync_key)
+    return jsonify({'orphaned_files': orphaned})
 
 
 @api_bp.route('/api/sync/destinations/<name>/reset', methods=['POST'])
@@ -2114,8 +2252,11 @@ def api_sync_client_record():
         # Auto-create destination from path if provided
         dest_path = data.get('dest_path', '').strip()
         if dest_path:
-            dest_type = data.get('dest_type', 'folder')
-            scheme = 'usb://' if dest_type == 'usb' else 'folder://'
+            dest_type = data.get('dest_type', '')
+            if not dest_type and ctx.detect_source() == 'ios':
+                dest_type = 'ios'
+            schemes = {'usb': 'usb://', 'ios': 'ios://'}
+            scheme = schemes.get(dest_type, 'folder://')
             schemed_path = f'{scheme}{dest_path}'
             link_to = data.get('link_to', '')
             sync_key = None

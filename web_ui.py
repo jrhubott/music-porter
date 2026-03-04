@@ -33,7 +33,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from flask import (
@@ -60,12 +60,19 @@ _migration_events = mp.migrate_data_dir()
 _migration_events += mp.migrate_db_schema()
 _migration_events += mp.migrate_config_schema()
 
-# Prune old log files at startup (uses default retention; config not loaded yet)
-mp.prune_logs()
-
-# Load output profiles from config at import time so OUTPUT_PROFILES is
-# populated before any request handler accesses it.
+# Load config so retention settings are available for all prune calls
 _startup_config = mp.ConfigManager(logger=mp.Logger(verbose=False))
+
+# Prune stale data at startup using configured retention settings
+mp.prune_logs(retention_days=_startup_config.get_setting(
+    'log_retention_days', mp.DEFAULT_LOG_RETENTION_DAYS))
+mp.prune_audit_entries(retention_days=_startup_config.get_setting(
+    'audit_retention_days', mp.DEFAULT_AUDIT_RETENTION_DAYS))
+mp.prune_task_history(retention_days=_startup_config.get_setting(
+    'task_history_retention_days', mp.DEFAULT_TASK_HISTORY_RETENTION_DAYS))
+mp.prune_removed_tracks(retention_days=_startup_config.get_setting(
+    'removed_tracks_retention_days', mp.DEFAULT_REMOVED_TRACKS_RETENTION_DAYS))
+
 mp.load_output_profiles(_startup_config)
 
 
@@ -734,6 +741,110 @@ class PipelineScheduler:
 
 
 # ══════════════════════════════════════════════════════════════════
+# MaintenanceScheduler — daily data pruning
+# ══════════════════════════════════════════════════════════════════
+
+MAINTENANCE_INTERVAL_S = 86400  # 24 hours
+
+
+class MaintenanceScheduler:
+    """Runs daily maintenance tasks (data pruning) using a threading.Timer chain.
+
+    Always enabled — no config toggle. Fires once per day, runs all prune
+    functions, and persists next_run_time to scheduled_jobs so restarts resume
+    from the correct point rather than resetting the 24 h clock.
+
+    Lifecycle: created in start_server(), stored on AppContext.
+    start() schedules the first timer. stop() cancels any pending timer.
+    """
+
+    def __init__(self, ctx, jobs_db):
+        self._ctx = ctx
+        self._jobs_db = jobs_db
+        self._timer = None
+        self._lock = threading.RLock()
+
+    def start(self):
+        """Resume from persisted state or schedule first run 24 h from now."""
+        with self._lock:
+            persisted = self._jobs_db.get('maintenance')
+            now = time.time()
+
+            if persisted:
+                nrt = persisted.get('next_run_time')
+                if nrt is not None and nrt > now:
+                    # Persisted time in the future — resume with remaining delay
+                    self._schedule_next(nrt - now)
+                    return
+                # Missed or no persisted next_run_time — startup already ran
+                # prune at module load; schedule next run 24 h from now.
+
+            self._schedule_next(MAINTENANCE_INTERVAL_S)
+
+    def stop(self):
+        """Cancel any pending timer. Called at server shutdown."""
+        with self._lock:
+            if self._timer:
+                self._timer.cancel()
+                self._timer = None
+
+    def _schedule_next(self, delay_seconds):
+        """Schedule the next maintenance run after delay_seconds."""
+        self._timer = threading.Timer(delay_seconds, self._on_timer)
+        self._timer.daemon = True
+        self._timer.name = 'MaintenanceScheduler'
+        self._timer.start()
+        next_run = time.time() + delay_seconds
+        self._jobs_db.upsert('maintenance', next_run_time=next_run)
+
+    def _on_timer(self):
+        """Timer callback — runs all prune functions then schedules next run."""
+        with self._lock:
+            self._timer = None
+        self._execute()
+        with self._lock:
+            self._schedule_next(MAINTENANCE_INTERVAL_S)
+
+    def _execute(self):
+        """Run all prune functions with current config-based retention values."""
+        try:
+            config = self._ctx.get_config()
+            db_path = mp.DEFAULT_DB_FILE
+            mp.prune_logs(retention_days=config.get_setting(
+                'log_retention_days', mp.DEFAULT_LOG_RETENTION_DAYS))
+            mp.prune_audit_entries(
+                db_path=db_path,
+                retention_days=config.get_setting(
+                    'audit_retention_days', mp.DEFAULT_AUDIT_RETENTION_DAYS))
+            mp.prune_task_history(
+                db_path=db_path,
+                retention_days=config.get_setting(
+                    'task_history_retention_days',
+                    mp.DEFAULT_TASK_HISTORY_RETENTION_DAYS))
+            mp.prune_removed_tracks(
+                db_path=db_path,
+                retention_days=config.get_setting(
+                    'removed_tracks_retention_days',
+                    mp.DEFAULT_REMOVED_TRACKS_RETENTION_DAYS))
+            self._jobs_db.upsert(
+                'maintenance',
+                last_run_time=time.time(),
+                last_run_status='completed',
+                last_run_error='',
+            )
+        except Exception as exc:
+            try:
+                self._jobs_db.upsert(
+                    'maintenance',
+                    last_run_time=time.time(),
+                    last_run_status='failed',
+                    last_run_error=str(exc),
+                )
+            except Exception:
+                pass
+
+
+# ══════════════════════════════════════════════════════════════════
 # AppContext — shared state for Flask routes (replaces closures)
 # ══════════════════════════════════════════════════════════════════
 
@@ -754,6 +865,7 @@ class AppContext:
     api_key: str
     project_root: Path
     scheduler: 'PipelineScheduler | None' = None
+    maintenance_scheduler: 'MaintenanceScheduler | None' = None
     _config_cache: mp.ConfigManager | None = field(default=None, repr=False)
 
     # ── Request-scoped helpers ─────────────────────────────────
@@ -851,6 +963,9 @@ def _get_freshness_level(last_modified: datetime | None, today: date) -> str:
 # Flask Application Factory
 # ══════════════════════════════════════════════════════════════════
 
+_server_start_time = time.time()
+
+
 def create_app(project_root=None, no_auth=False, server_host=None,
                server_port=None, external_url=None,
                behind_proxy=False, proxy_count=1):
@@ -905,6 +1020,61 @@ def create_app(project_root=None, no_auth=False, server_host=None,
     from web_api import api_bp
     app.register_blueprint(api_bp)
 
+    # ── Health probe (unauthenticated) ────────────────────────
+    @app.route('/health')
+    def health():
+        """Unauthenticated health check for external monitors and clients."""
+        checks = {}
+        overall = 'healthy'
+
+        # Database check
+        try:
+            conn = ctx.sync_tracker._connect()
+            conn.execute("PRAGMA user_version").fetchone()
+            conn.close()
+            checks['database'] = {'status': 'healthy', 'message': None}
+        except Exception as exc:
+            checks['database'] = {'status': 'unhealthy', 'message': str(exc)}
+            overall = 'unhealthy'
+
+        # Library check
+        audio_dir = Path(mp.get_audio_dir())
+        if audio_dir.is_dir():
+            checks['library'] = {'status': 'healthy', 'message': None}
+        else:
+            checks['library'] = {
+                'status': 'unhealthy',
+                'message': 'library/audio/ directory not found',
+            }
+            overall = 'unhealthy'
+
+        # Cookie check
+        cookie_mgr = mp.CookieManager(mp.DEFAULT_COOKIES, mp.Logger(verbose=False))
+        cs = cookie_mgr.validate()
+        if not cs.valid:
+            checks['cookies'] = {'status': 'unhealthy', 'message': cs.reason}
+            overall = 'unhealthy'
+        elif cs.days_until_expiration is not None and cs.days_until_expiration <= 14:
+            days = round(cs.days_until_expiration)
+            checks['cookies'] = {
+                'status': 'degraded',
+                'message': f'Cookie expires in {days} days',
+            }
+            if overall == 'healthy':
+                overall = 'degraded'
+        else:
+            checks['cookies'] = {'status': 'healthy', 'message': None}
+
+        result = {
+            'status': overall,
+            'version': mp.VERSION,
+            'uptime_s': round(time.time() - _server_start_time, 1),
+            'timestamp': datetime.now(UTC).isoformat(),
+            'checks': checks,
+        }
+        http_status = 503 if overall == 'unhealthy' else 200
+        return jsonify(result), http_status
+
     # ── CORS headers for iOS companion app ───────────────────
     @app.after_request
     def _add_cors_headers(response):
@@ -923,8 +1093,8 @@ def create_app(project_root=None, no_auth=False, server_host=None,
         # Web mode (--no-auth): skip all authentication
         if app.config.get('NO_AUTH'):
             return None
-        # Always allow the login/logout pages and static files
-        if request.path in ('/login', '/logout'):
+        # Always allow the login/logout pages, static files, and health probe
+        if request.path in ('/login', '/logout', '/health'):
             return None
         # Check auth sources
         has_session = session.get('authenticated') is True
@@ -1175,11 +1345,13 @@ def start_server(host='127.0.0.1', port=5555, no_auth=False,
                       server_port=port, external_url=external_url,
                       behind_proxy=behind_proxy, proxy_count=proxy_count)
 
-    # Initialize and start the pipeline scheduler
+    # Initialize and start the pipeline scheduler and maintenance scheduler
     ctx = app.config['CTX']
     jobs_db = mp.ScheduledJobsDB()
     ctx.scheduler = PipelineScheduler(ctx, jobs_db)
     ctx.scheduler.start()
+    ctx.maintenance_scheduler = MaintenanceScheduler(ctx, jobs_db)
+    ctx.maintenance_scheduler.start()
 
     # Bonjour/mDNS advertisement
     bonjour = None
@@ -1191,6 +1363,7 @@ def start_server(host='127.0.0.1', port=5555, no_auth=False,
         app.run(host=host, port=port, debug=False, threaded=True)
     finally:
         ctx.scheduler.stop()
+        ctx.maintenance_scheduler.stop()
         if bonjour:
             bonjour.stop()
 

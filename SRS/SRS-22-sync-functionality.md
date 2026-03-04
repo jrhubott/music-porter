@@ -8,14 +8,14 @@
 
 | ID | Web | CLI | GUI | iOS | Requirement |
 |----|-----|-----|-----|-----|-------------|
-| 22.1.1 | [x] | [x] | [x] | [ ] | As a user, I can sync all playlists to a selected destination so that my entire library is available at the target location. Acceptance: all playlists in the library are processed; files are copied to the destination path. |
-| 22.1.2 | [x] | [x] | [x] | [ ] | As a user, I can sync a specific playlist to a selected destination so that only the tracks I want are copied. Acceptance: only files belonging to the chosen playlist are synced; other playlists are unaffected. |
-| 22.1.3 | [x] | [x] | [x] | [ ] | As a user, I can expect that files are tagged according to the selected output profile during sync so that the destination files have the correct metadata without modifying my library. Acceptance: destination files have profile-specific ID3 tags, artwork, and filenames; library MP3s remain unchanged. |
-| 22.1.4 | [x] | [x] | [x] | [ ] | As a user, I can expect that only new or changed files are copied during sync (incremental sync) so that repeated syncs are fast. Acceptance: files already present and unchanged at the destination are skipped; only new or modified files are transferred. |
-| 22.1.5 | [x] | [x] | [x] | [ ] | As a user, I can see real-time progress during a sync operation so that I know how far along the process is. Acceptance: progress updates (file count, percentage) are displayed in real time via the web dashboard or client interface. |
+| 22.1.1 | [x] | [x] | [x] | [x] | As a user, I can sync all playlists to a selected destination so that my entire library is available at the target location. Acceptance: all playlists in the library are processed; files are copied to the destination path. |
+| 22.1.2 | [x] | [x] | [x] | [x] | As a user, I can sync a specific playlist to a selected destination so that only the tracks I want are copied. Acceptance: only files belonging to the chosen playlist are synced; other playlists are unaffected. |
+| 22.1.3 | [x] | [x] | [x] | [x] | As a user, I can expect that files are tagged according to the selected output profile during sync so that the destination files have the correct metadata without modifying my library. Acceptance: destination files have profile-specific ID3 tags, artwork, and filenames; library MP3s remain unchanged. |
+| 22.1.4 | [x] | [x] | [x] | [x] | As a user, I can expect that only new or changed files are copied during sync (incremental sync) so that repeated syncs are fast. Acceptance: files already present and unchanged at the destination are skipped; only new or modified files are transferred. |
+| 22.1.5 | [x] | [x] | [x] | [x] | As a user, I can see real-time progress during a sync operation so that I know how far along the process is. Acceptance: progress updates (file count, percentage) are displayed in real time via the web dashboard or client interface. |
 | 22.1.6 | [ ] | [x] | N/A | [ ] | As a user, I can perform a dry run to preview what would be synced without actually copying any files. Acceptance: the system reports which files would be copied, skipped, or updated, but no files are written to the destination. |
-| 22.1.7 | [x] | [x] | [x] | [ ] | As a user, I can see a summary of results after a sync completes so that I know what happened. Acceptance: summary includes counts for files copied, skipped, and failed, along with the total duration. |
-| 22.1.8 | [x] | [x] | [x] | [ ] | As a user, I can cancel a sync operation in progress so that I can stop it if needed. Acceptance: cancellation stops the sync promptly; files already copied remain at the destination; no partial files are left behind. |
+| 22.1.7 | [x] | [x] | [x] | [x] | As a user, I can see a summary of results after a sync completes so that I know what happened. Acceptance: summary includes counts for files copied, skipped, and failed, along with the total duration. |
+| 22.1.8 | [x] | [x] | [x] | [x] | As a user, I can cancel a sync operation in progress so that I can stop it if needed. Acceptance: cancellation stops the sync promptly; files already copied remain at the destination; no partial files are left behind. |
 
 ---
 
@@ -23,13 +23,13 @@
 
 | ID | Web | CLI | GUI | iOS | Requirement |
 |----|-----|-----|-----|-----|-------------|
-| 22.2.1 | [x] | N/A | N/A | [ ] | As a user, I can add a named destination with a folder path so that I can reuse it for future syncs. Acceptance: the destination is saved persistently with its name and path; it appears in the destination list on subsequent sessions. |
-| 22.2.2 | [ ] | [ ] | [ ] | [ ] | As a user, I can remove a saved destination so that outdated or unwanted entries are cleaned up. Acceptance: the destination entry is deleted; if other destinations share the same tracking group, tracking data is preserved for the remaining destinations; if this is the last destination in the group, tracking data is also cleaned up. |
+| 22.2.1 | [x] | N/A | N/A | [x] | As a user, I can add a named destination with a folder path so that I can reuse it for future syncs. Acceptance: the destination is saved persistently with its name and path; it appears in the destination list on subsequent sessions. |
+| 22.2.2 | [ ] | [ ] | [ ] | [x] | As a user, I can remove a saved destination so that outdated or unwanted entries are cleaned up. Acceptance: the destination entry is deleted; if other destinations share the same tracking group, tracking data is preserved for the remaining destinations; if this is the last destination in the group, tracking data is also cleaned up. |
 | 22.2.3 | [x] | N/A | N/A | [ ] | As a user, I can rename a saved destination so that I can update its display name. Acceptance: the destination name changes everywhere it appears; its path, group associations, and tracking data remain intact. |
-| 22.2.4 | [ ] | [ ] | [ ] | [ ] | As a user, I can view all saved destinations with their type, path, availability, and group membership so that I can choose where to sync. Acceptance: each destination shows its name, type (USB, folder, or browser client), path, whether the path currently exists or is connected, and which other destinations it is linked with. |
+| 22.2.4 | [ ] | [ ] | [ ] | [x] | As a user, I can view all saved destinations with their type, path, availability, and group membership so that I can choose where to sync. Acceptance: each destination shows its name, type (USB, folder, or browser client), path, whether the path currently exists or is connected, and which other destinations it is linked with. |
 | 22.2.5 | [x] | [x] | [x] | [ ] | As a user, I can see three destination types — USB drive, folder, and browser client — so that I can sync to different kinds of targets. Acceptance: USB destinations use a `usb://` scheme, folder destinations use a `folder://` scheme, and browser client destinations are identified by their client type. |
 | 22.2.6 | [ ] | [ ] | [ ] | [ ] | As a user, when I sync to a new destination for the first time, I am prompted to choose whether this is a new sync location or should share tracking with an existing destination so that I can avoid re-syncing files that have already been synced elsewhere. Acceptance: a prompt appears with two choices — "New sync location" or "Share tracking with existing destination"; if the user chooses to share, they select an existing destination from a list. |
-| 22.2.7 | [ ] | [ ] | [ ] | [ ] | As a user, I can reset sync tracking for a destination so that the next sync treats all files as new. Acceptance: all records of previously synced files for the destination's tracking group are cleared; the destination itself and its configuration remain intact; files at the destination are not affected. |
+| 22.2.7 | [ ] | [ ] | [ ] | [x] | As a user, I can reset sync tracking for a destination so that the next sync treats all files as new. Acceptance: all records of previously synced files for the destination's tracking group are cleared; the destination itself and its configuration remain intact; files at the destination are not affected. |
 
 ---
 
@@ -62,10 +62,10 @@ Destinations can be associated to share sync tracking. When multiple destination
 
 | ID | Web | CLI | GUI | iOS | Requirement |
 |----|-----|-----|-----|-----|-------------|
-| 22.5.1 | [ ] | [ ] | [ ] | [ ] | As a user, I can view a summary across all destinations showing total files, synced files, and new files so that I can see overall sync health. Acceptance: a summary table or card displays aggregate counts across all destination tracking groups. |
-| 22.5.2 | [ ] | [ ] | [ ] | [ ] | As a user, I can view a per-playlist breakdown for a specific destination so that I can see detailed sync status. Acceptance: for a given destination (or its tracking group), each playlist shows its total file count, synced count, and new (unsynced) count. |
-| 22.5.3 | [ ] | [ ] | [ ] | [ ] | As a user, I can see which playlists have never been synced to a given destination so that I know what's missing. Acceptance: playlists with zero synced files for the selected destination's tracking group are clearly identified. |
-| 22.5.4 | [ ] | [ ] | [ ] | [ ] | As a user, I can see how many new (unsynced) files exist per playlist for a given destination so that I can prioritize what to sync. Acceptance: each playlist shows the count of files not yet recorded as synced for the destination's tracking group. |
+| 22.5.1 | [ ] | [ ] | [ ] | [x] | As a user, I can view a summary across all destinations showing total files, synced files, and new files so that I can see overall sync health. Acceptance: a summary table or card displays aggregate counts across all destination tracking groups. |
+| 22.5.2 | [ ] | [ ] | [ ] | [x] | As a user, I can view a per-playlist breakdown for a specific destination so that I can see detailed sync status. Acceptance: for a given destination (or its tracking group), each playlist shows its total file count, synced count, and new (unsynced) count. |
+| 22.5.3 | [ ] | [ ] | [ ] | [x] | As a user, I can see which playlists have never been synced to a given destination so that I know what's missing. Acceptance: playlists with zero synced files for the selected destination's tracking group are clearly identified. |
+| 22.5.4 | [ ] | [ ] | [ ] | [x] | As a user, I can see how many new (unsynced) files exist per playlist for a given destination so that I can prioritize what to sync. Acceptance: each playlist shows the count of files not yet recorded as synced for the destination's tracking group. |
 | 22.5.5 | [ ] | [ ] | [ ] | [ ] | As a user, I can view which destinations have received each individual file so that I can trace where a specific track has been synced. Acceptance: for a given file, a list of destination names that include it is displayed. |
 
 ---
@@ -88,19 +88,19 @@ All sync clients (web dashboard, desktop app, iOS app) share core sync capabilit
 | ID | Web | CLI | GUI | iOS | Requirement |
 |----|-----|-----|-----|-----|-------------|
 | 22.6.5 | [x] | [x] | [x] | [x] | As a user, I can view all playlists with file counts, sizes, and freshness status so that I can see what's available. Acceptance: each playlist shows its track count, total size, and whether it has new content since the last sync. |
-| 22.6.6 | [x] | [x] | [x] | [ ] | As a user, I can select individual playlists or all playlists for sync so that I can control what gets synced. Acceptance: checkboxes or a select-all option allow choosing which playlists to include in the next sync operation. |
+| 22.6.6 | [x] | [x] | [x] | [x] | As a user, I can select individual playlists or all playlists for sync so that I can control what gets synced. Acceptance: checkboxes or a select-all option allow choosing which playlists to include in the next sync operation. |
 
 ### Sync Execution
 
 | ID | Web | CLI | GUI | iOS | Requirement |
 |----|-----|-----|-----|-----|-------------|
-| 22.6.7 | [x] | [x] | [x] | [ ] | As a user, I can start a sync to copy new or changed files to the destination so that my music is up to date. Acceptance: pressing the sync button begins transferring files; only new or changed files are copied. |
-| 22.6.8 | [x] | [x] | [x] | [ ] | As a user, I can force a re-sync to re-download all files regardless of sync status so that I can refresh everything. Acceptance: a force re-sync option ignores the sync tracking and re-copies all files. |
-| 22.6.9 | [x] | [x] | [x] | [ ] | As a user, I can see a real-time progress bar with file count, percentage, and current filename during sync so that I know what's happening. Acceptance: the progress display updates continuously showing files completed out of total, percentage, and the name of the file currently being transferred. |
-| 22.6.10 | [x] | [x] | [x] | [ ] | As a user, I can see live counters for copied, skipped, and failed files during sync so that I can monitor the operation. Acceptance: counters update in real time as each file is processed. |
-| 22.6.11 | [x] | [x] | [x] | [ ] | As a user, I can cancel a sync in progress so that I can stop the operation if needed. Acceptance: cancellation stops the sync promptly; files already copied remain; no partial files are left. |
-| 22.6.12 | [x] | [x] | [x] | [ ] | As a user, I can see a summary after sync showing copied, skipped, and failed counts along with the total duration so that I know the outcome. Acceptance: a summary is displayed after sync completes or is cancelled. |
-| 22.6.13 | [x] | [x] | [x] | [ ] | As a user, I can expect that sync activity is recorded for tracking purposes regardless of which client I use so that my sync history is consistent. Acceptance: files synced via any client (web, desktop, iOS) are recorded under the destination's tracking group. |
+| 22.6.7 | [x] | [x] | [x] | [x] | As a user, I can start a sync to copy new or changed files to the destination so that my music is up to date. Acceptance: pressing the sync button begins transferring files; only new or changed files are copied. |
+| 22.6.8 | [x] | [x] | [x] | [x] | As a user, I can force a re-sync to re-download all files regardless of sync status so that I can refresh everything. Acceptance: a force re-sync option ignores the sync tracking and re-copies all files. |
+| 22.6.9 | [x] | [x] | [x] | [x] | As a user, I can see a real-time progress bar with file count, percentage, and current filename during sync so that I know what's happening. Acceptance: the progress display updates continuously showing files completed out of total, percentage, and the name of the file currently being transferred. |
+| 22.6.10 | [x] | [x] | [x] | [x] | As a user, I can see live counters for copied, skipped, and failed files during sync so that I can monitor the operation. Acceptance: counters update in real time as each file is processed. |
+| 22.6.11 | [x] | [x] | [x] | [x] | As a user, I can cancel a sync in progress so that I can stop the operation if needed. Acceptance: cancellation stops the sync promptly; files already copied remain; no partial files are left. |
+| 22.6.12 | [x] | [x] | [x] | [x] | As a user, I can see a summary after sync showing copied, skipped, and failed counts along with the total duration so that I know the outcome. Acceptance: a summary is displayed after sync completes or is cancelled. |
+| 22.6.13 | [x] | [x] | [x] | [x] | As a user, I can expect that sync activity is recorded for tracking purposes regardless of which client I use so that my sync history is consistent. Acceptance: files synced via any client (web, desktop, iOS) are recorded under the destination's tracking group. |
 
 ### Offline Caching (Desktop & iOS)
 
@@ -118,7 +118,7 @@ All sync clients (web dashboard, desktop app, iOS app) share core sync capabilit
 | ID | Web | CLI | GUI | iOS | Requirement |
 |----|-----|-----|-----|-----|-------------|
 | 22.6.20 | [x] | [x] | [x] | N/A | As a user, I can see connected USB drives auto-detected with free space shown so that I can choose where to sync. Acceptance: USB drives appear in the destination list with their name and available free space displayed. |
-| 22.6.21 | [x] | [x] | [x] | [ ] | As a user, I can browse for a local folder as a sync destination so that I can sync to any directory on my computer. Acceptance: a folder picker dialog allows selecting any local directory as the sync target. |
+| 22.6.21 | [x] | [x] | [x] | [x] | As a user, I can browse for a local folder as a sync destination so that I can sync to any directory on my computer. Acceptance: a folder picker dialog allows selecting any local directory as the sync target. |
 | 22.6.22 | [ ] | [ ] | [x] | [ ] | As a user, I can select from recently used destinations via a dropdown so that I can quickly pick familiar targets. Acceptance: a dropdown lists previously used destinations; selecting one sets it as the active destination. |
 | 22.6.23 | [x] | [x] | [x] | [ ] | As a user, I can expect that when a USB drive is selected, files sync to the output profile's configured USB directory within the drive so that files are organized consistently. Acceptance: files are placed in the subdirectory specified by the profile's `usb_dir` setting on the selected drive. |
 
@@ -152,10 +152,10 @@ All sync clients (web dashboard, desktop app, iOS app) share core sync capabilit
 
 | ID | Web | CLI | GUI | iOS | Requirement |
 |----|-----|-----|-----|-----|-------------|
-| 22.7.1 | [x] | [x] | [x] | [ ] | As a user, I can select an output profile before syncing so that I control how files are tagged and named at the destination. Acceptance: a profile selection option is available before starting a sync; the chosen profile is applied to all files during that sync. |
-| 22.7.2 | [x] | [x] | [x] | [ ] | As a user, I can expect the profile to control file naming, directory structure, ID3 tags, and artwork for synced files so that the output matches my requirements. Acceptance: destination files use the profile's filename template, directory template, tag settings, and artwork size. |
+| 22.7.1 | [x] | [x] | [x] | [x] | As a user, I can select an output profile before syncing so that I control how files are tagged and named at the destination. Acceptance: a profile selection option is available before starting a sync; the chosen profile is applied to all files during that sync. |
+| 22.7.2 | [x] | [x] | [x] | [x] | As a user, I can expect the profile to control file naming, directory structure, ID3 tags, and artwork for synced files so that the output matches my requirements. Acceptance: destination files use the profile's filename template, directory template, tag settings, and artwork size. |
 | 22.7.3 | [ ] | N/A | N/A | [ ] | As a user, I can compare available profiles side-by-side so that I can choose the right one for my use case. Acceptance: profile details (tag settings, filename format, artwork size) are viewable for comparison before selection. |
-| 22.7.4 | [x] | [x] | [x] | [ ] | As a user, I can expect the profile to be applied on-the-fly during sync so that library files are never modified. Acceptance: the original library MP3s retain only their UUID tag; profile-specific tags and filenames are generated at sync time. |
+| 22.7.4 | [x] | [x] | [x] | [x] | As a user, I can expect the profile to be applied on-the-fly during sync so that library files are never modified. Acceptance: the original library MP3s retain only their UUID tag; profile-specific tags and filenames are generated at sync time. |
 
 ---
 
@@ -163,11 +163,11 @@ All sync clients (web dashboard, desktop app, iOS app) share core sync capabilit
 
 | ID | Web | CLI | GUI | iOS | Requirement |
 |----|-----|-----|-----|-----|-------------|
-| 22.8.1 | [x] | [x] | [x] | [ ] | As a user, if a destination becomes unavailable mid-sync (e.g., drive disconnected, folder deleted), the sync stops gracefully with an error message and files already copied remain intact. |
-| 22.8.2 | [x] | [x] | [x] | [ ] | As a user, if multiple tracks produce the same filename at the destination, the system resolves the collision (e.g., by appending a number) so that no files are overwritten. |
-| 22.8.3 | [x] | [x] | [x] | [ ] | As a user, if I sync when the library is empty, the system reports that there are no files to sync rather than failing silently or producing an error. |
-| 22.8.4 | [x] | [x] | [x] | [ ] | As a user, if I cancel a sync mid-operation, files already copied to the destination remain intact and are not deleted. |
-| 22.8.5 | [x] | [x] | [x] | [ ] | As a user, syncing a large library with thousands of files completes reliably without memory exhaustion or timeouts. |
-| 22.8.6 | [x] | [x] | [x] | [ ] | As a user, if a USB drive is disconnected during sync, the system detects the loss and stops with a clear error rather than producing corrupted files. |
-| 22.8.7 | N/A | [x] | [x] | [ ] | As a user, if I perform an offline sync from a client when the cache is incomplete, only cached files are synced and the client reports which files were skipped due to missing cache. |
-| 22.8.8 | N/A | [x] | [x] | [ ] | As a user, if the server becomes unreachable during a client sync, the client degrades gracefully by stopping new downloads and reporting the partial result. |
+| 22.8.1 | [x] | [x] | [x] | [x] | As a user, if a destination becomes unavailable mid-sync (e.g., drive disconnected, folder deleted), the sync stops gracefully with an error message and files already copied remain intact. |
+| 22.8.2 | [x] | [x] | [x] | [x] | As a user, if multiple tracks produce the same filename at the destination, the system resolves the collision (e.g., by appending a number) so that no files are overwritten. |
+| 22.8.3 | [x] | [x] | [x] | [x] | As a user, if I sync when the library is empty, the system reports that there are no files to sync rather than failing silently or producing an error. |
+| 22.8.4 | [x] | [x] | [x] | [x] | As a user, if I cancel a sync mid-operation, files already copied to the destination remain intact and are not deleted. |
+| 22.8.5 | [x] | [x] | [x] | [x] | As a user, syncing a large library with thousands of files completes reliably without memory exhaustion or timeouts. |
+| 22.8.6 | [x] | [x] | [x] | [x] | As a user, if a USB drive is disconnected during sync, the system detects the loss and stops with a clear error rather than producing corrupted files. |
+| 22.8.7 | N/A | [x] | [x] | [x] | As a user, if I perform an offline sync from a client when the cache is incomplete, only cached files are synced and the client reports which files were skipped due to missing cache. |
+| 22.8.8 | N/A | [x] | [x] | [x] | As a user, if the server becomes unreachable during a client sync, the client degrades gracefully by stopping new downloads and reporting the partial result. |

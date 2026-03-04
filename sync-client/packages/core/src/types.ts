@@ -75,12 +75,28 @@ export interface FileListResponse {
   files: FileInfo[];
 }
 
+export interface RemovedTrack {
+  id: number;
+  uuid: string;
+  playlist: string;
+  title: string;
+  artist: string;
+  album: string;
+  display_filename: string;
+  removed_at: number;
+}
+
+export interface RemovedFilesResponse {
+  removed_tracks: RemovedTrack[];
+}
+
 export interface SyncPlaylistStatus {
   name: string;
   total_files: number;
   synced_files: number;
   new_files: number;
-  is_new_playlist: boolean;
+  is_new_playlist: boolean;                                      // kept for compat — now timestamp-based
+  sync_status?: 'synced' | 'new' | 'behind' | 'skipped';        // new in server v2.38.13+
 }
 
 export interface SyncStatusDetail {

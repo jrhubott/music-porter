@@ -71,6 +71,22 @@ export class PrefetchEngine {
       }
     }
 
+    // Remove cached files for tracks removed from the server (SRS 23.5.2)
+    for (const key of options.playlists) {
+      if (options.signal?.aborted) break;
+      try {
+        const { removed_tracks } = await this.client.getRemovedFiles(key);
+        for (const removed of removed_tracks) {
+          const wasRemoved = this.cacheManager.removeEntry(removed.uuid);
+          if (wasRemoved) {
+            log('info', `Removed from cache: ${removed.display_filename} (track removed from server)`);
+          }
+        }
+      } catch {
+        // Non-fatal — continue prefetch without cache cleanup
+      }
+    }
+
     const hasLimit = options.maxCacheBytes !== undefined && options.maxCacheBytes > 0;
     const maxCacheBytes = options.maxCacheBytes ?? 0;
 

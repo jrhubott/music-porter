@@ -14,6 +14,7 @@ struct Track: Identifiable, Codable, Hashable {
     var hasCoverArt: Bool?
     var createdAt: Double?
     var updatedAt: Double?
+    var outputSubdir: String?
 
     enum CodingKeys: String, CodingKey {
         case filename, size, duration, title, artist, album, uuid
@@ -21,6 +22,7 @@ struct Track: Identifiable, Codable, Hashable {
         case hasCoverArt = "has_cover_art"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case outputSubdir = "output_subdir"
     }
 
     /// Display title (falls back to display filename stem, then filename stem).
