@@ -523,6 +523,8 @@ def api_playlists_list():
     etag_parts = [
         (p['key'], p['name'],
          stats.get(p['key'], {}).get('track_count', 0),
+         stats.get(p['key'], {}).get('total_track_count', 0),
+         stats.get(p['key'], {}).get('hidden_count', 0),
          stats.get(p['key'], {}).get('total_size_bytes', 0),
          stats.get(p['key'], {}).get('total_duration_s', 0),
          stats.get(p['key'], {}).get('max_updated_at', 0))
