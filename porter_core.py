@@ -8629,6 +8629,14 @@ def cleanup_removed_tracks(removed_tracks, track_db, sync_tracker,
         album = track.get('album', '')
         playlist = track.get('playlist', '')
 
+        # Skip locked tracks — they are protected from deletion even when
+        # the source playlist no longer contains them.
+        if track.get('locked'):
+            logger.warn(
+                f"Skipping removal of locked track: {title} — {artist} "
+                f"(unlock to allow deletion)")
+            continue
+
         # Build display filename from track metadata for historical record
         display_filename = f"{artist} - {title}.mp3" if artist else f"{title}.mp3"
 
