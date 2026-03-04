@@ -84,7 +84,7 @@ KNOWN_DEST_SCHEMES = ('usb://', 'folder://', 'web-client://', 'ios://')
 # Schema version constants — increment and add a migration case when changing
 # the config.yaml structure or DB tables/columns.
 CONFIG_SCHEMA_VERSION = 4
-DB_SCHEMA_VERSION = 13
+DB_SCHEMA_VERSION = 14
 
 # Excluded USB volumes by OS
 if IS_MACOS:
@@ -1513,6 +1513,35 @@ def migrate_db_schema(logger=None):
                 logger.info(
                     "DB migration 12→13: added hidden, hidden_at, locked"
                     " columns and idx_tracks_hidden index to tracks table")
+
+        if current < 14:
+            # Repair: v13 migration may have been skipped if TrackDB._init_db()
+            # pre-stamped user_version=13 before migrate_db_schema() ran.
+            # Add each column only if it is not already present.
+            existing_cols = {
+                r[1] for r in
+                conn.execute("PRAGMA table_info(tracks)").fetchall()
+            }
+            if 'hidden' not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE tracks"
+                    " ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
+            if 'hidden_at' not in existing_cols:
+                conn.execute("ALTER TABLE tracks ADD COLUMN hidden_at REAL")
+            if 'locked' not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE tracks"
+                    " ADD COLUMN locked INTEGER NOT NULL DEFAULT 0")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tracks_hidden"
+                " ON tracks(playlist, hidden)")
+            conn.execute("PRAGMA user_version = 14")
+            conn.commit()
+            changes.append("ensured hidden, hidden_at, locked columns on tracks (v13 repair)")
+            if logger:
+                logger.info(
+                    "DB migration 13→14: ensured hidden/hidden_at/locked"
+                    " columns exist on tracks table")
 
         return [MigrationEvent(
             'schema_migrate',
