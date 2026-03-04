@@ -1157,6 +1157,10 @@ def create_app(project_root=None, no_auth=False, server_host=None,
     def sources_page():
         return render_template('sources.html')
 
+    @app.route('/playlists/<key>/tracks')
+    def playlist_tracks_page(key):
+        return render_template('playlist_tracks.html', playlist_key=key)
+
     @app.route('/playlists')
     def playlists_page():
         return redirect(url_for('sources_page'))

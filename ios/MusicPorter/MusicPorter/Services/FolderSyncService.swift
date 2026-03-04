@@ -78,15 +78,27 @@ final class FolderSyncService {
 
         let task = Task { [weak self] in
             guard let self else { return }
-            await self.performSync(
-                destURL: destURL,
-                playlistKeys: playlistKeys,
-                playlistPrefs: playlistPrefs,
-                api: api,
-                audioCacheManager: audioCacheManager,
-                profile: profile,
-                forceResync: forceResync
-            )
+            do {
+                try await self.performSync(
+                    destURL: destURL,
+                    playlistKeys: playlistKeys,
+                    playlistPrefs: playlistPrefs,
+                    api: api,
+                    audioCacheManager: audioCacheManager,
+                    profile: profile,
+                    forceResync: forceResync
+                )
+            } catch {
+                self.lastResult = FolderSyncResult(
+                    success: false,
+                    filesCopied: 0,
+                    filesSkipped: 0,
+                    filesFailed: 0,
+                    totalFiles: 0,
+                    destinationName: destURL.lastPathComponent,
+                    message: "Sync failed: \(error.localizedDescription)"
+                )
+            }
         }
         syncTask = task
         await task.value
@@ -104,7 +116,7 @@ final class FolderSyncService {
         audioCacheManager: AudioCacheManager?,
         profile: String,
         forceResync: Bool
-    ) async {
+    ) async throws {
         let accessing = destURL.startAccessingSecurityScopedResource()
         defer { if accessing { destURL.stopAccessingSecurityScopedResource() } }
 
@@ -130,6 +142,14 @@ final class FolderSyncService {
             )
             return
         }
+
+        // Register sync run with server — required, throws if unreachable.
+        let startTime = Date()
+        let taskId = try await api.startSyncRun(
+            destination: destName,
+            playlistKeys: playlistKeys.isEmpty ? nil : playlistKeys,
+            startedAt: startTime.timeIntervalSince1970
+        )
 
         // Read manifest (nil when force-resyncing or no manifest exists yet).
         let manifestFolderURL = destURL
@@ -250,7 +270,8 @@ final class FolderSyncService {
                     destination: destName,
                     playlist: playlistKey,
                     files: playlistSynced,
-                    destPath: destURL.path
+                    destPath: destURL.path,
+                    taskId: taskId
                 )
             }
         }
@@ -272,6 +293,16 @@ final class FolderSyncService {
         } else {
             msg = "Sync complete — \(filesCopied) copied, \(filesSkipped) skipped, \(filesFailed) failed"
         }
+
+        // Notify server of sync completion (best-effort — non-fatal).
+        let finalStatus = cancelled ? "cancelled" : (filesFailed > 0 && filesCopied == 0 ? "failed" : "completed")
+        await api.completeSyncRun(
+            taskId: taskId,
+            status: finalStatus,
+            filesCopied: filesCopied,
+            filesSkipped: filesSkipped,
+            filesFailed: filesFailed
+        )
 
         lastResult = FolderSyncResult(
             success: !cancelled && filesFailed == 0,

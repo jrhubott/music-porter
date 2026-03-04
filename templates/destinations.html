@@ -114,7 +114,7 @@
             <th class="text-end">Total</th>
             <th class="text-end">Synced</th>
             <th class="text-end">New</th>
-            <th class="text-center" id="prefColHeader">Pref</th>
+            <th class="text-center" id="prefColHeader"><input type="checkbox" class="form-check-input" id="prefAllCheckbox" title="Toggle all playlist prefs"> Pref</th>
             <th class="text-center">Status</th>
             <th class="text-center">Actions</th>
           </tr>
@@ -252,6 +252,40 @@
     </div>
   </div>
 </div>
+
+<!-- Sync History Modal -->
+<div class="modal fade" id="syncHistoryModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title"><i class="bi bi-clock-history me-2"></i><span id="syncHistoryModalTitle">Sync History</span></h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0">
+        <div class="table-responsive">
+          <table class="table table-sm table-hover align-middle mb-0">
+            <thead class="table-dark sticky-top">
+              <tr>
+                <th>Time</th>
+                <th class="text-end">Total</th>
+                <th class="text-end">Copied</th>
+                <th class="text-end">Skipped</th>
+                <th class="text-end">Failed</th>
+                <th class="text-end">Orphans Cleaned</th>
+                <th class="text-end">Duration</th>
+                <th class="text-center">Source</th>
+              </tr>
+            </thead>
+            <tbody id="syncHistoryTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock content %}
 
 {% block scripts %}
@@ -260,6 +294,8 @@
 let destsMeta = []; // [{name, path, type, available, linked_destinations, playlist_prefs}]
 let allGroupsData = []; // cached /api/sync/status response
 let totalLibraryBytes = 0;
+let detailPrefs = null; // null = all playlists; array = selective prefs for open breakdown
+let detailPlaylists = []; // all playlist names in the currently open breakdown
 
 // ── Helpers ──
 const SECS_PER_HOUR = 3600;
@@ -420,7 +456,7 @@ function renderGroupsTable(data) {
         : matchedDest?.type === 'ios' ? 'Use iOS app to sync'
         : syncDisabled ? 'Destination unavailable' : 'Sync all playlists';
     const groupName = k.group_name || '';
-    const renameBtn = `<button class="btn btn-outline-secondary btn-sm py-0 px-1 ms-1" onclick="promptRenameGroup('${primaryDest}'); return false;" title="Rename group"><i class="bi bi-pencil"></i></button>`;
+    const renameBtn = `<button class="btn btn-outline-secondary btn-sm py-0 px-1 me-1" onclick="promptRenameGroup('${primaryDest}'); return false;" title="Rename group"><i class="bi bi-pencil"></i></button>`;
     const hasDetails = k.destination_details && k.destination_details.length > 1;
     const expandBtn = hasDetails
       ? `<button class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="toggleGroupExpand(this, ${idx})" title="Show destinations"><i class="bi bi-chevron-right"></i></button>`
@@ -429,11 +465,11 @@ function renderGroupsTable(data) {
     let destLabel;
     if (groupName) {
       const memberList = dests.join(', ');
-      destLabel = `<a href="#" onclick="showDetail('${primaryDest}'); return false;"><i class="bi ${icon} me-1"></i><strong>${groupName}</strong></a>${renameBtn}<br><small class="text-muted">${memberList}</small><br><span class="ms-4">${statusBadge}</span>`;
+      destLabel = `<a href="#" onclick="showDetail('${primaryDest}'); return false;"><i class="bi ${icon} me-1"></i><strong>${groupName}</strong></a><br><small class="text-muted">${memberList}</small><br><span class="ms-4">${statusBadge}</span>`;
     } else if (dests.length > 1) {
-      destLabel = `<a href="#" onclick="showDetail('${primaryDest}'); return false;"><i class="bi ${icon} me-1"></i>${primaryDest}</a> <span class="badge bg-info" title="${dests.join(', ')}">${dests.length} linked</span>${renameBtn}<br><span class="ms-4">${statusBadge}</span>`;
+      destLabel = `<a href="#" onclick="showDetail('${primaryDest}'); return false;"><i class="bi ${icon} me-1"></i>${primaryDest}</a> <span class="badge bg-info" title="${dests.join(', ')}">${dests.length} linked</span><br><span class="ms-4">${statusBadge}</span>`;
     } else {
-      destLabel = `<a href="#" onclick="showDetail('${primaryDest}'); return false;"><i class="bi ${icon} me-1"></i>${primaryDest}</a>${renameBtn}<br><span class="ms-4">${statusBadge}</span>`;
+      destLabel = `<a href="#" onclick="showDetail('${primaryDest}'); return false;"><i class="bi ${icon} me-1"></i>${primaryDest}</a><br><span class="ms-4">${statusBadge}</span>`;
     }
     return `<tr data-group-idx="${idx}">
       <td class="text-center" style="width:32px">${expandBtn}</td>
@@ -443,12 +479,74 @@ function renderGroupsTable(data) {
       <td class="text-end">${plBadge}</td>
       <td class="text-end ${stalenessClass}" title="${lastSyncAbs}">${lastSyncRel}</td>
       <td class="text-center">
+        ${renameBtn}
+        <button class="btn btn-outline-secondary btn-sm py-0 px-1 me-1"
+          onclick="showSyncHistory('${primaryDest}', '${(groupName || primaryDest).replace(/'/g, '&apos;')}')"
+          title="View sync history">
+          <i class="bi bi-clock-history"></i>
+        </button>
         <button class="btn btn-outline-primary btn-sm py-0 px-1" onclick="syncToKey('${primaryDest}', 'library')" title="${syncTitle}" ${syncDisabled}>
           <i class="bi bi-arrow-repeat"></i>
         </button>
       </td>
     </tr>`;
   }).join('');
+}
+
+// ── Sync History Modal ──
+function showSyncHistory(destName, groupLabel) {
+  const modalTitle = document.getElementById('syncHistoryModalTitle');
+  const tbody = document.getElementById('syncHistoryTableBody');
+  modalTitle.textContent = 'Sync History: ' + groupLabel;
+  tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3"><div class="spinner-border spinner-border-sm me-2"></div>Loading...</td></tr>';
+
+  const modal = new bootstrap.Modal(document.getElementById('syncHistoryModal'));
+  modal.show();
+
+  fetch('/api/sync/status/' + encodeURIComponent(destName) + '/history')
+    .then(r => r.json())
+    .then(data => {
+      const entries = data.history || [];
+      if (!entries.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">No sync history found for this destination.</td></tr>';
+        return;
+      }
+      const NA = '—';
+      tbody.innerHTML = entries.map(e => {
+        const time = e.started_at
+          ? new Date(e.started_at * 1000).toLocaleString()
+          : NA;
+        const duration = e.duration != null ? e.duration + 's' : NA;
+        const statusBadge = e.status === 'completed'
+          ? '<span class="badge bg-success">Done</span>'
+          : e.status === 'failed'
+          ? '<span class="badge bg-danger">Failed</span>'
+          : e.status === 'cancelled'
+          ? '<span class="badge bg-secondary">Cancelled</span>'
+          : `<span class="badge bg-warning text-dark">${e.status}</span>`;
+        const sourceBadge = e.source === 'ios'
+          ? '<span class="badge bg-info">iOS</span>'
+          : e.source === 'api'
+          ? '<span class="badge bg-secondary">API</span>'
+          : '<span class="badge bg-primary">Web</span>';
+        const failedCell = e.files_failed != null && e.files_failed > 0
+          ? `<span class="text-danger">${e.files_failed}</span>`
+          : (e.files_failed ?? NA);
+        return `<tr>
+          <td class="text-nowrap">${time}</td>
+          <td class="text-end">${e.files_found ?? NA}</td>
+          <td class="text-end">${e.files_copied ?? NA}</td>
+          <td class="text-end">${e.files_skipped ?? NA}</td>
+          <td class="text-end">${failedCell}</td>
+          <td class="text-end">${e.orphaned_cleaned ?? NA}</td>
+          <td class="text-end">${duration}</td>
+          <td class="text-center">${sourceBadge}</td>
+        </tr>`;
+      }).join('');
+    })
+    .catch(err => {
+      tbody.innerHTML = `<tr><td colspan="8" class="text-center text-danger py-3">Failed to load history: ${err}</td></tr>`;
+    });
 }
 
 // ── Expandable group rows ──
@@ -534,12 +632,17 @@ function showDetail(destName) {
       return;
     }
 
-    const prefs = data.playlist_prefs || null;
-    const prefHeader = document.getElementById('prefColHeader');
-    if (prefHeader) prefHeader.textContent = prefs ? 'Pref' : 'Pref (All)';
+    detailPrefs = data.playlist_prefs || null;
+    detailPlaylists = (data.playlists || []).map(p => p.name);
+    const prefAllCb = document.getElementById('prefAllCheckbox');
+    if (prefAllCb) {
+      prefAllCb.checked = !detailPrefs;
+      prefAllCb.onchange = () => handlePrefAllToggle(destName);
+    }
     const detailMeta = findDestMeta(destName);
     const detailSyncDisabled = (!detailMeta || !detailMeta.available) ? 'disabled' : '';
     const detailSyncTitle = detailSyncDisabled ? 'Destination unavailable' : 'Sync playlist';
+    const isAllMode = !detailPrefs;
     tbody.innerHTML = data.playlists.map(p => {
       let statusBadge;
       const s = p.sync_status;
@@ -552,14 +655,8 @@ function showDetail(destName) {
       } else {
         statusBadge = '<span class="badge bg-success">Synced</span>';
       }
-      let prefCell;
-      if (!prefs) {
-        prefCell = '<span class="text-muted">–</span>';
-      } else if (prefs.includes(p.name)) {
-        prefCell = '<i class="bi bi-check-circle-fill text-success" title="In saved prefs"></i>';
-      } else {
-        prefCell = '<span class="text-muted">–</span>';
-      }
+      const isChecked = isAllMode || detailPrefs.includes(p.name);
+      const prefCell = `<div class="${isAllMode ? 'opacity-50' : ''}"><input type="checkbox" class="form-check-input pref-playlist-cb" value="${p.name}" ${isChecked ? 'checked' : ''} ${isAllMode ? 'disabled' : ''} onchange="handlePrefToggle('${destName}')"></div>`;
       return `<tr>
         <td>${p.name}</td>
         <td class="text-end">${p.total_files}</td>
@@ -579,6 +676,46 @@ function showDetail(destName) {
 
 function hideDetail() {
   document.getElementById('detailCard').classList.add('d-none');
+}
+
+// ── Playlist pref checkboxes ──
+function handlePrefAllToggle(destName) {
+  const prefAllCb = document.getElementById('prefAllCheckbox');
+  if (prefAllCb.checked) {
+    savePrefAndRefresh(destName, null);
+  } else {
+    // Transition to selective: start with all playlists explicitly selected
+    savePrefAndRefresh(destName, detailPlaylists.slice());
+  }
+}
+
+function handlePrefToggle(destName) {
+  const checked = Array.from(document.querySelectorAll('#detailTableBody .pref-playlist-cb:checked')).map(cb => cb.value);
+  // If all checked, normalize to null (all mode)
+  savePrefAndRefresh(destName, checked.length === detailPlaylists.length ? null : checked);
+}
+
+function savePrefAndRefresh(destName, playlistKeys) {
+  document.querySelectorAll('#detailTableBody .pref-playlist-cb, #prefAllCheckbox').forEach(cb => { cb.disabled = true; });
+  fetch('/api/sync/destinations/' + encodeURIComponent(destName) + '/playlist-prefs', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({playlist_keys: playlistKeys})
+  }).then(r => r.json()).then(data => {
+    if (data.error) {
+      showToast('Failed to save prefs: ' + data.error, 'error');
+    } else {
+      const msg = playlistKeys === null
+        ? 'Prefs set to all playlists'
+        : `Prefs updated (${playlistKeys.length} playlist(s))`;
+      showToast(msg, 'success');
+      loadSyncStatusData();
+    }
+    showDetail(destName);
+  }).catch(err => {
+    showToast('Failed to save prefs: ' + err, 'error');
+    showDetail(destName);
+  });
 }
 
 // ── Reset tracking ──

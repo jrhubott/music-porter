@@ -13,6 +13,7 @@ import json
 import queue
 import re
 import time
+import uuid
 from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -522,6 +523,8 @@ def api_playlists_list():
     etag_parts = [
         (p['key'], p['name'],
          stats.get(p['key'], {}).get('track_count', 0),
+         stats.get(p['key'], {}).get('total_track_count', 0),
+         stats.get(p['key'], {}).get('hidden_count', 0),
          stats.get(p['key'], {}).get('total_size_bytes', 0),
          stats.get(p['key'], {}).get('total_duration_s', 0),
          stats.get(p['key'], {}).get('max_updated_at', 0))
@@ -544,6 +547,8 @@ def api_playlists_list():
     resp = jsonify([
         {'key': p['key'], 'url': p['url'], 'name': p['name'],
          'file_count': stats.get(p['key'], {}).get('track_count', 0),
+         'total_track_count': stats.get(p['key'], {}).get('total_track_count', 0),
+         'hidden_count': stats.get(p['key'], {}).get('hidden_count', 0),
          'size_bytes': stats.get(p['key'], {}).get('total_size_bytes', 0),
          'duration_s': stats.get(p['key'], {}).get('total_duration_s', 0),
          'freshness': _playlist_freshness(p['key'])}
@@ -621,6 +626,149 @@ def api_playlist_delete_data(key):
         dry_run=dry_run,
     )
     return jsonify(result.to_dict())
+
+
+# ══════════════════════════════════════════════════════════════════
+# API: Playlist Track Management
+# ══════════════════════════════════════════════════════════════════
+
+@api_bp.route('/api/playlists/<key>/tracks', methods=['GET'])
+def api_playlist_tracks_list(key):
+    """Return all tracks for a playlist, including hidden tracks."""
+    ctx = _ctx()
+    playlist = ctx.playlist_db.get(key)
+    if not playlist:
+        return jsonify({'error': f"Playlist '{key}' not found"}), 404
+    tracks = ctx.track_db.get_tracks_by_playlist(key, include_hidden=True)
+    return jsonify(tracks)
+
+
+@api_bp.route('/api/playlists/<key>/tracks/<uuid>', methods=['PUT'])
+def api_playlist_track_update(key, uuid):
+    """Update metadata fields for a single track."""
+    ctx = _ctx()
+    track = ctx.track_db.get_track(uuid)
+    if not track or track.get('playlist') != key:
+        return jsonify({'error': 'Track not found'}), 404
+
+    data = request.get_json(force=True) or {}
+    allowed_fields = {
+        'title', 'artist', 'album', 'genre', 'track_number', 'track_total',
+        'disc_number', 'disc_total', 'year', 'composer', 'album_artist',
+        'bpm', 'comment', 'compilation', 'grouping', 'lyrics', 'copyright',
+    }
+    kwargs = {k: v for k, v in data.items() if k in allowed_fields}
+    if not kwargs:
+        return jsonify({'error': 'No valid fields provided'}), 400
+    ctx.track_db.update_track_metadata(uuid, **kwargs)
+    return jsonify({'ok': True})
+
+
+@api_bp.route('/api/playlists/<key>/tracks/<uuid>/hide', methods=['POST'])
+def api_playlist_track_hide(key, uuid):
+    """Hide a track (mark hidden=1; files remain on disk)."""
+    ctx = _ctx()
+    track = ctx.track_db.get_track(uuid)
+    if not track or track.get('playlist') != key:
+        return jsonify({'error': 'Track not found'}), 404
+    ctx.track_db.set_hidden(uuid, True)
+    return jsonify({'ok': True, 'hidden': True})
+
+
+@api_bp.route('/api/playlists/<key>/tracks/<uuid>/unhide', methods=['POST'])
+def api_playlist_track_unhide(key, uuid):
+    """Unhide a track (mark hidden=0)."""
+    ctx = _ctx()
+    track = ctx.track_db.get_track(uuid)
+    if not track or track.get('playlist') != key:
+        return jsonify({'error': 'Track not found'}), 404
+    ctx.track_db.set_hidden(uuid, False)
+    return jsonify({'ok': True, 'hidden': False})
+
+
+@api_bp.route('/api/playlists/<key>/tracks/<uuid>/lock', methods=['POST'])
+def api_playlist_track_lock(key, uuid):
+    """Lock a track (metadata won't be overwritten by Converter pipeline)."""
+    ctx = _ctx()
+    track = ctx.track_db.get_track(uuid)
+    if not track or track.get('playlist') != key:
+        return jsonify({'error': 'Track not found'}), 404
+    ctx.track_db.set_locked(uuid, True)
+    return jsonify({'ok': True, 'locked': True})
+
+
+@api_bp.route('/api/playlists/<key>/tracks/<uuid>/unlock', methods=['POST'])
+def api_playlist_track_unlock(key, uuid):
+    """Unlock a track."""
+    ctx = _ctx()
+    track = ctx.track_db.get_track(uuid)
+    if not track or track.get('playlist') != key:
+        return jsonify({'error': 'Track not found'}), 404
+    ctx.track_db.set_locked(uuid, False)
+    return jsonify({'ok': True, 'locked': False})
+
+
+@api_bp.route('/api/playlists/<key>/lock-all', methods=['POST'])
+def api_playlist_lock_all(key):
+    """Bulk lock all tracks in a playlist."""
+    ctx = _ctx()
+    if not ctx.playlist_db.get(key):
+        return jsonify({'error': f"Playlist '{key}' not found"}), 404
+    ctx.track_db.set_all_locked(key, True)
+    return jsonify({'ok': True})
+
+
+@api_bp.route('/api/playlists/<key>/unlock-all', methods=['POST'])
+def api_playlist_unlock_all(key):
+    """Bulk unlock all tracks in a playlist."""
+    ctx = _ctx()
+    if not ctx.playlist_db.get(key):
+        return jsonify({'error': f"Playlist '{key}' not found"}), 404
+    ctx.track_db.set_all_locked(key, False)
+    return jsonify({'ok': True})
+
+
+@api_bp.route('/api/playlists/<key>/tracks/<uuid>/reconvert', methods=['POST'])
+def api_playlist_track_reconvert(key, uuid):
+    """Re-convert a single track from its source M4A.
+
+    Submits a background task. Returns {task_id}.
+    Locked tracks: audio reconverted, metadata preserved.
+    Unlocked tracks: full reconvert (new MP3, metadata re-read from M4A).
+    """
+    ctx = _ctx()
+    track = ctx.track_db.get_track(uuid)
+    if not track or track.get('playlist') != key:
+        return jsonify({'error': 'Track not found'}), 404
+    if track.get('hidden'):
+        return jsonify({'error': 'Cannot reconvert a hidden track'}), 400
+
+    source = ctx.detect_source()
+    logger = ctx.make_logger()
+    display = ctx.make_display_handler()
+    desc = f"Reconvert: {track.get('title', uuid)}"
+
+    def _run(task):
+        config = ctx.get_config()
+        quality_preset = config.get('settings', {}).get(
+            'quality_preset', mp.DEFAULT_QUALITY_PRESET)
+        converter = mp.Converter(
+            logger,
+            quality_preset=quality_preset,
+            track_db=ctx.track_db,
+            display_handler=display,
+            cancel_event=task.cancel_event,
+            audit_logger=ctx.audit_logger,
+            audit_source=source,
+        )
+        result = converter.reconvert_track(uuid, ctx.project_root)
+        if not result['success']:
+            raise Exception(result.get('error', 'Reconvert failed'))
+
+    task_id = ctx.task_manager.submit('reconvert', desc, _run, source=source)
+    if task_id is None:
+        return jsonify({'error': 'Another operation is already running'}), 409
+    return jsonify({'task_id': task_id})
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1304,9 +1452,12 @@ def api_files_sync_status(playlist_key):
 def api_files_removed(playlist_key):
     """Return tracks removed from a playlist since a given timestamp.
 
+    Includes both explicitly-removed tracks (from RemovedTrackDB) and
+    hidden tracks (hidden=1 in TrackDB) so sync clients treat both as deleted.
+
     Query params:
-        since (float, optional): Unix timestamp; only tracks removed after
-            this point are returned. If omitted, all removals are returned.
+        since (float, optional): Unix timestamp; only tracks removed/hidden
+            after this point are returned. If omitted, all entries are returned.
 
     Returns:
         {removed_tracks: [{uuid, title, artist, album, display_filename,
@@ -1323,10 +1474,30 @@ def api_files_removed(playlist_key):
 
     removed_track_db = mp.RemovedTrackDB(str(ctx.project_root / mp.DEFAULT_DB_FILE))
     if since is not None:
-        tracks = removed_track_db.get_removed_since(playlist_key, since)
+        explicit_removed = removed_track_db.get_removed_since(playlist_key, since)
     else:
-        tracks = removed_track_db.get_removed_by_playlist(playlist_key)
-    return jsonify({'removed_tracks': tracks})
+        explicit_removed = removed_track_db.get_removed_by_playlist(playlist_key)
+
+    # Also include hidden tracks from TrackDB
+    hidden_tracks = ctx.track_db.get_hidden_tracks(playlist_key, since=since)
+    hidden_as_removed = [
+        {
+            'uuid': t['uuid'],
+            'title': t.get('title', ''),
+            'artist': t.get('artist', ''),
+            'album': t.get('album', ''),
+            'display_filename': _build_display_filename(t),
+            'removed_at': t.get('hidden_at'),
+        }
+        for t in hidden_tracks
+    ]
+
+    # Merge, deduplicating by UUID (explicit removal wins)
+    existing_uuids = {r['uuid'] for r in explicit_removed}
+    merged = explicit_removed + [
+        h for h in hidden_as_removed if h['uuid'] not in existing_uuids
+    ]
+    return jsonify({'removed_tracks': merged})
 
 
 @api_bp.route('/api/files/<playlist_key>/<filename>')
@@ -2156,6 +2327,47 @@ def api_sync_status_orphaned(dest_name):
     return jsonify({'orphaned_files': orphaned})
 
 
+@api_bp.route('/api/sync/status/<path:dest_name>/history')
+def api_sync_dest_history(dest_name):
+    """Return sync history for a destination from task_history.
+
+    Description format: "Sync: <label> → <dest.name>"
+
+    Returns:
+        {history: [...], destination: str}
+    """
+    ctx = _ctx()
+    dest = ctx.sync_tracker.get_destination(dest_name)
+    if not dest:
+        return jsonify({'error': f"Destination '{dest_name}' not found"}), 404
+
+    history = []
+
+    db = ctx.task_manager._db
+    if db:
+        all_sync, _ = db.get_entries(operation='sync', limit=100)
+        suffix = f' \u2192 {dest.name}'
+        for e in all_sync:
+            if not e['description'].endswith(suffix):
+                continue
+            result = e.get('result') or {}
+            history.append({
+                'started_at': e.get('started_at'),
+                'duration': e.get('elapsed') or None,
+                'status': e['status'],
+                'source': e.get('source', 'web'),
+                'description': e['description'],
+                'files_found': result.get('files_found'),
+                'files_copied': result.get('files_copied'),
+                'files_skipped': result.get('files_skipped'),
+                'files_failed': result.get('files_failed'),
+                'orphaned_cleaned': result.get('orphaned_cleaned'),
+            })
+
+    history.sort(key=lambda x: x.get('started_at') or 0, reverse=True)
+    return jsonify({'history': history[:100], 'destination': dest.name})
+
+
 @api_bp.route('/api/sync/destinations/<name>/reset', methods=['POST'])
 def api_sync_destination_reset(name):
     """Reset all sync tracking for a destination's group.
@@ -2225,6 +2437,88 @@ def api_sync_destination_playlist_prefs(name):
     return jsonify({'ok': True})
 
 
+@api_bp.route('/api/sync/client-start', methods=['POST'])
+def api_sync_client_start():
+    """Create a running task_history entry for a client-side sync run.
+
+    Called at the start of a sync run before any files are transferred.
+    Returns a task_id that the client passes to /api/sync/client-complete
+    and includes in each /api/sync/client-record call.
+
+    Body: {destination (str), playlist_keys ([str]|null),
+           started_at (epoch float, optional — defaults to server time)}
+    """
+    ctx = _ctx()
+    data = request.get_json(force=True) or {}
+
+    dest_name = (data.get('destination') or '').strip()
+    if not dest_name:
+        return jsonify({'error': 'destination is required'}), 400
+
+    dest = ctx.sync_tracker.get_destination(dest_name)
+    if not dest:
+        return jsonify({'error': f"Destination '{dest_name}' not found"}), 404
+
+    playlist_keys = data.get('playlist_keys') or None
+    started_at = data.get('started_at') or time.time()
+
+    sync_label = (', '.join(playlist_keys) if playlist_keys else 'all')
+    desc = f'Sync: {sync_label} \u2192 {dest.name}'
+
+    task_id = uuid.uuid4().hex[:12]
+    db = ctx.task_manager._db
+    if db:
+        db.insert(task_id, 'sync', desc, source=ctx.detect_source())
+        db.update_status(task_id, 'running', started_at=started_at)
+
+    return jsonify({'task_id': task_id})
+
+
+@api_bp.route('/api/sync/client-complete', methods=['POST'])
+def api_sync_client_complete():
+    """Mark a client-side sync run as completed/failed/cancelled.
+
+    Called at the end of a sync run regardless of outcome.
+
+    Body: {task_id (str), status ('completed'|'failed'|'cancelled'),
+           files_copied (int), files_skipped (int), files_failed (int),
+           orphaned_cleaned (int, optional), error (str, optional)}
+    """
+    ctx = _ctx()
+    data = request.get_json(force=True) or {}
+
+    task_id = (data.get('task_id') or '').strip()
+    if not task_id:
+        return jsonify({'error': 'task_id is required'}), 400
+
+    status = data.get('status', 'completed')
+    if status not in ('completed', 'failed', 'cancelled'):
+        return jsonify({'error': f"Invalid status: {status}"}), 400
+
+    files_copied = int(data.get('files_copied', 0))
+    files_skipped = int(data.get('files_skipped', 0))
+    files_failed = int(data.get('files_failed', 0))
+
+    result = {
+        'files_found': files_copied + files_skipped + files_failed,
+        'files_copied': files_copied,
+        'files_skipped': files_skipped,
+        'files_failed': files_failed,
+        'orphaned_cleaned': data.get('orphaned_cleaned'),
+    }
+
+    db = ctx.task_manager._db
+    if db:
+        db.update_status(
+            task_id, status,
+            result=result if status == 'completed' else None,
+            error=data.get('error', ''),
+            finished_at=time.time(),
+        )
+
+    return jsonify({'ok': True})
+
+
 @api_bp.route('/api/sync/client-record', methods=['POST'])
 def api_sync_client_record():
     """Record files synced via client-side sync for tracking.
@@ -2237,6 +2531,23 @@ def api_sync_client_record():
         return jsonify({'error': 'Sync tracker not available'}), 400
 
     data = request.get_json(silent=True) or {}
+
+    task_id = (data.get('task_id') or '').strip()
+    if not task_id:
+        return jsonify({
+            'error': 'task_id is required — call /api/sync/client-start first',
+        }), 400
+
+    db = ctx.task_manager._db
+    if db:
+        task = db.get(task_id)
+        if not task:
+            return jsonify({'error': f"Task '{task_id}' not found"}), 404
+        if task['status'] != 'running':
+            return jsonify({
+                'error': f"Task '{task_id}' is not running (status: {task['status']})",
+            }), 409
+
     dest_name = data.get('destination', '')
     playlist = data.get('playlist', '')
     files = data.get('files', [])
@@ -2274,17 +2585,6 @@ def api_sync_client_record():
             }), 404
 
     ctx.sync_tracker.record_batch(dest.sync_key, playlist, files)
-
-    if ctx.audit_logger:
-        ctx.audit_logger.log(
-            'client_sync_record',
-            f"Recorded {len(files)} file(s) for '{playlist}' "
-            f"on destination '{dest_name}'",
-            'completed',
-            params={'destination': dest_name, 'playlist': playlist,
-                    'file_count': len(files)},
-            source=ctx.detect_source(),
-        )
 
     return jsonify({'ok': True, 'recorded': len(files)})
 

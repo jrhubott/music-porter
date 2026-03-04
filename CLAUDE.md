@@ -209,6 +209,11 @@ Version defined in `porter_core.py` line 50. Uses semantic versioning (MAJOR.MIN
 
 **USB Detection:** Auto-detects by platform — macOS: `/Volumes/`, Linux: `/media/$USER/` + `/mnt/`, Windows: drive letters. Eject: automatic on macOS/Linux, manual on Windows.
 
+**JS `onclick` string arguments:** When building HTML strings in JS template literals, never use `JSON.stringify()` for string arguments inside `onclick="..."` attributes — `JSON.stringify` wraps the value in double quotes, which terminates the attribute early and silently breaks the handler. Use single-quote wrapping instead, with `&apos;` to escape any literal single quotes in the value:
+```javascript
+onclick="myFn('${primaryDest}', '${label.replace(/'/g, '&apos;')}')"
+```
+
 ## Directory Structure
 
 **Key files:** `music-porter` (entry point), `porter_core.py` (business logic), `web_ui.py` (Flask app factory, classes, page routes), `web_api.py` (REST API blueprint — all `/api/*` routes), `data/config.yaml` (playlists + settings), `data/cookies.txt` (auth), `data/music-porter.db` (SQLite — tracks, audit, tasks, sync, EQ, scheduling).
