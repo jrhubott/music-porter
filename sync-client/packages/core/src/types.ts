@@ -329,6 +329,7 @@ export interface SyncPreferences {
   autoPinNewPlaylists: boolean;
   unpinnedPlaylists: string[];
   recentDestinations: string[];
+  cleanDestination: boolean;
 }
 
 export interface AppConfig {

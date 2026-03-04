@@ -348,7 +348,7 @@ export function registerIPCHandlers(): void {
         cacheManager,
         metadataCache,
         offlineOnly: opts.offlineOnly,
-        cleanDestination: opts.cleanDestination,
+        cleanDestination: opts.cleanDestination ?? configStore.preferences.cleanDestination ?? false,
         onProgress: (progress: SyncProgress) => {
           event.sender.send('sync:progress', progress);
         },

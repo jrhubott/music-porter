@@ -19,6 +19,7 @@ const DEFAULT_PREFERENCES: SyncPreferences = {
   autoPinNewPlaylists: false,
   unpinnedPlaylists: [],
   recentDestinations: [],
+  cleanDestination: false,
 };
 
 /** Legacy preferences shape for migration from autoSyncOnUSB. */

@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { MANIFEST_FILENAME } from './constants.js';
-import type { SyncManifest, SyncManifestPlaylist } from './types.js';
+import type { SyncManifest } from './types.js';
 
 /** Read a sync manifest from a destination directory. Returns null if not found. */
 export function readManifest(destDir: string): SyncManifest | null {
@@ -64,9 +64,6 @@ export function updateManifestPlaylist(
   playlistKey: string,
   files: Record<string, number>,
 ): void {
-  const existing = manifest.playlists[playlistKey];
-  const merged: Record<string, number> = existing ? { ...existing.files, ...files } : { ...files };
-  const entry: SyncManifestPlaylist = { files: merged };
-  manifest.playlists[playlistKey] = entry;
+  manifest.playlists[playlistKey] = { files: { ...files } };
   manifest.last_sync_at = new Date().toISOString();
 }
