@@ -523,6 +523,8 @@ def api_playlists_list():
     etag_parts = [
         (p['key'], p['name'],
          stats.get(p['key'], {}).get('track_count', 0),
+         stats.get(p['key'], {}).get('total_track_count', 0),
+         stats.get(p['key'], {}).get('hidden_count', 0),
          stats.get(p['key'], {}).get('total_size_bytes', 0),
          stats.get(p['key'], {}).get('total_duration_s', 0),
          stats.get(p['key'], {}).get('max_updated_at', 0))
@@ -545,6 +547,8 @@ def api_playlists_list():
     resp = jsonify([
         {'key': p['key'], 'url': p['url'], 'name': p['name'],
          'file_count': stats.get(p['key'], {}).get('track_count', 0),
+         'total_track_count': stats.get(p['key'], {}).get('total_track_count', 0),
+         'hidden_count': stats.get(p['key'], {}).get('hidden_count', 0),
          'size_bytes': stats.get(p['key'], {}).get('total_size_bytes', 0),
          'duration_s': stats.get(p['key'], {}).get('total_duration_s', 0),
          'freshness': _playlist_freshness(p['key'])}
@@ -622,6 +626,149 @@ def api_playlist_delete_data(key):
         dry_run=dry_run,
     )
     return jsonify(result.to_dict())
+
+
+# ══════════════════════════════════════════════════════════════════
+# API: Playlist Track Management
+# ══════════════════════════════════════════════════════════════════
+
+@api_bp.route('/api/playlists/<key>/tracks', methods=['GET'])
+def api_playlist_tracks_list(key):
+    """Return all tracks for a playlist, including hidden tracks."""
+    ctx = _ctx()
+    playlist = ctx.playlist_db.get(key)
+    if not playlist:
+        return jsonify({'error': f"Playlist '{key}' not found"}), 404
+    tracks = ctx.track_db.get_tracks_by_playlist(key, include_hidden=True)
+    return jsonify(tracks)
+
+
+@api_bp.route('/api/playlists/<key>/tracks/<uuid>', methods=['PUT'])
+def api_playlist_track_update(key, uuid):
+    """Update metadata fields for a single track."""
+    ctx = _ctx()
+    track = ctx.track_db.get_track(uuid)
+    if not track or track.get('playlist') != key:
+        return jsonify({'error': 'Track not found'}), 404
+
+    data = request.get_json(force=True) or {}
+    allowed_fields = {
+        'title', 'artist', 'album', 'genre', 'track_number', 'track_total',
+        'disc_number', 'disc_total', 'year', 'composer', 'album_artist',
+        'bpm', 'comment', 'compilation', 'grouping', 'lyrics', 'copyright',
+    }
+    kwargs = {k: v for k, v in data.items() if k in allowed_fields}
+    if not kwargs:
+        return jsonify({'error': 'No valid fields provided'}), 400
+    ctx.track_db.update_track_metadata(uuid, **kwargs)
+    return jsonify({'ok': True})
+
+
+@api_bp.route('/api/playlists/<key>/tracks/<uuid>/hide', methods=['POST'])
+def api_playlist_track_hide(key, uuid):
+    """Hide a track (mark hidden=1; files remain on disk)."""
+    ctx = _ctx()
+    track = ctx.track_db.get_track(uuid)
+    if not track or track.get('playlist') != key:
+        return jsonify({'error': 'Track not found'}), 404
+    ctx.track_db.set_hidden(uuid, True)
+    return jsonify({'ok': True, 'hidden': True})
+
+
+@api_bp.route('/api/playlists/<key>/tracks/<uuid>/unhide', methods=['POST'])
+def api_playlist_track_unhide(key, uuid):
+    """Unhide a track (mark hidden=0)."""
+    ctx = _ctx()
+    track = ctx.track_db.get_track(uuid)
+    if not track or track.get('playlist') != key:
+        return jsonify({'error': 'Track not found'}), 404
+    ctx.track_db.set_hidden(uuid, False)
+    return jsonify({'ok': True, 'hidden': False})
+
+
+@api_bp.route('/api/playlists/<key>/tracks/<uuid>/lock', methods=['POST'])
+def api_playlist_track_lock(key, uuid):
+    """Lock a track (metadata won't be overwritten by Converter pipeline)."""
+    ctx = _ctx()
+    track = ctx.track_db.get_track(uuid)
+    if not track or track.get('playlist') != key:
+        return jsonify({'error': 'Track not found'}), 404
+    ctx.track_db.set_locked(uuid, True)
+    return jsonify({'ok': True, 'locked': True})
+
+
+@api_bp.route('/api/playlists/<key>/tracks/<uuid>/unlock', methods=['POST'])
+def api_playlist_track_unlock(key, uuid):
+    """Unlock a track."""
+    ctx = _ctx()
+    track = ctx.track_db.get_track(uuid)
+    if not track or track.get('playlist') != key:
+        return jsonify({'error': 'Track not found'}), 404
+    ctx.track_db.set_locked(uuid, False)
+    return jsonify({'ok': True, 'locked': False})
+
+
+@api_bp.route('/api/playlists/<key>/lock-all', methods=['POST'])
+def api_playlist_lock_all(key):
+    """Bulk lock all tracks in a playlist."""
+    ctx = _ctx()
+    if not ctx.playlist_db.get(key):
+        return jsonify({'error': f"Playlist '{key}' not found"}), 404
+    ctx.track_db.set_all_locked(key, True)
+    return jsonify({'ok': True})
+
+
+@api_bp.route('/api/playlists/<key>/unlock-all', methods=['POST'])
+def api_playlist_unlock_all(key):
+    """Bulk unlock all tracks in a playlist."""
+    ctx = _ctx()
+    if not ctx.playlist_db.get(key):
+        return jsonify({'error': f"Playlist '{key}' not found"}), 404
+    ctx.track_db.set_all_locked(key, False)
+    return jsonify({'ok': True})
+
+
+@api_bp.route('/api/playlists/<key>/tracks/<uuid>/reconvert', methods=['POST'])
+def api_playlist_track_reconvert(key, uuid):
+    """Re-convert a single track from its source M4A.
+
+    Submits a background task. Returns {task_id}.
+    Locked tracks: audio reconverted, metadata preserved.
+    Unlocked tracks: full reconvert (new MP3, metadata re-read from M4A).
+    """
+    ctx = _ctx()
+    track = ctx.track_db.get_track(uuid)
+    if not track or track.get('playlist') != key:
+        return jsonify({'error': 'Track not found'}), 404
+    if track.get('hidden'):
+        return jsonify({'error': 'Cannot reconvert a hidden track'}), 400
+
+    source = ctx.detect_source()
+    logger = ctx.make_logger()
+    display = ctx.make_display_handler()
+    desc = f"Reconvert: {track.get('title', uuid)}"
+
+    def _run(task):
+        config = ctx.get_config()
+        quality_preset = config.get('settings', {}).get(
+            'quality_preset', mp.DEFAULT_QUALITY_PRESET)
+        converter = mp.Converter(
+            logger,
+            quality_preset=quality_preset,
+            track_db=ctx.track_db,
+            display_handler=display,
+            cancel_event=task.cancel_event,
+            audit_logger=ctx.audit_logger,
+            audit_source=source,
+        )
+        result = converter.reconvert_track(uuid, ctx.project_root)
+        if not result['success']:
+            raise Exception(result.get('error', 'Reconvert failed'))
+
+    task_id = ctx.task_manager.submit('reconvert', desc, _run, source=source)
+    if task_id is None:
+        return jsonify({'error': 'Another operation is already running'}), 409
+    return jsonify({'task_id': task_id})
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1305,9 +1452,12 @@ def api_files_sync_status(playlist_key):
 def api_files_removed(playlist_key):
     """Return tracks removed from a playlist since a given timestamp.
 
+    Includes both explicitly-removed tracks (from RemovedTrackDB) and
+    hidden tracks (hidden=1 in TrackDB) so sync clients treat both as deleted.
+
     Query params:
-        since (float, optional): Unix timestamp; only tracks removed after
-            this point are returned. If omitted, all removals are returned.
+        since (float, optional): Unix timestamp; only tracks removed/hidden
+            after this point are returned. If omitted, all entries are returned.
 
     Returns:
         {removed_tracks: [{uuid, title, artist, album, display_filename,
@@ -1324,10 +1474,30 @@ def api_files_removed(playlist_key):
 
     removed_track_db = mp.RemovedTrackDB(str(ctx.project_root / mp.DEFAULT_DB_FILE))
     if since is not None:
-        tracks = removed_track_db.get_removed_since(playlist_key, since)
+        explicit_removed = removed_track_db.get_removed_since(playlist_key, since)
     else:
-        tracks = removed_track_db.get_removed_by_playlist(playlist_key)
-    return jsonify({'removed_tracks': tracks})
+        explicit_removed = removed_track_db.get_removed_by_playlist(playlist_key)
+
+    # Also include hidden tracks from TrackDB
+    hidden_tracks = ctx.track_db.get_hidden_tracks(playlist_key, since=since)
+    hidden_as_removed = [
+        {
+            'uuid': t['uuid'],
+            'title': t.get('title', ''),
+            'artist': t.get('artist', ''),
+            'album': t.get('album', ''),
+            'display_filename': _build_display_filename(t),
+            'removed_at': t.get('hidden_at'),
+        }
+        for t in hidden_tracks
+    ]
+
+    # Merge, deduplicating by UUID (explicit removal wins)
+    existing_uuids = {r['uuid'] for r in explicit_removed}
+    merged = explicit_removed + [
+        h for h in hidden_as_removed if h['uuid'] not in existing_uuids
+    ]
+    return jsonify({'removed_tracks': merged})
 
 
 @api_bp.route('/api/files/<playlist_key>/<filename>')

@@ -49,7 +49,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.39.1-dev"
+VERSION = "2.39.1-playlist-track-browser"
 
 DEFAULT_DATA_DIR = "data"
 DEFAULT_LIBRARY_DIR = "library"
@@ -84,7 +84,7 @@ KNOWN_DEST_SCHEMES = ('usb://', 'folder://', 'web-client://', 'ios://')
 # Schema version constants — increment and add a migration case when changing
 # the config.yaml structure or DB tables/columns.
 CONFIG_SCHEMA_VERSION = 4
-DB_SCHEMA_VERSION = 12
+DB_SCHEMA_VERSION = 14
 
 # Excluded USB volumes by OS
 if IS_MACOS:
@@ -1496,6 +1496,52 @@ def migrate_db_schema(logger=None):
                 logger.info(
                     "DB migration 11→12: added idx_sync_files_track_uuid"
                     " index on sync_files(track_uuid)")
+
+        if current < 13:
+            conn.execute(
+                "ALTER TABLE tracks ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
+            conn.execute("ALTER TABLE tracks ADD COLUMN hidden_at REAL")
+            conn.execute(
+                "ALTER TABLE tracks ADD COLUMN locked INTEGER NOT NULL DEFAULT 0")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tracks_hidden"
+                " ON tracks(playlist, hidden)")
+            conn.execute("PRAGMA user_version = 13")
+            conn.commit()
+            changes.append("added hidden, hidden_at, locked columns to tracks")
+            if logger:
+                logger.info(
+                    "DB migration 12→13: added hidden, hidden_at, locked"
+                    " columns and idx_tracks_hidden index to tracks table")
+
+        if current < 14:
+            # Repair: v13 migration may have been skipped if TrackDB._init_db()
+            # pre-stamped user_version=13 before migrate_db_schema() ran.
+            # Add each column only if it is not already present.
+            existing_cols = {
+                r[1] for r in
+                conn.execute("PRAGMA table_info(tracks)").fetchall()
+            }
+            if 'hidden' not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE tracks"
+                    " ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
+            if 'hidden_at' not in existing_cols:
+                conn.execute("ALTER TABLE tracks ADD COLUMN hidden_at REAL")
+            if 'locked' not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE tracks"
+                    " ADD COLUMN locked INTEGER NOT NULL DEFAULT 0")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tracks_hidden"
+                " ON tracks(playlist, hidden)")
+            conn.execute("PRAGMA user_version = 14")
+            conn.commit()
+            changes.append("ensured hidden, hidden_at, locked columns on tracks (v13 repair)")
+            if logger:
+                logger.info(
+                    "DB migration 13→14: ensured hidden/hidden_at/locked"
+                    " columns exist on tracks table")
 
         return [MigrationEvent(
             'schema_migrate',
@@ -3700,7 +3746,10 @@ class TrackDB:
                     lyrics          TEXT,
                     copyright       TEXT,
                     created_at      REAL NOT NULL,
-                    updated_at      REAL NOT NULL
+                    updated_at      REAL NOT NULL,
+                    hidden          INTEGER NOT NULL DEFAULT 0,
+                    hidden_at       REAL,
+                    locked          INTEGER NOT NULL DEFAULT 0
                 )
             """)
             conn.execute("""CREATE INDEX IF NOT EXISTS idx_tracks_playlist
@@ -3897,14 +3946,26 @@ class TrackDB:
         finally:
             conn.close()
 
-    def get_tracks_by_playlist(self, playlist):
-        """Return all tracks for a playlist, ordered by title."""
+    def get_tracks_by_playlist(self, playlist, include_hidden=False):
+        """Return tracks for a playlist, ordered by title.
+
+        Args:
+            include_hidden: If True, includes hidden tracks. Defaults to False
+                (active tracks only, backward-compatible).
+        """
         conn = self._connect()
         try:
-            rows = conn.execute(
-                "SELECT * FROM tracks WHERE playlist = ? ORDER BY title",
-                (playlist,),
-            ).fetchall()
+            if include_hidden:
+                rows = conn.execute(
+                    "SELECT * FROM tracks WHERE playlist = ? ORDER BY title",
+                    (playlist,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM tracks WHERE playlist = ? AND hidden = 0"
+                    " ORDER BY title",
+                    (playlist,),
+                ).fetchall()
             return [dict(r) for r in rows]
         finally:
             conn.close()
@@ -3921,7 +3982,7 @@ class TrackDB:
             conn.close()
 
     def get_playlist_stats(self):
-        """Return per-playlist aggregate stats.
+        """Return per-playlist aggregate stats (active tracks only).
 
         Returns list of dicts with keys: playlist, track_count,
         total_size_bytes, total_duration_s, max_updated_at,
@@ -3931,14 +3992,16 @@ class TrackDB:
         try:
             rows = conn.execute("""
                 SELECT playlist,
-                       COUNT(*) AS track_count,
-                       COALESCE(SUM(file_size_bytes), 0) AS total_size_bytes,
-                       COALESCE(SUM(duration_s), 0) AS total_duration_s,
-                       COALESCE(MAX(updated_at), 0) AS max_updated_at,
-                       SUM(CASE WHEN cover_art_path IS NOT NULL
+                       SUM(CASE WHEN hidden = 0 THEN 1 ELSE 0 END) AS track_count,
+                       COALESCE(SUM(CASE WHEN hidden = 0 THEN file_size_bytes ELSE 0 END), 0) AS total_size_bytes,
+                       COALESCE(SUM(CASE WHEN hidden = 0 THEN duration_s ELSE 0 END), 0) AS total_duration_s,
+                       COALESCE(MAX(CASE WHEN hidden = 0 THEN updated_at END), 0) AS max_updated_at,
+                       SUM(CASE WHEN hidden = 0 AND cover_art_path IS NOT NULL
                            THEN 1 ELSE 0 END) AS cover_with,
-                       SUM(CASE WHEN cover_art_path IS NULL
-                           THEN 1 ELSE 0 END) AS cover_without
+                       SUM(CASE WHEN hidden = 0 AND cover_art_path IS NULL
+                           THEN 1 ELSE 0 END) AS cover_without,
+                       COUNT(*) AS total_track_count,
+                       SUM(CASE WHEN hidden = 1 THEN 1 ELSE 0 END) AS hidden_count
                 FROM tracks
                 GROUP BY playlist
                 ORDER BY playlist
@@ -3948,20 +4011,22 @@ class TrackDB:
             conn.close()
 
     def get_track_count(self):
-        """Return the total number of tracks across all playlists."""
+        """Return the total number of active (non-hidden) tracks."""
         conn = self._connect()
         try:
-            row = conn.execute("SELECT COUNT(*) AS cnt FROM tracks").fetchone()
+            row = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM tracks WHERE hidden = 0"
+            ).fetchone()
             return row['cnt'] if row else 0
         finally:
             conn.close()
 
     def get_all_tracks(self):
-        """Return all tracks, ordered by playlist then title."""
+        """Return all active (non-hidden) tracks, ordered by playlist then title."""
         conn = self._connect()
         try:
             rows = conn.execute(
-                "SELECT * FROM tracks ORDER BY playlist, title"
+                "SELECT * FROM tracks WHERE hidden = 0 ORDER BY playlist, title"
             ).fetchall()
             return [dict(r) for r in rows]
         finally:
@@ -4006,15 +4071,15 @@ class TrackDB:
     def get_playlist_fingerprint(self, playlist):
         """Return a lightweight fingerprint (count + max_updated_at + total_size).
 
-        Changes when any track is added, removed, or updated.
-        Returns None if the playlist has no tracks.
+        Changes when any active track is added, removed, updated, or hidden/unhidden.
+        Returns None if the playlist has no active tracks.
         """
         conn = self._connect()
         try:
             row = conn.execute(
                 "SELECT COUNT(*) AS cnt, MAX(updated_at) AS max_updated, "
                 "COALESCE(SUM(file_size_bytes), 0) AS total_size "
-                "FROM tracks WHERE playlist = ?",
+                "FROM tracks WHERE playlist = ? AND hidden = 0",
                 (playlist,),
             ).fetchone()
             if not row or row["cnt"] == 0:
@@ -4022,6 +4087,79 @@ class TrackDB:
             return f"{row['cnt']}-{row['max_updated']}-{row['total_size']}"
         finally:
             conn.close()
+
+    def set_hidden(self, uuid, hidden: bool):
+        """Set or clear the hidden flag for a track.
+
+        When hiding, records the current time in hidden_at.
+        When unhiding, clears hidden_at.
+        """
+        import time as _time
+        hidden_at = _time.time() if hidden else None
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE tracks SET hidden = ?, hidden_at = ?,"
+                    " updated_at = ? WHERE uuid = ?",
+                    (1 if hidden else 0, hidden_at, _time.time(), uuid),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def get_hidden_tracks(self, playlist, since=None):
+        """Return hidden tracks for a playlist.
+
+        Args:
+            since: Optional Unix timestamp — only return tracks hidden after this time.
+        """
+        conn = self._connect()
+        try:
+            if since is not None:
+                rows = conn.execute(
+                    "SELECT * FROM tracks WHERE playlist = ? AND hidden = 1"
+                    " AND hidden_at > ? ORDER BY title",
+                    (playlist, since),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM tracks WHERE playlist = ? AND hidden = 1"
+                    " ORDER BY title",
+                    (playlist,),
+                ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def set_locked(self, uuid, locked: bool):
+        """Set or clear the locked flag for a track."""
+        import time as _time
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE tracks SET locked = ?, updated_at = ? WHERE uuid = ?",
+                    (1 if locked else 0, _time.time(), uuid),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def set_all_locked(self, playlist, locked: bool):
+        """Bulk set or clear the locked flag for all tracks in a playlist."""
+        import time as _time
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE tracks SET locked = ?, updated_at = ?"
+                    " WHERE playlist = ?",
+                    (1 if locked else 0, _time.time(), playlist),
+                )
+                conn.commit()
+            finally:
+                conn.close()
 
 
 class EQConfigManager:
@@ -6020,17 +6158,69 @@ class Converter:
                 existing_track = self.track_db.get_track_by_source_m4a(
                     rel_source)
 
-            if existing_track and not force:
-                self.stats.increment('skipped')
-                msg = (f"[{count}/{self.stats.total_found}] "
-                       f"Skipping (already converted): {human_label}")
-                if progress_bar and not verbose:
-                    self.logger.file_info(msg)
-                else:
-                    self.logger.info(msg)
-                if progress_bar:
-                    progress_bar.update(1)
-                return
+            if existing_track:
+                # Hidden tracks are never re-processed, even with force=True
+                if existing_track.get('hidden'):
+                    if progress_bar:
+                        progress_bar.update(1)
+                    return
+
+                if not force:
+                    self.stats.increment('skipped')
+                    msg = (f"[{count}/{self.stats.total_found}] "
+                           f"Skipping (already converted): {human_label}")
+                    if progress_bar and not verbose:
+                        self.logger.file_info(msg)
+                    else:
+                        self.logger.info(msg)
+                    if progress_bar:
+                        progress_bar.update(1)
+                    return
+
+                # Locked + force: reconvert audio only, preserve UUID and metadata
+                if force and existing_track.get('locked'):
+                    import ffmpeg as _locked_ffmpeg
+                    existing_mp3 = Path(existing_track['file_path'])
+                    if not existing_mp3.is_absolute():
+                        existing_mp3 = output_path.parent / existing_mp3
+                    try:
+                        ffmpeg_params = {'acodec': 'libmp3lame'}
+                        if self.quality_settings['mode'] == 'vbr':
+                            ffmpeg_params['q:a'] = self.quality_settings['value']
+                        else:
+                            ffmpeg_params['b:a'] = (
+                                self.quality_settings['value'] + 'k')
+                        filter_chain = self.eq_config.build_filter_chain()
+                        if filter_chain:
+                            ffmpeg_params['af'] = filter_chain
+                        (
+                            _locked_ffmpeg
+                            .input(str(input_file))
+                            .output(str(existing_mp3), **ffmpeg_params)
+                            .run(overwrite_output=True, quiet=True)
+                        )
+                        # Re-stamp TXXX:TrackUUID only
+                        locked_uuid = existing_track['uuid']
+                        id3_locked = ID3()
+                        id3_locked.add(TXXX(encoding=3, desc=TXXX_TRACK_UUID,
+                                            text=[locked_uuid]))
+                        id3_locked.save(str(existing_mp3), v2_version=4, v1=0)
+                        self.stats.increment('overwritten')
+                        msg = (f"[{count}/{self.stats.total_found}] "
+                               f"Reconverted (audio-only, locked): {human_label}")
+                        if progress_bar and not verbose:
+                            self.logger.file_info(msg)
+                        else:
+                            self.logger.info(msg)
+                    except _locked_ffmpeg.Error as e:
+                        err_msg = e.stderr.decode('utf-8') if e.stderr else str(e)
+                        self.logger.error(
+                            f"FFmpeg error reconverting locked track '{human_label}': {err_msg}")
+                        self.stats.increment('errors')
+                    finally:
+                        if progress_bar:
+                            progress_bar.update(1)
+                    return
 
             # Generate UUID first — used for both filename and DB record
             track_uuid = _uuid.uuid4().hex
@@ -6376,6 +6566,78 @@ class Converter:
             eq_effects=self.eq_config.enabled_effects,
         )
 
+    def reconvert_track(self, uuid, project_root='.'):
+        """Re-convert a single track from its source M4A.
+
+        For locked tracks: reconverts audio only (skips metadata write).
+        For unlocked tracks: full reconvert (deletes old MP3 + DB record, re-inserts).
+
+        Returns a dict with 'success' (bool) and 'error' (str, only on failure).
+        """
+        if not self.track_db:
+            return {'success': False, 'error': 'No TrackDB configured'}
+
+        track = self.track_db.get_track(uuid)
+        if not track:
+            return {'success': False, 'error': f'Track {uuid} not found'}
+        if track.get('hidden'):
+            return {'success': False, 'error': 'Cannot reconvert a hidden track'}
+
+        playlist_key = track['playlist']
+        source_m4a_rel = track.get('source_m4a_path')
+        if not source_m4a_rel:
+            return {'success': False, 'error': 'No source M4A path recorded for this track'}
+
+        # Build absolute path to the source M4A
+        project_root = Path(project_root)
+        abs_m4a = project_root / source_m4a_rel
+        if not abs_m4a.exists():
+            return {
+                'success': False,
+                'error': f'Source M4A not found on disk: {source_m4a_rel}',
+            }
+
+        import ffmpeg as _ffmpeg
+        from mutagen.id3 import ID3, TXXX  # type: ignore[attr-defined]
+
+        if track.get('locked'):
+            # Locked: reconvert audio only — overwrite the existing MP3 file
+            mp3_path = track['file_path']
+            abs_mp3 = Path(mp3_path) if Path(mp3_path).is_absolute() else project_root / mp3_path
+            abs_mp3.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                ffmpeg_params = {'acodec': 'libmp3lame'}
+                if self.quality_settings['mode'] == 'vbr':
+                    ffmpeg_params['q:a'] = self.quality_settings['value']
+                else:
+                    ffmpeg_params['b:a'] = self.quality_settings['value'] + 'k'
+                filter_chain = self.eq_config.build_filter_chain()
+                if filter_chain:
+                    ffmpeg_params['af'] = filter_chain
+                (
+                    _ffmpeg
+                    .input(str(abs_m4a))
+                    .output(str(abs_mp3), **ffmpeg_params)
+                    .run(overwrite_output=True, quiet=True)
+                )
+                # Re-stamp only the TXXX:TrackUUID tag (strip anything ffmpeg copied)
+                id3_tags = ID3()
+                id3_tags.add(TXXX(encoding=3, desc=TXXX_TRACK_UUID, text=[uuid]))
+                id3_tags.save(str(abs_mp3), v2_version=4, v1=0)
+                self.logger.info(
+                    f"Reconverted (audio-only, locked): {track.get('title', uuid)}")
+            except _ffmpeg.Error as e:
+                error_msg = e.stderr.decode('utf-8') if e.stderr else str(e)
+                return {'success': False, 'error': f'FFmpeg error: {error_msg}'}
+        else:
+            # Unlocked: full reconvert via _convert_single_file with force=True
+            input_path = abs_m4a.parent
+            output_path = project_root / get_audio_dir()
+            self._convert_single_file(
+                abs_m4a, input_path, output_path, playlist_key,
+                force=True, dry_run=False, verbose=False)
+
+        return {'success': True}
 
 
 # ══════════════════════════════════════════════════════════════════

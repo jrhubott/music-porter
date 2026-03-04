@@ -34,12 +34,13 @@
             <th>#</th>
             <th>Key</th>
             <th>Name</th>
+            <th>Tracks</th>
             <th>URL</th>
             <th class="text-end">Actions</th>
           </tr>
         </thead>
         <tbody id="playlistTable">
-          <tr><td colspan="5" class="text-center text-muted">Loading...</td></tr>
+          <tr><td colspan="6" class="text-center text-muted">Loading...</td></tr>
         </tbody>
       </table>
     </div>
@@ -112,22 +113,31 @@ function loadPlaylists() {
   fetch('/api/playlists').then(r => r.json()).then(playlists => {
     const tbody = document.getElementById('playlistTable');
     if (playlists.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No playlists configured</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No playlists configured</td></tr>';
       return;
     }
-    tbody.innerHTML = playlists.map((p, i) => `
+    tbody.innerHTML = playlists.map((p, i) => {
+      const total = p.total_track_count || 0;
+      const hidden = p.hidden_count || 0;
+      const trackCell = hidden > 0
+        ? `${total} <span class="badge bg-secondary ms-1" title="${hidden} hidden">${hidden} hidden</span>`
+        : `${total}`;
+      return `
       <tr>
         <td>${i + 1}</td>
         <td><code>${p.key}</code></td>
         <td>${p.name}</td>
+        <td class="text-nowrap">${trackCell}</td>
         <td><small class="text-muted text-truncate d-inline-block" style="max-width:300px" title="${p.url}">${p.url}</small></td>
         <td class="text-end">
+          <a href="/playlists/${p.key}/tracks" class="btn btn-outline-info btn-sm py-0 px-2" title="Browse tracks"><i class="bi bi-music-note-list"></i></a>
           <button class="btn btn-outline-primary btn-sm py-0 px-2" onclick="openEdit('${p.key}','${p.name}','${p.url}')" title="Edit"><i class="bi bi-pencil"></i></button>
           <button class="btn btn-outline-warning btn-sm py-0 px-2" onclick="openDeleteData('${p.key}','${p.name}')" title="Delete data"><i class="bi bi-folder-x"></i></button>
           <button class="btn btn-outline-danger btn-sm py-0 px-2" onclick="removePlaylist('${p.key}')" title="Remove config"><i class="bi bi-trash"></i></button>
         </td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
   });
 }
 
