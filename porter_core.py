@@ -3992,16 +3992,17 @@ class TrackDB:
         try:
             rows = conn.execute("""
                 SELECT playlist,
-                       COUNT(*) AS track_count,
-                       COALESCE(SUM(file_size_bytes), 0) AS total_size_bytes,
-                       COALESCE(SUM(duration_s), 0) AS total_duration_s,
-                       COALESCE(MAX(updated_at), 0) AS max_updated_at,
-                       SUM(CASE WHEN cover_art_path IS NOT NULL
+                       SUM(CASE WHEN hidden = 0 THEN 1 ELSE 0 END) AS track_count,
+                       COALESCE(SUM(CASE WHEN hidden = 0 THEN file_size_bytes ELSE 0 END), 0) AS total_size_bytes,
+                       COALESCE(SUM(CASE WHEN hidden = 0 THEN duration_s ELSE 0 END), 0) AS total_duration_s,
+                       COALESCE(MAX(CASE WHEN hidden = 0 THEN updated_at END), 0) AS max_updated_at,
+                       SUM(CASE WHEN hidden = 0 AND cover_art_path IS NOT NULL
                            THEN 1 ELSE 0 END) AS cover_with,
-                       SUM(CASE WHEN cover_art_path IS NULL
-                           THEN 1 ELSE 0 END) AS cover_without
+                       SUM(CASE WHEN hidden = 0 AND cover_art_path IS NULL
+                           THEN 1 ELSE 0 END) AS cover_without,
+                       COUNT(*) AS total_track_count,
+                       SUM(CASE WHEN hidden = 1 THEN 1 ELSE 0 END) AS hidden_count
                 FROM tracks
-                WHERE hidden = 0
                 GROUP BY playlist
                 ORDER BY playlist
             """).fetchall()

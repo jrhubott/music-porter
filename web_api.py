@@ -545,6 +545,8 @@ def api_playlists_list():
     resp = jsonify([
         {'key': p['key'], 'url': p['url'], 'name': p['name'],
          'file_count': stats.get(p['key'], {}).get('track_count', 0),
+         'total_track_count': stats.get(p['key'], {}).get('total_track_count', 0),
+         'hidden_count': stats.get(p['key'], {}).get('hidden_count', 0),
          'size_bytes': stats.get(p['key'], {}).get('total_size_bytes', 0),
          'duration_s': stats.get(p['key'], {}).get('total_duration_s', 0),
          'freshness': _playlist_freshness(p['key'])}
