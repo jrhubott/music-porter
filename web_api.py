@@ -2156,6 +2156,49 @@ def api_sync_status_orphaned(dest_name):
     return jsonify({'orphaned_files': orphaned})
 
 
+@api_bp.route('/api/sync/status/<path:dest_name>/history')
+def api_sync_dest_history(dest_name):
+    """Return task_history entries for sync operations to this destination.
+
+    Description format: "Sync: <label> → <dest.name>"
+    Filters by suffix to match the exact destination name.
+
+    Returns:
+        {history: [...], destination: str}
+    """
+    ctx = _ctx()
+    dest = ctx.sync_tracker.get_destination(dest_name)
+    if not dest:
+        return jsonify({'error': f"Destination '{dest_name}' not found"}), 404
+
+    db = ctx.task_manager._db
+    if not db:
+        return jsonify({'history': [], 'destination': dest.name})
+
+    all_sync, _ = db.get_entries(operation='sync', limit=100)
+    suffix = f' \u2192 {dest.name}'
+    history = []
+    for e in all_sync:
+        if not e['description'].endswith(suffix):
+            continue
+        result = e.get('result') or {}
+        history.append({
+            'started_at': e.get('started_at'),
+            'finished_at': e.get('finished_at'),
+            'duration': e.get('elapsed') or None,
+            'status': e['status'],
+            'source': e.get('source', 'web'),
+            'description': e['description'],
+            'files_found': result.get('files_found'),
+            'files_copied': result.get('files_copied'),
+            'files_skipped': result.get('files_skipped'),
+            'files_failed': result.get('files_failed'),
+            'orphaned_cleaned': result.get('orphaned_cleaned'),
+        })
+
+    return jsonify({'history': history, 'destination': dest.name})
+
+
 @api_bp.route('/api/sync/destinations/<name>/reset', methods=['POST'])
 def api_sync_destination_reset(name):
     """Reset all sync tracking for a destination's group.
