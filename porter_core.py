@@ -3717,7 +3717,10 @@ class TrackDB:
                     lyrics          TEXT,
                     copyright       TEXT,
                     created_at      REAL NOT NULL,
-                    updated_at      REAL NOT NULL
+                    updated_at      REAL NOT NULL,
+                    hidden          INTEGER NOT NULL DEFAULT 0,
+                    hidden_at       REAL,
+                    locked          INTEGER NOT NULL DEFAULT 0
                 )
             """)
             conn.execute("""CREATE INDEX IF NOT EXISTS idx_tracks_playlist
