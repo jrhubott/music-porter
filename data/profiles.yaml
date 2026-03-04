@@ -1,0 +1,32 @@
+# Music Porter Output Profiles
+# Edit this file to add or customise output profiles.
+
+schema_version: 1
+
+output:
+  ride-command:
+    description: Polaris Ride Command infotainment system
+    id3_title: '{artist} - {title}'
+    id3_artist: Various
+    id3_album: '{playlist}'
+    id3_genre: Playlist
+    id3_extra: {}
+    id3_versions:
+    - v2.3
+    artwork_size: 100
+    filename: '{artist} - {title}'
+    directory: ''
+    usb_dir: RZR/Music
+  basic:
+    description: Standard MP3 with original tags and artwork
+    id3_title: '{title}'
+    id3_artist: '{artist}'
+    id3_album: '{album}'
+    id3_genre: ''
+    id3_extra: {}
+    id3_versions:
+    - v2.4
+    artwork_size: 0
+    filename: '{artist} - {title}'
+    directory: '{artist}/{album}'
+    usb_dir: ''

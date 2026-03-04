@@ -59,6 +59,7 @@ _migration_events = mp.migrate_data_dir()
 # Apply schema migrations before any DB or config class is instantiated
 _migration_events += mp.migrate_db_schema()
 _migration_events += mp.migrate_config_schema()
+_migration_events += mp.migrate_profiles_schema()
 
 # Load config so retention settings are available for all prune calls
 _startup_config = mp.ConfigManager(logger=mp.Logger(verbose=False))

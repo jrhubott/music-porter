@@ -48,6 +48,7 @@ from porter_core import (
     migrate_config_schema,
     migrate_data_dir,
     migrate_db_schema,
+    migrate_profiles_schema,
 )
 
 
@@ -110,6 +111,7 @@ def main():
     # Apply schema migrations before any DB or config class is instantiated
     migration_events += migrate_db_schema(logger=temp_logger)
     migration_events += migrate_config_schema(logger=temp_logger)
+    migration_events += migrate_profiles_schema(logger=temp_logger)
 
     parser = _create_parser()
     args = parser.parse_args()

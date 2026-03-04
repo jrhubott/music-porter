@@ -64,6 +64,7 @@ DEFAULT_TASK_HISTORY_RETENTION_DAYS = 90
 DEFAULT_CLEANUP_REMOVED_TRACKS = False
 DEFAULT_CLEAN_SYNC_DESTINATION = False
 DEFAULT_CONFIG_FILE = "data/config.yaml"
+DEFAULT_PROFILES_FILE = "data/profiles.yaml"
 DEFAULT_COOKIES = "data/cookies.txt"
 DEFAULT_DB_FILE = "data/music-porter.db"
 DEFAULT_USB_DIR = "RZR/Music"
@@ -82,7 +83,8 @@ KNOWN_DEST_SCHEMES = ('usb://', 'folder://', 'web-client://', 'ios://')
 
 # Schema version constants — increment and add a migration case when changing
 # the config.yaml structure or DB tables/columns.
-CONFIG_SCHEMA_VERSION = 4
+CONFIG_SCHEMA_VERSION = 5
+PROFILES_SCHEMA_VERSION = 1  # increment + add a migration case when changing profiles.yaml structure
 DB_SCHEMA_VERSION = 15
 
 # Excluded USB volumes by OS
@@ -1806,6 +1808,40 @@ def migrate_config_schema(logger=None):
             logger.info(
                 "Config migration 3→4: moved playlists + destinations to DB")
 
+    # ── Version 4 → 5: move output_types to data/profiles.yaml ──────────────
+    if current < 5:
+        profiles_path = Path(DEFAULT_PROFILES_FILE)
+        raw_types = data.get('output_types')
+
+        # Only write profiles.yaml if it doesn't already exist.
+        # Fresh installs have profiles.yaml committed to git; only existing
+        # installs with output_types in config.yaml need the copy.
+        if not profiles_path.exists() and isinstance(raw_types, dict) and raw_types:
+            import copy as _copy
+            profiles_data = {
+                'schema_version': 1,
+                'output': _copy.deepcopy(raw_types),
+            }
+            with open(profiles_path, 'w') as pf:
+                pf.write("# Music Porter Output Profiles\n")
+                pf.write("# Edit this file to add or customise output profiles.\n\n")
+                yaml.dump(profiles_data, pf,
+                          default_flow_style=False, sort_keys=False)
+            if logger:
+                logger.info(
+                    f"Config migration 4→5: wrote output profiles to {profiles_path}")
+
+        # Always remove output_types from config.yaml
+        if 'output_types' in data:
+            data.pop('output_types')
+            dirty = True
+
+        data['schema_version'] = 5
+        dirty = True
+        changes.append("moved output_types to data/profiles.yaml")
+        if logger:
+            logger.info("Config migration 4→5: removed output_types from config.yaml")
+
     if dirty:
         with open(conf_path, 'w') as f:
             f.write("# Music Porter Configuration\n")
@@ -1820,6 +1856,77 @@ def migrate_config_schema(logger=None):
             'completed',
             {'target': 'config', 'from_version': from_version,
              'to_version': CONFIG_SCHEMA_VERSION, 'changes': changes},
+        )]
+
+    return []
+
+
+def migrate_profiles_schema(logger=None):
+    """Apply sequential profiles.yaml schema migrations.
+
+    Call once at startup, before ConfigManager is instantiated.
+    Returns a list of MigrationEvent entries for deferred audit logging.
+
+    Migration convention (same as migrate_config_schema):
+      - Each `if current < N:` block sets schema_version to exactly N (not
+        PROFILES_SCHEMA_VERSION). New migrations go exclusively in a new block.
+      - Migrations must be idempotent and sequential (1→2→3…).
+      - Never modify existing version blocks.
+    """
+    profiles_path = Path(DEFAULT_PROFILES_FILE)
+    if not profiles_path.exists():
+        return []
+
+    try:
+        import yaml
+    except ImportError:
+        return []  # PyYAML not yet installed — DependencyChecker handles this
+
+    try:
+        with open(profiles_path) as f:
+            data = yaml.safe_load(f) or {}
+    except yaml.YAMLError as e:
+        if logger:
+            logger.warn(f"Could not read profiles.yaml for migration: {e}")
+        return []
+
+    current = data.get('schema_version', 1)
+
+    if current > PROFILES_SCHEMA_VERSION:
+        raise RuntimeError(
+            f"Profiles schema version {current} is newer than this "
+            f"software supports ({PROFILES_SCHEMA_VERSION}). Update the "
+            f"software or restore from data/archive/."
+        )
+
+    if current >= PROFILES_SCHEMA_VERSION:
+        return []  # already up to date
+
+    from_version = current
+    dirty = False
+    changes = []
+
+    # Future migrations go here, e.g.:
+    # if current < 2:
+    #     # ... transform data ...
+    #     data['schema_version'] = 2
+    #     dirty = True
+    #     changes.append("...")
+
+    if dirty:
+        with open(profiles_path, 'w') as f:
+            f.write("# Music Porter Output Profiles\n")
+            f.write("# Edit this file to add or customise output profiles.\n\n")
+            yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+        if logger:
+            logger.info(
+                f"Profiles schema updated to version {PROFILES_SCHEMA_VERSION}")
+        return [MigrationEvent(
+            'schema_migrate',
+            f"Profiles schema migrated from version {from_version} to {PROFILES_SCHEMA_VERSION}",
+            'completed',
+            {'target': 'profiles', 'from_version': from_version,
+             'to_version': PROFILES_SCHEMA_VERSION, 'changes': changes},
         )]
 
     return []
@@ -4377,7 +4484,6 @@ class ConfigManager:
         self._on_change = on_change
         self.settings = {}
         self.output_profiles = {}
-        self._raw_output_types = {}
 
         if self.conf_path.exists():
             try:
@@ -4387,7 +4493,6 @@ class ConfigManager:
                 self.logger.warn("PyYAML not available — cannot load config.yaml yet")
                 self.settings = {}
                 self.output_profiles = {}
-                self._raw_output_types = {}
         else:
             try:
                 self._create_default()
@@ -4396,7 +4501,6 @@ class ConfigManager:
                 self.logger.warn(f"Configuration file not found: {self.conf_path}")
                 self.settings = {}
                 self.output_profiles = {}
-                self._raw_output_types = {}
 
     def _load_yaml(self):
         """Load configuration from YAML file.
@@ -4409,21 +4513,34 @@ class ConfigManager:
         with open(self.conf_path) as f:
             data = yaml.safe_load(f) or {}
 
-        # Load settings
         self.settings = data.get('settings', {})
+        profiles_path = self.conf_path.parent / "profiles.yaml"
+        self._load_profiles(profiles_path)
 
-        # Load output_types
-        raw_types = data.get('output_types')
-        if raw_types is None:
-            raise ValueError(
-                "config.yaml: missing 'output_types' section "
-                "(run migrate_config_schema() first or delete config.yaml to regenerate)")
-        elif isinstance(raw_types, dict) and len(raw_types) == 0:
-            raise ValueError(
-                "config.yaml: 'output_types' is empty — at least one profile is required")
+    def _load_profiles(self, profiles_path):
+        """Load and validate output profiles from profiles.yaml.
 
-        # Validate and build OutputProfile instances
-        self._raw_output_types = raw_types
+        Falls back to DEFAULT_OUTPUT_PROFILES with a warning if the file is missing.
+        Raises ValueError on invalid profile content.
+        """
+        import copy
+
+        import yaml
+
+        if not profiles_path.exists():
+            self.logger.warn(
+                f"profiles.yaml not found at {profiles_path}; "
+                "using built-in default profiles")
+            raw_types = copy.deepcopy(DEFAULT_OUTPUT_PROFILES)
+        else:
+            with open(profiles_path) as pf:
+                data = yaml.safe_load(pf) or {}
+            raw_types = data.get('output') or {}
+
+        if not isinstance(raw_types, dict) or len(raw_types) == 0:
+            raise ValueError(
+                f"{profiles_path}: 'output' section is missing or empty")
+
         self.output_profiles = {}
         for name, fields in raw_types.items():
             _validate_profile(name, fields)
@@ -4442,11 +4559,11 @@ class ConfigManager:
                 usb_dir=fields.get("usb_dir", ""),
             )
 
-        self.logger.info(f"Loaded {len(self.output_profiles)} output profiles from {self.conf_path}")
+        self.logger.info(
+            f"Loaded {len(self.output_profiles)} output profiles from {profiles_path}")
 
     def _create_default(self):
-        """Create a default config.yaml with default profiles and empty playlists."""
-        import copy
+        """Create a default config.yaml. Profiles are loaded from profiles.yaml."""
         self.settings = {
             'output_type': DEFAULT_OUTPUT_TYPE,
             'workers': DEFAULT_WORKERS,
@@ -4454,36 +4571,18 @@ class ConfigManager:
             'server_name': '',
             'log_retention_days': DEFAULT_LOG_RETENTION_DAYS,
         }
-        self._raw_output_types = copy.deepcopy(DEFAULT_OUTPUT_PROFILES)
-        # Build OutputProfile instances from defaults
-        self.output_profiles = {}
-        for name, fields in self._raw_output_types.items():
-            profile_kwargs = {k: fields[k] for k in _PROFILE_REQUIRED_FIELDS}
-            profile_kwargs['usb_dir'] = fields.get('usb_dir', '')
-            self.output_profiles[name] = OutputProfile(
-                name=name, **profile_kwargs
-            )
         self._save()
+        profiles_path = self.conf_path.parent / "profiles.yaml"
+        self._load_profiles(profiles_path)
         self.logger.info(f"Created default configuration: {self.conf_path}")
 
     def _save(self):
-        """Write current configuration to YAML file."""
+        """Write current configuration to config.yaml (settings only)."""
         import yaml
-
-        # Serialize output_types from raw dict if available, else from profiles
-        if self._raw_output_types:
-            output_types = self._raw_output_types
-        else:
-            output_types = {}
-            for name, p in self.output_profiles.items():
-                fields = {f: getattr(p, f) for f in _PROFILE_REQUIRED_FIELDS}
-                fields['usb_dir'] = p.usb_dir
-                output_types[name] = fields
 
         data = {
             'schema_version': CONFIG_SCHEMA_VERSION,
             'settings': self.settings,
-            'output_types': output_types,
         }
 
         with open(self.conf_path, 'w') as f:
