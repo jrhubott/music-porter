@@ -114,7 +114,7 @@
             <th class="text-end">Total</th>
             <th class="text-end">Synced</th>
             <th class="text-end">New</th>
-            <th class="text-center" id="prefColHeader">Pref</th>
+            <th class="text-center" id="prefColHeader"><input type="checkbox" class="form-check-input" id="prefAllCheckbox" title="Toggle all playlist prefs"> Pref</th>
             <th class="text-center">Status</th>
             <th class="text-center">Actions</th>
           </tr>
@@ -260,6 +260,8 @@
 let destsMeta = []; // [{name, path, type, available, linked_destinations, playlist_prefs}]
 let allGroupsData = []; // cached /api/sync/status response
 let totalLibraryBytes = 0;
+let detailPrefs = null; // null = all playlists; array = selective prefs for open breakdown
+let detailPlaylists = []; // all playlist names in the currently open breakdown
 
 // ── Helpers ──
 const SECS_PER_HOUR = 3600;
@@ -534,12 +536,17 @@ function showDetail(destName) {
       return;
     }
 
-    const prefs = data.playlist_prefs || null;
-    const prefHeader = document.getElementById('prefColHeader');
-    if (prefHeader) prefHeader.textContent = prefs ? 'Pref' : 'Pref (All)';
+    detailPrefs = data.playlist_prefs || null;
+    detailPlaylists = (data.playlists || []).map(p => p.name);
+    const prefAllCb = document.getElementById('prefAllCheckbox');
+    if (prefAllCb) {
+      prefAllCb.checked = !detailPrefs;
+      prefAllCb.onchange = () => handlePrefAllToggle(destName);
+    }
     const detailMeta = findDestMeta(destName);
     const detailSyncDisabled = (!detailMeta || !detailMeta.available) ? 'disabled' : '';
     const detailSyncTitle = detailSyncDisabled ? 'Destination unavailable' : 'Sync playlist';
+    const isAllMode = !detailPrefs;
     tbody.innerHTML = data.playlists.map(p => {
       let statusBadge;
       const s = p.sync_status;
@@ -552,14 +559,8 @@ function showDetail(destName) {
       } else {
         statusBadge = '<span class="badge bg-success">Synced</span>';
       }
-      let prefCell;
-      if (!prefs) {
-        prefCell = '<span class="text-muted">–</span>';
-      } else if (prefs.includes(p.name)) {
-        prefCell = '<i class="bi bi-check-circle-fill text-success" title="In saved prefs"></i>';
-      } else {
-        prefCell = '<span class="text-muted">–</span>';
-      }
+      const isChecked = isAllMode || detailPrefs.includes(p.name);
+      const prefCell = `<div class="${isAllMode ? 'opacity-50' : ''}"><input type="checkbox" class="form-check-input pref-playlist-cb" value="${p.name}" ${isChecked ? 'checked' : ''} ${isAllMode ? 'disabled' : ''} onchange="handlePrefToggle('${destName}')"></div>`;
       return `<tr>
         <td>${p.name}</td>
         <td class="text-end">${p.total_files}</td>
@@ -579,6 +580,46 @@ function showDetail(destName) {
 
 function hideDetail() {
   document.getElementById('detailCard').classList.add('d-none');
+}
+
+// ── Playlist pref checkboxes ──
+function handlePrefAllToggle(destName) {
+  const prefAllCb = document.getElementById('prefAllCheckbox');
+  if (prefAllCb.checked) {
+    savePrefAndRefresh(destName, null);
+  } else {
+    // Transition to selective: start with all playlists explicitly selected
+    savePrefAndRefresh(destName, detailPlaylists.slice());
+  }
+}
+
+function handlePrefToggle(destName) {
+  const checked = Array.from(document.querySelectorAll('#detailTableBody .pref-playlist-cb:checked')).map(cb => cb.value);
+  // If all checked, normalize to null (all mode)
+  savePrefAndRefresh(destName, checked.length === detailPlaylists.length ? null : checked);
+}
+
+function savePrefAndRefresh(destName, playlistKeys) {
+  document.querySelectorAll('#detailTableBody .pref-playlist-cb, #prefAllCheckbox').forEach(cb => { cb.disabled = true; });
+  fetch('/api/sync/destinations/' + encodeURIComponent(destName) + '/playlist-prefs', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({playlist_keys: playlistKeys})
+  }).then(r => r.json()).then(data => {
+    if (data.error) {
+      showToast('Failed to save prefs: ' + data.error, 'error');
+    } else {
+      const msg = playlistKeys === null
+        ? 'Prefs set to all playlists'
+        : `Prefs updated (${playlistKeys.length} playlist(s))`;
+      showToast(msg, 'success');
+      loadSyncStatusData();
+    }
+    showDetail(destName);
+  }).catch(err => {
+    showToast('Failed to save prefs: ' + err, 'error');
+    showDetail(destName);
+  });
 }
 
 // ── Reset tracking ──
