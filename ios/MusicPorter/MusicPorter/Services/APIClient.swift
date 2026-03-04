@@ -48,6 +48,23 @@ final class APIClient {
         return response
     }
 
+    /// Unauthenticated health probe. Safe to call before auth is established.
+    /// Returns a HealthResponse for both 200 (healthy/degraded) and 503 (unhealthy).
+    /// Throws on network failure (connection refused, timeout, etc.).
+    func fetchHealth(baseURL: URL? = nil) async throws -> HealthResponse {
+        let base = baseURL ?? activeBaseURL
+        guard let base else { throw APIError.notConfigured }
+        guard var comps = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+            throw APIError.notConfigured
+        }
+        comps.path = "/health"
+        comps.queryItems = nil
+        guard let url = comps.url else { throw APIError.notConfigured }
+        let request = URLRequest(url: url)      // no Authorization header
+        let (data, _) = try await session.data(for: request)
+        return try JSONDecoder().decode(HealthResponse.self, from: data)
+    }
+
     func disconnect() {
         server = nil
         apiKey = nil
@@ -157,8 +174,12 @@ final class APIClient {
 
     // MARK: - Files
 
-    func getFiles(playlist: String) async throws -> FileListResponse {
-        try await get("/api/files/\(playlist)")
+    func getFiles(playlist: String, profile: String? = nil) async throws -> FileListResponse {
+        var queryItems: [URLQueryItem]?
+        if let profile, !profile.isEmpty {
+            queryItems = [URLQueryItem(name: "profile", value: profile)]
+        }
+        return try await get("/api/files/\(playlist)", queryItems: queryItems)
     }
 
     /// Fetch a playlist's file list with ETag support via MetadataCache.
@@ -370,6 +391,30 @@ final class APIClient {
         try await get("/api/files/\(playlist)/sync-status")
     }
 
+    /// Get tracks removed from a playlist, optionally since a given Unix timestamp.
+    func getRemovedFiles(playlist: String, since: Double? = nil) async throws -> RemovedFilesResponse {
+        var queryItems: [URLQueryItem]?
+        if let since {
+            queryItems = [URLQueryItem(name: "since", value: String(since))]
+        }
+        return try await get("/api/files/\(playlist)/removed", queryItems: queryItems)
+    }
+
+    func recordClientSync(
+        destination: String,
+        playlist: String,
+        files: [String],
+        destPath: String? = nil
+    ) async throws {
+        var body: [String: Any] = [
+            "destination": destination,
+            "playlist": playlist,
+            "files": files,
+        ]
+        if let destPath { body["dest_path"] = destPath }
+        let _: OkResponse = try await postAny("/api/sync/client-record", body: body)
+    }
+
     // MARK: - Tasks
 
     func getTasks() async throws -> [TaskInfo] {
@@ -430,6 +475,7 @@ final class APIClient {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("MusicPorter-iOS", forHTTPHeaderField: "User-Agent")
         if let apiKey {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
@@ -756,6 +802,31 @@ struct LibraryStatsResponse: Codable {
         case totalExported = "total_exported"
         case totalUnconverted = "total_unconverted"
         case scanDuration = "scan_duration"
+    }
+}
+
+struct RemovedTrack: Codable {
+    let id: Int
+    let uuid: String
+    let playlist: String
+    let title: String
+    let artist: String
+    let album: String
+    let displayFilename: String
+    let removedAt: Double
+
+    enum CodingKeys: String, CodingKey {
+        case id, uuid, playlist, title, artist, album
+        case displayFilename = "display_filename"
+        case removedAt = "removed_at"
+    }
+}
+
+struct RemovedFilesResponse: Codable {
+    let removedTracks: [RemovedTrack]
+
+    enum CodingKeys: String, CodingKey {
+        case removedTracks = "removed_tracks"
     }
 }
 

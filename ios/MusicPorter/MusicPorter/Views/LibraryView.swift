@@ -15,6 +15,11 @@ struct LibraryView: View {
     @State private var showExportPicker = false
     @State private var exportScope: ExportScope = .all
 
+    @State private var selectedSyncFolder: URL?
+    @State private var showFolderSetupPicker = false
+    @State private var forceResync = false
+    @State private var selectedSyncPlaylistKeys: Set<String> = []
+
     // Cache state
     @State private var playlistCacheStatus: [String: PlaylistCacheStatus] = [:]
     @State private var cacheSize: Int64 = 0
@@ -72,6 +77,16 @@ struct LibraryView: View {
                     }
                 }
             }
+            .sheet(isPresented: $showFolderSetupPicker) {
+                DocumentExportPicker { url in
+                    showFolderSetupPicker = false
+                    if let url {
+                        selectedSyncFolder = url
+                        selectedSyncPlaylistKeys = []
+                        Task { await preSelectPlaylists(for: url) }
+                    }
+                }
+            }
             .refreshable {
                 await load()
                 if selectedSegment == 1 && !isOffline {
@@ -103,11 +118,15 @@ struct LibraryView: View {
 
     private var playlistsContent: some View {
         List {
+            playlistsSection
             actionBar
+            
             prefetchProgressSection
+            
             exportProgressSection
             exportResultSection
-            playlistsSection
+            folderSyncProgressSection
+            folderSyncResultSection
             localStorageSection
             errorSection
         }
@@ -200,22 +219,46 @@ struct LibraryView: View {
 
     private var actionBar: some View {
         Section {
-            HStack(spacing: 12) {
+            HStack {
                 Spacer()
-
                 Button {
-                    exportScope = .all
-                    showExportPicker = true
+                    showFolderSetupPicker = true
                 } label: {
-                    Label("Export to USB", systemImage: "externaldrive")
+                    Label("Select Sync Folder", systemImage: "folder.badge.plus")
                 }
-                .disabled(appState.usbExport.isExporting || !hasExportableFiles)
+                .disabled(appState.folderSync.isSyncing || !hasExportableFiles)
+                Spacer()
             }
             .buttonStyle(.borderless)
 
-            Text("Files are organized into playlist folders on USB.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+            if let folder = selectedSyncFolder {
+                Text(folder.path)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+
+                let syncCount = selectedSyncPlaylistKeys.count
+                Text(syncCount == 0 ? "All playlists" : "\(syncCount) playlist\(syncCount == 1 ? "" : "s") selected")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Force re-sync all files", isOn: $forceResync)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Button {
+                    Task { await doFolderSync(folder) }
+                } label: {
+                    HStack {
+                        Spacer()
+                        Label("Sync to Folder", systemImage: "arrow.triangle.2.circlepath")
+                            .fontWeight(.semibold)
+                        Spacer()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(appState.folderSync.isSyncing)
+            }
 
             exportSourceSummary
         }
@@ -277,7 +320,7 @@ struct LibraryView: View {
     @ViewBuilder
     private var exportProgressSection: some View {
         if appState.usbExport.isExporting {
-            Section("USB Export") {
+            Section("Export") {
                 VStack(alignment: .leading, spacing: 6) {
                     ProgressView(value: appState.usbExport.exportProgress)
                         .tint(.orange)
@@ -305,6 +348,67 @@ struct LibraryView: View {
             Section {
                 Label(result.message, systemImage: result.success ? "checkmark.circle.fill" : "xmark.circle.fill")
                     .foregroundStyle(result.success ? .green : .red)
+            }
+        }
+    }
+
+    // MARK: - Folder Sync Progress
+
+    @ViewBuilder
+    private var folderSyncProgressSection: some View {
+        if appState.folderSync.isSyncing {
+            Section("Syncing to Folder") {
+                ProgressView(value: appState.folderSync.progress)
+                    .tint(.blue)
+                HStack {
+                    VStack(alignment: .leading) {
+                        Text("↑ \(appState.folderSync.filesCopied) copied  ↷ \(appState.folderSync.filesSkipped) skipped")
+                            .font(.caption2)
+                        if let name = appState.folderSync.currentFileName {
+                            Text(name)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer()
+                    Button("Cancel") {
+                        appState.folderSync.cancel()
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var folderSyncResultSection: some View {
+        if !appState.folderSync.isSyncing, let result = appState.folderSync.lastResult {
+            Section {
+                Label(result.message, systemImage: result.success ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    .foregroundStyle(result.success ? .green : .red)
+                if result.filesCopied > 0 || result.filesSkipped > 0 {
+                    HStack {
+                        Text("\(result.filesCopied) copied")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text("·")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text("\(result.filesSkipped) skipped")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        if result.filesFailed > 0 {
+                            Text("·")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text("\(result.filesFailed) failed")
+                                .font(.caption2)
+                                .foregroundStyle(.red)
+                        }
+                    }
+                }
             }
         }
     }
@@ -384,6 +488,21 @@ struct LibraryView: View {
                         .foregroundStyle(isPinned ? .blue : .secondary)
                 }
                 .buttonStyle(.borderless)
+
+                if selectedSyncFolder != nil {
+                    let isSelected = selectedSyncPlaylistKeys.contains(playlist.key)
+                    Button {
+                        if isSelected {
+                            selectedSyncPlaylistKeys.remove(playlist.key)
+                        } else {
+                            selectedSyncPlaylistKeys.insert(playlist.key)
+                        }
+                    } label: {
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(isSelected ? .blue : .secondary)
+                    }
+                    .buttonStyle(.borderless)
+                }
             }
         }
         .swipeActions(edge: .trailing) {
@@ -507,7 +626,9 @@ struct LibraryView: View {
     // MARK: - Helpers
 
     private var hasExportableFiles: Bool {
-        !vm.exportDirs.isEmpty && vm.exportDirs.contains { $0.files > 0 }
+        let serverHas = !vm.exportDirs.isEmpty && vm.exportDirs.contains { $0.files > 0 }
+        let cacheHas = playlistCacheStatus.values.contains { $0.cached > 0 }
+        return serverHas || cacheHas
     }
 
     // MARK: - Actions
@@ -532,6 +653,45 @@ struct LibraryView: View {
             statuses[playlist.key] = status
         }
         playlistCacheStatus = statuses
+    }
+
+    private func doFolderSync(_ destURL: URL) async {
+        appState.folderSync.reset()
+        let keys = selectedSyncPlaylistKeys.isEmpty
+            ? vm.playlists.map(\.key)
+            : Array(selectedSyncPlaylistKeys)
+        let prefsToSave: [String]? = selectedSyncPlaylistKeys.isEmpty ? nil : Array(selectedSyncPlaylistKeys)
+        await appState.folderSync.sync(
+            destURL: destURL,
+            playlistKeys: keys,
+            playlistPrefs: prefsToSave,
+            api: appState.apiClient,
+            audioCacheManager: appState.audioCacheManager,
+            profile: appState.activeProfile,
+            forceResync: forceResync
+        )
+    }
+
+    private func preSelectPlaylists(for folderURL: URL) async {
+        // Online: authoritative data from server
+        if let status = (try? await appState.apiClient.resolveDestination(
+            path: folderURL.path,
+            name: folderURL.lastPathComponent
+        ))?.syncStatus {
+            if let prefs = status.playlistPrefs {
+                selectedSyncPlaylistKeys = Set(prefs)
+            } else {
+                selectedSyncPlaylistKeys = Set(status.playlists.map(\.name))
+            }
+            return
+        }
+        // Offline fallback: read local manifest
+        let accessing = folderURL.startAccessingSecurityScopedResource()
+        defer { if accessing { folderURL.stopAccessingSecurityScopedResource() } }
+        if let manifest = SyncManifest.read(from: folderURL) {
+            selectedSyncPlaylistKeys = Set(manifest.playlists.keys)
+        }
+        // New folder (no manifest) → stays empty → sync all
     }
 
     private func exportToFolder(_ destDir: URL) async {

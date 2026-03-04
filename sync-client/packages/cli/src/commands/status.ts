@@ -37,7 +37,10 @@ export function registerStatusCommand(program: Command): void {
                 String(p.synced_files),
                 String(p.total_files),
                 String(p.new_files),
-                p.is_new_playlist ? 'New' : p.new_files > 0 ? 'Updates' : 'Current',
+                p.sync_status === 'skipped' ? 'Skipped'
+                  : (p.sync_status === 'new' || p.is_new_playlist) ? 'New'
+                  : p.sync_status === 'behind' || p.new_files > 0 ? 'Updates'
+                  : 'Current',
               ]),
             );
             console.log();

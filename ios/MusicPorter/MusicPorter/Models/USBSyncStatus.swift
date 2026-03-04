@@ -38,6 +38,8 @@ struct SyncPlaylistInfo: Identifiable, Codable {
     let syncedFiles: Int
     let newFiles: Int
     let isNewPlaylist: Bool
+    /// "synced" | "new" | "behind" | "skipped". nil for older server versions.
+    let syncStatus: String?
 
     var id: String { name }
 
@@ -47,6 +49,7 @@ struct SyncPlaylistInfo: Identifiable, Codable {
         case syncedFiles = "synced_files"
         case newFiles = "new_files"
         case isNewPlaylist = "is_new_playlist"
+        case syncStatus = "sync_status"
     }
 }
 

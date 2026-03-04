@@ -353,16 +353,15 @@ export function DestinationsPage() {
                     </thead>
                     <tbody>
                       {selectedDestGroupDetail.playlists.map((p) => {
-                        const badgeClass = p.is_new_playlist
-                          ? 'bg-warning text-dark'
-                          : p.new_files > 0
-                            ? 'bg-info'
-                            : 'bg-success';
-                        const badgeText = p.is_new_playlist
-                          ? 'Never synced'
-                          : p.new_files > 0
-                            ? `${p.new_files} new`
-                            : 'Current';
+                        const s = p.sync_status;
+                        const badgeClass =
+                          s === 'skipped' ? 'bg-secondary' :
+                          (s === 'new' || p.is_new_playlist) ? 'bg-warning text-dark' :
+                          (s === 'behind' || p.new_files > 0) ? 'bg-info' : 'bg-success';
+                        const badgeText =
+                          s === 'skipped' ? 'Skipped' :
+                          (s === 'new' || p.is_new_playlist) ? 'Never synced' :
+                          (s === 'behind' || p.new_files > 0) ? `${p.new_files} new` : 'Current';
                         const prefs = selectedDestGroupDetail.playlist_prefs;
                         const inPref = prefs ? prefs.includes(p.name) : null;
                         return (

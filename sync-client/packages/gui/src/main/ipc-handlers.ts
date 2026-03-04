@@ -12,6 +12,7 @@ import {
   VERSION,
   getConfigDir,
   readManifest,
+  readManifestPlaylistKeys,
 } from '@mporter/core';
 import type {
   BackgroundPrefetchStatus,
@@ -219,6 +220,7 @@ export function registerIPCHandlers(): void {
     const response = await apiClient.getSyncDestinations();
     return response.destinations.filter((d) => {
       if (d.type === 'web-client') return false;
+      if (d.type === 'ios') return false;
       if (d.type === 'usb') return false;
       const rawPath = d.path.replace(/^(usb|folder):\/\//, '');
       return existsSync(rawPath);
@@ -327,6 +329,7 @@ export function registerIPCHandlers(): void {
         profile?: string;
         force?: boolean;
         offlineOnly?: boolean;
+        cleanDestination?: boolean;
       },
     ): Promise<SyncResult> => {
       activeSyncAbort = new AbortController();
@@ -345,6 +348,7 @@ export function registerIPCHandlers(): void {
         cacheManager,
         metadataCache,
         offlineOnly: opts.offlineOnly,
+        cleanDestination: opts.cleanDestination,
         onProgress: (progress: SyncProgress) => {
           event.sender.send('sync:progress', progress);
         },
@@ -381,6 +385,10 @@ export function registerIPCHandlers(): void {
       }
     },
   );
+
+  ipcMain.handle('manifest:getPlaylistKeys', (_event, destPath: string): string[] => {
+    return readManifestPlaylistKeys(destPath);
+  });
 
   // ── Drives ──
 

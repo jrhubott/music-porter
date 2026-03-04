@@ -29,6 +29,7 @@ export function registerSyncCommand(program: Command): void {
     .option('--dry-run', 'Preview sync without downloading')
     .option('--force', 'Force re-download all files (ignore manifest and disk cache)')
     .option('--offline', 'Sync from local cache only (no server connection)')
+    .option('--clean-destination', 'Remove destination files for tracks deleted from server')
     .action(async (opts: {
       playlist?: string;
       dest?: string;
@@ -38,6 +39,7 @@ export function registerSyncCommand(program: Command): void {
       dryRun?: boolean;
       force?: boolean;
       offline?: boolean;
+      cleanDestination?: boolean;
     }) => {
       const configStore = new ConfigStore();
 
@@ -218,6 +220,17 @@ export function registerSyncCommand(program: Command): void {
       if (usbDriveName) console.log(`USB drive: ${usbDriveName}`);
       console.log();
 
+      // If --clean-destination not specified, read server default
+      let cleanDestination = opts.cleanDestination ?? false;
+      if (!opts.cleanDestination) {
+        try {
+          const settings = await client.getSettings();
+          cleanDestination = Boolean(settings.settings['clean_sync_destination']);
+        } catch {
+          // Non-critical — default to false
+        }
+      }
+
       try {
         const result = await engine.sync(dest, {
           playlists,
@@ -230,6 +243,7 @@ export function registerSyncCommand(program: Command): void {
           force: opts.force,
           cacheManager,
           metadataCache,
+          cleanDestination,
           onProgress: (progress: SyncProgress) => {
             if (progress.phase === 'discovering') {
               // Don't start bar yet

@@ -214,6 +214,25 @@ actor AudioCacheManager {
         return PlaylistCacheStatus(playlistKey: key, total: totalFiles, cached: cached, pinned: pinned)
     }
 
+    // MARK: - Removal
+
+    /// Remove a cached entry by UUID — deletes the audio file from disk and removes
+    /// the index entry. Returns whether the entry existed and bytes freed.
+    @discardableResult
+    func removeEntry(_ uuid: String) -> (removed: Bool, bytesFreed: Int64) {
+        guard let entry = index.entries[uuid] else { return (false, 0) }
+        let filePath = entryPath(entry)
+        let bytesFreed = Int64(entry.size)
+        let fm = FileManager.default
+        if fm.fileExists(atPath: filePath.path) {
+            try? fm.removeItem(at: filePath)
+        }
+        index.entries.removeValue(forKey: uuid)
+        persistIndex()
+        CacheUtils.removeEmptyDirs(baseDir: cacheDir)
+        return (true, bytesFreed)
+    }
+
     // MARK: - Staleness
 
     /// Returns true if the cached file is stale — i.e. the server's updated_at

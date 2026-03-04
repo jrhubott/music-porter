@@ -644,6 +644,7 @@ Background task: full pipeline (download + convert + optional sync) for one or a
 | `sync_destination` | string | No | — | Destination name to sync after pipeline |
 | `eq` | object | No | — | EQ config override: `{loudnorm, bass_boost, treble_boost, compressor}` |
 | `no_eq` | boolean | No | `false` | Disable all EQ processing |
+| `cleanup_removed_tracks` | boolean | No | server setting | When `true`, cascade-delete tracks removed from the Apple Music playlist (source M4A, library MP3, artwork, TrackDB record, sync records). Overrides the `cleanup_removed_tracks` server setting. |
 
 *At least one of `playlist`, `url`, or `auto` is required.
 
@@ -853,6 +854,45 @@ Per-file sync status map for a playlist. Lightweight endpoint with no ID3 reads.
 
 ---
 
+### GET /api/files/\<key\>/removed
+
+Return tracks that have been removed from a playlist's library (via library cleanup) since an optional timestamp. Used by sync clients to clean up their local caches and destination directories.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `key` | string | Playlist key |
+
+**Query parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `since` | float | No | Unix timestamp; only tracks removed after this point are returned. If omitted, all removals for the playlist are returned. |
+
+**Response:**
+
+```json
+{
+  "removed_tracks": [
+    {
+      "id": 1,
+      "uuid": "abc-123",
+      "playlist": "my_playlist",
+      "title": "Track Title",
+      "artist": "Artist Name",
+      "album": "Album Name",
+      "display_filename": "Artist Name - Track Title.mp3",
+      "removed_at": 1709500000.0
+    }
+  ]
+}
+```
+
+**Status codes:** 400 if `since` is not a valid float
+
+---
+
 ### GET /api/files/\<key\>/download-all
 
 Stream a ZIP archive of all MP3s in a playlist. Files are stored uncompressed (ZIP_STORED) for streaming efficiency. Archive entries use human-readable display filenames.
@@ -1048,6 +1088,7 @@ Background task: sync MP3s to a destination with profile-specific tags applied o
 | `profile` | string | No | config default | Output profile for tagging |
 | `dry_run` | boolean | No | `false` | Preview without syncing |
 | `verbose` | boolean | No | `false` | Enable verbose logging |
+| `clean_destination` | boolean | No | server setting | When `true`, remove orphaned files at the destination (tracked in SyncTracker but no longer in the library). Overrides the `clean_sync_destination` server setting. |
 
 **Response:** `{"task_id": "..."}` — see [Background Task Model](#background-task-model)
 
@@ -1070,6 +1111,7 @@ Summary of sync status per destination group. Destinations sharing the same trac
 | `synced_files` | integer | Files synced to this group |
 | `new_files` | integer | Files not yet synced |
 | `new_playlists` | integer | Playlists with no synced files |
+| `orphaned_files` | integer | Sync records in SyncTracker whose source track no longer exists in the library |
 
 ---
 
@@ -1100,6 +1142,37 @@ Per-playlist sync breakdown for a destination's tracking group.
 | `new_files` | integer | Total unsynced files |
 | `new_playlists` | integer | Count of new (unsynced) playlists |
 | `playlist_prefs` | string[] \| null | Saved playlist selection for this group. `null` = sync all; array = only listed playlist keys |
+| `orphaned_files` | integer | Sync records in SyncTracker whose source track no longer exists in the library |
+
+---
+
+### GET /api/sync/status/\<dest\_name\>/orphaned
+
+Return detailed orphaned file list for a destination's sync group.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `dest_name` | string | Destination name |
+
+**Response:**
+
+```json
+{
+  "orphaned_files": [
+    {
+      "id": 42,
+      "file_path": "Artist - Title.mp3",
+      "playlist": "my_playlist",
+      "track_uuid": "abc-123",
+      "synced_at": 1709400000.0
+    }
+  ]
+}
+```
+
+**Status codes:** 404 if destination not found
 
 ---
 

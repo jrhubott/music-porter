@@ -21,6 +21,12 @@ export function writeManifest(destDir: string, manifest: SyncManifest): void {
   writeFileSync(path, JSON.stringify(manifest, null, 2), 'utf-8');
 }
 
+/** Returns playlist keys recorded in the manifest at destDir, or [] if none. */
+export function readManifestPlaylistKeys(destDir: string): string[] {
+  const manifest = readManifest(destDir);
+  return manifest ? Object.keys(manifest.playlists) : [];
+}
+
 /** Get the cached file map for a playlist from the manifest. */
 export function getManifestFiles(
   manifest: SyncManifest | null,
@@ -39,6 +45,17 @@ export function createManifest(destinationName: string, serverOrigin: string): S
     last_sync_at: new Date().toISOString(),
     playlists: {},
   };
+}
+
+/** Remove a specific file entry from the manifest's playlist files map. */
+export function removeManifestFile(
+  manifest: SyncManifest,
+  playlistKey: string,
+  filePath: string,
+): void {
+  const playlist = manifest.playlists[playlistKey];
+  if (!playlist) return;
+  delete playlist.files[filePath];
 }
 
 /** Update the manifest with synced files for a playlist. */

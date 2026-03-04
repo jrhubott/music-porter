@@ -16,6 +16,7 @@ import {
   getManifestFiles,
   createManifest,
   updateManifestPlaylist,
+  removeManifestFile,
 } from './manifest.js';
 
 export interface SyncOptions {
@@ -45,6 +46,8 @@ export interface SyncOptions {
   metadataCache?: MetadataCache;
   /** When true, sync exclusively from local cache (no server calls). */
   offlineOnly?: boolean;
+  /** Remove destination files and update manifest for tracks removed from the server. */
+  cleanDestination?: boolean;
 }
 
 /**
@@ -166,6 +169,44 @@ export class SyncEngine {
       const manifestFiles = getManifestFiles(manifest, key);
       const syncedFiles: Record<string, number> = {};
       const filesToDownload: FileInfo[] = [];
+
+      // Remove cache/destination files for tracks removed from server (SRS 23.5.2, 23.5.3)
+      if (!options.dryRun) {
+        try {
+          const since = manifest?.last_sync_at
+            ? Date.parse(manifest.last_sync_at) / 1000
+            : undefined;
+          const { removed_tracks } = await this.client.getRemovedFiles(key, since);
+          for (const removed of removed_tracks) {
+            if (cache) {
+              const wasRemoved = cache.removeEntry(removed.uuid);
+              if (wasRemoved) {
+                log('info', `Removed from cache: ${removed.display_filename} (track removed from server)`);
+              }
+            }
+            if (options.cleanDestination) {
+              const diskName = removed.display_filename;
+              for (const mKey of Object.keys(manifestFiles)) {
+                const parts = mKey.split('/');
+                if (parts[parts.length - 1] === diskName) {
+                  const filePath = join(destDir, mKey);
+                  try {
+                    await unlink(filePath);
+                  } catch {
+                    // File may not exist — ignore
+                  }
+                  delete manifestFiles[mKey];
+                  removeManifestFile(newManifest, key, mKey);
+                  log('info', `Removed from destination: ${diskName} (track removed from server)`);
+                  break;
+                }
+              }
+            }
+          }
+        } catch {
+          // Non-fatal — continue sync without cleanup
+        }
+      }
 
       // Check which files need downloading
       for (const file of files) {

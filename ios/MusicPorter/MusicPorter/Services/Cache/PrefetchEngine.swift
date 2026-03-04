@@ -48,6 +48,23 @@ actor PrefetchEngine {
             }
         }
 
+        // Remove cached files for tracks removed from the server (SRS 23.5.2)
+        for key in options.playlists {
+            if Task.isCancelled { break }
+            do {
+                let response = try await apiClient.getRemovedFiles(playlist: key)
+                for removed in response.removedTracks {
+                    let result = await cacheManager.removeEntry(removed.uuid)
+                    if result.removed {
+                        logger.info("Removed from cache: \(removed.displayFilename) (track removed from server)")
+                    }
+                }
+            } catch {
+                // Non-fatal — continue prefetch without cache cleanup
+                logger.warning("Could not fetch removed files for \"\(key)\": \(error)")
+            }
+        }
+
         let hasLimit = options.maxCacheBytes > 0
 
         // Pre-filter: determine which files would be evicted anyway due to capacity

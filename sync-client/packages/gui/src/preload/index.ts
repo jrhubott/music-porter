@@ -80,6 +80,7 @@ const electronAPI = {
     profile?: string;
     force?: boolean;
     offlineOnly?: boolean;
+    cleanDestination?: boolean;
   }): Promise<SyncResult> => ipcRenderer.invoke('sync:start', opts),
   cancelSync: (): Promise<void> => ipcRenderer.invoke('sync:cancel'),
   resolveDestination: (destPath: string, usbDriveName?: string): Promise<string | null> =>
@@ -194,6 +195,10 @@ const electronAPI = {
     ipcRenderer.on('cache:backgroundPrefetchStatus', handler);
     return () => ipcRenderer.removeListener('cache:backgroundPrefetchStatus', handler);
   },
+
+  // Manifest
+  readManifestPlaylistKeys: (destPath: string): Promise<string[]> =>
+    ipcRenderer.invoke('manifest:getPlaylistKeys', destPath),
 
   // App info
   getVersion: (): Promise<string> => ipcRenderer.invoke('app:getVersion'),
