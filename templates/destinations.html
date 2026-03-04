@@ -480,7 +480,7 @@ function renderGroupsTable(data) {
       <td class="text-end ${stalenessClass}" title="${lastSyncAbs}">${lastSyncRel}</td>
       <td class="text-center">
         <button class="btn btn-outline-secondary btn-sm py-0 px-1 me-1"
-          onclick="showSyncHistory('${primaryDest}', ${JSON.stringify(groupName || primaryDest)})"
+          onclick="showSyncHistory('${primaryDest}', '${(groupName || primaryDest).replace(/'/g, '&apos;')}')"
           title="View sync history">
           <i class="bi bi-clock-history"></i>
         </button>
