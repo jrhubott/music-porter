@@ -1,3 +1,23 @@
+Version 2.39.2 (2026-03-03):
+• Fix 0 track counts: include new fields in /api/playlists ETag
+• Add total/hidden track counts to Sources playlist table
+• Fix hide confirm not appearing due to conflicting CSS
+• Fix bootstrap.Modal instantiated before Bootstrap JS loads
+• Add DB schema v14 repair migration for hidden/locked columns
+• Fix TrackDB._init_db CREATE TABLE missing v13 columns
+• Implement playlist track browser and editor
+• Set branch version to 2.39.1-playlist-track-browser
+• Rename Operations page title to Tasks
+• Move rename group button to action column in destinations table
+• Implement START+COMPLETE pattern for client-side sync history
+• Fix sync history: also query audit_entries for sync client records
+• docs: add onclick string escaping gotcha to CLAUDE.md
+• Fix sync history button onclick — escape quotes
+• Add sync history modal to Destinations page
+• Make Pref column interactive in Playlist Breakdown
+• iOS companion app updated to v2.39.1
+• Sync client updated to v2.39.1
+
 Version 2.39.0 (2026-03-03):
 • Exclude first entry from group expand sub-rows to prevent duplicate display
 • Fix Entry Details button broken by single quotes in onclick attribute
