@@ -8384,11 +8384,17 @@ class SummaryManager:
         stats = MusicLibraryStats()
         start_time = time.time()
 
-        # Get per-playlist MP3 counts from TrackDB
+        # Get per-playlist MP3 counts from TrackDB.
+        # exported_count uses only active (non-hidden) tracks for display.
+        # converted_count includes hidden tracks so they are not falsely
+        # reported as unconverted when a track is hidden.
         db_counts = {}
         if track_db:
             for ps in track_db.get_playlist_stats():
-                db_counts[ps['playlist']] = ps['track_count']
+                db_counts[ps['playlist']] = {
+                    'exported': ps['track_count'],
+                    'converted': ps['total_track_count'],
+                }
 
         try:
             for item in sorted(source_root.iterdir(), key=lambda p: p.name):
@@ -8414,9 +8420,12 @@ class SummaryManager:
                 if m4a_count == 0:
                     continue
 
-                # Use DB count if available, otherwise 0
-                exported_count = db_counts.get(playlist_name, 0)
-                unconverted_count = max(0, m4a_count - exported_count)
+                # exported_count: active tracks only (for display)
+                # converted_count: all tracks including hidden (for unconverted calc)
+                playlist_db = db_counts.get(playlist_name, {})
+                exported_count = playlist_db.get('exported', 0)
+                converted_count = playlist_db.get('converted', 0)
+                unconverted_count = max(0, m4a_count - converted_count)
 
                 stats.playlists.append({
                     'name': playlist_name,
