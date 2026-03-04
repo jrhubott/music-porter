@@ -51,12 +51,12 @@
     <nav class="nav flex-column mt-2">
       <a class="nav-link {% if request.path == '/' %}active{% endif %}" href="/"><i class="bi bi-speedometer2"></i>Dashboard</a>
       <a class="nav-link {% if request.path == '/sources' %}active{% endif %}" href="/sources"><i class="bi bi-list-ul"></i>Sources</a>
+      <a class="nav-link {% if request.path == '/destinations' %}active{% endif %}" href="/destinations"><i class="bi bi-hdd-network"></i>Destinations</a>
       <a class="nav-link {% if request.path == '/process' %}active{% endif %}" href="/process"><i class="bi bi-arrow-repeat"></i>Process</a>
       <a class="nav-link {% if request.path == '/sync' %}active{% endif %}" href="/sync"><i class="bi bi-arrow-left-right"></i>Sync</a>
-      <a class="nav-link {% if request.path == '/destinations' %}active{% endif %}" href="/destinations"><i class="bi bi-hdd-network"></i>Destinations</a>
       <a class="nav-link {% if request.path == '/settings' %}active{% endif %}" href="/settings"><i class="bi bi-gear"></i>Settings</a>
       <hr class="my-2 border-secondary mx-3">
-      <a class="nav-link {% if request.path == '/operations' %}active{% endif %}" href="/operations"><i class="bi bi-activity"></i>Operations <span class="badge bg-primary badge-running d-none" id="opsBadge">0</span></a>
+      <a class="nav-link {% if request.path == '/operations' %}active{% endif %}" href="/operations"><i class="bi bi-activity"></i>Tasks <span class="badge bg-primary badge-running d-none" id="opsBadge">0</span></a>
       <a class="nav-link {% if request.path == '/audit' %}active{% endif %}" href="/audit"><i class="bi bi-clock-history"></i>Audit Log</a>
       <a class="nav-link {% if request.path == '/about' %}active{% endif %}" href="/about"><i class="bi bi-info-circle"></i>About</a>
     </nav>

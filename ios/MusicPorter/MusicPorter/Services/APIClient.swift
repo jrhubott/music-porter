@@ -404,15 +404,52 @@ final class APIClient {
         destination: String,
         playlist: String,
         files: [String],
-        destPath: String? = nil
+        destPath: String? = nil,
+        taskId: String
     ) async throws {
         var body: [String: Any] = [
             "destination": destination,
             "playlist": playlist,
             "files": files,
+            "task_id": taskId,
         ]
         if let destPath { body["dest_path"] = destPath }
         let _: OkResponse = try await postAny("/api/sync/client-record", body: body)
+    }
+
+    func startSyncRun(
+        destination: String,
+        playlistKeys: [String]?,
+        startedAt: TimeInterval
+    ) async throws -> String {
+        var body: [String: Any] = [
+            "destination": destination,
+            "started_at": startedAt,
+        ]
+        if let keys = playlistKeys, !keys.isEmpty {
+            body["playlist_keys"] = keys
+        }
+        let response: TaskIdResponse = try await postAny("/api/sync/client-start", body: body)
+        return response.taskId
+    }
+
+    func completeSyncRun(
+        taskId: String,
+        status: String,
+        filesCopied: Int,
+        filesSkipped: Int,
+        filesFailed: Int,
+        error: String? = nil
+    ) async {
+        var body: [String: Any] = [
+            "task_id": taskId,
+            "status": status,
+            "files_copied": filesCopied,
+            "files_skipped": filesSkipped,
+            "files_failed": filesFailed,
+        ]
+        if let err = error { body["error"] = err }
+        let _: OkResponse? = try? await postAny("/api/sync/client-complete", body: body)
     }
 
     // MARK: - Tasks

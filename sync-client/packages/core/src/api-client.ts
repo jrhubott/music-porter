@@ -386,6 +386,7 @@ export class APIClient {
     files: string[],
     destPath?: string,
     destType?: 'usb' | 'folder',
+    taskId?: string,
   ): Promise<ClientRecordResponse> {
     const body: Record<string, unknown> = { destination: destinationName, playlist, files };
     if (destPath) {
@@ -394,6 +395,7 @@ export class APIClient {
         body['dest_type'] = destType;
       }
     }
+    if (taskId) body['task_id'] = taskId;
 
     const url = this.buildURL('/api/sync/client-record');
     const response = await fetch(url, {
@@ -410,6 +412,52 @@ export class APIClient {
 
     this.checkResponse(response);
     return (await response.json()) as ClientRecordResponse;
+  }
+
+  async startSyncRun(
+    destinationName: string,
+    playlistKeys: string[] | null,
+    startedAt: number,
+  ): Promise<string | null> {
+    const body = {
+      destination: destinationName,
+      playlist_keys: playlistKeys,
+      started_at: startedAt,
+    };
+    const url = this.buildURL('/api/sync/client-start');
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: this.authHeaders(),
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) return null;
+    const data = (await response.json()) as { task_id?: string };
+    return data.task_id ?? null;
+  }
+
+  async completeSyncRun(
+    taskId: string,
+    status: 'completed' | 'failed' | 'cancelled',
+    copied: number,
+    skipped: number,
+    failed: number,
+    error?: string,
+  ): Promise<void> {
+    const body: Record<string, unknown> = {
+      task_id: taskId,
+      status,
+      files_copied: copied,
+      files_skipped: skipped,
+      files_failed: failed,
+    };
+    if (error) body['error'] = error;
+    const url = this.buildURL('/api/sync/client-complete');
+    await fetch(url, {
+      method: 'POST',
+      headers: this.authHeaders(),
+      body: JSON.stringify(body),
+    });
+    // Non-fatal — ignore response errors
   }
 
   async getSyncStatus(destName: string): Promise<SyncStatusDetail> {

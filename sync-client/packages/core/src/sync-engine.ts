@@ -111,6 +111,21 @@ export class SyncEngine {
       playlistKeys = playlists.map((p) => p.key);
     }
 
+    // Phase 3b: Register sync run with server (required — enforced server-side)
+    let syncTaskId: string | undefined;
+    if (!options.dryRun) {
+      const wasAllPlaylists = !options.playlists || options.playlists.length === 0;
+      const id = await this.client.startSyncRun(
+        destName,
+        wasAllPlaylists ? null : playlistKeys,
+        startTime / 1000,
+      );
+      if (!id) {
+        throw new SyncError('Failed to start sync run on server — cannot proceed');
+      }
+      syncTaskId = id;
+    }
+
     // Phase 4: Write initial manifest (persists destination_name across interruptions)
     const activeURL = this.client.connectionState.activeURL ?? '';
     const newManifest = manifest ?? createManifest(destName, activeURL);
@@ -356,7 +371,7 @@ export class SyncEngine {
         try {
           const recordDestType = options.usbDriveName ? 'usb' : 'folder';
           await this.client.recordSync(
-            destName, key, Object.keys(syncedFiles), destDir, recordDestType,
+            destName, key, Object.keys(syncedFiles), destDir, recordDestType, syncTaskId,
           );
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
@@ -385,6 +400,18 @@ export class SyncEngine {
       skipped: totalSkipped,
       failed: totalFailed,
     });
+
+    // Notify server of sync completion (best-effort — non-fatal)
+    if (syncTaskId) {
+      const finalStatus = aborted ? 'cancelled' : 'completed';
+      try {
+        await this.client.completeSyncRun(
+          syncTaskId, finalStatus, totalCopied, totalSkipped, totalFailed,
+        );
+      } catch {
+        log('warn', 'Failed to complete sync run record on server');
+      }
+    }
 
     return {
       destinationName: destName,

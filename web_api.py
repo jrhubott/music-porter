@@ -13,6 +13,7 @@ import json
 import queue
 import re
 import time
+import uuid
 from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -2158,12 +2159,9 @@ def api_sync_status_orphaned(dest_name):
 
 @api_bp.route('/api/sync/status/<path:dest_name>/history')
 def api_sync_dest_history(dest_name):
-    """Return sync history for a destination from two sources:
+    """Return sync history for a destination from task_history.
 
-    1. task_history (operation='sync'): direct web UI / API sync runs.
-       Description format: "Sync: <label> → <dest.name>"
-    2. audit_entries (operation='client_sync_record'): sync client batch
-       records (one entry per playlist per sync run).
+    Description format: "Sync: <label> → <dest.name>"
 
     Returns:
         {history: [...], destination: str}
@@ -2175,7 +2173,6 @@ def api_sync_dest_history(dest_name):
 
     history = []
 
-    # ── Source 1: task_history (web UI / API direct syncs) ──
     db = ctx.task_manager._db
     if db:
         all_sync, _ = db.get_entries(operation='sync', limit=100)
@@ -2195,47 +2192,6 @@ def api_sync_dest_history(dest_name):
                 'files_skipped': result.get('files_skipped'),
                 'files_failed': result.get('files_failed'),
                 'orphaned_cleaned': result.get('orphaned_cleaned'),
-            })
-
-    # ── Source 2: audit_entries (sync client batch records) ──
-    if ctx.audit_logger:
-        conn = ctx.audit_logger._connect()
-        try:
-            rows = conn.execute(
-                """SELECT timestamp, description, params, status, duration_s, source
-                   FROM audit_entries
-                   WHERE operation = 'client_sync_record'
-                     AND json_extract(params, '$.destination') = ?
-                   ORDER BY timestamp DESC LIMIT 100""",
-                (dest.name,),
-            ).fetchall()
-        finally:
-            conn.close()
-        epoch_base = datetime(1970, 1, 1)
-        for row in rows:
-            params = {}
-            if row['params']:
-                try:
-                    params = json.loads(row['params'])
-                except Exception:
-                    pass
-            # Parse ISO timestamp to epoch (strip timezone for py<3.11)
-            try:
-                clean_ts = re.sub(r'[+Z][0-9:]*$', '', row['timestamp'])
-                started_at = (datetime.fromisoformat(clean_ts) - epoch_base).total_seconds()
-            except Exception:
-                started_at = None
-            history.append({
-                'started_at': started_at,
-                'duration': row['duration_s'],
-                'status': row['status'],
-                'source': row['source'] or 'api',
-                'description': row['description'],
-                'files_found': None,
-                'files_copied': params.get('file_count'),
-                'files_skipped': None,
-                'files_failed': None,
-                'orphaned_cleaned': None,
             })
 
     history.sort(key=lambda x: x.get('started_at') or 0, reverse=True)
@@ -2311,6 +2267,88 @@ def api_sync_destination_playlist_prefs(name):
     return jsonify({'ok': True})
 
 
+@api_bp.route('/api/sync/client-start', methods=['POST'])
+def api_sync_client_start():
+    """Create a running task_history entry for a client-side sync run.
+
+    Called at the start of a sync run before any files are transferred.
+    Returns a task_id that the client passes to /api/sync/client-complete
+    and includes in each /api/sync/client-record call.
+
+    Body: {destination (str), playlist_keys ([str]|null),
+           started_at (epoch float, optional — defaults to server time)}
+    """
+    ctx = _ctx()
+    data = request.get_json(force=True) or {}
+
+    dest_name = (data.get('destination') or '').strip()
+    if not dest_name:
+        return jsonify({'error': 'destination is required'}), 400
+
+    dest = ctx.sync_tracker.get_destination(dest_name)
+    if not dest:
+        return jsonify({'error': f"Destination '{dest_name}' not found"}), 404
+
+    playlist_keys = data.get('playlist_keys') or None
+    started_at = data.get('started_at') or time.time()
+
+    sync_label = (', '.join(playlist_keys) if playlist_keys else 'all')
+    desc = f'Sync: {sync_label} \u2192 {dest.name}'
+
+    task_id = uuid.uuid4().hex[:12]
+    db = ctx.task_manager._db
+    if db:
+        db.insert(task_id, 'sync', desc, source=ctx.detect_source())
+        db.update_status(task_id, 'running', started_at=started_at)
+
+    return jsonify({'task_id': task_id})
+
+
+@api_bp.route('/api/sync/client-complete', methods=['POST'])
+def api_sync_client_complete():
+    """Mark a client-side sync run as completed/failed/cancelled.
+
+    Called at the end of a sync run regardless of outcome.
+
+    Body: {task_id (str), status ('completed'|'failed'|'cancelled'),
+           files_copied (int), files_skipped (int), files_failed (int),
+           orphaned_cleaned (int, optional), error (str, optional)}
+    """
+    ctx = _ctx()
+    data = request.get_json(force=True) or {}
+
+    task_id = (data.get('task_id') or '').strip()
+    if not task_id:
+        return jsonify({'error': 'task_id is required'}), 400
+
+    status = data.get('status', 'completed')
+    if status not in ('completed', 'failed', 'cancelled'):
+        return jsonify({'error': f"Invalid status: {status}"}), 400
+
+    files_copied = int(data.get('files_copied', 0))
+    files_skipped = int(data.get('files_skipped', 0))
+    files_failed = int(data.get('files_failed', 0))
+
+    result = {
+        'files_found': files_copied + files_skipped + files_failed,
+        'files_copied': files_copied,
+        'files_skipped': files_skipped,
+        'files_failed': files_failed,
+        'orphaned_cleaned': data.get('orphaned_cleaned'),
+    }
+
+    db = ctx.task_manager._db
+    if db:
+        db.update_status(
+            task_id, status,
+            result=result if status == 'completed' else None,
+            error=data.get('error', ''),
+            finished_at=time.time(),
+        )
+
+    return jsonify({'ok': True})
+
+
 @api_bp.route('/api/sync/client-record', methods=['POST'])
 def api_sync_client_record():
     """Record files synced via client-side sync for tracking.
@@ -2323,6 +2361,23 @@ def api_sync_client_record():
         return jsonify({'error': 'Sync tracker not available'}), 400
 
     data = request.get_json(silent=True) or {}
+
+    task_id = (data.get('task_id') or '').strip()
+    if not task_id:
+        return jsonify({
+            'error': 'task_id is required — call /api/sync/client-start first',
+        }), 400
+
+    db = ctx.task_manager._db
+    if db:
+        task = db.get(task_id)
+        if not task:
+            return jsonify({'error': f"Task '{task_id}' not found"}), 404
+        if task['status'] != 'running':
+            return jsonify({
+                'error': f"Task '{task_id}' is not running (status: {task['status']})",
+            }), 409
+
     dest_name = data.get('destination', '')
     playlist = data.get('playlist', '')
     files = data.get('files', [])
@@ -2360,17 +2415,6 @@ def api_sync_client_record():
             }), 404
 
     ctx.sync_tracker.record_batch(dest.sync_key, playlist, files)
-
-    if ctx.audit_logger:
-        ctx.audit_logger.log(
-            'client_sync_record',
-            f"Recorded {len(files)} file(s) for '{playlist}' "
-            f"on destination '{dest_name}'",
-            'completed',
-            params={'destination': dest_name, 'playlist': playlist,
-                    'file_count': len(files)},
-            source=ctx.detect_source(),
-        )
 
     return jsonify({'ok': True, 'recorded': len(files)})
 
