@@ -752,6 +752,7 @@ export function SyncPage() {
           <div>Copied: {lastSyncResult.copied}</div>
           <div>Skipped: {lastSyncResult.skipped}</div>
           {lastSyncResult.failed > 0 && <div>Failed: {lastSyncResult.failed}</div>}
+          {lastSyncResult.cleaned > 0 && <div>Deleted: {lastSyncResult.cleaned}</div>}
           <div>Duration: {formatDuration(lastSyncResult.durationMs)}</div>
           <div>Destination: {lastSyncResult.destinationName}</div>
           {lastSyncResult.destError && (
