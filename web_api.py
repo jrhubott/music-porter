@@ -2158,10 +2158,12 @@ def api_sync_status_orphaned(dest_name):
 
 @api_bp.route('/api/sync/status/<path:dest_name>/history')
 def api_sync_dest_history(dest_name):
-    """Return task_history entries for sync operations to this destination.
+    """Return sync history for a destination from two sources:
 
-    Description format: "Sync: <label> → <dest.name>"
-    Filters by suffix to match the exact destination name.
+    1. task_history (operation='sync'): direct web UI / API sync runs.
+       Description format: "Sync: <label> → <dest.name>"
+    2. audit_entries (operation='client_sync_record'): sync client batch
+       records (one entry per playlist per sync run).
 
     Returns:
         {history: [...], destination: str}
@@ -2171,32 +2173,73 @@ def api_sync_dest_history(dest_name):
     if not dest:
         return jsonify({'error': f"Destination '{dest_name}' not found"}), 404
 
-    db = ctx.task_manager._db
-    if not db:
-        return jsonify({'history': [], 'destination': dest.name})
-
-    all_sync, _ = db.get_entries(operation='sync', limit=100)
-    suffix = f' \u2192 {dest.name}'
     history = []
-    for e in all_sync:
-        if not e['description'].endswith(suffix):
-            continue
-        result = e.get('result') or {}
-        history.append({
-            'started_at': e.get('started_at'),
-            'finished_at': e.get('finished_at'),
-            'duration': e.get('elapsed') or None,
-            'status': e['status'],
-            'source': e.get('source', 'web'),
-            'description': e['description'],
-            'files_found': result.get('files_found'),
-            'files_copied': result.get('files_copied'),
-            'files_skipped': result.get('files_skipped'),
-            'files_failed': result.get('files_failed'),
-            'orphaned_cleaned': result.get('orphaned_cleaned'),
-        })
 
-    return jsonify({'history': history, 'destination': dest.name})
+    # ── Source 1: task_history (web UI / API direct syncs) ──
+    db = ctx.task_manager._db
+    if db:
+        all_sync, _ = db.get_entries(operation='sync', limit=100)
+        suffix = f' \u2192 {dest.name}'
+        for e in all_sync:
+            if not e['description'].endswith(suffix):
+                continue
+            result = e.get('result') or {}
+            history.append({
+                'started_at': e.get('started_at'),
+                'duration': e.get('elapsed') or None,
+                'status': e['status'],
+                'source': e.get('source', 'web'),
+                'description': e['description'],
+                'files_found': result.get('files_found'),
+                'files_copied': result.get('files_copied'),
+                'files_skipped': result.get('files_skipped'),
+                'files_failed': result.get('files_failed'),
+                'orphaned_cleaned': result.get('orphaned_cleaned'),
+            })
+
+    # ── Source 2: audit_entries (sync client batch records) ──
+    if ctx.audit_logger:
+        conn = ctx.audit_logger._connect()
+        try:
+            rows = conn.execute(
+                """SELECT timestamp, description, params, status, duration_s, source
+                   FROM audit_entries
+                   WHERE operation = 'client_sync_record'
+                     AND json_extract(params, '$.destination') = ?
+                   ORDER BY timestamp DESC LIMIT 100""",
+                (dest.name,),
+            ).fetchall()
+        finally:
+            conn.close()
+        epoch_base = datetime(1970, 1, 1)
+        for row in rows:
+            params = {}
+            if row['params']:
+                try:
+                    params = json.loads(row['params'])
+                except Exception:
+                    pass
+            # Parse ISO timestamp to epoch (strip timezone for py<3.11)
+            try:
+                clean_ts = re.sub(r'[+Z][0-9:]*$', '', row['timestamp'])
+                started_at = (datetime.fromisoformat(clean_ts) - epoch_base).total_seconds()
+            except Exception:
+                started_at = None
+            history.append({
+                'started_at': started_at,
+                'duration': row['duration_s'],
+                'status': row['status'],
+                'source': row['source'] or 'api',
+                'description': row['description'],
+                'files_found': None,
+                'files_copied': params.get('file_count'),
+                'files_skipped': None,
+                'files_failed': None,
+                'orphaned_cleaned': None,
+            })
+
+    history.sort(key=lambda x: x.get('started_at') or 0, reverse=True)
+    return jsonify({'history': history[:100], 'destination': dest.name})
 
 
 @api_bp.route('/api/sync/destinations/<name>/reset', methods=['POST'])
