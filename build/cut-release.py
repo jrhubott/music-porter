@@ -36,7 +36,7 @@ from typing import NoReturn
 
 MAIN_BRANCH = "main"
 DEV_BRANCH = "dev"
-VERSION_FILE = "server/core/porter_core.py"
+VERSION_FILE = "server/core/constants.py"
 IOS_VERSION_FILE = "clients/ios/MusicPorter/MusicPorter/MusicPorterApp.swift"
 SYNC_VERSION_FILE = "clients/sync-client/packages/core/src/constants.ts"
 RELEASE_NOTES_FILE = "release-notes.txt"
@@ -304,7 +304,7 @@ def patch_bump(version: str) -> str:
 
 
 def read_porter_version() -> str:
-    """Read the raw VERSION value from porter_core.py (includes -dev+hash suffix)."""
+    """Read the raw VERSION value from constants.py (includes -dev+hash suffix)."""
     text = (PROJECT_ROOT / VERSION_FILE).read_text()
     m = re.search(r'VERSION\s*=\s*"([^"]+)"', text, re.MULTILINE)
     if m:
@@ -313,7 +313,7 @@ def read_porter_version() -> str:
 
 
 def write_porter_version(version: str) -> None:
-    """Set VERSION = "version" in porter_core.py."""
+    """Set VERSION = "version" in constants.py."""
     if DRY_RUN:
         dry(f'Set VERSION = "{version}" in {VERSION_FILE}')
         return
@@ -1452,16 +1452,16 @@ def parse_args() -> argparse.Namespace:
 
 
 def verify_project_root() -> Path:
-    """Walk up from cwd until server/core/porter_core.py and .git/ are both found."""
+    """Walk up from cwd until server/core/constants.py and .git/ are both found."""
     candidate = Path.cwd()
     while True:
-        if (candidate / "server" / "core" / "porter_core.py").exists() and (candidate / ".git").is_dir():
+        if (candidate / "server" / "core" / "constants.py").exists() and (candidate / ".git").is_dir():
             return candidate
         parent = candidate.parent
         if parent == candidate:
             break
         candidate = parent
-    err("Cannot locate project root (looking for server/core/porter_core.py + .git/).")
+    err("Cannot locate project root (looking for server/core/constants.py + .git/).")
     err("Run this script from within the music-porter directory.")
     sys.exit(1)
 
