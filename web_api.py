@@ -1322,6 +1322,69 @@ def api_library_audit():
     return jsonify({'task_id': task_id})
 
 
+@api_bp.route('/api/library/detect-duplicates', methods=['POST'])
+def api_library_detect_duplicates():
+    """Find duplicate tracks (same artist+title) within each playlist and hide all but one."""
+    ctx = _ctx()
+    source = ctx.detect_source()
+    playlists = ctx.playlist_db.get_all()
+    total_hidden = 0
+    per_playlist = []
+
+    for playlist in playlists:
+        key = playlist['key']
+        # Only consider active (non-hidden), non-locked tracks
+        tracks = [
+            t for t in ctx.track_db.get_tracks_by_playlist(key, include_hidden=False)
+            if not t.get('locked')
+        ]
+
+        # Group by normalized artist+title (matches frontend Duplicates filter logic)
+        groups = {}
+        for track in tracks:
+            dup_key = (
+                f"{(track.get('artist') or '').lower()}"
+                f"|||{(track.get('title') or '').lower()}"
+            )
+            groups.setdefault(dup_key, []).append(track)
+
+        hidden_count = 0
+        for group in groups.values():
+            if len(group) <= 1:
+                continue
+            # Keep earliest created_at; hide the rest
+            group.sort(key=lambda t: t.get('created_at') or '')
+            for track in group[1:]:
+                ctx.track_db.set_hidden(track['uuid'], True)
+                hidden_count += 1
+
+        if hidden_count > 0:
+            per_playlist.append({
+                'key': key,
+                'name': playlist.get('name', key),
+                'hidden_count': hidden_count,
+            })
+            total_hidden += hidden_count
+
+    if ctx.audit_logger and total_hidden > 0:
+        ctx.audit_logger.log(
+            'detect_duplicates',
+            'Detect and hide duplicate tracks',
+            'completed',
+            params={
+                'total_hidden': total_hidden,
+                'playlists_affected': len(per_playlist),
+            },
+            source=source,
+        )
+
+    return jsonify({
+        'playlists_scanned': len(playlists),
+        'total_hidden': total_hidden,
+        'per_playlist': per_playlist,
+    })
+
+
 # ══════════════════════════════════════════════════════════════════
 # API: File Serving (for iOS companion app)
 # ══════════════════════════════════════════════════════════════════

@@ -26,6 +26,12 @@
 
 <!-- Playlist Table -->
 <div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center py-2">
+    <span class="fw-semibold">Playlists</span>
+    <button class="btn btn-outline-warning btn-sm" id="detectDuplicatesBtn" onclick="detectDuplicates()">
+      <i class="bi bi-copy"></i> Detect Duplicates
+    </button>
+  </div>
   <div class="card-body">
     <div class="table-responsive">
       <table class="table table-sm table-hover mb-0">
@@ -43,6 +49,22 @@
           <tr><td colspan="6" class="text-center text-muted">Loading...</td></tr>
         </tbody>
       </table>
+    </div>
+  </div>
+</div>
+
+<!-- Detect Duplicates Results Modal -->
+<div class="modal fade" id="detectDuplicatesModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title"><i class="bi bi-copy me-1"></i>Duplicate Detection Results</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="detectDuplicatesBody"></div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+      </div>
     </div>
   </div>
 </div>
@@ -234,6 +256,39 @@ document.getElementById('deleteDataConfirm').addEventListener('click', function(
       loadPlaylists();
     });
 });
+
+function detectDuplicates() {
+  const btn = document.getElementById('detectDuplicatesBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Scanning...';
+  fetch('/api/library/detect-duplicates', {method: 'POST'})
+    .then(r => r.json())
+    .then(d => {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-copy"></i> Detect Duplicates';
+      if (d.error) { showToast(d.error, 'error'); return; }
+      let body;
+      if (d.total_hidden === 0) {
+        body = '<p class="text-muted mb-0">No duplicates found across '
+          + d.playlists_scanned + ' playlist(s).</p>';
+      } else {
+        body = '<p>Hidden <strong>' + d.total_hidden + '</strong> duplicate track(s) across '
+          + d.per_playlist.length + ' playlist(s):</p><ul class="mb-0">';
+        d.per_playlist.forEach(p => {
+          body += '<li>' + p.name + ': ' + p.hidden_count + ' hidden</li>';
+        });
+        body += '</ul>';
+        loadPlaylists();
+      }
+      document.getElementById('detectDuplicatesBody').innerHTML = body;
+      new bootstrap.Modal(document.getElementById('detectDuplicatesModal')).show();
+    })
+    .catch(() => {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-copy"></i> Detect Duplicates';
+      showToast('Request failed', 'error');
+    });
+}
 
 loadPlaylists();
 </script>
