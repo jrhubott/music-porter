@@ -49,7 +49,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.39.5-dev"
+VERSION = "2.39.5-repo-restructure"
 
 DEFAULT_DATA_DIR = "data"
 DEFAULT_LIBRARY_DIR = "library"
