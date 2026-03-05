@@ -49,7 +49,7 @@ Merges `dev` into `main` with version bump, tagging, SRS gate, release notes, an
 
 | ID | Interactive | Automated | Scripted | Requirement |
 |----|:-----------:|:---------:|:--------:|-------------|
-| CR-1.1 | [x] | [x] | [x] | As a developer, I can run the script from any subdirectory of the project so that I don't have to `cd` to the root first. Acceptance: `verify_project_root()` walks up the directory tree until it finds `porter_core.py` and `.git/`; exits with a clear error if not found. |
+| CR-1.1 | [x] | [x] | [x] | As a developer, I can run the script from any subdirectory of the project so that I don't have to `cd` to the root first. Acceptance: `verify_project_root()` walks up the directory tree until it finds `server/core/porter_core.py` and `.git/`; exits with a clear error if not found. |
 | CR-1.2 | [x] | [x] | [x] | As a developer, I can have the script automatically switch to the `dev` branch if I'm on another branch so that I don't accidentally cut the release from the wrong branch. Acceptance: if `HEAD` is not `dev`, the script runs `git checkout dev` before any other operations. |
 | CR-1.3 | [x] | [x] | [x] | As a CI operator, I can have all validation of required flags happen before any git operations run so that a misconfigured invocation fails fast without leaving the repo in a partially-modified state. Acceptance: `--non-interactive` + missing `--bump` exits with a clear error before `step1_verify_and_sync()` is called. |
 
@@ -81,9 +81,9 @@ Merges `dev` into `main` with version bump, tagging, SRS gate, release notes, an
 |----|:-----------:|:---------:|:--------:|-------------|
 | CR-4.1 | [x] | [x] | [x] | As a developer, I can choose PATCH, MINOR, or MAJOR for the server version bump via an interactive numbered menu so that semantic versioning is applied correctly. Acceptance: menu shows current base version; input "1"/"2"/"3" or "patch"/"minor"/"major" selects the bump type; defaults to PATCH on Enter. |
 | CR-4.2 | [x] | [x] | [x] | As a release engineer, I can pass `--bump {patch,minor,major}` so that the server version bump type is pre-answered without a prompt. Acceptance: `--bump patch` produces a PATCH bump; `--bump minor` a MINOR bump; `--bump major` a MAJOR bump. `--non-interactive` requires `--bump`. |
-| CR-4.3 | [x] | [x] | [x] | As a developer, I can be prompted for a new iOS appVersion only when `ios/` changes are detected since the last tag so that iOS version bumps are not forgotten when iOS code changes. Acceptance: `git diff <last_tag>..dev --name-only -- ios/` determines if iOS changed; the suggested version is a PATCH bump of the current `appVersion`. |
+| CR-4.3 | [x] | [x] | [x] | As a developer, I can be prompted for a new iOS appVersion only when `ios/` changes are detected since the last tag so that iOS version bumps are not forgotten when iOS code changes. Acceptance: `git diff <last_tag>..dev --name-only -- clients/ios/` determines if iOS changed; the suggested version is a PATCH bump of the current `appVersion`. |
 | CR-4.4 | [x] | [x] | [x] | As a release engineer, I can pass `--ios-version X.Y.Z` to pre-answer the iOS version or `--no-ios-bump` to suppress it so that iOS version decisions are scriptable. Acceptance: `--no-ios-bump` suppresses bump even when iOS changes are detected (with a warning); `--ios-version` applies the given version string; `--non-interactive` exits with a clear error if iOS changes are detected and neither flag is provided. |
-| CR-4.5 | [x] | [x] | [x] | As a developer, I can be prompted for a new sync-client VERSION only when `sync-client/` changes are detected since the last tag so that sync-client version bumps are not forgotten. Acceptance: same detection and suggestion logic as iOS (CR-4.3), applied to `sync-client/` and `constants.ts`. |
+| CR-4.5 | [x] | [x] | [x] | As a developer, I can be prompted for a new sync-client VERSION only when `sync-client/` changes are detected since the last tag so that sync-client version bumps are not forgotten. Acceptance: same detection and suggestion logic as iOS (CR-4.3), applied to `clients/sync-client/` and `constants.ts`. |
 | CR-4.6 | [x] | [x] | [x] | As a release engineer, I can pass `--sync-version X.Y.Z` or `--no-sync-bump` to pre-answer the sync-client version decision. Acceptance: mirrors CR-4.4 for the sync-client. |
 
 ---
@@ -180,7 +180,7 @@ Merges the current feature/bugfix branch into `dev`, restores the `-dev+<hash>` 
 
 | ID | Interactive | Automated | Scripted | Requirement |
 |----|:-----------:|:---------:|:--------:|-------------|
-| MTD-1.1 | [ ] | [ ] | [ ] | As a developer, I can run the script from any subdirectory of the project so that I don't have to `cd` to the root first. Acceptance: `verify_project_root()` walks up the directory tree until it finds `porter_core.py` and `.git/`; exits with a clear error if not found. |
+| MTD-1.1 | [ ] | [ ] | [ ] | As a developer, I can run the script from any subdirectory of the project so that I don't have to `cd` to the root first. Acceptance: `verify_project_root()` walks up the directory tree until it finds `server/core/porter_core.py` and `.git/`; exits with a clear error if not found. |
 | MTD-1.2 | [ ] | [ ] | [ ] | As a developer, I can have the script verify that I am on a feature or bugfix branch (not `dev` or `main`) so that I don't accidentally run merge-to-dev from the wrong branch. Acceptance: the script reads the current branch name; if it is `dev` or `main`, it exits with a clear error naming the current branch and instructing the user to run from a feature branch. |
 | MTD-1.3 | [ ] | [ ] | [ ] | As a CI operator, I can have all validation of required flags happen before any git operations run so that a misconfigured invocation fails fast without leaving the repo in a partially modified state. Acceptance: `--non-interactive` flag validation completes before any `git fetch` or `git checkout` is executed. |
 
@@ -218,7 +218,7 @@ Merges the current feature/bugfix branch into `dev`, restores the `-dev+<hash>` 
 
 | ID | Interactive | Automated | Scripted | Requirement |
 |----|:-----------:|:---------:|:--------:|-------------|
-| MTD-5.1 | [ ] | [ ] | [ ] | As a developer, I can have the script automatically restore the `VERSION` in `porter_core.py` to the `-dev+<hash>` format after the merge so that `dev` always carries the correct dev version suffix. Acceptance: the script reads the current VERSION from `porter_core.py` line 50, strips any branch or dev suffix to obtain the bare semver base, gets the short hash of the merge commit via `git rev-parse --short HEAD`, sets `VERSION = "X.Y.Z-dev+<hash>"`, and commits with message `Set dev version to X.Y.Z-dev+<hash>`. |
+| MTD-5.1 | [ ] | [ ] | [ ] | As a developer, I can have the script automatically restore the `VERSION` in `porter_core.py` to the `-dev+<hash>` format after the merge so that `dev` always carries the correct dev version suffix. Acceptance: the script reads the current VERSION from `server/core/porter_core.py` line 52, strips any branch or dev suffix to obtain the bare semver base, gets the short hash of the merge commit via `git rev-parse --short HEAD`, sets `VERSION = "X.Y.Z-dev+<hash>"`, and commits with message `Set dev version to X.Y.Z-dev+<hash>`. |
 
 ---
 

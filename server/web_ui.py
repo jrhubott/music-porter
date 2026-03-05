@@ -46,7 +46,7 @@ from flask import (
     url_for,
 )
 
-import porter_core as mp
+from core import porter_core as mp
 
 # Initialize third-party imports once at load time.
 # The web server runs inside the venv so all packages are already available.
@@ -964,10 +964,12 @@ def create_app(project_root=None, no_auth=False, server_host=None,
                behind_proxy=False, proxy_count=1):
     """Create and configure the Flask application."""
     if project_root is None:
-        project_root = Path(__file__).resolve().parent
+        # server/web_ui.py lives in server/ — go up one level to reach repo root
+        project_root = Path(__file__).resolve().parent.parent
 
     project_root = Path(project_root)
-    template_dir = project_root / 'templates'
+    # templates/ is a sibling of web_ui.py inside server/
+    template_dir = Path(__file__).resolve().parent / 'templates'
 
     app = Flask(__name__, template_folder=str(template_dir))
     app.config['PROJECT_ROOT'] = str(project_root)

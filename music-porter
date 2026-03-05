@@ -40,7 +40,10 @@ def _auto_activate_venv():
 
 _auto_activate_venv()
 
-from porter_core import (
+# Add server/ to sys.path so server modules are importable without package prefix
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'server'))
+
+from core.porter_core import (
     VERSION,
     DependencyChecker,
     Logger,

@@ -29,7 +29,7 @@ from typing import NoReturn
 
 DEV_BRANCH = "dev"
 PROTECTED_BRANCHES = ("dev", "main")
-VERSION_FILE = "porter_core.py"
+VERSION_FILE = "server/core/porter_core.py"
 FINAL_LOG_COUNT = 5  # recent commits shown in final report
 
 # Regex patterns for locating version strings in source files
@@ -577,16 +577,16 @@ def parse_args() -> argparse.Namespace:
 
 
 def verify_project_root() -> Path:
-    """Walk up from cwd until porter_core.py and .git/ are both found."""
+    """Walk up from cwd until server/core/porter_core.py and .git/ are both found."""
     candidate = Path.cwd()
     while True:
-        if (candidate / "porter_core.py").exists() and (candidate / ".git").is_dir():
+        if (candidate / "server" / "core" / "porter_core.py").exists() and (candidate / ".git").is_dir():
             return candidate
         parent = candidate.parent
         if parent == candidate:
             break
         candidate = parent
-    err("Cannot locate project root (looking for porter_core.py + .git/).")
+    err("Cannot locate project root (looking for server/core/porter_core.py + .git/).")
     err("Run this script from within the music-porter directory.")
     sys.exit(1)
 
