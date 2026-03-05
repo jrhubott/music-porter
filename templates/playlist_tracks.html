@@ -44,6 +44,8 @@
     <button type="button" class="btn btn-outline-secondary filter-chip active" data-filter="status" data-value="all">All</button>
     <button type="button" class="btn btn-outline-secondary filter-chip" data-filter="status" data-value="converted">Converted</button>
     <button type="button" class="btn btn-outline-secondary filter-chip" data-filter="status" data-value="source_only">Source Only</button>
+    <button type="button" class="btn btn-outline-secondary filter-chip" data-filter="status" data-value="duplicates">Duplicates</button>
+    <button type="button" class="btn btn-outline-secondary filter-chip" data-filter="status" data-value="hidden">Hidden</button>
   </div>
   <div class="btn-group btn-group-sm" role="group" aria-label="Lock state">
     <button type="button" class="btn btn-outline-secondary filter-chip active" data-filter="lock" data-value="all">All</button>
@@ -153,6 +155,13 @@ function hasMp3(track) {
   return !!track.file_path;
 }
 
+function duplicateUuids() {
+  const key = t => `${(t.artist||'').toLowerCase()}|||${(t.title||'').toLowerCase()}`;
+  const counts = {};
+  tracks.forEach(t => { const k = key(t); counts[k] = (counts[k] || 0) + 1; });
+  return new Set(tracks.filter(t => counts[key(t)] > 1).map(t => t.uuid));
+}
+
 // ── Sorting ───────────────────────────────────────────────────────
 function getVal(track, col) {
   if (col === 'has_mp3') return hasMp3(track) ? 1 : 0;
@@ -171,9 +180,14 @@ function sortedTracks(list) {
 // ── Filter ────────────────────────────────────────────────────────
 function visibleTracks() {
   return sortedTracks(tracks.filter(t => {
-    if (!showHidden && t.hidden) return false;
+    if (filterStatus === 'hidden') {
+      if (!t.hidden) return false;
+    } else {
+      if (!showHidden && t.hidden) return false;
+    }
     if (filterStatus === 'converted' && !hasMp3(t)) return false;
     if (filterStatus === 'source_only' && hasMp3(t)) return false;
+    if (filterStatus === 'duplicates' && !duplicateUuids().has(t.uuid)) return false;
     if (filterLock === 'locked' && !t.locked) return false;
     if (filterLock === 'unlocked' && t.locked) return false;
     if (searchText) {
