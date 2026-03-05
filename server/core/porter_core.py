@@ -63,12 +63,12 @@ from core.migrations import (
     migrate_profiles_schema,
 )
 from core.models import (
-    AggregateStatistics,
     EQConfig,
     SyncDestination,
     SyncStatusResult,
 )
 from core.pipeline import (
+    AggregateStatistics,
     DataManager,
     PipelineOrchestrator,
     SummaryManager,
