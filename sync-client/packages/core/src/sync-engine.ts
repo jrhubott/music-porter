@@ -369,7 +369,10 @@ export class SyncEngine {
         }
         const mp3s = await findMp3s(destDir);
         for (const absPath of mp3s) {
-          if (!expectedPaths.has(absPath)) {
+          // Normalize to NFC before comparison: macOS HFS+/APFS returns NFD from readdir,
+          // but manifest paths are NFC (from server API). Without normalization, filenames
+          // with accented characters (é, ü, etc.) would never match and be wrongly deleted.
+          if (!expectedPaths.has(absPath.normalize('NFC'))) {
             try {
               await unlink(absPath);
               totalCleaned++;
