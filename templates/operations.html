@@ -187,6 +187,7 @@ const PAGE_SIZE = 50;
 let currentOffset = 0;
 let autoRefreshInterval = null;
 let activeSSE = null;
+let taskEntries = [];
 
 function statusBadge(status) {
   const map = {
@@ -248,10 +249,11 @@ function loadHistory() {
 
   fetch('/api/tasks/history?' + params).then(r => r.json()).then(data => {
     const tbody = document.getElementById('tasksTable');
+    taskEntries = data.entries;
     if (data.entries.length === 0) {
       tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No tasks found</td></tr>';
     } else {
-      tbody.innerHTML = data.entries.map(t => `
+      tbody.innerHTML = data.entries.map((t, i) => `
         <tr>
           <td class="text-nowrap small">${formatTime(t.started_at)}</td>
           <td><code>${t.operation}</code></td>
@@ -261,8 +263,8 @@ function loadHistory() {
           <td>${sourceBadge(t.source)}</td>
           <td class="text-end text-nowrap">
             ${t.status === 'running' ? `<button class="btn btn-outline-warning btn-sm py-0 px-2" onclick="cancelTask('${t.id}')"><i class="bi bi-stop-fill"></i></button>` : ''}
-            ${t.result || t.error ? `<button class="btn btn-outline-secondary btn-sm py-0 px-2" onclick='showResult(${JSON.stringify(JSON.stringify(t))})'><i class="bi bi-code-square"></i></button>` : ''}
-            ${t.status === 'running' ? `<button class="btn btn-outline-secondary btn-sm py-0 px-2" onclick="viewLog('${t.id}', '${t.description.replace(/'/g, "\\'")}')"><i class="bi bi-terminal"></i></button>` : ''}
+            ${t.result || t.error ? `<button class="btn btn-outline-secondary btn-sm py-0 px-2" onclick="showResult(${i})"><i class="bi bi-code-square"></i></button>` : ''}
+            ${t.status === 'running' ? `<button class="btn btn-outline-secondary btn-sm py-0 px-2" onclick="viewLog('${t.id}', '${t.description.replace(/'/g, '&apos;')}')"><i class="bi bi-terminal"></i></button>` : ''}
           </td>
         </tr>
       `).join('');
@@ -341,8 +343,8 @@ function cancelTask(id) {
     });
 }
 
-function showResult(jsonStr) {
-  const entry = JSON.parse(jsonStr);
+function showResult(index) {
+  const entry = taskEntries[index];
   const content = {
     id: entry.id,
     operation: entry.operation,
