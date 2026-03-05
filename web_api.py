@@ -1333,31 +1333,7 @@ def api_library_detect_duplicates():
 
     for playlist in playlists:
         key = playlist['key']
-        # Only consider active (non-hidden), non-locked tracks
-        tracks = [
-            t for t in ctx.track_db.get_tracks_by_playlist(key, include_hidden=False)
-            if not t.get('locked')
-        ]
-
-        # Group by normalized artist+title (matches frontend Duplicates filter logic)
-        groups = {}
-        for track in tracks:
-            dup_key = (
-                f"{(track.get('artist') or '').lower()}"
-                f"|||{(track.get('title') or '').lower()}"
-            )
-            groups.setdefault(dup_key, []).append(track)
-
-        hidden_count = 0
-        for group in groups.values():
-            if len(group) <= 1:
-                continue
-            # Keep earliest created_at; hide the rest
-            group.sort(key=lambda t: t.get('created_at') or '')
-            for track in group[1:]:
-                ctx.track_db.set_hidden(track['uuid'], True)
-                hidden_count += 1
-
+        hidden_count = ctx.track_db.hide_duplicates(key)
         if hidden_count > 0:
             per_playlist.append({
                 'key': key,

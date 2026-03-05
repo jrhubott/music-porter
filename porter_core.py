@@ -4250,6 +4250,34 @@ class TrackDB:
             finally:
                 conn.close()
 
+    def hide_duplicates(self, playlist_key):
+        """Hide duplicate tracks (same artist+title) within a playlist.
+
+        Keeps the earliest created_at; hides all others. Skips locked tracks.
+        Returns the number of tracks hidden.
+        """
+        tracks = [
+            t for t in self.get_tracks_by_playlist(playlist_key, include_hidden=False)
+            if not t.get('locked')
+        ]
+        groups = {}
+        for track in tracks:
+            dup_key = (
+                f"{(track.get('artist') or '').lower()}"
+                f"|||{(track.get('title') or '').lower()}"
+            )
+            groups.setdefault(dup_key, []).append(track)
+
+        hidden_count = 0
+        for group in groups.values():
+            if len(group) <= 1:
+                continue
+            group.sort(key=lambda t: t.get('created_at') or '')
+            for track in group[1:]:
+                self.set_hidden(track['uuid'], True)
+                hidden_count += 1
+        return hidden_count
+
 
 class EQConfigManager:
     """Persistent EQ configuration per profile/playlist using SQLite.
@@ -9150,6 +9178,12 @@ class PipelineOrchestrator:
         if convert_result.success:
             self.stats.stages_completed.append("convert")
             self.stats.conversion_stats = converter.stats
+            # ── Duplicate detection (post-convert) ───────────────────────
+            if self.track_db and self.stats.playlist_key:
+                dup_hidden = self.track_db.hide_duplicates(self.stats.playlist_key)
+                if dup_hidden > 0:
+                    self.logger.info(
+                        f"Duplicate detection: hid {dup_hidden} duplicate track(s)")
         else:
             self.stats.stages_failed.append("convert")
             self.logger.error("Conversion stage failed")
