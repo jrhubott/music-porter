@@ -1,0 +1,62 @@
+{% extends "track_editor_base.html" %}
+{% block title %}
+    Search{% if query %}: {{ query | e }}{% endif %} – Music Porter
+{% endblock title %}
+{% block track_editor_header %}
+    <div class="d-flex align-items-center mb-3 gap-2 flex-wrap">
+        <a href="/sources" class="btn btn-sm btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Sources
+        </a>
+        {% if query %}
+            <h5 class="mb-0">
+                Search: <em>{{ query | e }}</em>
+            </h5>
+        {% else %}
+            <h5 class="mb-0">Search Tracks</h5>
+        {% endif %}
+        <span class="badge bg-secondary" id="visibleCount">0</span>
+        <form class="d-flex gap-2 ms-auto" onsubmit="doNewSearch(event)">
+            <input type="text"
+                   class="form-control form-control-sm"
+                   id="searchPageInput"
+                   value="{{ query | e }}"
+                   placeholder="Search title, artist, album…"
+                   style="width:220px">
+            <button type="submit" class="btn btn-sm btn-outline-info">
+                <i class="bi bi-search"></i>
+            </button>
+        </form>
+    </div>
+{% endblock track_editor_header %}
+{% block extra_th %}
+    <th class="sortable" data-sort="playlist_name">
+        Playlist <span class="sort-arrow d-none" id="sort-playlist_name"></span>
+    </th>
+{% endblock extra_th %}
+{% block extra_td %}<td class="small text-muted">${esc(t.playlist_name || t.playlist || '')}</td>{% endblock extra_td %}
+{% block js_config %}
+const INITIAL_QUERY = {{ query | tojson }};
+
+function doNewSearch(e) {
+  e.preventDefault();
+  const q = document.getElementById('searchPageInput').value.trim();
+  if (!q) return;
+  window.location.href = '/search?q=' + encodeURIComponent(q);
+}
+{% endblock js_config %}
+{% block load_tracks_fn %}
+async function loadTracks() {
+  if (!INITIAL_QUERY) {
+    trackTbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted py-4">Enter a search term above</td></tr>`;
+    return;
+  }
+  const r = await fetch('/api/tracks/search?q=' + encodeURIComponent(INITIAL_QUERY));
+  if (!r.ok) {
+    trackTbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-4">Search failed</td></tr>`;
+    return;
+  }
+  tracks = await r.json();
+  renderTable();
+}
+{% endblock load_tracks_fn %}
+{% block bulk_action_listeners %}{% endblock bulk_action_listeners %}

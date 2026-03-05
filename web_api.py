@@ -1362,6 +1362,35 @@ def api_library_detect_duplicates():
 
 
 # ══════════════════════════════════════════════════════════════════
+# API: Track Search
+# ══════════════════════════════════════════════════════════════════
+
+@api_bp.route('/api/tracks/search')
+def api_tracks_search():
+    """Search all tracks by title, artist, or album.
+
+    Query params:
+    - ``q``: search string (case-insensitive LIKE; SQL metacharacters escaped)
+
+    Returns a JSON array of full track objects (all ``tracks`` columns) plus a
+    ``playlist_name`` field resolved from the playlists table.  Empty ``q``
+    returns an empty array.
+    """
+    ctx = _ctx()
+    raw_q = request.args.get('q', '').strip()
+    if not raw_q:
+        return jsonify([])
+    # Escape SQL LIKE metacharacters at the API boundary so callers pass
+    # literal search strings without worrying about SQL injection patterns.
+    escaped_q = raw_q.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+    tracks = ctx.track_db.search_tracks(escaped_q, include_hidden=True)
+    playlists = {p['key']: p['name'] for p in ctx.playlist_db.get_all()}
+    for track in tracks:
+        track['playlist_name'] = playlists.get(track['playlist'], track['playlist'])
+    return jsonify(tracks)
+
+
+# ══════════════════════════════════════════════════════════════════
 # API: File Serving (for iOS companion app)
 # ══════════════════════════════════════════════════════════════════
 

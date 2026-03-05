@@ -4139,6 +4139,30 @@ class TrackDB:
         finally:
             conn.close()
 
+    def search_tracks(self, query, include_hidden=True):
+        """Search tracks by title, artist, or album (case-insensitive LIKE).
+
+        ``query`` must already have SQL LIKE metacharacters escaped by the
+        caller (``%`` → ``\\%``, ``_`` → ``\\_``, ``\\`` → ``\\\\``).
+        """
+        pattern = f"%{query}%"
+        hidden_clause = " AND hidden = 0" if not include_hidden else ""
+        sql = (
+            "SELECT * FROM tracks"
+            " WHERE ("
+            "  UPPER(title)  LIKE UPPER(?) ESCAPE '\\'"
+            "  OR UPPER(artist) LIKE UPPER(?) ESCAPE '\\'"
+            "  OR UPPER(album)  LIKE UPPER(?) ESCAPE '\\'"
+            f"){hidden_clause}"
+            " ORDER BY playlist, title"
+        )
+        conn = self._connect()
+        try:
+            rows = conn.execute(sql, (pattern, pattern, pattern)).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
     def get_orphaned_playlist_tracks(self):
         """Return tracks whose playlist column references a non-existent playlist.
 

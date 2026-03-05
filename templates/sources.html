@@ -26,8 +26,16 @@
 
 <!-- Playlist Table -->
 <div class="card">
-  <div class="card-header d-flex justify-content-between align-items-center py-2">
+  <div class="card-header d-flex justify-content-between align-items-center py-2 gap-2 flex-wrap">
     <span class="fw-semibold">Playlists</span>
+    <form id="trackSearchForm" class="d-flex gap-2 align-items-center ms-auto"
+          onsubmit="doTrackSearch(event)">
+      <input type="text" class="form-control form-control-sm" id="trackSearchInput"
+             placeholder="Search tracks…" style="width:200px">
+      <button type="submit" class="btn btn-outline-info btn-sm">
+        <i class="bi bi-search"></i>
+      </button>
+    </form>
     <button class="btn btn-outline-warning btn-sm" id="detectDuplicatesBtn" onclick="detectDuplicates()">
       <i class="bi bi-copy"></i> Detect Duplicates
     </button>
@@ -288,6 +296,13 @@ function detectDuplicates() {
       btn.innerHTML = '<i class="bi bi-copy"></i> Detect Duplicates';
       showToast('Request failed', 'error');
     });
+}
+
+function doTrackSearch(e) {
+  e.preventDefault();
+  const q = document.getElementById('trackSearchInput').value.trim();
+  if (!q) return;
+  window.location.href = '/search?q=' + encodeURIComponent(q);
 }
 
 loadPlaylists();

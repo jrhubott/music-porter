@@ -731,6 +731,30 @@ Background task: verify DB records match filesystem and clean up orphans.
 
 ---
 
+## Track Search
+
+### GET /api/tracks/search
+
+Search all tracks across all playlists by title, artist, or album. Case-insensitive.
+
+**Query params:**
+
+| Param | Type | Description |
+|---|---|---|
+| `q` | string | Search term. SQL LIKE metacharacters (`%`, `_`, `\`) are automatically escaped. |
+
+**Response:** JSON array of track objects. Each object contains all `tracks` table columns plus:
+
+| Field | Type | Description |
+|---|---|---|
+| `playlist_name` | string | Human-readable playlist name (resolved from playlists table) |
+
+Empty `q` returns `[]` HTTP 200. No matches returns `[]` HTTP 200.
+
+**Status codes:** 200 OK
+
+---
+
 ## File Serving
 
 ### GET /api/files/\<key\>
