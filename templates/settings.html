@@ -647,7 +647,7 @@ function loadEQPresets() {
           '<td class="text-center">' + check(c.bass_boost) + '</td>' +
           '<td class="text-center">' + check(c.treble_boost) + '</td>' +
           '<td class="text-center">' + check(c.compressor) + '</td>' +
-          '<td class="text-center"><button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="deleteEQOverride(\'' + c.playlist.replace(/'/g, "\\'") + '\')"><i class="bi bi-trash"></i></button></td>' +
+          '<td class="text-center"><button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="deleteEQOverride(\'' + c.playlist.replace(/'/g, '&apos;') + '\')"><i class="bi bi-trash"></i></button></td>' +
           '</tr>';
       }).join('');
     }

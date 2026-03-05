@@ -153,9 +153,9 @@ function loadPlaylists() {
         <td><small class="text-muted text-truncate d-inline-block" style="max-width:300px" title="${p.url}">${p.url}</small></td>
         <td class="text-end">
           <a href="/playlists/${p.key}/tracks" class="btn btn-outline-info btn-sm py-0 px-2" title="Browse tracks"><i class="bi bi-music-note-list"></i></a>
-          <button class="btn btn-outline-primary btn-sm py-0 px-2" onclick="openEdit('${p.key}','${p.name}','${p.url}')" title="Edit"><i class="bi bi-pencil"></i></button>
-          <button class="btn btn-outline-warning btn-sm py-0 px-2" onclick="openDeleteData('${p.key}','${p.name}')" title="Delete data"><i class="bi bi-folder-x"></i></button>
-          <button class="btn btn-outline-danger btn-sm py-0 px-2" onclick="removePlaylist('${p.key}')" title="Remove config"><i class="bi bi-trash"></i></button>
+          <button class="btn btn-outline-primary btn-sm py-0 px-2" onclick="openEdit('${p.key.replace(/'/g, '&apos;')}','${p.name.replace(/'/g, '&apos;')}','${p.url.replace(/'/g, '&apos;')}')" title="Edit"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-outline-warning btn-sm py-0 px-2" onclick="openDeleteData('${p.key.replace(/'/g, '&apos;')}','${p.name.replace(/'/g, '&apos;')}')" title="Delete data"><i class="bi bi-folder-x"></i></button>
+          <button class="btn btn-outline-danger btn-sm py-0 px-2" onclick="removePlaylist('${p.key.replace(/'/g, '&apos;')}')" title="Remove config"><i class="bi bi-trash"></i></button>
         </td>
       </tr>
     `;

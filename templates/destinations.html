@@ -456,7 +456,7 @@ function renderGroupsTable(data) {
         : matchedDest?.type === 'ios' ? 'Use iOS app to sync'
         : syncDisabled ? 'Destination unavailable' : 'Sync all playlists';
     const groupName = k.group_name || '';
-    const renameBtn = `<button class="btn btn-outline-secondary btn-sm py-0 px-1 me-1" onclick="promptRenameGroup('${primaryDest}'); return false;" title="Rename group"><i class="bi bi-pencil"></i></button>`;
+    const renameBtn = `<button class="btn btn-outline-secondary btn-sm py-0 px-1 me-1" onclick="promptRenameGroup('${primaryDest.replace(/'/g, '&apos;')}'); return false;" title="Rename group"><i class="bi bi-pencil"></i></button>`;
     const hasDetails = k.destination_details && k.destination_details.length > 1;
     const expandBtn = hasDetails
       ? `<button class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="toggleGroupExpand(this, ${idx})" title="Show destinations"><i class="bi bi-chevron-right"></i></button>`
@@ -465,11 +465,11 @@ function renderGroupsTable(data) {
     let destLabel;
     if (groupName) {
       const memberList = dests.join(', ');
-      destLabel = `<a href="#" onclick="showDetail('${primaryDest}'); return false;"><i class="bi ${icon} me-1"></i><strong>${groupName}</strong></a><br><small class="text-muted">${memberList}</small><br><span class="ms-4">${statusBadge}</span>`;
+      destLabel = `<a href="#" onclick="showDetail('${primaryDest.replace(/'/g, '&apos;')}'); return false;"><i class="bi ${icon} me-1"></i><strong>${groupName}</strong></a><br><small class="text-muted">${memberList}</small><br><span class="ms-4">${statusBadge}</span>`;
     } else if (dests.length > 1) {
-      destLabel = `<a href="#" onclick="showDetail('${primaryDest}'); return false;"><i class="bi ${icon} me-1"></i>${primaryDest}</a> <span class="badge bg-info" title="${dests.join(', ')}">${dests.length} linked</span><br><span class="ms-4">${statusBadge}</span>`;
+      destLabel = `<a href="#" onclick="showDetail('${primaryDest.replace(/'/g, '&apos;')}'); return false;"><i class="bi ${icon} me-1"></i>${primaryDest}</a> <span class="badge bg-info" title="${dests.join(', ')}">${dests.length} linked</span><br><span class="ms-4">${statusBadge}</span>`;
     } else {
-      destLabel = `<a href="#" onclick="showDetail('${primaryDest}'); return false;"><i class="bi ${icon} me-1"></i>${primaryDest}</a><br><span class="ms-4">${statusBadge}</span>`;
+      destLabel = `<a href="#" onclick="showDetail('${primaryDest.replace(/'/g, '&apos;')}'); return false;"><i class="bi ${icon} me-1"></i>${primaryDest}</a><br><span class="ms-4">${statusBadge}</span>`;
     }
     return `<tr data-group-idx="${idx}">
       <td class="text-center" style="width:32px">${expandBtn}</td>
@@ -485,7 +485,7 @@ function renderGroupsTable(data) {
           title="View sync history">
           <i class="bi bi-clock-history"></i>
         </button>
-        <button class="btn btn-outline-primary btn-sm py-0 px-1" onclick="syncToKey('${primaryDest}', 'library')" title="${syncTitle}" ${syncDisabled}>
+        <button class="btn btn-outline-primary btn-sm py-0 px-1" onclick="syncToKey('${primaryDest.replace(/'/g, '&apos;')}', 'library')" title="${syncTitle}" ${syncDisabled}>
           <i class="bi bi-arrow-repeat"></i>
         </button>
       </td>
@@ -665,7 +665,7 @@ function showDetail(destName) {
         <td class="text-center">${prefCell}</td>
         <td class="text-center">${statusBadge}</td>
         <td class="text-center">
-          <button class="btn btn-outline-primary btn-sm py-0 px-1" onclick="syncToKey('${destName}', '${p.name}')" title="${detailSyncTitle}" ${detailSyncDisabled}>
+          <button class="btn btn-outline-primary btn-sm py-0 px-1" onclick="syncToKey('${destName.replace(/'/g, '&apos;')}', '${p.name.replace(/'/g, '&apos;')}')" title="${detailSyncTitle}" ${detailSyncDisabled}>
             <i class="bi bi-arrow-repeat"></i>
           </button>
         </td>
@@ -763,9 +763,10 @@ function renderDestsTable(saved) {
     const linkedBadge = linked.length > 0
       ? `<span class="badge bg-info" title="${linked.join(', ')}">${linked.length} linked</span>`
       : '<span class="text-muted">-</span>';
+    const dName = d.name.replace(/'/g, '&apos;');
     const linkBtn = linked.length > 0
-      ? `<button class="btn btn-outline-warning btn-sm py-0 px-1 me-1" onclick="unlinkDest('${d.name}')" title="Unlink"><i class="bi bi-link-45deg"></i></button>`
-      : `<button class="btn btn-outline-info btn-sm py-0 px-1 me-1" onclick="promptLinkDest('${d.name}')" title="Link to destination"><i class="bi bi-link"></i></button>`;
+      ? `<button class="btn btn-outline-warning btn-sm py-0 px-1 me-1" onclick="unlinkDest('${dName}')" title="Unlink"><i class="bi bi-link-45deg"></i></button>`
+      : `<button class="btn btn-outline-info btn-sm py-0 px-1 me-1" onclick="promptLinkDest('${dName}')" title="Link to destination"><i class="bi bi-link"></i></button>`;
     return `<tr>
       <td>${d.name}</td>
       <td>${typeBadge}</td>
@@ -774,10 +775,10 @@ function renderDestsTable(saved) {
       <td class="text-center">${avail}</td>
       <td class="text-center">
         ${linkBtn}
-        <button class="btn btn-outline-warning btn-sm py-0 px-1 me-1" onclick="promptRenameDest('${d.name}')" title="Rename">
+        <button class="btn btn-outline-warning btn-sm py-0 px-1 me-1" onclick="promptRenameDest('${dName}')" title="Rename">
           <i class="bi bi-pencil"></i>
         </button>
-        <button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="removeDest('${d.name}')" title="Remove">
+        <button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="removeDest('${dName}')" title="Remove">
           <i class="bi bi-trash"></i>
         </button>
       </td>
