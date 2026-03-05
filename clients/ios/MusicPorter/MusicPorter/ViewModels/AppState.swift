@@ -160,15 +160,14 @@ final class AppState {
             }
         }
 
-        // Try external URL
+        // Try external URL — skip probe since /health may not be forwarded by reverse proxy.
+        // Attempt validation directly; the 10-second timeout handles unreachable servers.
         if let extStr = server.externalURL, let externalURL = URL(string: extStr) {
-            if await probeReachable(baseURL: externalURL, timeoutSeconds: Self.standardTimeoutSeconds) {
-                apiClient.setActiveURL(externalURL, type: .external)
-                do {
-                    return try await validateWithTimeout(seconds: Self.standardTimeoutSeconds)
-                } catch {
-                    lastError = error
-                }
+            apiClient.setActiveURL(externalURL, type: .external)
+            do {
+                return try await validateWithTimeout(seconds: Self.standardTimeoutSeconds)
+            } catch {
+                lastError = error
             }
         }
 

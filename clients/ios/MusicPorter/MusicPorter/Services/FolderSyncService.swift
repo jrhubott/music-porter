@@ -291,9 +291,8 @@ final class FolderSyncService {
                 includingPropertiesForKeys: nil,
                 options: [.skipsHiddenFiles]
             ) {
-                for case let fileURL as URL in enumerator
-                    where fileURL.pathExtension.lowercased() == "mp3"
-                {
+                let allURLs = enumerator.compactMap { $0 as? URL }
+                for fileURL in allURLs where fileURL.pathExtension.lowercased() == "mp3" {
                     if !syncedFileURLs.contains(fileURL) {
                         if (try? fm.removeItem(at: fileURL)) != nil {
                             orphansCleaned += 1
