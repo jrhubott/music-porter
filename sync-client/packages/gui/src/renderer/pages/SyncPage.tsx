@@ -76,7 +76,6 @@ export function SyncPage() {
   const [autoSyncDrives, setAutoSyncDrives] = useState<string[]>([]);
   const [ejectAfterSync, setEjectAfterSync] = useState(false);
   const [ejected, setEjected] = useState(false);
-  const [cleanDestination, setCleanDestination] = useState(false);
   const [localDestinations, setLocalDestinations] = useState<SyncDestination[]>([]);
   const [linkModalOpen, setLinkModalOpen] = useState(false);
   const [linkTargetName, setLinkTargetName] = useState('');
@@ -137,7 +136,6 @@ export function SyncPage() {
       setServerProfiles(settingsData.profiles);
       setAutoSyncDrives(prefs.autoSyncDrives);
       setEjectAfterSync(prefs.ejectAfterSync);
-      setCleanDestination(Boolean(settingsData.settings['clean_sync_destination']));
       setAutoPinNewPlaylists(autoPin);
       setLocalDestinations(localDests);
 
@@ -239,29 +237,33 @@ export function SyncPage() {
   const profile = serverProfiles[activeProfile];
   const usbDir = profile?.usb_dir ?? '';
 
-  async function loadSyncStatus(path: string, driveName?: string) {
+  async function loadSyncStatus(path: string, driveName?: string, applyPrefs = true) {
     try {
       const destName = await ipc.resolveDestination(path, driveName);
       if (destName) {
         const status = await ipc.getSyncStatus(destName);
         setDestSyncStatus(status);
-        // Auto-apply saved playlist prefs for this destination
-        const destMeta = localDestinations.find((d) => d.name === destName);
-        const prefs = destMeta?.playlist_prefs ?? status.playlist_prefs ?? null;
-        if (prefs && prefs.length > 0) {
-          setSelectedPlaylists(new Set(prefs));
-        } else {
-          clearSelection();
+        if (applyPrefs) {
+          // Auto-apply saved playlist prefs for this destination
+          const destMeta = localDestinations.find((d) => d.name === destName);
+          const prefs = destMeta?.playlist_prefs ?? status.playlist_prefs ?? null;
+          if (prefs && prefs.length > 0) {
+            setSelectedPlaylists(new Set(prefs));
+          } else {
+            clearSelection();
+          }
         }
       } else {
         setDestSyncStatus(null);
       }
     } catch {
       setDestSyncStatus(null);
-      // Offline fallback: read local manifest for playlist pre-selection
-      const keys = await ipc.readManifestPlaylistKeys(path).catch(() => []);
-      if (keys.length > 0) {
-        setSelectedPlaylists(new Set(keys));
+      if (applyPrefs) {
+        // Offline fallback: read local manifest for playlist pre-selection
+        const keys = await ipc.readManifestPlaylistKeys(path).catch(() => []);
+        if (keys.length > 0) {
+          setSelectedPlaylists(new Set(keys));
+        }
       }
     }
   }
@@ -356,7 +358,6 @@ export function SyncPage() {
         profile: activeProfile || undefined,
         force,
         offlineOnly: isOffline,
-        cleanDestination,
       });
       setLastSyncResult(result);
 
@@ -384,8 +385,8 @@ export function SyncPage() {
           setDrives(updated);
         }
       } else {
-        // Refresh sync status so badges reflect the completed sync
-        loadSyncStatus(destPath, syncDrive?.name);
+        // Refresh sync status so badges reflect the completed sync (don't re-apply prefs)
+        loadSyncStatus(destPath, syncDrive?.name, false);
       }
     } catch {
       // Error handled via progress
@@ -680,21 +681,6 @@ export function SyncPage() {
       )}
 
       {/* Sync options */}
-      {!isOffline && (
-        <div className="form-check mb-3">
-          <input
-            type="checkbox"
-            id="cleanDestination"
-            className="form-check-input"
-            checked={cleanDestination}
-            onChange={(e) => setCleanDestination(e.target.checked)}
-          />
-          <label className="form-check-label" htmlFor="cleanDestination">
-            Remove destination files for tracks deleted from server
-          </label>
-        </div>
-      )}
-
       {/* Action buttons */}
       <div className="d-flex gap-2 mb-4">
         {isSyncing ? (
@@ -766,6 +752,7 @@ export function SyncPage() {
           <div>Copied: {lastSyncResult.copied}</div>
           <div>Skipped: {lastSyncResult.skipped}</div>
           {lastSyncResult.failed > 0 && <div>Failed: {lastSyncResult.failed}</div>}
+          {lastSyncResult.cleaned > 0 && <div>Deleted: {lastSyncResult.cleaned}</div>}
           <div>Duration: {formatDuration(lastSyncResult.durationMs)}</div>
           <div>Destination: {lastSyncResult.destinationName}</div>
           {lastSyncResult.destError && (

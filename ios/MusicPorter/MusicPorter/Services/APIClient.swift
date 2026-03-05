@@ -339,10 +339,11 @@ final class APIClient {
         let _: OkResponse = try await delete("/api/sync/destinations/\(name)")
     }
 
-    func syncToDestination(sourceDir: String, destination: String, profile: String? = nil, playlistKeys: [String]? = nil) async throws -> String {
+    func syncToDestination(sourceDir: String, destination: String, profile: String? = nil, playlistKeys: [String]? = nil, cleanDestination: Bool = false) async throws -> String {
         var body: [String: Any] = ["source_dir": sourceDir, "destination": destination]
         if let profile { body["profile"] = profile }
         if let playlistKeys { body["playlist_keys"] = playlistKeys }
+        if cleanDestination { body["clean_destination"] = true }
         let response: TaskIdResponse = try await postAny("/api/sync/run", body: body)
         return response.taskId
     }
@@ -391,16 +392,7 @@ final class APIClient {
         try await get("/api/files/\(playlist)/sync-status")
     }
 
-    /// Get tracks removed from a playlist, optionally since a given Unix timestamp.
-    func getRemovedFiles(playlist: String, since: Double? = nil) async throws -> RemovedFilesResponse {
-        var queryItems: [URLQueryItem]?
-        if let since {
-            queryItems = [URLQueryItem(name: "since", value: String(since))]
-        }
-        return try await get("/api/files/\(playlist)/removed", queryItems: queryItems)
-    }
-
-    func recordClientSync(
+func recordClientSync(
         destination: String,
         playlist: String,
         files: [String],
@@ -439,6 +431,7 @@ final class APIClient {
         filesCopied: Int,
         filesSkipped: Int,
         filesFailed: Int,
+        orphanedCleaned: Int = 0,
         error: String? = nil
     ) async {
         var body: [String: Any] = [
@@ -447,6 +440,7 @@ final class APIClient {
             "files_copied": filesCopied,
             "files_skipped": filesSkipped,
             "files_failed": filesFailed,
+            "orphaned_cleaned": orphanedCleaned,
         ]
         if let err = error { body["error"] = err }
         let _: OkResponse? = try? await postAny("/api/sync/client-complete", body: body)

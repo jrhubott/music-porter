@@ -448,6 +448,24 @@ export function SettingsPage() {
               <small className="text-secondary">{prefs.concurrency} concurrent downloads</small>
             </div>
 
+            {/* Mirror destination */}
+            <div className="form-check form-switch mb-3">
+              <input
+                type="checkbox"
+                className="form-check-input"
+                id="mirrorDest"
+                checked={prefs.cleanDestination ?? false}
+                onChange={(e) => {
+                  const updated = { ...prefs, cleanDestination: e.target.checked };
+                  setPrefs(updated);
+                  void ipc.updatePreferences({ cleanDestination: e.target.checked });
+                }}
+              />
+              <label className="form-check-label" htmlFor="mirrorDest">
+                Mirror destination (remove unlisted files)
+              </label>
+            </div>
+
             {/* Per-drive auto-sync */}
             <div>
               <label className="form-label">Auto-Sync Drives</label>

@@ -185,8 +185,8 @@ Library metadata for all MP3s. Core table added in **migration 3 -> 4**, source\
 | copyright | TEXT | | v6 | Copyright info |
 | created\_at | REAL | NOT NULL | v4 | Unix epoch timestamp |
 | updated\_at | REAL | NOT NULL | v4 | Unix epoch timestamp |
-| hidden | INTEGER | NOT NULL DEFAULT 0 | v13 | 1 = hidden; skipped by Converter and sync; included in /removed endpoint |
-| hidden\_at | REAL | | v13 | Unix epoch when track was hidden; used by ?since= filter in /removed |
+| hidden | INTEGER | NOT NULL DEFAULT 0 | v13 | 1 = hidden; skipped by Converter and sync; excluded from destination sync |
+| hidden\_at | REAL | | v13 | Unix epoch when track was hidden |
 | locked | INTEGER | NOT NULL DEFAULT 0 | v13 | 1 = locked; Converter skips metadata write on re-runs (audio still reconverted) |
 
 **Indexes:** `idx_tracks_playlist(playlist)` (v4), `idx_tracks_file_path(file_path)` (v4), `idx_tracks_source_m4a(source_m4a_path)` (v5), `idx_tracks_hidden(playlist, hidden)` (v13)
@@ -231,29 +231,6 @@ Sync destination configuration previously stored in `config.yaml`, migrated to t
 
 ---
 
-### removed\_tracks
-
-Historical record of tracks removed from the library during playlist cleanup. Added in **migration 10 -> 11**.
-
-Populated by `cleanup_removed_tracks()` when library cleanup is enabled after a pipeline run. Used by `GET /api/files/<key>/removed` so sync clients can query which tracks were deleted since their last sync.
-
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| id | INTEGER | PRIMARY KEY AUTOINCREMENT | Auto-generated row ID |
-| uuid | TEXT | NOT NULL | UUID of the removed track (same as `tracks.uuid` before deletion) |
-| playlist | TEXT | NOT NULL | Playlist key the track belonged to |
-| title | TEXT | NOT NULL | Track title |
-| artist | TEXT | NOT NULL | Track artist |
-| album | TEXT | NOT NULL | Track album |
-| display\_filename | TEXT | | Human-readable filename (`Artist - Title.mp3`) used by sync clients for cache/destination cleanup |
-| removed\_at | REAL | NOT NULL | Unix epoch timestamp when the track was removed |
-
-**Indexes:** `idx_removed_tracks_playlist(playlist)`, `idx_removed_tracks_removed_at(removed_at)`
-
-**Class:** `RemovedTrackDB`
-
----
-
 ## Migration History
 
 | From | To | Changes |
@@ -270,6 +247,7 @@ Populated by `cleanup_removed_tracks()` when library cleanup is enabled after a 
 | 9 | 10 | Added nullable `playlist_prefs` column to `sync_keys` for per-group saved playlist selection (JSON array or NULL). |
 | 10 | 11 | Added `removed_tracks` table for historical removal tracking. Added nullable `track_uuid` column to `sync_files` for orphan detection. |
 | 11 | 12 | Added `idx_sync_files_track_uuid` index on `sync_files(track_uuid)` for efficient orphan detection JOIN/WHERE queries. |
+| 14 | 15 | Dropped `removed_tracks` table. Destination cleanup is now scan-based (mirror mode) rather than API-based removal tracking. |
 
 ## Notes
 

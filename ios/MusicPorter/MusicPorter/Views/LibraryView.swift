@@ -668,7 +668,8 @@ struct LibraryView: View {
             api: appState.apiClient,
             audioCacheManager: appState.audioCacheManager,
             profile: appState.activeProfile,
-            forceResync: forceResync
+            forceResync: forceResync,
+            cleanDestination: appState.cleanDestination
         )
     }
 

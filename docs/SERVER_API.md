@@ -731,6 +731,30 @@ Background task: verify DB records match filesystem and clean up orphans.
 
 ---
 
+## Track Search
+
+### GET /api/tracks/search
+
+Search all tracks across all playlists by title, artist, or album. Case-insensitive.
+
+**Query params:**
+
+| Param | Type | Description |
+|---|---|---|
+| `q` | string | Search term. SQL LIKE metacharacters (`%`, `_`, `\`) are automatically escaped. |
+
+**Response:** JSON array of track objects. Each object contains all `tracks` table columns plus:
+
+| Field | Type | Description |
+|---|---|---|
+| `playlist_name` | string | Human-readable playlist name (resolved from playlists table) |
+
+Empty `q` returns `[]` HTTP 200. No matches returns `[]` HTTP 200.
+
+**Status codes:** 200 OK
+
+---
+
 ## File Serving
 
 ### GET /api/files/\<key\>
@@ -851,45 +875,6 @@ Per-file sync status map for a playlist. Lightweight endpoint with no ID3 reads.
   "def456.mp3": []
 }
 ```
-
----
-
-### GET /api/files/\<key\>/removed
-
-Return tracks that have been removed from a playlist's library (via library cleanup) since an optional timestamp. Used by sync clients to clean up their local caches and destination directories.
-
-**Path parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `key` | string | Playlist key |
-
-**Query parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `since` | float | No | Unix timestamp; only tracks removed after this point are returned. If omitted, all removals for the playlist are returned. |
-
-**Response:**
-
-```json
-{
-  "removed_tracks": [
-    {
-      "id": 1,
-      "uuid": "abc-123",
-      "playlist": "my_playlist",
-      "title": "Track Title",
-      "artist": "Artist Name",
-      "album": "Album Name",
-      "display_filename": "Artist Name - Track Title.mp3",
-      "removed_at": 1709500000.0
-    }
-  ]
-}
-```
-
-**Status codes:** 400 if `since` is not a valid float
 
 ---
 

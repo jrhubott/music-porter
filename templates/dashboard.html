@@ -556,7 +556,7 @@ function renderUnconvertedFiles(playlist, container, files) {
   });
   html += '</tbody></table></div>';
   html += '<button class="btn btn-outline-primary btn-sm" onclick="convertPlaylist(\'' +
-    playlist.replace(/'/g, "\\'") + '\')"><i class="bi bi-arrow-repeat"></i> Convert ' + playlist + '</button>';
+    playlist.replace(/'/g, '&apos;') + '\')"><i class="bi bi-arrow-repeat"></i> Convert ' + playlist + '</button>';
   container.innerHTML = html;
 }
 

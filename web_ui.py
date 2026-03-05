@@ -59,6 +59,7 @@ _migration_events = mp.migrate_data_dir()
 # Apply schema migrations before any DB or config class is instantiated
 _migration_events += mp.migrate_db_schema()
 _migration_events += mp.migrate_config_schema()
+_migration_events += mp.migrate_profiles_schema()
 
 # Load config so retention settings are available for all prune calls
 _startup_config = mp.ConfigManager(logger=mp.Logger(verbose=False))
@@ -70,9 +71,6 @@ mp.prune_audit_entries(retention_days=_startup_config.get_setting(
     'audit_retention_days', mp.DEFAULT_AUDIT_RETENTION_DAYS))
 mp.prune_task_history(retention_days=_startup_config.get_setting(
     'task_history_retention_days', mp.DEFAULT_TASK_HISTORY_RETENTION_DAYS))
-mp.prune_removed_tracks(retention_days=_startup_config.get_setting(
-    'removed_tracks_retention_days', mp.DEFAULT_REMOVED_TRACKS_RETENTION_DAYS))
-
 mp.load_output_profiles(_startup_config)
 
 
@@ -821,11 +819,6 @@ class MaintenanceScheduler:
                 retention_days=config.get_setting(
                     'task_history_retention_days',
                     mp.DEFAULT_TASK_HISTORY_RETENTION_DAYS))
-            mp.prune_removed_tracks(
-                db_path=db_path,
-                retention_days=config.get_setting(
-                    'removed_tracks_retention_days',
-                    mp.DEFAULT_REMOVED_TRACKS_RETENTION_DAYS))
             self._jobs_db.upsert(
                 'maintenance',
                 last_run_time=time.time(),
@@ -1160,6 +1153,11 @@ def create_app(project_root=None, no_auth=False, server_host=None,
     @app.route('/playlists/<key>/tracks')
     def playlist_tracks_page(key):
         return render_template('playlist_tracks.html', playlist_key=key)
+
+    @app.route('/search')
+    def search_page():
+        q = request.args.get('q', '').strip()
+        return render_template('search.html', query=q)
 
     @app.route('/playlists')
     def playlists_page():

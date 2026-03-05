@@ -66,7 +66,8 @@ final class FolderSyncService {
         api: APIClient,
         audioCacheManager: AudioCacheManager?,
         profile: String,
-        forceResync: Bool = false
+        forceResync: Bool = false,
+        cleanDestination: Bool = false
     ) async {
         isSyncing = true
         isCancelled = false
@@ -86,7 +87,8 @@ final class FolderSyncService {
                     api: api,
                     audioCacheManager: audioCacheManager,
                     profile: profile,
-                    forceResync: forceResync
+                    forceResync: forceResync,
+                    cleanDestination: cleanDestination
                 )
             } catch {
                 self.lastResult = FolderSyncResult(
@@ -115,7 +117,8 @@ final class FolderSyncService {
         api: APIClient,
         audioCacheManager: AudioCacheManager?,
         profile: String,
-        forceResync: Bool
+        forceResync: Bool,
+        cleanDestination: Bool
     ) async throws {
         let accessing = destURL.startAccessingSecurityScopedResource()
         defer { if accessing { destURL.stopAccessingSecurityScopedResource() } }
@@ -178,6 +181,7 @@ final class FolderSyncService {
         }
 
         // Phase 2: Process each playlist.
+        var syncedFileURLs = Set<URL>()
         for (playlistKey, response) in allFiles {
             guard !Task.isCancelled && !isCancelled else { break }
 
@@ -202,6 +206,7 @@ final class FolderSyncService {
                 // Incremental skip: already in manifest and file is present on disk.
                 if manifestFiles[displayName] != nil && existsOnDisk {
                     filesSkipped += 1
+                    syncedFileURLs.insert(destFile)
                     playlistSynced.append(displayName)
                     updateProgress()
                     continue
@@ -254,6 +259,7 @@ final class FolderSyncService {
 
                 if written {
                     filesCopied += 1
+                    syncedFileURLs.insert(destFile)
                     playlistSynced.append(displayName)
                     // Update manifest entry for this file.
                     var entry = manifest.playlists[playlistKey] ?? SyncManifestPlaylist(files: [:])
@@ -274,6 +280,28 @@ final class FolderSyncService {
                     taskId: taskId
                 )
             }
+        }
+
+        // Scan-based destination cleanup (mirror mode).
+        var orphansCleaned = 0
+        if cleanDestination && !(isCancelled || Task.isCancelled) {
+            let fm = FileManager.default
+            if let enumerator = fm.enumerator(
+                at: destURL,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            ) {
+                for case let fileURL as URL in enumerator
+                    where fileURL.pathExtension.lowercased() == "mp3"
+                {
+                    if !syncedFileURLs.contains(fileURL) {
+                        if (try? fm.removeItem(at: fileURL)) != nil {
+                            orphansCleaned += 1
+                        }
+                    }
+                }
+            }
+            removeEmptyDirectories(at: destURL, using: fm)
         }
 
         // Write updated manifest.
@@ -301,7 +329,8 @@ final class FolderSyncService {
             status: finalStatus,
             filesCopied: filesCopied,
             filesSkipped: filesSkipped,
-            filesFailed: filesFailed
+            filesFailed: filesFailed,
+            orphanedCleaned: orphansCleaned
         )
 
         lastResult = FolderSyncResult(
@@ -319,5 +348,22 @@ final class FolderSyncService {
         guard totalFiles > 0 else { return }
         let processed = filesCopied + filesSkipped + filesFailed
         progress = Double(processed) / Double(totalFiles)
+    }
+
+    /// Recursively removes empty subdirectories under `url`.
+    private func removeEmptyDirectories(at url: URL, using fm: FileManager) {
+        guard let contents = try? fm.contentsOfDirectory(
+            at: url, includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+        for item in contents {
+            var isDir: ObjCBool = false
+            if fm.fileExists(atPath: item.path, isDirectory: &isDir), isDir.boolValue {
+                removeEmptyDirectories(at: item, using: fm)
+                if (try? fm.contentsOfDirectory(atPath: item.path))?.isEmpty == true {
+                    try? fm.removeItem(at: item)
+                }
+            }
+        }
     }
 }

@@ -1112,7 +1112,6 @@ def api_pipeline_run():
         clean_dest_enabled = (clean_destination_param
                               if clean_destination_param is not None
                               else clean_dest_default)
-        removed_track_db = mp.RemovedTrackDB(str(ctx.project_root / mp.DEFAULT_DB_FILE))
         orchestrator = mp.PipelineOrchestrator(
             logger, deps, config,
             quality_preset=quality_preset,
@@ -1128,7 +1127,6 @@ def api_pipeline_run():
             eq_config_override=eq_cli_override,
             project_root=ctx.project_root,
             cleanup_removed_tracks_enabled=cleanup_enabled,
-            removed_track_db=removed_track_db,
         )
 
         # Resolve sync destination by name
@@ -1324,6 +1322,74 @@ def api_library_audit():
     return jsonify({'task_id': task_id})
 
 
+@api_bp.route('/api/library/detect-duplicates', methods=['POST'])
+def api_library_detect_duplicates():
+    """Find duplicate tracks (same artist+title) within each playlist and hide all but one."""
+    ctx = _ctx()
+    source = ctx.detect_source()
+    playlists = ctx.playlist_db.get_all()
+    total_hidden = 0
+    per_playlist = []
+
+    for playlist in playlists:
+        key = playlist['key']
+        hidden_count = ctx.track_db.hide_duplicates(key)
+        if hidden_count > 0:
+            per_playlist.append({
+                'key': key,
+                'name': playlist.get('name', key),
+                'hidden_count': hidden_count,
+            })
+            total_hidden += hidden_count
+
+    if ctx.audit_logger and total_hidden > 0:
+        ctx.audit_logger.log(
+            'detect_duplicates',
+            'Detect and hide duplicate tracks',
+            'completed',
+            params={
+                'total_hidden': total_hidden,
+                'playlists_affected': len(per_playlist),
+            },
+            source=source,
+        )
+
+    return jsonify({
+        'playlists_scanned': len(playlists),
+        'total_hidden': total_hidden,
+        'per_playlist': per_playlist,
+    })
+
+
+# ══════════════════════════════════════════════════════════════════
+# API: Track Search
+# ══════════════════════════════════════════════════════════════════
+
+@api_bp.route('/api/tracks/search')
+def api_tracks_search():
+    """Search all tracks by title, artist, or album.
+
+    Query params:
+    - ``q``: search string (case-insensitive LIKE; SQL metacharacters escaped)
+
+    Returns a JSON array of full track objects (all ``tracks`` columns) plus a
+    ``playlist_name`` field resolved from the playlists table.  Empty ``q``
+    returns an empty array.
+    """
+    ctx = _ctx()
+    raw_q = request.args.get('q', '').strip()
+    if not raw_q:
+        return jsonify([])
+    # Escape SQL LIKE metacharacters at the API boundary so callers pass
+    # literal search strings without worrying about SQL injection patterns.
+    escaped_q = raw_q.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+    tracks = ctx.track_db.search_tracks(escaped_q, include_hidden=True)
+    playlists = {p['key']: p['name'] for p in ctx.playlist_db.get_all()}
+    for track in tracks:
+        track['playlist_name'] = playlists.get(track['playlist'], track['playlist'])
+    return jsonify(tracks)
+
+
 # ══════════════════════════════════════════════════════════════════
 # API: File Serving (for iOS companion app)
 # ══════════════════════════════════════════════════════════════════
@@ -1342,6 +1408,9 @@ def api_files_list(playlist_key):
     """
     ctx = _ctx()
 
+    # Ensure profiles.yaml changes are reflected without requiring a server restart
+    mp.load_output_profiles(ctx.get_config())
+
     # DB-driven file list — all MP3s are in flat library/audio/
     tracks = ctx.track_db.get_tracks_by_playlist(playlist_key)
     if not tracks:
@@ -1351,7 +1420,13 @@ def api_files_list(playlist_key):
     profile_name = request.args.get('profile')
     fingerprint = ctx.track_db.get_playlist_fingerprint(playlist_key)
     if fingerprint:
-        etag_source = f"{fingerprint}:{profile_name or ''}"
+        profile_template_sig = ''
+        if profile_name:
+            _p = mp.OUTPUT_PROFILES.get(profile_name)
+            if _p:
+                # Include filename+directory templates so ETag changes when the profile template changes
+                profile_template_sig = f"{_p.filename}\x00{_p.directory}"
+        etag_source = f"{fingerprint}:{profile_name or ''}:{profile_template_sig}"
         etag_hash = hashlib.md5(etag_source.encode()).hexdigest()
         etag = f'"{etag_hash}"'
         if_none_match = request.headers.get('If-None-Match')
@@ -1447,57 +1522,6 @@ def api_files_sync_status(playlist_key):
         return jsonify({})
     return jsonify(ctx.sync_tracker.get_file_sync_map(playlist_key))
 
-
-@api_bp.route('/api/files/<playlist_key>/removed')
-def api_files_removed(playlist_key):
-    """Return tracks removed from a playlist since a given timestamp.
-
-    Includes both explicitly-removed tracks (from RemovedTrackDB) and
-    hidden tracks (hidden=1 in TrackDB) so sync clients treat both as deleted.
-
-    Query params:
-        since (float, optional): Unix timestamp; only tracks removed/hidden
-            after this point are returned. If omitted, all entries are returned.
-
-    Returns:
-        {removed_tracks: [{uuid, title, artist, album, display_filename,
-                           removed_at}]}
-    """
-    ctx = _ctx()
-    since_raw = request.args.get('since')
-    since = None
-    if since_raw:
-        try:
-            since = float(since_raw)
-        except ValueError:
-            return jsonify({'error': 'Invalid since parameter'}), 400
-
-    removed_track_db = mp.RemovedTrackDB(str(ctx.project_root / mp.DEFAULT_DB_FILE))
-    if since is not None:
-        explicit_removed = removed_track_db.get_removed_since(playlist_key, since)
-    else:
-        explicit_removed = removed_track_db.get_removed_by_playlist(playlist_key)
-
-    # Also include hidden tracks from TrackDB
-    hidden_tracks = ctx.track_db.get_hidden_tracks(playlist_key, since=since)
-    hidden_as_removed = [
-        {
-            'uuid': t['uuid'],
-            'title': t.get('title', ''),
-            'artist': t.get('artist', ''),
-            'album': t.get('album', ''),
-            'display_filename': _build_display_filename(t),
-            'removed_at': t.get('hidden_at'),
-        }
-        for t in hidden_tracks
-    ]
-
-    # Merge, deduplicating by UUID (explicit removal wins)
-    existing_uuids = {r['uuid'] for r in explicit_removed}
-    merged = explicit_removed + [
-        h for h in hidden_as_removed if h['uuid'] not in existing_uuids
-    ]
-    return jsonify({'removed_tracks': merged})
 
 
 @api_bp.route('/api/files/<playlist_key>/<filename>')

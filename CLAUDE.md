@@ -111,7 +111,7 @@ Applies profile-specific ID3 tags on-the-fly during sync and download. Library M
 
 ### Output Type Profiles
 
-Profiles are defined in `config.yaml` under `output_types`. Applied at sync/download time by TagApplicator, not at conversion time.
+Profiles are defined in `data/profiles.yaml` under the `output` key. Applied at sync/download time by TagApplicator, not at conversion time.
 
 | Profile | ID3 | Artwork | Album Tag | Artist Tag | Genre | Filename |
 |---------|-----|---------|-----------|------------|-------|----------|
@@ -333,16 +333,21 @@ All persistent state lives in `data/`: `config.yaml`, `cookies.txt`, `music-port
 
 ### config.yaml
 
-YAML file with `settings` (output\_type, workers, server\_name, quality\_preset) and `output_types` (profile definitions with template-based formats). Playlists and destinations are stored in the SQLite database (moved from config in schema v4). Path: `data/config.yaml`. Auto-created if missing.
+YAML file with `settings` (output\_type, workers, server\_name, quality\_preset) only. Profiles are in `data/profiles.yaml` (git-tracked). Playlists and destinations are stored in the SQLite database (moved from config in schema v4). Path: `data/config.yaml`. Auto-created if missing.
+
+### profiles.yaml
+
+YAML file at `data/profiles.yaml` (git-tracked via `.gitignore` exception). Profiles nested under `output` key. Read-only at runtime — edit manually to add or customise profiles. Loaded by `ConfigManager._load_profiles()` at startup. Falls back to built-in `DEFAULT_OUTPUT_PROFILES` if file is missing.
 
 ### Schema Versioning
 
-Both persistent stores have explicit version tracking with sequential migrations:
+All three persistent stores have explicit version tracking with sequential migrations:
 
 - **Config:** `CONFIG_SCHEMA_VERSION` constant in `porter_core.py` (~line 67). Version stored as `schema_version` key in `config.yaml`. Migrations run in `migrate_config_schema()`.
-- **Database:** `DB_SCHEMA_VERSION` constant in `porter_core.py` (~line 68). Version stored as SQLite `PRAGMA user_version`. Migrations run in `migrate_db_schema()`.
+- **Profiles:** `PROFILES_SCHEMA_VERSION` constant in `porter_core.py` (~line 88). Version stored as `schema_version` key in `data/profiles.yaml`. Migrations run in `migrate_profiles_schema()`.
+- **Database:** `DB_SCHEMA_VERSION` constant in `porter_core.py` (~line 89). Version stored as SQLite `PRAGMA user_version`. Migrations run in `migrate_db_schema()`.
 
-Both functions are called at startup before any DB class or ConfigManager is instantiated (in `music-porter` main() and `web_ui.py` module level).
+All three functions are called at startup before any DB class or ConfigManager is instantiated (in `music-porter` main() and `web_ui.py` module level).
 
 **When changing config.yaml structure or DB tables/columns:**
 
@@ -363,11 +368,15 @@ Both functions are called at startup before any DB class or ConfigManager is ins
 - `playlists`: key (PK), url, name, created\_at, updated\_at
 - `destinations`: name (PK), path, sync\_key (internal UUID, NOT NULL), created\_at, updated\_at (index: sync\_key). Multiple destinations sharing the same sync\_key form a linked group with shared tracking.
 
-**Current config schema (version 4) — top-level keys:**
+**Current config schema (version 5) — top-level keys:**
 
 - `schema_version` (integer)
 - `settings` (output\_type, workers, server\_name, quality\_preset)
-- `output_types` (profile name → id3\_title, id3\_artist, id3\_album, id3\_genre, id3\_extra, id3\_versions, artwork\_size, filename, directory, usb\_dir)
+
+**Current profiles schema (version 1) — `data/profiles.yaml` top-level keys:**
+
+- `schema_version` (integer)
+- `output` (profile name → description, id3\_title, id3\_artist, id3\_album, id3\_genre, id3\_extra, id3\_versions, artwork\_size, filename, directory, usb\_dir)
 
 ### USB Drive Exclusions
 

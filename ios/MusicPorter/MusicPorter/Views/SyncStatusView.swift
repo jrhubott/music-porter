@@ -412,7 +412,8 @@ struct SyncStatusView: View {
                 sourceDir: "library",
                 destination: destName,
                 profile: activeProfile,
-                playlistKeys: playlistKeys
+                playlistKeys: playlistKeys,
+                cleanDestination: appState.cleanDestination
             )
         }
         await load()

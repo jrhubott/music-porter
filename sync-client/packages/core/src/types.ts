@@ -220,6 +220,7 @@ export interface SyncResult {
   copied: number;
   skipped: number;
   failed: number;
+  cleaned: number;
   aborted: boolean;
   durationMs: number;
   destError?: string;
@@ -329,6 +330,7 @@ export interface SyncPreferences {
   autoPinNewPlaylists: boolean;
   unpinnedPlaylists: string[];
   recentDestinations: string[];
+  cleanDestination: boolean;
 }
 
 export interface AppConfig {

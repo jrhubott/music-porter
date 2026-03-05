@@ -35,7 +35,6 @@ import type {
   SyncStatusSummary,
   LinkDestinationResponse,
   ResetTrackingResponse,
-  RemovedFilesResponse,
 } from './types.js';
 import type { MetadataCache } from './cache/metadata-cache.js';
 
@@ -364,14 +363,6 @@ export class APIClient {
     return { body: response.body, size };
   }
 
-  /** Get tracks removed from a playlist, optionally since a given Unix timestamp. */
-  async getRemovedFiles(playlistKey: string, since?: number): Promise<RemovedFilesResponse> {
-    const params = since !== undefined ? `?since=${since}` : '';
-    return this.get<RemovedFilesResponse>(
-      `/api/files/${encodeURIComponent(playlistKey)}/removed${params}`,
-    );
-  }
-
   /** Build a direct URL for downloading a file (for external use). Pass profile for tagged output. */
   fileDownloadURL(playlistKey: string, filename: string, profile?: string): string {
     const profileParam = profile ? `?profile=${encodeURIComponent(profile)}` : '';
@@ -441,6 +432,7 @@ export class APIClient {
     copied: number,
     skipped: number,
     failed: number,
+    cleaned = 0,
     error?: string,
   ): Promise<void> {
     const body: Record<string, unknown> = {
@@ -449,6 +441,7 @@ export class APIClient {
       files_copied: copied,
       files_skipped: skipped,
       files_failed: failed,
+      orphaned_cleaned: cleaned,
     };
     if (error) body['error'] = error;
     const url = this.buildURL('/api/sync/client-complete');

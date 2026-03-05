@@ -47,6 +47,12 @@ final class AppState {
         set { UserDefaults.standard.set(newValue, forKey: "activeProfile") }
     }
 
+    /// Whether to remove orphaned destination files after a folder sync (mirror mode).
+    var cleanDestination: Bool {
+        get { UserDefaults.standard.bool(forKey: "cleanDestination") }
+        set { UserDefaults.standard.set(newValue, forKey: "cleanDestination") }
+    }
+
     /// Resolved USB directory from the active profile.
     var usbDir: String {
         profiles[activeProfile]?.usbDir ?? ""

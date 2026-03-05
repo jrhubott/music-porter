@@ -1,3 +1,28 @@
+Version 2.39.4 (2026-03-04):
+• Move Detect Duplicates button below playlists table
+• Add cross-library track search
+• Fix onclick attribute quoting issues across templates
+• Fix task detail button for pipeline operations with apostrophes
+• Extract duplicate detection into TrackDB.hide_duplicates and auto-detect after pipeline
+• Add Detect Duplicates button to sources screen
+• Add Duplicates and Hidden filters to playlist editor
+• Fix sync-client mirror mode cleanup: normalize paths to NFC before comparison
+• Fix profile template changes not reflected in sync
+• Update ride-command profile filename template to include playlist_key
+• Move output_types to data/profiles.yaml
+• Show deleted file count in sync complete summary
+• Fix sync-client playlist selection revert after sync completes
+• Report orphaned files cleaned to server sync history
+• Fix mirror mode to scope cleanup to synced playlists only
+• Fix sync-client mirror mode cleanup + move setting to Settings page
+• Update DB_SCHEMA.md: remove stale /removed endpoint references
+• Implement scan-based destination cleanup (full mirror mode) across all clients
+• Protect locked tracks from deletion during source cleanup
+• Fix hidden tracks counted as unconverted on Dashboard
+• Filter "Set dev version" commits from release notes draft
+• iOS companion app updated to v2.39.2
+• Sync client updated to v2.39.2
+
 Version 2.39.2 (2026-03-03):
 • Fix 0 track counts: include new fields in /api/playlists ETag
 • Add total/hidden track counts to Sources playlist table

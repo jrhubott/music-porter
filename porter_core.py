@@ -49,7 +49,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.39.2"
+VERSION = "2.39.4"
 
 DEFAULT_DATA_DIR = "data"
 DEFAULT_LIBRARY_DIR = "library"
@@ -61,10 +61,10 @@ DEFAULT_LOG_DIR = "logs"
 DEFAULT_LOG_RETENTION_DAYS = 7
 DEFAULT_AUDIT_RETENTION_DAYS = 90
 DEFAULT_TASK_HISTORY_RETENTION_DAYS = 90
-DEFAULT_REMOVED_TRACKS_RETENTION_DAYS = 365
 DEFAULT_CLEANUP_REMOVED_TRACKS = False
 DEFAULT_CLEAN_SYNC_DESTINATION = False
 DEFAULT_CONFIG_FILE = "data/config.yaml"
+DEFAULT_PROFILES_FILE = "data/profiles.yaml"
 DEFAULT_COOKIES = "data/cookies.txt"
 DEFAULT_DB_FILE = "data/music-porter.db"
 DEFAULT_USB_DIR = "RZR/Music"
@@ -83,8 +83,9 @@ KNOWN_DEST_SCHEMES = ('usb://', 'folder://', 'web-client://', 'ios://')
 
 # Schema version constants — increment and add a migration case when changing
 # the config.yaml structure or DB tables/columns.
-CONFIG_SCHEMA_VERSION = 4
-DB_SCHEMA_VERSION = 14
+CONFIG_SCHEMA_VERSION = 5
+PROFILES_SCHEMA_VERSION = 1  # increment + add a migration case when changing profiles.yaml structure
+DB_SCHEMA_VERSION = 15
 
 # Excluded USB volumes by OS
 if IS_MACOS:
@@ -271,6 +272,7 @@ DEFAULT_OUTPUT_PROFILES: dict = {
 }
 
 OUTPUT_PROFILES: dict = {}  # Populated at runtime by load_output_profiles()
+_profiles_file_mtime: float = 0.0  # tracks last-seen mtime of profiles.yaml
 DEFAULT_OUTPUT_TYPE = "ride-command"
 
 # Valid ID3 version tokens for the id3_versions list
@@ -532,9 +534,24 @@ def validate_config(conf_path=DEFAULT_CONFIG_FILE):
 def load_output_profiles(config):
     """Populate the module-level OUTPUT_PROFILES dict from a ConfigManager instance.
 
-    Must be called after ConfigManager has loaded config.yaml.
+    Re-reads profiles.yaml from disk if the file has been modified since last
+    load — no server restart needed to pick up profile edits.
     Raises ValueError if settings.output_type references a nonexistent profile.
     """
+    global _profiles_file_mtime
+
+    # Check if profiles.yaml changed on disk since last load
+    profiles_path = Path(DEFAULT_PROFILES_FILE)
+    try:
+        current_mtime = profiles_path.stat().st_mtime
+    except OSError:
+        current_mtime = 0.0
+
+    if current_mtime != _profiles_file_mtime:
+        # File was created, modified, or replaced — reload into config
+        config._load_profiles(profiles_path)
+        _profiles_file_mtime = current_mtime
+
     OUTPUT_PROFILES.clear()
     for name, profile in config.output_profiles.items():
         OUTPUT_PROFILES[name] = profile
@@ -544,7 +561,7 @@ def load_output_profiles(config):
     if selected not in OUTPUT_PROFILES:
         available = ", ".join(OUTPUT_PROFILES.keys())
         raise ValueError(
-            f"settings.output_type '{selected}' not found in output_types. "
+            f"settings.output_type '{selected}' not found in output profiles. "
             f"Available profiles: {available}")
 
 
@@ -897,32 +914,6 @@ def prune_task_history(db_path=DEFAULT_DB_FILE,
     return count
 
 
-def prune_removed_tracks(db_path=DEFAULT_DB_FILE,
-                         retention_days=DEFAULT_REMOVED_TRACKS_RETENTION_DAYS,
-                         logger=None):
-    """Delete removed_tracks entries older than retention_days. Returns count deleted."""
-    if retention_days <= 0:
-        return 0
-    cutoff = time.time() - (retention_days * 86400)
-    count = 0
-    try:
-        conn = sqlite3.connect(db_path)
-        try:
-            cur = conn.execute(
-                "DELETE FROM removed_tracks WHERE removed_at < ?", (cutoff,))
-            count = cur.rowcount
-            conn.commit()
-        finally:
-            conn.close()
-    except Exception as exc:
-        if logger:
-            logger.warning(f"prune_removed_tracks failed: {exc}")
-        return 0
-    if count and logger:
-        logger.info(f"Pruned {count} removed track"
-                    f" record{'s' if count != 1 else ''}"
-                    f" older than {retention_days} days")
-    return count
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1543,6 +1534,17 @@ def migrate_db_schema(logger=None):
                     "DB migration 13→14: ensured hidden/hidden_at/locked"
                     " columns exist on tracks table")
 
+        if current < 15:
+            # Drop removed_tracks table — scan-based destination cleanup replaces
+            # the old API-based removal tracking mechanism.
+            conn.execute("DROP TABLE IF EXISTS removed_tracks")
+            conn.execute("PRAGMA user_version = 15")
+            conn.commit()
+            changes.append("dropped removed_tracks table (replaced by scan-based cleanup)")
+            if logger:
+                logger.info(
+                    "DB migration 14→15: dropped removed_tracks table")
+
         return [MigrationEvent(
             'schema_migrate',
             f"DB schema migrated from version {from_version} to {DB_SCHEMA_VERSION}",
@@ -1822,6 +1824,40 @@ def migrate_config_schema(logger=None):
             logger.info(
                 "Config migration 3→4: moved playlists + destinations to DB")
 
+    # ── Version 4 → 5: move output_types to data/profiles.yaml ──────────────
+    if current < 5:
+        profiles_path = Path(DEFAULT_PROFILES_FILE)
+        raw_types = data.get('output_types')
+
+        # Only write profiles.yaml if it doesn't already exist.
+        # Fresh installs have profiles.yaml committed to git; only existing
+        # installs with output_types in config.yaml need the copy.
+        if not profiles_path.exists() and isinstance(raw_types, dict) and raw_types:
+            import copy as _copy
+            profiles_data = {
+                'schema_version': 1,
+                'output': _copy.deepcopy(raw_types),
+            }
+            with open(profiles_path, 'w') as pf:
+                pf.write("# Music Porter Output Profiles\n")
+                pf.write("# Edit this file to add or customise output profiles.\n\n")
+                yaml.dump(profiles_data, pf,
+                          default_flow_style=False, sort_keys=False)
+            if logger:
+                logger.info(
+                    f"Config migration 4→5: wrote output profiles to {profiles_path}")
+
+        # Always remove output_types from config.yaml
+        if 'output_types' in data:
+            data.pop('output_types')
+            dirty = True
+
+        data['schema_version'] = 5
+        dirty = True
+        changes.append("moved output_types to data/profiles.yaml")
+        if logger:
+            logger.info("Config migration 4→5: removed output_types from config.yaml")
+
     if dirty:
         with open(conf_path, 'w') as f:
             f.write("# Music Porter Configuration\n")
@@ -1836,6 +1872,77 @@ def migrate_config_schema(logger=None):
             'completed',
             {'target': 'config', 'from_version': from_version,
              'to_version': CONFIG_SCHEMA_VERSION, 'changes': changes},
+        )]
+
+    return []
+
+
+def migrate_profiles_schema(logger=None):
+    """Apply sequential profiles.yaml schema migrations.
+
+    Call once at startup, before ConfigManager is instantiated.
+    Returns a list of MigrationEvent entries for deferred audit logging.
+
+    Migration convention (same as migrate_config_schema):
+      - Each `if current < N:` block sets schema_version to exactly N (not
+        PROFILES_SCHEMA_VERSION). New migrations go exclusively in a new block.
+      - Migrations must be idempotent and sequential (1→2→3…).
+      - Never modify existing version blocks.
+    """
+    profiles_path = Path(DEFAULT_PROFILES_FILE)
+    if not profiles_path.exists():
+        return []
+
+    try:
+        import yaml
+    except ImportError:
+        return []  # PyYAML not yet installed — DependencyChecker handles this
+
+    try:
+        with open(profiles_path) as f:
+            data = yaml.safe_load(f) or {}
+    except yaml.YAMLError as e:
+        if logger:
+            logger.warn(f"Could not read profiles.yaml for migration: {e}")
+        return []
+
+    current = data.get('schema_version', 1)
+
+    if current > PROFILES_SCHEMA_VERSION:
+        raise RuntimeError(
+            f"Profiles schema version {current} is newer than this "
+            f"software supports ({PROFILES_SCHEMA_VERSION}). Update the "
+            f"software or restore from data/archive/."
+        )
+
+    if current >= PROFILES_SCHEMA_VERSION:
+        return []  # already up to date
+
+    from_version = current
+    dirty = False
+    changes = []
+
+    # Future migrations go here, e.g.:
+    # if current < 2:
+    #     # ... transform data ...
+    #     data['schema_version'] = 2
+    #     dirty = True
+    #     changes.append("...")
+
+    if dirty:
+        with open(profiles_path, 'w') as f:
+            f.write("# Music Porter Output Profiles\n")
+            f.write("# Edit this file to add or customise output profiles.\n\n")
+            yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+        if logger:
+            logger.info(
+                f"Profiles schema updated to version {PROFILES_SCHEMA_VERSION}")
+        return [MigrationEvent(
+            'schema_migrate',
+            f"Profiles schema migrated from version {from_version} to {PROFILES_SCHEMA_VERSION}",
+            'completed',
+            {'target': 'profiles', 'from_version': from_version,
+             'to_version': PROFILES_SCHEMA_VERSION, 'changes': changes},
         )]
 
     return []
@@ -4032,6 +4139,30 @@ class TrackDB:
         finally:
             conn.close()
 
+    def search_tracks(self, query, include_hidden=True):
+        """Search tracks by title, artist, or album (case-insensitive LIKE).
+
+        ``query`` must already have SQL LIKE metacharacters escaped by the
+        caller (``%`` → ``\\%``, ``_`` → ``\\_``, ``\\`` → ``\\\\``).
+        """
+        pattern = f"%{query}%"
+        hidden_clause = " AND hidden = 0" if not include_hidden else ""
+        sql = (
+            "SELECT * FROM tracks"
+            " WHERE ("
+            "  UPPER(title)  LIKE UPPER(?) ESCAPE '\\'"
+            "  OR UPPER(artist) LIKE UPPER(?) ESCAPE '\\'"
+            "  OR UPPER(album)  LIKE UPPER(?) ESCAPE '\\'"
+            f"){hidden_clause}"
+            " ORDER BY playlist, title"
+        )
+        conn = self._connect()
+        try:
+            rows = conn.execute(sql, (pattern, pattern, pattern)).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
     def get_orphaned_playlist_tracks(self):
         """Return tracks whose playlist column references a non-existent playlist.
 
@@ -4044,24 +4175,6 @@ class TrackDB:
                 """SELECT t.*
                    FROM tracks t
                    WHERE t.playlist NOT IN (SELECT key FROM playlists)
-                   ORDER BY t.playlist, t.title""",
-            ).fetchall()
-            return [dict(r) for r in rows]
-        finally:
-            conn.close()
-
-    def get_removed_track_conflicts(self):
-        """Return tracks that appear in both the tracks and removed_tracks tables.
-
-        Returns a list of track dicts for tracks whose UUID is present in both
-        tables, indicating a potential data inconsistency.
-        """
-        conn = self._connect()
-        try:
-            rows = conn.execute(
-                """SELECT t.*
-                   FROM tracks t
-                   WHERE t.uuid IN (SELECT uuid FROM removed_tracks)
                    ORDER BY t.playlist, t.title""",
             ).fetchall()
             return [dict(r) for r in rows]
@@ -4160,6 +4273,34 @@ class TrackDB:
                 conn.commit()
             finally:
                 conn.close()
+
+    def hide_duplicates(self, playlist_key):
+        """Hide duplicate tracks (same artist+title) within a playlist.
+
+        Keeps the earliest created_at; hides all others. Skips locked tracks.
+        Returns the number of tracks hidden.
+        """
+        tracks = [
+            t for t in self.get_tracks_by_playlist(playlist_key, include_hidden=False)
+            if not t.get('locked')
+        ]
+        groups = {}
+        for track in tracks:
+            dup_key = (
+                f"{(track.get('artist') or '').lower()}"
+                f"|||{(track.get('title') or '').lower()}"
+            )
+            groups.setdefault(dup_key, []).append(track)
+
+        hidden_count = 0
+        for group in groups.values():
+            if len(group) <= 1:
+                continue
+            group.sort(key=lambda t: t.get('created_at') or '')
+            for track in group[1:]:
+                self.set_hidden(track['uuid'], True)
+                hidden_count += 1
+        return hidden_count
 
 
 class EQConfigManager:
@@ -4411,7 +4552,6 @@ class ConfigManager:
         self._on_change = on_change
         self.settings = {}
         self.output_profiles = {}
-        self._raw_output_types = {}
 
         if self.conf_path.exists():
             try:
@@ -4421,7 +4561,6 @@ class ConfigManager:
                 self.logger.warn("PyYAML not available — cannot load config.yaml yet")
                 self.settings = {}
                 self.output_profiles = {}
-                self._raw_output_types = {}
         else:
             try:
                 self._create_default()
@@ -4430,7 +4569,6 @@ class ConfigManager:
                 self.logger.warn(f"Configuration file not found: {self.conf_path}")
                 self.settings = {}
                 self.output_profiles = {}
-                self._raw_output_types = {}
 
     def _load_yaml(self):
         """Load configuration from YAML file.
@@ -4443,21 +4581,34 @@ class ConfigManager:
         with open(self.conf_path) as f:
             data = yaml.safe_load(f) or {}
 
-        # Load settings
         self.settings = data.get('settings', {})
+        profiles_path = self.conf_path.parent / "profiles.yaml"
+        self._load_profiles(profiles_path)
 
-        # Load output_types
-        raw_types = data.get('output_types')
-        if raw_types is None:
-            raise ValueError(
-                "config.yaml: missing 'output_types' section "
-                "(run migrate_config_schema() first or delete config.yaml to regenerate)")
-        elif isinstance(raw_types, dict) and len(raw_types) == 0:
-            raise ValueError(
-                "config.yaml: 'output_types' is empty — at least one profile is required")
+    def _load_profiles(self, profiles_path):
+        """Load and validate output profiles from profiles.yaml.
 
-        # Validate and build OutputProfile instances
-        self._raw_output_types = raw_types
+        Falls back to DEFAULT_OUTPUT_PROFILES with a warning if the file is missing.
+        Raises ValueError on invalid profile content.
+        """
+        import copy
+
+        import yaml
+
+        if not profiles_path.exists():
+            self.logger.warn(
+                f"profiles.yaml not found at {profiles_path}; "
+                "using built-in default profiles")
+            raw_types = copy.deepcopy(DEFAULT_OUTPUT_PROFILES)
+        else:
+            with open(profiles_path) as pf:
+                data = yaml.safe_load(pf) or {}
+            raw_types = data.get('output') or {}
+
+        if not isinstance(raw_types, dict) or len(raw_types) == 0:
+            raise ValueError(
+                f"{profiles_path}: 'output' section is missing or empty")
+
         self.output_profiles = {}
         for name, fields in raw_types.items():
             _validate_profile(name, fields)
@@ -4476,11 +4627,11 @@ class ConfigManager:
                 usb_dir=fields.get("usb_dir", ""),
             )
 
-        self.logger.info(f"Loaded {len(self.output_profiles)} output profiles from {self.conf_path}")
+        self.logger.info(
+            f"Loaded {len(self.output_profiles)} output profiles from {profiles_path}")
 
     def _create_default(self):
-        """Create a default config.yaml with default profiles and empty playlists."""
-        import copy
+        """Create a default config.yaml. Profiles are loaded from profiles.yaml."""
         self.settings = {
             'output_type': DEFAULT_OUTPUT_TYPE,
             'workers': DEFAULT_WORKERS,
@@ -4488,36 +4639,18 @@ class ConfigManager:
             'server_name': '',
             'log_retention_days': DEFAULT_LOG_RETENTION_DAYS,
         }
-        self._raw_output_types = copy.deepcopy(DEFAULT_OUTPUT_PROFILES)
-        # Build OutputProfile instances from defaults
-        self.output_profiles = {}
-        for name, fields in self._raw_output_types.items():
-            profile_kwargs = {k: fields[k] for k in _PROFILE_REQUIRED_FIELDS}
-            profile_kwargs['usb_dir'] = fields.get('usb_dir', '')
-            self.output_profiles[name] = OutputProfile(
-                name=name, **profile_kwargs
-            )
         self._save()
+        profiles_path = self.conf_path.parent / "profiles.yaml"
+        self._load_profiles(profiles_path)
         self.logger.info(f"Created default configuration: {self.conf_path}")
 
     def _save(self):
-        """Write current configuration to YAML file."""
+        """Write current configuration to config.yaml (settings only)."""
         import yaml
-
-        # Serialize output_types from raw dict if available, else from profiles
-        if self._raw_output_types:
-            output_types = self._raw_output_types
-        else:
-            output_types = {}
-            for name, p in self.output_profiles.items():
-                fields = {f: getattr(p, f) for f in _PROFILE_REQUIRED_FIELDS}
-                fields['usb_dir'] = p.usb_dir
-                output_types[name] = fields
 
         data = {
             'schema_version': CONFIG_SCHEMA_VERSION,
             'settings': self.settings,
-            'output_types': output_types,
         }
 
         with open(self.conf_path, 'w') as f:
@@ -5007,7 +5140,6 @@ def audit_library(track_db, project_root=None, logger=None,
         'sync_uuid_orphans_removed': 0,
         'orphan_source_m4as_removed': 0,
         'orphaned_playlist_tracks_removed': 0,
-        'removed_active_conflicts': 0,
         'details': [],
     }
 
@@ -5369,26 +5501,6 @@ def audit_library(track_db, project_root=None, logger=None,
     else:
         logger.info("  No orphaned playlist tracks found")
 
-    # ── Phase 6: Active/removed conflicts (report-only) ───────────
-    if cancel_event and cancel_event.is_set():
-        logger.warn("Audit cancelled by user")
-        return stats
-
-    logger.info("=== Phase 6: Detecting active/removed table conflicts ===")
-    conflicts = track_db.get_removed_track_conflicts()
-    if conflicts:
-        for track in conflicts:
-            _detail(
-                f"Conflict: uuid={track['uuid']} ({track.get('title', '')!r}) "
-                f"appears in both tracks and removed_tracks tables — "
-                f"manual review recommended")
-        stats['removed_active_conflicts'] = len(conflicts)
-        logger.warn(
-            f"  {len(conflicts)} track(s) appear in both tracks and removed_tracks "
-            f"— manual review recommended")
-    else:
-        logger.info("  No active/removed conflicts found")
-
     # ── Summary ───────────────────────────────────────────────────
     stats['allow_updates'] = allow_updates
     mode_label = "Audit Summary" if allow_updates else "Audit Summary (report only)"
@@ -5412,11 +5524,6 @@ def audit_library(track_db, project_root=None, logger=None,
     logger.info(
         f"  Orphan playlist tracks {verb}removed: "
         f"{stats['orphaned_playlist_tracks_removed']}")
-    if stats['removed_active_conflicts'] > 0:
-        logger.warn(
-            f"  Active/removed conflicts:    "
-            f"{stats['removed_active_conflicts']} (manual review needed)")
-
     return stats
 
 
@@ -8118,6 +8225,7 @@ class SyncManager:
             self.display_handler, total=len(mp3_files),
             desc="Syncing files",
         )
+        expected_dest_paths: set[Path] = set()
 
         try:
             for src_file in mp3_files:
@@ -8127,6 +8235,7 @@ class SyncManager:
                 try:
                     track_meta = track_metas[src_file]
                     dst_file = dest_path_map[src_file]
+                    expected_dest_paths.add(dst_file)
 
                     dst_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -8175,45 +8284,34 @@ class SyncManager:
 
         self.logger.ok("Sync complete")
 
-        # ── Orphan detection and optional destination cleanup ─────────
-        orphaned_detected = 0
+        # ── Scan-based destination cleanup (mirror mode) ──────────────
         orphaned_cleaned = 0
         orphaned_bytes_freed = 0
-        if self.sync_tracker and not dry_run:
-            orphan_records = self.sync_tracker.get_orphaned_files(sync_key)
-            orphaned_detected = len(orphan_records)
-            if orphaned_detected > 0:
-                self.logger.info(
-                    f"Orphaned files at destination: {orphaned_detected}")
-                for rec in orphan_records:
-                    self.logger.info(
-                        f"  Orphan: {rec['file_path']} "
-                        f"(playlist: {rec['playlist']})")
-                if clean_destination:
-                    if orphaned_detected == len(list(
-                            Path(dest).rglob("*.mp3"))) if Path(dest).exists() else 0:
+        if clean_destination and not dry_run and Path(dest).exists():
+            for existing in Path(dest).rglob("*.mp3"):
+                if existing not in expected_dest_paths:
+                    try:
+                        orphaned_bytes_freed += existing.stat().st_size
+                        existing.unlink()
+                        orphaned_cleaned += 1
+                        self.logger.info(f"  Removed orphan: {existing.name}")
+                    except OSError as exc:
                         self.logger.warn(
-                            "All files at destination are orphans — proceeding with cleanup")
-                    for rec in orphan_records:
-                        try:
-                            orphan_path = Path(dest) / rec['playlist'] / rec['file_path']
-                            if not orphan_path.exists():
-                                # Try without playlist subdirectory
-                                orphan_path = Path(dest) / rec['file_path']
-                            if orphan_path.exists():
-                                orphaned_bytes_freed += orphan_path.stat().st_size
-                                orphan_path.unlink()
-                                orphaned_cleaned += 1
-                                self.logger.info(
-                                    f"  Removed orphan: {rec['file_path']}")
-                        except OSError as exc:
-                            self.logger.warn(
-                                f"  Could not remove orphan {rec['file_path']}: {exc}")
-                    if orphaned_cleaned > 0:
-                        self.sync_tracker.delete_orphaned_records(sync_key)
-                        self.logger.ok(
-                            f"Destination cleanup: {orphaned_cleaned} file(s) removed, "
-                            f"{_format_bytes(orphaned_bytes_freed)} freed")
+                            f"  Could not remove orphan {existing.name}: {exc}")
+            # Remove empty subdirectories left behind
+            for d in sorted(Path(dest).rglob("*"), reverse=True):
+                if d.is_dir() and not any(d.iterdir()):
+                    try:
+                        d.rmdir()
+                    except OSError:
+                        pass
+            if orphaned_cleaned > 0:
+                self.logger.ok(
+                    f"Destination cleanup: {orphaned_cleaned} file(s) removed, "
+                    f"{_format_bytes(orphaned_bytes_freed)} freed")
+        # Clean up stale sync_files DB records regardless of scan cleanup
+        if self.sync_tracker and not dry_run:
+            self.sync_tracker.delete_orphaned_records(sync_key)
 
         duration = time.time() - start_time
 
@@ -8230,7 +8328,7 @@ class SyncManager:
             files_copied=stats.files_copied,
             files_skipped=stats.files_skipped,
             files_failed=stats.files_failed,
-            orphaned_detected=orphaned_detected,
+            orphaned_detected=orphaned_cleaned,
             orphaned_cleaned=orphaned_cleaned,
             orphaned_bytes_freed=orphaned_bytes_freed)
 
@@ -8384,11 +8482,17 @@ class SummaryManager:
         stats = MusicLibraryStats()
         start_time = time.time()
 
-        # Get per-playlist MP3 counts from TrackDB
+        # Get per-playlist MP3 counts from TrackDB.
+        # exported_count uses only active (non-hidden) tracks for display.
+        # converted_count includes hidden tracks so they are not falsely
+        # reported as unconverted when a track is hidden.
         db_counts = {}
         if track_db:
             for ps in track_db.get_playlist_stats():
-                db_counts[ps['playlist']] = ps['track_count']
+                db_counts[ps['playlist']] = {
+                    'exported': ps['track_count'],
+                    'converted': ps['total_track_count'],
+                }
 
         try:
             for item in sorted(source_root.iterdir(), key=lambda p: p.name):
@@ -8414,9 +8518,12 @@ class SummaryManager:
                 if m4a_count == 0:
                     continue
 
-                # Use DB count if available, otherwise 0
-                exported_count = db_counts.get(playlist_name, 0)
-                unconverted_count = max(0, m4a_count - exported_count)
+                # exported_count: active tracks only (for display)
+                # converted_count: all tracks including hidden (for unconverted calc)
+                playlist_db = db_counts.get(playlist_name, {})
+                exported_count = playlist_db.get('exported', 0)
+                converted_count = playlist_db.get('converted', 0)
+                unconverted_count = max(0, m4a_count - converted_count)
 
                 stats.playlists.append({
                     'name': playlist_name,
@@ -8449,73 +8556,6 @@ class SummaryManager:
 # ══════════════════════════════════════════════════════════════════
 
 
-class RemovedTrackDB:
-    """Manages the removed_tracks table for historical removal queries.
-
-    Tracks are inserted here when library cleanup cascades a removal, allowing
-    clients to query which tracks have been removed since a given timestamp.
-    """
-
-    def __init__(self, db_path=DEFAULT_DB_FILE):
-        self._db_path = db_path
-        self._write_lock = threading.Lock()
-
-    def _connect(self):
-        conn = sqlite3.connect(self._db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        return conn
-
-    def record_removal(self, uuid, playlist, title, artist, album,
-                       display_filename=None):
-        """Insert a record for a track that was removed from the library."""
-        now = time.time()
-        with self._write_lock:
-            conn = self._connect()
-            try:
-                conn.execute(
-                    """INSERT INTO removed_tracks
-                           (uuid, playlist, title, artist, album,
-                            display_filename, removed_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                    (uuid, playlist, title, artist, album,
-                     display_filename, now),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-
-    def get_removed_since(self, playlist, since_timestamp):
-        """Return removed tracks for a playlist after a given timestamp."""
-        conn = self._connect()
-        try:
-            rows = conn.execute(
-                """SELECT uuid, playlist, title, artist, album,
-                          display_filename, removed_at
-                   FROM removed_tracks
-                   WHERE playlist = ? AND removed_at >= ?
-                   ORDER BY removed_at ASC""",
-                (playlist, since_timestamp),
-            ).fetchall()
-            return [dict(r) for r in rows]
-        finally:
-            conn.close()
-
-    def get_removed_by_playlist(self, playlist):
-        """Return all removed tracks for a playlist."""
-        conn = self._connect()
-        try:
-            rows = conn.execute(
-                """SELECT uuid, playlist, title, artist, album,
-                          display_filename, removed_at
-                   FROM removed_tracks
-                   WHERE playlist = ?
-                   ORDER BY removed_at ASC""",
-                (playlist,),
-            ).fetchall()
-            return [dict(r) for r in rows]
-        finally:
-            conn.close()
 
 
 def detect_removed_tracks(playlist_key, playlist_track_names,
@@ -8587,18 +8627,17 @@ def detect_removed_tracks(playlist_key, playlist_track_names,
 
 
 def cleanup_removed_tracks(removed_tracks, track_db, sync_tracker,
-                           removed_track_db, logger, project_root,
+                           logger, project_root,
                            audit_logger=None, audit_source='cli'):
     """Cascade-delete removed tracks from the library.
 
-    For each removed track: records the removal, then deletes the source M4A,
-    library MP3, artwork file, TrackDB record, and SyncTracker records.
+    For each removed track, deletes the source M4A, library MP3, artwork file,
+    TrackDB record, and SyncTracker records.
 
     Args:
         removed_tracks: List of track dicts from detect_removed_tracks().
         track_db: TrackDB instance.
         sync_tracker: SyncTracker instance (may be None).
-        removed_track_db: RemovedTrackDB instance for historical tracking.
         logger: Logger instance.
         project_root: Path to the project root for resolving file paths.
 
@@ -8617,22 +8656,16 @@ def cleanup_removed_tracks(removed_tracks, track_db, sync_tracker,
         uuid = track.get('uuid', '')
         title = track.get('title', '')
         artist = track.get('artist', '')
-        album = track.get('album', '')
-        playlist = track.get('playlist', '')
 
-        # Build display filename from track metadata for historical record
-        display_filename = f"{artist} - {title}.mp3" if artist else f"{title}.mp3"
+        # Skip locked tracks — they are protected from deletion even when
+        # the source playlist no longer contains them.
+        if track.get('locked'):
+            logger.warn(
+                f"Skipping removal of locked track: {title} — {artist} "
+                f"(unlock to allow deletion)")
+            continue
 
-        # 1. Record in removed_tracks table for client queries
-        try:
-            removed_track_db.record_removal(
-                uuid=uuid, playlist=playlist, title=title,
-                artist=artist, album=album,
-                display_filename=display_filename)
-        except Exception as exc:
-            logger.warn(f"Could not record removal for '{title}': {exc}")
-
-        # 2. Delete source M4A
+        # 1. Delete source M4A
         src_m4a = track.get('source_m4a_path')
         if src_m4a:
             src_path = root / src_m4a
@@ -9035,7 +9068,7 @@ class PipelineOrchestrator:
                  sync_tracker=None, track_db=None, playlist_db=None,
                  eq_config_manager=None, eq_config_override=None,
                  project_root=None,
-                 cleanup_removed_tracks_enabled=False, removed_track_db=None):
+                 cleanup_removed_tracks_enabled=False):
         self.logger = logger or Logger()
         self.prompt_handler = prompt_handler or NonInteractivePromptHandler()
         self.display_handler = display_handler or NullDisplayHandler()
@@ -9055,7 +9088,6 @@ class PipelineOrchestrator:
         self.workers = workers
         self.project_root = Path(project_root) if project_root else Path('.')
         self.cleanup_removed_tracks_enabled = cleanup_removed_tracks_enabled
-        self.removed_track_db = removed_track_db
         self.clean_destination_enabled = False  # set via run_full_pipeline param
 
     def run_full_pipeline(self, playlist=None, url=None, auto=False,
@@ -9170,6 +9202,12 @@ class PipelineOrchestrator:
         if convert_result.success:
             self.stats.stages_completed.append("convert")
             self.stats.conversion_stats = converter.stats
+            # ── Duplicate detection (post-convert) ───────────────────────
+            if self.track_db and self.stats.playlist_key:
+                dup_hidden = self.track_db.hide_duplicates(self.stats.playlist_key)
+                if dup_hidden > 0:
+                    self.logger.info(
+                        f"Duplicate detection: hid {dup_hidden} duplicate track(s)")
         else:
             self.stats.stages_failed.append("convert")
             self.logger.error("Conversion stage failed")
@@ -9180,7 +9218,6 @@ class PipelineOrchestrator:
                 removed_tracks_found,
                 track_db=self.track_db,
                 sync_tracker=self.sync_tracker,
-                removed_track_db=self.removed_track_db,
                 logger=self.logger,
                 project_root=self.project_root,
                 audit_logger=self.audit_logger,

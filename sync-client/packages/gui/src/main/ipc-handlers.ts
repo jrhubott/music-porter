@@ -337,6 +337,8 @@ export function registerIPCHandlers(): void {
       const cacheManager = getCacheManager() ?? undefined;
       const metadataCache = getMetadataCache() ?? undefined;
 
+      const cleanDestination = opts.cleanDestination ?? configStore.preferences.cleanDestination ?? false;
+
       return engine.sync(opts.dest, {
         playlists: opts.playlists,
         destinationName: opts.destinationName,
@@ -348,7 +350,7 @@ export function registerIPCHandlers(): void {
         cacheManager,
         metadataCache,
         offlineOnly: opts.offlineOnly,
-        cleanDestination: opts.cleanDestination,
+        cleanDestination,
         onProgress: (progress: SyncProgress) => {
           event.sender.send('sync:progress', progress);
         },
