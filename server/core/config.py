@@ -35,6 +35,8 @@ from core.logging import Logger
 from core.models import DependencyCheckResult, OutputProfile
 from core.utils import _init_third_party
 
+_profiles_file_mtime: float = 0.0
+
 
 def _validate_profile(name, data):
     """Validate a single profile entry from config.yaml.
