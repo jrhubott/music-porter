@@ -1,3 +1,14 @@
+Version 2.40.0 (2026-03-05):
+• Fixed warnings
+• Fix NameError: initialize _profiles_file_mtime at module level
+• Fix import: move AggregateStatistics to correct module (core.pipeline)
+• Split porter_core.py monolith into 13 focused modules
+• Update import paths, configs, and build scripts for new layout
+• Move server source to server/, Docker to docker/, clients to clients/
+• Set branch version to 2.39.5-repo-restructure
+• iOS companion app updated to v2.40.0
+• Sync client updated to v2.40.0
+
 Version 2.39.4 (2026-03-04):
 • Move Detect Duplicates button below playlists table
 • Add cross-library track search
