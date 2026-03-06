@@ -636,6 +636,18 @@ def migrate_db_schema(logger=None):
                 logger.info(
                     "DB migration 15→16: added last_downloaded_at to playlists")
 
+        if current < 17:
+            # Add source_type column to playlists table for YouTube Music support.
+            conn.execute(
+                "ALTER TABLE playlists ADD COLUMN source_type TEXT NOT NULL DEFAULT 'apple_music'"
+            )
+            conn.execute("PRAGMA user_version = 17")
+            conn.commit()
+            changes.append("added source_type column to playlists (v17)")
+            if logger:
+                logger.info(
+                    "DB migration 16→17: added source_type to playlists table")
+
         return [MigrationEvent(
             'schema_migrate',
             f"DB schema migrated from version {from_version} to {DB_SCHEMA_VERSION}",

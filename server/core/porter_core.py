@@ -13,6 +13,7 @@ from core.config import (
     DependencyChecker,
     NonInteractivePromptHandler,
     NullDisplayHandler,
+    detect_source_type,
     load_output_profiles,
     validate_config,
 )
@@ -35,12 +36,14 @@ from core.constants import (
     FRESHNESS_CURRENT_DAYS,
     FRESHNESS_RECENT_DAYS,
     FRESHNESS_STALE_DAYS,
+    IMPORTER_YTDLP,
     KNOWN_DEST_SCHEMES,
     OUTPUT_PROFILES,
     QUALITY_PRESETS,
     SOURCE_SUBDIR,
     VERSION,
     VIRTUAL_DEST_TYPES,
+    YT_COOKIE_PATH,
     get_os_display_name,
 )
 from core.converter import Converter

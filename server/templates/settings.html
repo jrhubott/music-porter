@@ -44,10 +44,31 @@
   </div>
 </div>
 
-<!-- Cookie Management -->
+<!-- YouTube Music Cookies -->
 <div class="card mt-4">
   <div class="card-body">
-    <h6 class="card-title"><i class="bi bi-shield-lock"></i> Cookie Management</h6>
+    <h6 class="card-title"><i class="bi bi-youtube"></i> YouTube Music Cookies</h6>
+    <div class="mt-3">
+      <div class="row align-items-center">
+        <div class="col-auto">
+          <label class="form-label mb-1">Status</label>
+          <div id="ytCookieStatusBadge"><span class="spinner-border spinner-border-sm"></span> Checking...</div>
+        </div>
+      </div>
+      <div class="form-text mt-2">
+        Place a Netscape-format cookies file at <code>data/yt-cookies.txt</code> to enable
+        premium-quality downloads and access to private playlists.
+        Export cookies using a browser extension (e.g. <em>Get cookies.txt LOCALLY</em>) while
+        logged into YouTube Music.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Apple Music Cookie Management -->
+<div class="card mt-4">
+  <div class="card-body">
+    <h6 class="card-title"><i class="bi bi-shield-lock"></i> Apple Music Cookie Management</h6>
     <div class="row align-items-end mt-3">
       <div class="col-auto">
         <label class="form-label mb-1">Status</label>
@@ -373,7 +394,22 @@ document.getElementById('retentionForm').addEventListener('submit', function(e) 
     .then(() => { showToast('Retention settings saved', 'success'); });
 });
 
-// ── Cookie Management ──
+// ── YouTube Music Cookie Status ──
+function loadYtCookieStatus() {
+  fetch('/api/settings').then(r=>r.json()).then(data => {
+    const present = data.yt_cookies_present;
+    let html;
+    if (present) {
+      html = '<span class="badge bg-success">Present</span> <small class="text-muted ms-2">yt-dlp will use cookies for premium downloads</small>';
+    } else {
+      html = '<span class="badge bg-secondary">Missing</span> <small class="text-muted ms-2">Place cookies file at data/yt-cookies.txt to enable premium downloads</small>';
+    }
+    document.getElementById('ytCookieStatusBadge').innerHTML = html;
+  });
+}
+loadYtCookieStatus();
+
+// ── Apple Music Cookie Management ──
 function loadCookieStatus() {
   jsonFetch('/api/status').then(data => {
     const cs = data.cookies;

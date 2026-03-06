@@ -21,6 +21,7 @@ from core.constants import (
     IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
+    YT_COOKIE_PATH,
 )
 from core.logging import Logger
 from core.models import DownloadResult, _DisplayProgress
@@ -1076,4 +1077,206 @@ class CookieManager:
             self.logger.error(f"Cookie cleanup failed: {e}")
             return (False, 0, 0)
 
+
+# ══════════════════════════════════════════════════════════════════
+# Section 8: YouTube Music Downloader
+# ══════════════════════════════════════════════════════════════════
+
+class YouTubeMusicDownloader:
+    """Downloads playlists from YouTube Music using yt-dlp."""
+
+    def __init__(self, logger=None, display_handler=None, cancel_event=None):
+        self.logger = logger or Logger()
+        self.display_handler = display_handler or NullDisplayHandler()
+        self.cancel_event = cancel_event
+
+    @staticmethod
+    def extract_url_info(url):
+        """Extract key suggestion and display name from a YouTube Music playlist URL.
+
+        Returns (key, display_name) or (None, None) on failure.
+        The key is derived from the 'list' query parameter (e.g. PLxxxxx → PLxxxxx).
+        """
+        import urllib.parse
+        parsed = urllib.parse.urlparse(url)
+        params = urllib.parse.parse_qs(parsed.query)
+        list_id = params.get('list', [None])[0]
+        if not list_id:
+            return None, None
+        # Use the list ID as the key; display name will be the same unless overridden
+        return list_id, list_id
+
+    def _count_m4a_files(self, directory):
+        """Count M4A files in directory recursively."""
+        if not os.path.exists(directory):
+            return 0
+        return sum(1 for f in Path(directory).rglob("*.m4a") if not f.name.startswith('._'))
+
+    def download(self, url, output_dir, key=None, display_handler=None, cancel_event=None):
+        """Download a YouTube Music playlist using yt-dlp.
+
+        Returns DownloadResult.
+        """
+        import shutil as _shutil
+
+        display_handler = display_handler or self.display_handler
+        cancel_event = cancel_event or self.cancel_event
+
+        if not _shutil.which('yt-dlp'):
+            self.logger.error(
+                "yt-dlp is not installed. Install it with: pip install yt-dlp")
+            return DownloadResult(success=False, key=key, album_name=key, duration=0)
+
+        if not key:
+            key, _ = self.extract_url_info(url)
+            if not key:
+                self.logger.error(f"Could not extract playlist info from URL: {url}")
+                return DownloadResult(success=False, key=None, album_name=None, duration=0)
+
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        start_time = time.time()
+
+        self.logger.info(f"Downloading YouTube Music playlist: {key}")
+        self.logger.info(f"  Output: {output_path}")
+
+        # Detect available JS runtime for yt-dlp (required for YouTube extraction)
+        js_runtime = None
+        for runtime in ('node', 'nodejs', 'deno', 'phantomjs'):
+            if _shutil.which(runtime):
+                js_runtime = runtime
+                break
+
+        # Build yt-dlp command
+        cmd = [
+            'yt-dlp',
+            '--extract-audio',
+            '--audio-format', 'm4a',
+            '--embed-metadata',
+            '--embed-thumbnail',
+            '--no-playlist-reverse',
+            '-o', str(output_path / '%(uploader)s/%(album)s/%(title)s.%(ext)s'),
+            '--progress',
+            '--newline',
+        ]
+
+        if js_runtime:
+            cmd += ['--js-runtimes', js_runtime]
+        else:
+            self.logger.warn(
+                "No JavaScript runtime found for yt-dlp. "
+                "Install Node.js (node) or Deno for best compatibility."
+            )
+
+        yt_cookie_path = Path(YT_COOKIE_PATH)
+        if yt_cookie_path.exists():
+            cmd += ['--cookies', str(yt_cookie_path)]
+            self.logger.info("  Using YouTube Music cookies")
+
+        cmd.append(url)
+
+        stats = DownloadStatistics()
+        files_before = self._count_m4a_files(output_path)
+
+        try:
+            self.logger.info(f"Running: {' '.join(cmd[:6])} ... {url[:60]}")
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                bufsize=1,
+            )
+
+            progress = _DisplayProgress(display_handler, total=0, desc="Downloading")
+            playlist_track_names = []
+            error_lines = []
+
+            try:
+                assert process.stdout is not None
+                for line in process.stdout:
+                    if _is_cancelled(cancel_event):
+                        process.terminate()
+                        self.logger.warn("Download cancelled by user")
+                        break
+
+                    cleaned = line.replace('\r', '').strip()
+                    if not cleaned:
+                        continue
+
+                    # Parse yt-dlp progress line: [download]  X% of ...
+                    if cleaned.startswith('[download]') and '%' in cleaned:
+                        continue  # Skip raw percent lines; rely on file counts
+
+                    # Destination line — new file starting
+                    if cleaned.startswith('[ExtractAudio] Destination:'):
+                        fname = cleaned.split('Destination:', 1)[-1].strip()
+                        track_name = Path(fname).stem
+                        playlist_track_names.append(track_name)
+                        self.logger.file_info(f"Converting: {track_name}")
+                        stats.downloaded += 1
+                        progress.update(1)
+
+                    elif '[youtube]' in cleaned or '[youtube:tab]' in cleaned:
+                        # Playlist metadata lines — useful for total count
+                        self.logger.file_info(f"yt-dlp: {cleaned}")
+
+                    elif 'has already been downloaded' in cleaned:
+                        # yt-dlp skip message
+                        stats.skipped += 1
+                        fname = cleaned.split('[download]', 1)[-1].split('has already')[0].strip()
+                        track_name = Path(fname).stem if fname else '(unknown)'
+                        self.logger.file_info(f"Skipping (already exists): {track_name}")
+
+                    elif 'ERROR:' in cleaned or 'WARNING:' in cleaned:
+                        error_lines.append(cleaned)
+                        self.logger.error(f"yt-dlp: {cleaned}")
+
+                    else:
+                        self.logger.file_info(f"yt-dlp: {cleaned}")
+
+            finally:
+                progress.close()
+
+            process.wait()
+
+            # Recalculate from filesystem for accuracy
+            files_after = self._count_m4a_files(output_path)
+            actual_new = files_after - files_before
+            if actual_new > stats.downloaded:
+                stats.downloaded = actual_new
+
+            stats.playlist_total = files_after
+            duration = time.time() - start_time
+
+            if process.returncode == 0:
+                self.logger.ok(f"YouTube Music download complete: {key} "
+                               f"({stats.downloaded} new, {stats.skipped} skipped)")
+                return DownloadResult(
+                    success=True, key=key, album_name=key,
+                    duration=duration, playlist_total=stats.playlist_total,
+                    downloaded=stats.downloaded, skipped=stats.skipped,
+                    failed=stats.failed,
+                    playlist_track_names=playlist_track_names,
+                )
+            else:
+                self.logger.error(
+                    f"yt-dlp failed with exit code {process.returncode}")
+                if error_lines:
+                    for err in error_lines[-5:]:
+                        self.logger.error(f"  {err}")
+                return DownloadResult(
+                    success=False, key=key, album_name=key,
+                    duration=duration, playlist_total=stats.playlist_total,
+                    downloaded=stats.downloaded, skipped=stats.skipped,
+                    failed=stats.failed,
+                    playlist_track_names=playlist_track_names,
+                )
+
+        except Exception as e:
+            self.logger.error(f"Failed to download YouTube Music playlist {key}: {e}")
+            duration = time.time() - start_time
+            return DownloadResult(
+                success=False, key=key, album_name=key,
+                duration=duration)
 

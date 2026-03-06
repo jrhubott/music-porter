@@ -1750,6 +1750,7 @@ class PlaylistDB:
                     key                TEXT PRIMARY KEY,
                     url                TEXT NOT NULL,
                     name               TEXT NOT NULL,
+                    source_type        TEXT NOT NULL DEFAULT 'apple_music',
                     created_at         REAL NOT NULL,
                     updated_at         REAL NOT NULL,
                     last_downloaded_at REAL
@@ -1764,7 +1765,7 @@ class PlaylistDB:
         conn = self._connect()
         try:
             row = conn.execute(
-                "SELECT key, url, name, created_at, updated_at,"
+                "SELECT key, url, name, source_type, created_at, updated_at,"
                 " last_downloaded_at "
                 "FROM playlists WHERE key = ? COLLATE NOCASE",
                 (key,),
@@ -1778,7 +1779,7 @@ class PlaylistDB:
         conn = self._connect()
         try:
             rows = conn.execute(
-                "SELECT key, url, name, created_at, updated_at,"
+                "SELECT key, url, name, source_type, created_at, updated_at,"
                 " last_downloaded_at "
                 "FROM playlists ORDER BY rowid"
             ).fetchall()
@@ -1786,7 +1787,7 @@ class PlaylistDB:
         finally:
             conn.close()
 
-    def add(self, key, url, name):
+    def add(self, key, url, name, source_type='apple_music'):
         """Insert a new playlist. Returns True on success, False if key exists."""
         import re as _re
         if not key or not _re.match(r'^[a-zA-Z0-9_-]+$', key):
@@ -1802,9 +1803,9 @@ class PlaylistDB:
                 if existing:
                     return False
                 conn.execute(
-                    "INSERT INTO playlists (key, url, name, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (key, url, name, now, now),
+                    "INSERT INTO playlists (key, url, name, source_type, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (key, url, name, source_type, now, now),
                 )
                 conn.commit()
             finally:
@@ -1812,7 +1813,7 @@ class PlaylistDB:
         if self.audit_logger:
             self.audit_logger.log(
                 'playlist_add', f"Added playlist '{name}' ({key})",
-                'completed', params={'key': key, 'name': name},
+                'completed', params={'key': key, 'name': name, 'source_type': source_type},
                 source=self._audit_source)
         return True
 

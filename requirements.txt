@@ -3,6 +3,9 @@
 # Apple Music downloader
 gamdl>=2.8.0
 
+# YouTube Music downloader
+yt-dlp>=2024.1.0
+
 # Python ID3 tag library for MP3 metadata management
 mutagen>=1.47.0
 
