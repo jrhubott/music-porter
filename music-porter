@@ -3,8 +3,8 @@
 music-porter - Apple Music to MP3 converter and sync server
 
 Server-only entry point. All functionality is accessed via the web
-dashboard and REST API. Business logic lives in porter_core.py,
-Flask routes in web_api.py + web_ui.py.
+dashboard and REST API. Business logic lives in server/core/ modules,
+Flask routes in server/web_api.py + server/web_ui.py.
 """
 
 from __future__ import annotations
@@ -40,7 +40,10 @@ def _auto_activate_venv():
 
 _auto_activate_venv()
 
-from porter_core import (
+# Add server/ to sys.path so server modules are importable without package prefix
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'server'))
+
+from core.porter_core import (
     VERSION,
     DependencyChecker,
     Logger,

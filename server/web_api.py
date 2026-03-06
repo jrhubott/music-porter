@@ -27,9 +27,9 @@ from flask import (
     send_from_directory,
     stream_with_context,
 )
-
-import porter_core as mp
 from web_ui import WebPromptHandler, _get_freshness_level
+
+from core import porter_core as mp
 
 api_bp = Blueprint('api', __name__)
 

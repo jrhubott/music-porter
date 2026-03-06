@@ -1,6 +1,8 @@
 services:
   music-porter:
-    build: .
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
     user: "1000:1000"  # jrhubott:jrhubott — avoid running as root
     # Host networking lets Bonjour/mDNS work for iOS companion app discovery.
     # To use bridge networking instead (no Bonjour), replace with:
@@ -14,9 +16,9 @@ services:
       - /etc/localtime:/etc/localtime:ro
       # data/ contains config.yaml, cookies.txt, and music-porter.db.
       # Auto-created on first run; pre-populate data/cookies.txt if needed.
-      - ./data:/app/data
-      - ./library:/app/library
-      - ./logs:/app/logs
+      - ../data:/app/data
+      - ../library:/app/library
+      - ../logs:/app/logs
     restart: unless-stopped
     # Default: server mode with --behind-proxy (auth enabled, 0.0.0.0, Bonjour).
     # Containers typically sit behind a reverse proxy, so proxy header trust is on.

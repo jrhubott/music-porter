@@ -146,8 +146,8 @@ source .venv/bin/activate
 ruff check .                                                 # Python (lint)
 ruff check --fix .                                           # Python (auto-fix)
 pymarkdown scan -r --respect-gitignore .                     # Markdown
-djlint templates/ --lint                                     # Templates (lint)
-djlint templates/ --reformat                                 # Templates (auto-fix)
+djlint server/templates/ --lint                              # Templates (lint)
+djlint server/templates/ --reformat                          # Templates (auto-fix)
 ```
 
 All three must pass clean before merging to main. Linting is recommended but not enforced at `/merge-to-dev` time.
@@ -164,14 +164,14 @@ The project uses a 3-tier branch model: **feature -> dev -> main**.
 
 **Branch naming:** `feature/`, `bugfix/`, `refactor/`, `docs/` prefix + lowercase-hyphenated description (2-4 words). Examples: `feature/playlist-search`, `bugfix/tag-double-prefix`.
 
-**Creating:** Start from dev, create branch, set `VERSION = "X.Y.Z-branch-name"` in `porter_core.py` line 50 (base version from dev, replacing `-dev` with `-branch-name`) as first commit.
+**Creating:** Start from dev, create branch, set `VERSION = "X.Y.Z-branch-name"` in `server/core/constants.py` (base version from dev, replacing `-dev` with `-branch-name`) as first commit.
 
 **Planning mode — CRITICAL:** After a plan is approved, the **absolute first step** before doing ANYTHING is to ask the user which branch to use via `AskUserQuestion`. This is **non-negotiable** — do NOT start reading code, editing files, or any other action. The branch question MUST be the very first thing after plan approval:
 - **Feature branch** (default, recommended) — creates `feature/<name>` branch from dev
 - **Bugfix branch** — creates `bugfix/<name>` branch from dev
 - **Stay on dev** — no branch created, work directly on dev
 
-If a branch is created, set the branch version in `porter_core.py` as the first commit, then begin implementation. Never modify implementation files before the branch question is answered.
+If a branch is created, set the branch version in `server/core/constants.py` as the first commit, then begin implementation. Never modify implementation files before the branch question is answered.
 
 **Working:** Keep branch version throughout development. For long-lived branches, rebase on `origin/dev` periodically.
 
@@ -185,7 +185,7 @@ If a branch is created, set the branch version in `porter_core.py` as the first 
 
 ### Version Management
 
-Version defined in `porter_core.py` line 50. Uses semantic versioning (MAJOR.MINOR.PATCH).
+Version defined in `server/core/constants.py`. Uses semantic versioning (MAJOR.MINOR.PATCH).
 
 **On `dev` branch:** `VERSION = "X.Y.Z-dev+<hash>"` (e.g., `"2.31.0-dev+a425c6c"`). The `-dev` suffix is always present on dev, with `+<short-hash>` SemVer build metadata appended by merge-to-dev.
 
@@ -216,9 +216,9 @@ onclick="myFn('${primaryDest}', '${label.replace(/'/g, '&apos;')}')"
 
 ## Directory Structure
 
-**Key files:** `music-porter` (entry point), `porter_core.py` (business logic), `web_ui.py` (Flask app factory, classes, page routes), `web_api.py` (REST API blueprint — all `/api/*` routes), `data/config.yaml` (playlists + settings), `data/cookies.txt` (auth), `data/music-porter.db` (SQLite — tracks, audit, tasks, sync, EQ, scheduling).
+**Key files:** `music-porter` (entry point), `server/core/` (split business logic modules), `server/web_ui.py` (Flask app factory, classes, page routes), `server/web_api.py` (REST API blueprint — all `/api/*` routes), `data/config.yaml` (playlists + settings), `data/cookies.txt` (auth), `data/music-porter.db` (SQLite — tracks, audit, tasks, sync, EQ, scheduling).
 
-**Directories:** `library/source/gamdl/<playlist>/` (M4A downloads, nested by artist/album), `library/audio/` (all MP3s as `<uuid>.mp3`, flat), `library/artwork/` (all cover art as `<uuid>.ext`, flat), `templates/` (Jinja2), `logs/`, `data/` (config, cookies, DB), `SRS/`, `ios/` (companion app — see `ios/CLAUDE.md`), `sync-client/` (desktop sync client — see `sync-client/CLAUDE.md`).
+**Directories:** `library/source/gamdl/<playlist>/` (M4A downloads, nested by artist/album), `library/audio/` (all MPs as `<uuid>.mp3`, flat), `library/artwork/` (all cover art as `<uuid>.ext`, flat), `server/templates/` (Jinja2), `logs/`, `data/` (config, cookies, DB), `SRS/`, `clients/ios/` (companion app — see `clients/ios/CLAUDE.md`), `clients/sync-client/` (desktop sync client — see `clients/sync-client/CLAUDE.md`), `docker/` (Docker infrastructure).
 
 ## Web Dashboard & Server
 
@@ -240,11 +240,11 @@ The web dashboard (`web_ui.py`) provides a browser-based interface for all music
 
 ### Pages & Templates
 
-11 Jinja2 templates in `templates/` using Bootstrap 5.3.3 dark theme (CDN from jsDelivr). `base.html` provides shared layout (sidebar, log panel, SSE handler). Pages: `/login`, `/` (dashboard), `/playlists`, `/pipeline`, `/convert`, `/sync`, `/settings`, `/operations`, `/audit`, `/about`.
+11 Jinja2 templates in `server/templates/` using Bootstrap 5.3.3 dark theme (CDN from jsDelivr). `base.html` provides shared layout (sidebar, log panel, SSE handler). Pages: `/login`, `/` (dashboard), `/playlists`, `/pipeline`, `/convert`, `/sync`, `/settings`, `/operations`, `/audit`, `/about`.
 
 ### API Endpoints (~60)
 
-All API routes are defined in `web_api.py` as a Flask Blueprint.
+All API routes are defined in `server/web_api.py` as a Flask Blueprint.
 
 - **Auth:** `POST /api/auth/validate`, `GET /api/server-info`
 - **Status:** `GET /api/status`, `/api/summary`, `/api/library-stats`
@@ -281,22 +281,22 @@ All API routes are defined in `web_api.py` as a Flask Blueprint.
 
 ## iOS Companion App
 
-See `ios/CLAUDE.md` for full iOS companion app documentation (architecture, models, services, views, Bonjour, pairing flow).
+See `clients/ios/CLAUDE.md` for full iOS companion app documentation (architecture, models, services, views, Bonjour, pairing flow).
 
-**Quick reference:** Native SwiftUI app (iOS 17+) connecting to `./music-porter server` over local network. Requires API key auth, Bonjour discovery, and file serving endpoints. The iOS app has its own independent version (`MusicPorterApp.appVersion`) — `/merge-dev-to-main` automatically detects `ios/` changes and prompts for an iOS version bump.
+**Quick reference:** Native SwiftUI app (iOS 17+) connecting to `./music-porter server` over local network. Requires API key auth, Bonjour discovery, and file serving endpoints. The iOS app has its own independent version (`MusicPorterApp.appVersion`) — `/merge-dev-to-main` automatically detects `clients/ios/` changes and prompts for an iOS version bump.
 
 ## Sync Client (Desktop)
 
-See `sync-client/CLAUDE.md` for full sync client documentation (architecture, core library, CLI, Electron GUI).
+See `clients/sync-client/CLAUDE.md` for full sync client documentation (architecture, core library, CLI, Electron GUI).
 
-**Quick reference:** Cross-platform standalone sync client (`sync-client/` subdirectory) connecting to `./music-porter server` via API. Provides both a CLI tool (`mporter-sync`) and an Electron desktop app. Built with TypeScript as an npm workspaces monorepo (`@mporter/core`, `@mporter/cli`, `@mporter/gui`). The sync client has its own independent version (`VERSION` in `sync-client/packages/core/src/constants.ts`) — `/merge-dev-to-main` automatically detects `sync-client/` changes and prompts for a sync client version bump.
+**Quick reference:** Cross-platform standalone sync client (`clients/sync-client/` subdirectory) connecting to `./music-porter server` via API. Provides both a CLI tool (`mporter-sync`) and an Electron desktop app. Built with TypeScript as an npm workspaces monorepo (`@mporter/core`, `@mporter/cli`, `@mporter/gui`). The sync client has its own independent version (`VERSION` in `clients/sync-client/packages/core/src/constants.ts`) — `/merge-dev-to-main` automatically detects `clients/sync-client/` changes and prompts for a sync client version bump.
 
 ## Shared Cache Model
 
 Both the iOS companion app and the sync client implement the same cache model for offline audio file caching and API response metadata. JSON file formats, schema versions, and cache invalidation behavior must stay in sync between the two implementations.
 
-- **iOS implementation:** `ios/MusicPorter/MusicPorter/Services/Cache/` (Swift actors)
-- **Sync client implementation:** `sync-client/packages/core/src/cache/` (TypeScript classes)
+- **iOS implementation:** `clients/ios/MusicPorter/MusicPorter/Services/Cache/` (Swift actors)
+- **Sync client implementation:** `clients/sync-client/packages/core/src/cache/` (TypeScript classes)
 - **JSON formats:** `metadata-cache.json` (camelCase), `cache-index.json` (snake\_case)
 - **Schema version:** `metadataCacheVersion = 1` (shared constant)
 
@@ -343,9 +343,9 @@ YAML file at `data/profiles.yaml` (git-tracked via `.gitignore` exception). Prof
 
 All three persistent stores have explicit version tracking with sequential migrations:
 
-- **Config:** `CONFIG_SCHEMA_VERSION` constant in `porter_core.py` (~line 67). Version stored as `schema_version` key in `config.yaml`. Migrations run in `migrate_config_schema()`.
-- **Profiles:** `PROFILES_SCHEMA_VERSION` constant in `porter_core.py` (~line 88). Version stored as `schema_version` key in `data/profiles.yaml`. Migrations run in `migrate_profiles_schema()`.
-- **Database:** `DB_SCHEMA_VERSION` constant in `porter_core.py` (~line 89). Version stored as SQLite `PRAGMA user_version`. Migrations run in `migrate_db_schema()`.
+- **Config:** `CONFIG_SCHEMA_VERSION` constant in `server/core/constants.py`. Version stored as `schema_version` key in `config.yaml`. Migrations run in `migrate_config_schema()` (`server/core/migrations.py`).
+- **Profiles:** `PROFILES_SCHEMA_VERSION` constant in `server/core/constants.py`. Version stored as `schema_version` key in `data/profiles.yaml`. Migrations run in `migrate_profiles_schema()` (`server/core/migrations.py`).
+- **Database:** `DB_SCHEMA_VERSION` constant in `server/core/constants.py`. Version stored as SQLite `PRAGMA user_version`. Migrations run in `migrate_db_schema()` (`server/core/migrations.py`).
 
 All three functions are called at startup before any DB class or ConfigManager is instantiated (in `music-porter` main() and `web_ui.py` module level).
 
@@ -380,23 +380,39 @@ All three functions are called at startup before any DB class or ConfigManager i
 
 ### USB Drive Exclusions
 
-Constant `EXCLUDED_USB_VOLUMES` in `porter_core.py` — platform-specific (macOS: `"Macintosh HD"`, `"Macintosh HD - Data"`; Windows: `"C:"`; Linux: `"boot"`, `"root"`).
+Constant `EXCLUDED_USB_VOLUMES` in `server/core/constants.py` — platform-specific (macOS: `"Macintosh HD"`, `"Macintosh HD - Data"`; Windows: `"C:"`; Linux: `"boot"`, `"root"`).
 
 ## Implementation Details
 
-### Key Classes in `porter_core.py`
+### Key Classes (split across `server/core/` modules)
 
-Organized by concern (dataclasses, DB classes, business logic):
+Organized by module and concern:
 
-**Configuration:** `EQConfig`, `OutputProfile`, `SafeTemplateDict`, `SyncDestination`, `ConfigManager`
+**`constants.py`:** VERSION, all DEFAULT\_\* constants, EQ\_EFFECTS, QUALITY\_PRESETS, M4A\_TAG\_\*, schema versions, platform flags, `get_os_display_name()`
 
-**Infrastructure:** `Logger`, `ProgressBar`, `MigrationEvent`, `DependencyChecker`, `UserPromptHandler` (protocol), `DisplayHandler` (protocol), `NonInteractivePromptHandler`, `NullDisplayHandler`
+**`models.py`:** `EQConfig`, `OutputProfile`, `SyncDestination`, `_DisplayProgress`; result dataclasses: `ConversionResult`, `DownloadResult`, `SyncResult`, `SyncStatusResult`, `DeleteResult`, `PipelineResult`, `AggregateResult`, `AggregateStatistics`, `DependencyCheckResult`
 
-**Database:** `AuditLogger`, `TaskHistoryDB`, `ScheduledJobsDB`, `SyncTracker`, `TrackDB`, `EQConfigManager`, `PlaylistDB`
+**`protocols.py`:** `UserPromptHandler`, `DisplayHandler` (Protocol classes)
 
-**Result dataclasses:** `ConversionResult`, `DownloadResult`, `SyncResult`, `SyncStatusResult`, `DeleteResult`, `PipelineResult`, `AggregateResult`, `DependencyCheckResult`
+**`logging.py`:** `Logger`, `ProgressBar`, `MigrationEvent`
 
-**Business logic:** `ConversionStatistics`, `TagApplicator`, `Converter`, `DownloadStatistics`, `Downloader`, `CookieStatus`, `CookieManager`, `USBSyncStatistics`, `SyncManager`, `MusicLibraryStats`, `SummaryManager`, `DataManager`, `PipelineStatistics`, `PlaylistResult`, `AggregateStatistics`, `PipelineOrchestrator`
+**`database.py`:** `AuditLogger`, `TaskHistoryDB`, `ScheduledJobsDB`, `SyncTracker`, `TrackDB`, `EQConfigManager`, `PlaylistDB`
+
+**`config.py`:** `ConfigManager`, `DependencyChecker`, `NonInteractivePromptHandler`, `NullDisplayHandler`, `SafeTemplateDict`, `load_output_profiles()`, `validate_config()`
+
+**`migrations.py`:** `migrate_db_schema()`, `migrate_config_schema()`, `migrate_profiles_schema()`, `migrate_data_dir()`, `flush_migration_events()`
+
+**`utils.py`:** `sanitize_filename()`, `deduplicate_filenames()`, `apply_template()`, `display_name()`, `read_m4a_tags()`, `read_m4a_cover_art()`, `resize_cover_art_bytes()`, path helpers, `prune_*()`, `_init_third_party()`
+
+**`tagging.py`:** `TagApplicator`
+
+**`converter.py`:** `ConversionStatistics`, `Converter`
+
+**`downloader.py`:** `DownloadStatistics`, `Downloader`, `CookieStatus`, `CookieManager`
+
+**`sync.py`:** `USBSyncStatistics`, `SyncManager`, `detect_removed_tracks()`, `cleanup_removed_tracks()`
+
+**`pipeline.py`:** `MusicLibraryStats`, `SummaryManager`, `DataManager`, `PipelineStatistics`, `PlaylistResult`, `PipelineOrchestrator`, `backfill_track_metadata()`, `audit_library()`
 
 ### TrackDB
 

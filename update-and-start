@@ -16,7 +16,7 @@ else
     echo "Branch: $CURRENT_BRANCH"
 fi
 
-docker compose down || true
+docker compose -f docker/docker-compose.yml down || true
 git pull --rebase || die "git pull --rebase failed"
-docker compose build || die "docker compose build failed"
-docker compose up
+docker compose -f docker/docker-compose.yml build || die "docker compose build failed"
+docker compose -f docker/docker-compose.yml up
