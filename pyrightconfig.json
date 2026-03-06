@@ -1,8 +1,9 @@
 {
   "venvPath": ".",
   "venv": ".venv",
+  "include": ["server", "music-porter", "build"],
   "exclude": [
-    "sync-client",
-    "ios"
+    "clients/sync-client",
+    "clients/ios"
   ]
 }

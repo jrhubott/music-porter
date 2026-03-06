@@ -14,8 +14,8 @@ RUN grep -viE 'selenium|webdriver.manager' requirements.txt > requirements-docke
     && rm requirements-docker.txt requirements.txt
 
 # Copy application files
-COPY music-porter porter_core.py web_ui.py web_api.py release-notes.txt ./
-COPY templates/ templates/
+COPY music-porter release-notes.txt ./
+COPY server/ server/
 
 # Pre-create data directories for volume mounts
 RUN mkdir -p library logs data
@@ -25,7 +25,7 @@ ENV PYTHONUNBUFFERED=1
 
 EXPOSE 5555
 
-COPY docker-entrypoint.sh /usr/local/bin/
+COPY docker/docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 ENTRYPOINT ["docker-entrypoint.sh"]

@@ -35,22 +35,20 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "music-porter" = [
-    "F403",  # star import (from porter_core import *)
-    "F405",  # may be undefined from star import
     "E402",  # module-level import not at top (venv bootstrap)
 ]
-"porter_core.py" = [
+"server/core/porter_core.py" = [
     "E402",  # module-level import not at top (conditional imports)
 ]
-"web_ui.py" = [
+"server/web_ui.py" = [
     "E402",  # module-level import not at top (path setup)
 ]
-"web_api.py" = [
+"server/web_api.py" = [
     "E402",  # module-level import not at top (lazy imports in route handlers)
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["porter_core"]
+known-first-party = ["core"]
 
 [tool.ruff.format]
 # Configured but not enforced yet — future adoption
