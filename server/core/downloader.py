@@ -40,6 +40,10 @@ _FirefoxOptions = None
 # Section 7: Download Module
 # ══════════════════════════════════════════════════════════════════
 
+LOGIN_POLL_INTERVAL = 3   # seconds between login checks
+LOGIN_TIMEOUT = 300       # 5 minutes max wait for cookie extraction
+
+
 class DownloadStatistics:
     """Tracks download operation statistics."""
 
@@ -241,7 +245,8 @@ class Downloader:
             playlist_track_names = []
 
             try:
-                assert process.stdout is not None  # stdout=PIPE always sets this
+                if process.stdout is None:
+                    raise RuntimeError("subprocess stdout is None despite PIPE")
                 for line in process.stdout:
                     if _is_cancelled(self.cancel_event):
                         process.terminate()
@@ -263,7 +268,6 @@ class Downloader:
                         if '[Track' in cleaned and '/' in cleaned:
                             match = re.search(r'\[Track (\d+)/(\d+)\]', cleaned)
                             if match:
-                                _current_track = int(match.group(1))
                                 total_tracks = int(match.group(2))
                                 if stats.playlist_total == 0:
                                     stats.playlist_total = total_tracks
@@ -837,10 +841,6 @@ class CookieManager:
         """
         import http.cookiejar
         import time
-
-
-        LOGIN_POLL_INTERVAL = 3   # seconds between login checks
-        LOGIN_TIMEOUT = 300       # 5 minutes max wait
 
         try:
             # Navigate to Apple Music

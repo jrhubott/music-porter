@@ -248,11 +248,13 @@ class Converter:
 
             # If force re-converting, delete old file + DB entry
             if existing_track and force:
-                old_path = Path(existing_track['file_path'])
-                if not old_path.is_absolute():
-                    old_path = Path('.') / old_path
-                if old_path.exists():
-                    old_path.unlink()
+                old_file_path = existing_track.get('file_path')
+                if old_file_path:
+                    old_path = Path(old_file_path)
+                    if not old_path.is_absolute():
+                        old_path = Path('.') / old_path
+                    if old_path.exists():
+                        old_path.unlink()
                 # Clean up old cover art
                 if existing_track.get('cover_art_path'):
                     old_art = Path(existing_track['cover_art_path'])
@@ -260,8 +262,9 @@ class Converter:
                         old_art = Path('.') / old_art
                     if old_art.exists():
                         old_art.unlink()
-                if self.track_db:
-                    self.track_db.delete_track(existing_track['uuid'])
+                old_uuid = existing_track.get('uuid')
+                if self.track_db and old_uuid:
+                    self.track_db.delete_track(old_uuid)
 
             if verbose:
                 self.logger.debug(f"Source file:  '{input_file}'")

@@ -196,7 +196,6 @@ DEFAULT_OUTPUT_PROFILES: dict = {
 }
 
 OUTPUT_PROFILES: dict = {}  # Populated at runtime by load_output_profiles()
-_profiles_file_mtime: float = 0.0  # tracks last-seen mtime of profiles.yaml
 DEFAULT_OUTPUT_TYPE = "ride-command"
 
 # Valid ID3 version tokens for the id3_versions list

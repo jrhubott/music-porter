@@ -4,6 +4,7 @@ core.sync - SyncManager, USBSyncStatistics, and removed-track helpers.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -27,6 +28,9 @@ from core.utils import (
     deduplicate_filenames,
     get_audio_dir,
 )
+
+# Timestamp tolerance for FAT32/exFAT filesystem precision (2-second granularity)
+TIMESTAMP_TOLERANCE_SECS = 2
 
 # ══════════════════════════════════════════════════════════════════
 # Section 8: Sync Module (formerly USB Sync)
@@ -194,10 +198,10 @@ class SyncManager:
             return True
 
         # Compare modification time (source newer than dest)
-        # Use 2-second tolerance for FAT32/exFAT timestamp precision
+        # Use TIMESTAMP_TOLERANCE_SECS tolerance for FAT32/exFAT timestamp precision
         src_mtime = src_path.stat().st_mtime
         dst_mtime = dst_path.stat().st_mtime
-        if src_mtime > dst_mtime + 2:
+        if src_mtime > dst_mtime + TIMESTAMP_TOLERANCE_SECS:
             return True
 
         # File is up-to-date, skip
@@ -287,9 +291,8 @@ class SyncManager:
     @staticmethod
     def _sanitize_dest_name(name):
         """Sanitize a directory name into a valid destination name (alphanumeric, hyphens, underscores)."""
-        import re as _re
-        sanitized = _re.sub(r'[^a-zA-Z0-9_-]', '-', name)
-        sanitized = _re.sub(r'-+', '-', sanitized).strip('-')
+        sanitized = re.sub(r'[^a-zA-Z0-9_-]', '-', name)
+        sanitized = re.sub(r'-+', '-', sanitized).strip('-')
         return sanitized or 'custom-dest'
 
     def sync_to_destination(self, source_dir, dest_path, sync_key,
@@ -523,11 +526,13 @@ class SyncManager:
         self.logger.ok("Sync complete")
 
         # ── Scan-based destination cleanup (mirror mode) ──────────────
+        orphaned_detected = 0
         orphaned_cleaned = 0
         orphaned_bytes_freed = 0
         if clean_destination and not dry_run and Path(dest).exists():
             for existing in Path(dest).rglob("*.mp3"):
                 if existing not in expected_dest_paths:
+                    orphaned_detected += 1
                     try:
                         orphaned_bytes_freed += existing.stat().st_size
                         existing.unlink()
@@ -566,7 +571,7 @@ class SyncManager:
             files_copied=stats.files_copied,
             files_skipped=stats.files_skipped,
             files_failed=stats.files_failed,
-            orphaned_detected=orphaned_cleaned,
+            orphaned_detected=orphaned_detected,
             orphaned_cleaned=orphaned_cleaned,
             orphaned_bytes_freed=orphaned_bytes_freed)
 

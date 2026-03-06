@@ -87,8 +87,8 @@ class SyncDestination:
     name: str
     path: str  # usb:///Volumes/X/RZR/Music or folder:///path/to/dir
     sync_key: str = ''  # internal UUID; never shown to users
-    linked_destinations: list = field(default_factory=list)
-    playlist_prefs: list | None = None  # None = all playlists
+    linked_destinations: list[str] = field(default_factory=list)
+    playlist_prefs: list[str] | None = None  # None = all playlists
 
     @property
     def type(self) -> str:

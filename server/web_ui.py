@@ -1008,6 +1008,9 @@ def create_app(project_root=None, no_auth=False, server_host=None,
     if not no_auth:
         import secrets as _secrets
         app.secret_key = _secrets.token_hex(32)
+        app.config['SESSION_COOKIE_HTTPONLY'] = True
+        app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+        # SESSION_COOKIE_SECURE intentionally omitted — server runs over HTTP on LAN
 
     # ── Shared Application Context ───────────────────────────
     _boot_config = mp.ConfigManager(logger=mp.Logger(verbose=False))

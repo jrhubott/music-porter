@@ -55,7 +55,8 @@ def _content_disposition(filename):
     """Build RFC 5987 Content-Disposition for non-ASCII filenames."""
     try:
         filename.encode('latin-1')
-        return f'attachment; filename="{filename}"'
+        escaped = filename.replace('\\', '\\\\').replace('"', '\\"')
+        return f'attachment; filename="{escaped}"'
     except UnicodeEncodeError:
         ascii_fallback = filename.encode('ascii', 'replace').decode('ascii')
         utf8_quoted = quote(filename)
@@ -413,7 +414,7 @@ def api_library_unconverted(playlist_key):
 def api_convert_batch():
     """Convert multiple playlists in a single background task."""
     ctx = _ctx()
-    data = request.get_json(force=True)
+    data = request.get_json()
     playlists = data.get('playlists', [])
     force = data.get('force', False)
     dry_run = data.get('dry_run', False)
@@ -537,7 +538,7 @@ def api_playlists_list():
 
     if_none_match = request.headers.get('If-None-Match')
     if if_none_match == etag:
-        return Response(status=304)
+        return Response(status=304, headers={'ETag': etag})
 
     def _playlist_freshness(key):
         max_ts = stats.get(key, {}).get('max_updated_at', 0)
@@ -561,7 +562,7 @@ def api_playlists_list():
 @api_bp.route('/api/playlists', methods=['POST'])
 def api_playlists_add():
     ctx = _ctx()
-    data = request.get_json(force=True)
+    data = request.get_json()
     key = data.get('key', '').strip()
     url = data.get('url', '').strip()
     name = data.get('name', '').strip()
@@ -577,7 +578,7 @@ def api_playlists_add():
 @api_bp.route('/api/playlists/<key>', methods=['PUT'])
 def api_playlists_update(key):
     ctx = _ctx()
-    data = request.get_json(force=True)
+    data = request.get_json()
     if ctx.playlist_db.update(key, url=data.get('url'), name=data.get('name')):
         return jsonify({'ok': True})
     return jsonify({'error': f"Playlist '{key}' not found"}), 404
@@ -594,7 +595,7 @@ def api_playlists_delete(key):
 @api_bp.route('/api/playlists/<key>/delete-data', methods=['POST'])
 def api_playlist_delete_data(key):
     ctx = _ctx()
-    data = request.get_json(force=True) if request.data else {}
+    data = (request.get_json() or {}) if request.data else {}
     delete_source = data.get('delete_source', True)
     delete_library = data.get('delete_library', data.get('delete_export', True))
     remove_config = data.get('remove_config', False)

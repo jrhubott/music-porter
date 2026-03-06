@@ -21,6 +21,11 @@ _ID3NoHeaderError = None
 _Encoding = None
 _mutagen_mp3 = None
 
+ID3V2_HEADER_SIZE = 10        # Fixed 10-byte ID3v2 header prefix
+IO_CHUNK_SIZE = 65536         # Read/write chunk size for file I/O
+_SYNCSAFE_SHIFTS = (21, 14, 7, 0)  # Bit shifts for ID3v2 syncsafe integer decode
+
+
 class TagApplicator:
     """Applies profile-specific ID3 tags to clean library MP3s on-the-fly.
 
@@ -166,14 +171,11 @@ class TagApplicator:
 
             # ID3v2 size is stored as a 4-byte syncsafe integer (bytes 6-9)
             size_bytes = header[6:10]
-            tag_size = (
-                (size_bytes[0] << 21)
-                | (size_bytes[1] << 14)
-                | (size_bytes[2] << 7)
-                | size_bytes[3]
+            tag_size = sum(
+                size_bytes[i] << shift
+                for i, shift in enumerate(_SYNCSAFE_SHIFTS)
             )
-            # Total ID3v2 header = 10-byte header + tag_size
-            ID3V2_HEADER_SIZE = 10
+            # Total ID3v2 block = fixed 10-byte header + tag content size
             return ID3V2_HEADER_SIZE + tag_size
 
     def build_tagged_stream(self, mp3_path, track_meta, profile,
@@ -228,7 +230,7 @@ class TagApplicator:
             with open(mp3_path, 'rb') as src:
                 src.seek(audio_offset)
                 while True:
-                    chunk = src.read(65536)
+                    chunk = src.read(IO_CHUNK_SIZE)
                     if not chunk:
                         break
                     out.write(chunk)

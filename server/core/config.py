@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import ClassVar
 
@@ -36,6 +37,7 @@ from core.models import DependencyCheckResult, OutputProfile
 from core.utils import _init_third_party
 
 _profiles_file_mtime: float = 0.0
+_profiles_lock = threading.Lock()
 
 
 def _validate_profile(name, data):
@@ -286,21 +288,22 @@ def load_output_profiles(config):
     """
     global _profiles_file_mtime
 
-    # Check if profiles.yaml changed on disk since last load
-    profiles_path = Path(DEFAULT_PROFILES_FILE)
-    try:
-        current_mtime = profiles_path.stat().st_mtime
-    except OSError:
-        current_mtime = 0.0
+    with _profiles_lock:
+        # Check if profiles.yaml changed on disk since last load
+        profiles_path = Path(DEFAULT_PROFILES_FILE)
+        try:
+            current_mtime = profiles_path.stat().st_mtime
+        except OSError:
+            current_mtime = 0.0
 
-    if current_mtime != _profiles_file_mtime:
-        # File was created, modified, or replaced — reload into config
-        config._load_profiles(profiles_path)
-        _profiles_file_mtime = current_mtime
+        if current_mtime != _profiles_file_mtime:
+            # File was created, modified, or replaced — reload into config
+            config._load_profiles(profiles_path)
+            _profiles_file_mtime = current_mtime
 
-    OUTPUT_PROFILES.clear()
-    for name, profile in config.output_profiles.items():
-        OUTPUT_PROFILES[name] = profile
+        OUTPUT_PROFILES.clear()
+        for name, profile in config.output_profiles.items():
+            OUTPUT_PROFILES[name] = profile
 
     # Validate that settings.output_type references an existing profile
     selected = config.get_setting('output_type', DEFAULT_OUTPUT_TYPE)
