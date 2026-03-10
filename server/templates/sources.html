@@ -142,7 +142,7 @@
 {% block scripts %}
 <script>
 function loadPlaylists() {
-  fetch('/api/playlists').then(r => r.json()).then(playlists => {
+  jsonFetch('/api/playlists').then(playlists => {
     const tbody = document.getElementById('playlistTable');
     if (playlists.length === 0) {
       tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No playlists configured</td></tr>';
@@ -180,8 +180,7 @@ document.getElementById('addForm').addEventListener('submit', function(e) {
     url: document.getElementById('addUrl').value.trim(),
     name: document.getElementById('addName').value.trim(),
   };
-  fetch('/api/playlists', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
-    .then(r => r.json())
+  jsonFetch('/api/playlists', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
     .then(d => {
       if (d.error) { showToast(d.error, 'error'); return; }
       showToast('Playlist added', 'success');
@@ -203,8 +202,7 @@ document.getElementById('editSave').addEventListener('click', function() {
     name: document.getElementById('editName').value.trim(),
     url: document.getElementById('editUrl').value.trim(),
   };
-  fetch('/api/playlists/' + encodeURIComponent(key), {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
-    .then(r => r.json())
+  jsonFetch('/api/playlists/' + encodeURIComponent(key), {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
     .then(d => {
       if (d.error) { showToast(d.error, 'error'); return; }
       showToast('Playlist updated', 'success');
@@ -215,8 +213,7 @@ document.getElementById('editSave').addEventListener('click', function() {
 
 function removePlaylist(key) {
   if (!confirm('Remove playlist "' + key + '"?')) return;
-  fetch('/api/playlists/' + encodeURIComponent(key), {method:'DELETE'})
-    .then(r => r.json())
+  jsonFetch('/api/playlists/' + encodeURIComponent(key), {method:'DELETE'})
     .then(d => {
       if (d.error) { showToast(d.error, 'error'); return; }
       showToast('Playlist removed', 'success');
@@ -249,9 +246,8 @@ document.getElementById('deleteDataConfirm').addEventListener('click', function(
     delete_library: deleteLibrary,
     remove_config: removeConfig,
   };
-  fetch('/api/playlists/' + encodeURIComponent(key) + '/delete-data',
+  jsonFetch('/api/playlists/' + encodeURIComponent(key) + '/delete-data',
     {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
-    .then(r => r.json())
     .then(d => {
       bootstrap.Modal.getInstance(document.getElementById('deleteDataModal')).hide();
       if (d.error) { showToast(d.error, 'error'); return; }
@@ -271,8 +267,7 @@ function detectDuplicates() {
   const btn = document.getElementById('detectDuplicatesBtn');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Scanning...';
-  fetch('/api/library/detect-duplicates', {method: 'POST'})
-    .then(r => r.json())
+  jsonFetch('/api/library/detect-duplicates', {method: 'POST'})
     .then(d => {
       btn.disabled = false;
       btn.innerHTML = '<i class="bi bi-copy"></i> Detect Duplicates';

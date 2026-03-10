@@ -242,7 +242,7 @@ async function loadAudit() {
   // Fetch batches until we have PAGE_SIZE display rows or run out of entries
   while (true) {
     const params = new URLSearchParams({limit: PAGE_SIZE, offset: fetchOffset, ...filterParams});
-    const data = await fetch('/api/audit?' + params).then(r => r.json());
+    const data = await jsonFetch('/api/audit?' + params);
     total = data.total;
 
     if (data.entries.length === 0) break;
@@ -316,7 +316,7 @@ async function loadAudit() {
 }
 
 function loadStats() {
-  fetch('/api/audit/stats').then(r => r.json()).then(stats => {
+  jsonFetch('/api/audit/stats').then(stats => {
     document.getElementById('statTotal').textContent = stats.total;
     document.getElementById('statToday').textContent = stats.today;
 
@@ -423,11 +423,11 @@ document.getElementById('clearBtn').addEventListener('click', function() {
   const body = {confirm: true};
   if (before) body.before_date = before;
 
-  fetch('/api/audit/clear', {
+  jsonFetch('/api/audit/clear', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body),
-  }).then(r => r.json()).then(data => {
+  }).then(data => {
     if (data.error) {
       showToast(data.error, 'error');
     } else {

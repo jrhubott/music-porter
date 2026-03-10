@@ -247,7 +247,7 @@ function loadHistory() {
   if (f.from) params.set('from', f.from);
   if (f.to) params.set('to', f.to);
 
-  fetch('/api/tasks/history?' + params).then(r => r.json()).then(data => {
+  jsonFetch('/api/tasks/history?' + params).then(data => {
     const tbody = document.getElementById('tasksTable');
     taskEntries = data.entries;
     if (data.entries.length === 0) {
@@ -286,7 +286,7 @@ function loadHistory() {
 }
 
 function loadStats() {
-  fetch('/api/tasks/stats').then(r => r.json()).then(stats => {
+  jsonFetch('/api/tasks/stats').then(stats => {
     document.getElementById('statTotal').textContent = stats.total;
     document.getElementById('statToday').textContent = stats.today;
 
@@ -335,8 +335,8 @@ function updateActiveTask(task) {
 }
 
 function cancelTask(id) {
-  fetch('/api/tasks/' + id + '/cancel', {method:'POST'})
-    .then(r => r.json()).then(d => {
+  jsonFetch('/api/tasks/' + id + '/cancel', {method:'POST'})
+    .then(d => {
       if (d.ok) showToast('Cancellation requested', 'info');
       else showToast(d.error || 'Failed', 'error');
       loadHistory();
@@ -363,7 +363,7 @@ function viewLog(id, desc) {
   document.getElementById('taskLogCard').classList.remove('d-none');
   document.getElementById('taskLogTitle').textContent = desc;
 
-  fetch('/api/tasks/' + id).then(r => r.json()).then(task => {
+  jsonFetch('/api/tasks/' + id).then(task => {
     if (task.status === 'running') {
       startSSE(id, 'taskLog');
     } else {
@@ -430,11 +430,11 @@ document.getElementById('clearBtn').addEventListener('click', function() {
   const body = {confirm: true};
   if (before) body.before_date = before;
 
-  fetch('/api/tasks/clear', {
+  jsonFetch('/api/tasks/clear', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body),
-  }).then(r => r.json()).then(data => {
+  }).then(data => {
     if (data.error) {
       showToast(data.error, 'error');
     } else {

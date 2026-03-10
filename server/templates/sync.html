@@ -154,7 +154,7 @@
 let cachedProfile = '';
 
 // Load clean_destination default from settings
-fetch('/api/settings').then(r => r.json()).then(d => {
+jsonFetch('/api/settings').then(d => {
   if (d.settings && d.settings.clean_sync_destination) {
     document.getElementById('syncCleanDest').checked = true;
   }
@@ -162,7 +162,7 @@ fetch('/api/settings').then(r => r.json()).then(d => {
 
 // ── Sync Status Groups ──
 function loadSyncStatusGroups() {
-  fetch('/api/sync/status').then(r => r.json()).then(groups => {
+  jsonFetch('/api/sync/status').then(groups => {
     const body = document.getElementById('syncStatusBody');
     if (!groups.length) {
       body.innerHTML = '<span class="text-muted small">No sync destinations configured.</span>';
@@ -197,8 +197,7 @@ function loadSyncStatusGroups() {
       link.addEventListener('click', function(e) {
         e.preventDefault();
         const dest = this.dataset.dest;
-        fetch('/api/sync/status/' + encodeURIComponent(dest) + '/orphaned')
-          .then(r => r.json())
+        jsonFetch('/api/sync/status/' + encodeURIComponent(dest) + '/orphaned')
           .then(data => {
             const files = data.orphaned_files || [];
             const list = files.map(f => `${f.playlist}/${f.file_path}`).join('\n') || 'None';
@@ -216,7 +215,7 @@ loadSyncStatusGroups();
 
 // ── Output Profile ──
 function loadProfileCards() {
-  fetch('/api/settings').then(r=>r.json()).then(data => {
+  jsonFetch('/api/settings').then(data => {
     const profiles = data.profiles;
     const activeProfile = data.settings.output_type || 'ride-command';
     let html = '';
@@ -236,9 +235,9 @@ function loadProfileCards() {
 
     document.getElementById('saveProfile').addEventListener('click', function() {
       const selected = document.querySelector('input[name="profileRadio"]:checked').value;
-      fetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'},
+      jsonFetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'},
         body:JSON.stringify({output_type: selected})})
-        .then(r=>r.json()).then(() => { showToast('Profile updated to ' + selected, 'success'); loadProfileCards(); });
+        .then(() => { showToast('Profile updated to ' + selected, 'success'); loadProfileCards(); });
     });
 
     // Profile comparison table
@@ -281,7 +280,7 @@ loadProfileCards();
 let destsMeta = []; // [{name, path, type, available}]
 
 function loadDestinations() {
-  fetch('/api/sync/destinations').then(r => r.json()).then(data => {
+  jsonFetch('/api/sync/destinations').then(data => {
     const sel = document.getElementById('syncDest');
     destsMeta = [];
     let opts = '';
@@ -314,8 +313,8 @@ document.getElementById('refreshDests').addEventListener('click', loadDestinatio
 
 // ── Source loading ──
 function loadSources() {
-  fetch('/api/directories/export').then(r => r.json()).then(dirs => {
-    fetch('/api/status').then(r => r.json()).then(status => {
+  jsonFetch('/api/directories/export').then(dirs => {
+    jsonFetch('/api/status').then(status => {
       cachedProfile = status.profile;
       const container = document.getElementById('playlistChecklist');
       if (!dirs.length) {
@@ -417,7 +416,7 @@ const csyncHasFSA = typeof window.showDirectoryPicker === 'function';
 })();
 
 function loadClientSyncPlaylists() {
-  fetch('/api/directories/export').then(r => r.json()).then(dirs => {
+  jsonFetch('/api/directories/export').then(dirs => {
     const container = document.getElementById('csyncPlaylists');
     const emptyMsg = document.getElementById('csyncEmpty');
     const area = document.getElementById('csyncPlaylistArea');
