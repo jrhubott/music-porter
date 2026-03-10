@@ -1,3 +1,10 @@
+Version 2.40.2 (2026-03-10):
+• Add Last Downloaded column to dashboard playlist table
+• Add favicon to web UI
+• Move iOS .gitignore to clients/ios/ directory
+• Add rate limiting and caching to health endpoint
+• iOS companion app updated to v2.40.1
+
 Version 2.40.0 (2026-03-05):
 • Fixed warnings
 • Fix NameError: initialize _profiles_file_mtime at module level
