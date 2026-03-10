@@ -282,6 +282,11 @@ def api_summary():
     today = date.today()
     freshness_counts = {"current": 0, "recent": 0, "stale": 0, "outdated": 0}
 
+    # Build playlist lookup for last_downloaded_at timestamps
+    pl_lookup = {}
+    if ctx.playlist_db:
+        pl_lookup = {p['key']: p for p in ctx.playlist_db.get_all()}
+
     playlists_json = []
     for ps in playlist_stats:
         track_count = ps['track_count']
@@ -301,8 +306,15 @@ def api_summary():
             last_mod_ts = max(t['updated_at'] for t in tracks_for_pl)
             last_modified = datetime.fromtimestamp(last_mod_ts)
 
-        freshness = _get_freshness_level(last_modified, today)
-        freshness_counts[freshness] += 1
+        # Get last downloaded from playlists table
+        pl_record = pl_lookup.get(ps['playlist'], {})
+        last_dl_ts = pl_record.get('last_downloaded_at')
+        last_downloaded = (datetime.fromtimestamp(last_dl_ts)
+                           if last_dl_ts else None)
+
+        # Freshness is based on last downloaded, not last modified
+        download_freshness = _get_freshness_level(last_downloaded, today)
+        freshness_counts[download_freshness] += 1
 
         avg_size_mb = (size_bytes / track_count / (1024 * 1024)
                        if track_count > 0 else 0)
@@ -313,7 +325,9 @@ def api_summary():
             'size_bytes': size_bytes,
             'avg_size_mb': round(avg_size_mb, 1),
             'last_modified': last_modified.isoformat() if last_modified else None,
-            'freshness': freshness,
+            'last_downloaded': (last_downloaded.isoformat()
+                                if last_downloaded else None),
+            'download_freshness': download_freshness,
             'tags_checked': track_count,
             'tags_protected': track_count,
             'cover_with': cover_with,
@@ -527,7 +541,8 @@ def api_playlists_list():
          stats.get(p['key'], {}).get('hidden_count', 0),
          stats.get(p['key'], {}).get('total_size_bytes', 0),
          stats.get(p['key'], {}).get('total_duration_s', 0),
-         stats.get(p['key'], {}).get('max_updated_at', 0))
+         stats.get(p['key'], {}).get('max_updated_at', 0),
+         p.get('last_downloaded_at', 0))
         for p in playlists
     ]
     etag_hash = hashlib.md5(
@@ -539,10 +554,13 @@ def api_playlists_list():
     if if_none_match == etag:
         return Response(status=304)
 
-    def _playlist_freshness(key):
-        max_ts = stats.get(key, {}).get('max_updated_at', 0)
-        last_mod = datetime.fromtimestamp(max_ts) if max_ts > 0 else None
-        return _get_freshness_level(last_mod, today)
+    # Build playlist lookup for last_downloaded_at
+    pl_by_key = {p['key']: p for p in playlists}
+
+    def _download_freshness(key):
+        dl_ts = pl_by_key.get(key, {}).get('last_downloaded_at')
+        last_dl = datetime.fromtimestamp(dl_ts) if dl_ts else None
+        return _get_freshness_level(last_dl, today)
 
     resp = jsonify([
         {'key': p['key'], 'url': p['url'], 'name': p['name'],
@@ -551,7 +569,7 @@ def api_playlists_list():
          'hidden_count': stats.get(p['key'], {}).get('hidden_count', 0),
          'size_bytes': stats.get(p['key'], {}).get('total_size_bytes', 0),
          'duration_s': stats.get(p['key'], {}).get('total_duration_s', 0),
-         'freshness': _playlist_freshness(p['key'])}
+         'freshness': _download_freshness(p['key'])}
         for p in playlists
     ])
     resp.headers['ETag'] = etag

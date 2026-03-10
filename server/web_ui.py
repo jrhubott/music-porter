@@ -21,6 +21,7 @@ Display Handling (SRS 2.6.4):
     SSE events pushed to the frontend via /api/stream/<task_id>.
 """
 
+import collections
 import json
 import os
 import platform
@@ -958,6 +959,30 @@ def _get_freshness_level(last_modified: datetime | None, today: date) -> str:
 
 _server_start_time = time.time()
 
+# Health endpoint protection
+_HEALTH_CACHE_TTL_S = 15          # seconds to cache computed health result
+_HEALTH_RATE_LIMIT_MAX = 20       # max requests per window per IP
+_HEALTH_RATE_LIMIT_WINDOW_S = 60  # sliding window in seconds
+
+_health_cache_lock = threading.Lock()
+_health_cache: tuple | None = None  # (timestamp: float, result: dict, http_status: int)
+_health_rate_buckets: dict = {}     # ip -> collections.deque of timestamps
+_health_rate_lock = threading.Lock()
+
+
+def _health_rate_check(ip: str) -> bool:
+    """Return True if request is within rate limit, False if exceeded."""
+    now = time.time()
+    cutoff = now - _HEALTH_RATE_LIMIT_WINDOW_S
+    with _health_rate_lock:
+        bucket = _health_rate_buckets.setdefault(ip, collections.deque())
+        while bucket and bucket[0] < cutoff:
+            bucket.popleft()
+        if len(bucket) >= _HEALTH_RATE_LIMIT_MAX:
+            return False
+        bucket.append(now)
+        return True
+
 
 def create_app(project_root=None, no_auth=False, server_host=None,
                server_port=None, external_url=None,
@@ -1019,6 +1044,34 @@ def create_app(project_root=None, no_auth=False, server_host=None,
     @app.route('/health')
     def health():
         """Unauthenticated health check for external monitors and clients."""
+        global _health_cache
+
+        # Rate limit by IP
+        client_ip = request.remote_addr or '0.0.0.0'
+        if not _health_rate_check(client_ip):
+            return jsonify({'error': 'Too many requests'}), 429
+
+        # Auth detection — authenticated callers get full detail
+        is_auth = app.config.get('NO_AUTH', False)
+        if not is_auth:
+            auth_header = request.headers.get('Authorization', '')
+            is_auth = auth_header.startswith('Bearer ') and auth_header[7:] == ctx.api_key
+
+        # Cache check
+        now = time.time()
+        with _health_cache_lock:
+            if _health_cache is not None:
+                cached_ts, cached_result, cached_status = _health_cache
+                if now - cached_ts < _HEALTH_CACHE_TTL_S:
+                    if is_auth:
+                        resp = jsonify(cached_result)
+                        resp.headers['Cache-Control'] = 'no-store'
+                    else:
+                        resp = jsonify({'status': cached_result['status']})
+                        resp.headers['Cache-Control'] = f'max-age={_HEALTH_CACHE_TTL_S}, public'
+                    return resp, cached_status
+
+        # Run checks
         checks = {}
         overall = 'healthy'
 
@@ -1028,8 +1081,8 @@ def create_app(project_root=None, no_auth=False, server_host=None,
             conn.execute("PRAGMA user_version").fetchone()
             conn.close()
             checks['database'] = {'status': 'healthy', 'message': None}
-        except Exception as exc:
-            checks['database'] = {'status': 'unhealthy', 'message': str(exc)}
+        except Exception:
+            checks['database'] = {'status': 'unhealthy', 'message': 'database check failed'}
             overall = 'unhealthy'
 
         # Library check
@@ -1037,28 +1090,29 @@ def create_app(project_root=None, no_auth=False, server_host=None,
         if audio_dir.is_dir():
             checks['library'] = {'status': 'healthy', 'message': None}
         else:
-            checks['library'] = {
-                'status': 'unhealthy',
-                'message': 'library/audio/ directory not found',
-            }
+            checks['library'] = {'status': 'unhealthy', 'message': 'library directory unavailable'}
             overall = 'unhealthy'
 
         # Cookie check
-        cookie_mgr = mp.CookieManager(mp.DEFAULT_COOKIES, mp.Logger(verbose=False))
-        cs = cookie_mgr.validate()
-        if not cs.valid:
-            checks['cookies'] = {'status': 'unhealthy', 'message': cs.reason}
+        try:
+            cookie_mgr = mp.CookieManager(mp.DEFAULT_COOKIES, mp.Logger(verbose=False))
+            cs = cookie_mgr.validate()
+            if not cs.valid:
+                checks['cookies'] = {'status': 'unhealthy', 'message': 'cookie validation failed'}
+                overall = 'unhealthy'
+            elif cs.days_until_expiration is not None and cs.days_until_expiration <= 14:
+                days = round(cs.days_until_expiration)
+                checks['cookies'] = {
+                    'status': 'degraded',
+                    'message': f'Cookie expires in {days} days',
+                }
+                if overall == 'healthy':
+                    overall = 'degraded'
+            else:
+                checks['cookies'] = {'status': 'healthy', 'message': None}
+        except Exception:
+            checks['cookies'] = {'status': 'unhealthy', 'message': 'cookie validation failed'}
             overall = 'unhealthy'
-        elif cs.days_until_expiration is not None and cs.days_until_expiration <= 14:
-            days = round(cs.days_until_expiration)
-            checks['cookies'] = {
-                'status': 'degraded',
-                'message': f'Cookie expires in {days} days',
-            }
-            if overall == 'healthy':
-                overall = 'degraded'
-        else:
-            checks['cookies'] = {'status': 'healthy', 'message': None}
 
         result = {
             'status': overall,
@@ -1068,7 +1122,17 @@ def create_app(project_root=None, no_auth=False, server_host=None,
             'checks': checks,
         }
         http_status = 503 if overall == 'unhealthy' else 200
-        return jsonify(result), http_status
+
+        with _health_cache_lock:
+            _health_cache = (time.time(), result, http_status)
+
+        if is_auth:
+            resp = jsonify(result)
+            resp.headers['Cache-Control'] = 'no-store'
+        else:
+            resp = jsonify({'status': overall})
+            resp.headers['Cache-Control'] = f'max-age={_HEALTH_CACHE_TTL_S}, public'
+        return resp, http_status
 
     # ── CORS headers for iOS companion app ───────────────────
     @app.after_request

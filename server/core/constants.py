@@ -33,7 +33,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.40.0"
+VERSION = "2.40.2"
 
 DEFAULT_DATA_DIR = "data"
 DEFAULT_LIBRARY_DIR = "library"
@@ -69,7 +69,7 @@ KNOWN_DEST_SCHEMES = ('usb://', 'folder://', 'web-client://', 'ios://')
 # the config.yaml structure or DB tables/columns.
 CONFIG_SCHEMA_VERSION = 5
 PROFILES_SCHEMA_VERSION = 1  # increment + add a migration case when changing profiles.yaml structure
-DB_SCHEMA_VERSION = 15
+DB_SCHEMA_VERSION = 16
 
 # Excluded USB volumes by OS
 if IS_MACOS:

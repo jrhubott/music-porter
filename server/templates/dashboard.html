@@ -290,6 +290,7 @@
               <th class="sortable text-center" data-sort="tag_pct" onclick="sortTable('tag_pct')">Tags <i class="bi bi-chevron-expand small"></i></th>
               <th class="sortable text-center" data-sort="cover_pct" onclick="sortTable('cover_pct')">Cover Art <i class="bi bi-chevron-expand small"></i></th>
               <th class="sortable text-end" data-sort="last_modified" onclick="sortTable('last_modified')">Last Modified <i class="bi bi-chevron-expand small"></i></th>
+              <th class="sortable text-end" data-sort="last_downloaded" onclick="sortTable('last_downloaded')">Last Downloaded <i class="bi bi-chevron-expand small"></i></th>
             </tr>
           </thead>
           <tbody id="playlistTableBody"></tbody>
@@ -616,6 +617,12 @@ function integrityBadge(percent) {
 const FRESHNESS_ICONS = { current: '✅', recent: '', stale: '⚠️', outdated: '❌' };
 const FRESHNESS_CLASSES = { current: 'text-success', recent: '', stale: 'text-warning', outdated: 'text-danger' };
 
+function formatPlainDate(iso) {
+  if (!iso) return '<span class="text-muted">N/A</span>';
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
 function formatDateWithFreshness(iso, freshness) {
   if (!iso) return '<span class="text-danger">❌ N/A</span>';
   const d = new Date(iso);
@@ -725,7 +732,8 @@ function renderTable(playlists) {
       <td class="text-end">${p.avg_size_mb.toFixed(1)} MB</td>
       <td class="text-center">${integrityBadge(p.tag_pct)}</td>
       <td class="text-center">${integrityBadge(p.cover_pct)}</td>
-      <td class="text-end">${formatDateWithFreshness(p.last_modified, p.freshness)}</td>
+      <td class="text-end">${formatPlainDate(p.last_modified)}</td>
+      <td class="text-end">${formatDateWithFreshness(p.last_downloaded, p.download_freshness)}</td>
     </tr>
   `).join('');
 }

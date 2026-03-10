@@ -12,10 +12,3 @@ logs/
 .venv/
 test_m4a_input/
 test_mp3_output/
-
-# Xcode / iOS
-ios/MusicPorter/MusicPorter.xcodeproj/project.xcworkspace/
-ios/MusicPorter/MusicPorter.xcodeproj/xcuserdata/
-ios/MusicPorter/build/
-ios/MusicPorter/DerivedData/
-*.xcuserstate

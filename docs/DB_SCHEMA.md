@@ -208,6 +208,7 @@ Playlist configuration previously stored in `config.yaml`, migrated to the datab
 | name | TEXT | NOT NULL | Human-readable playlist name |
 | created\_at | REAL | NOT NULL | Unix epoch timestamp |
 | updated\_at | REAL | NOT NULL | Unix epoch timestamp |
+| last\_downloaded\_at | REAL | | Unix epoch timestamp of last download attempt |
 
 **Class:** `ConfigManager` (or related playlist management class)
 
@@ -248,6 +249,7 @@ Sync destination configuration previously stored in `config.yaml`, migrated to t
 | 10 | 11 | Added `removed_tracks` table for historical removal tracking. Added nullable `track_uuid` column to `sync_files` for orphan detection. |
 | 11 | 12 | Added `idx_sync_files_track_uuid` index on `sync_files(track_uuid)` for efficient orphan detection JOIN/WHERE queries. |
 | 14 | 15 | Dropped `removed_tracks` table. Destination cleanup is now scan-based (mirror mode) rather than API-based removal tracking. |
+| 15 | 16 | Added nullable `last_downloaded_at` column to `playlists` table for tracking when a playlist was last downloaded. |
 
 ## Notes
 
