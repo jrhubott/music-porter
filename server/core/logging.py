@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import sys
 import threading
-from dataclasses import field
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -219,6 +219,7 @@ class ProgressBar:
         return False
 
 
+@dataclass
 class MigrationEvent:
     """Deferred audit entry for schema/data migrations that run before AuditLogger exists."""
     operation: str
