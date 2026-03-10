@@ -1287,12 +1287,16 @@ class PipelineOrchestrator:
             self.stats.download_success = True
             self.stats.download_stats = dl_result
             self.stats.stages_completed.append("download")
+            if self.playlist_db:
+                self.playlist_db.record_download(pl_key)
             return True
         else:
             # Check if user skipped (no stats and we have playlist info)
             # In this case, allow pipeline to continue
             if dl_result.downloaded == 0 and dl_result.failed == 0 and self.stats.playlist_key:
                 self.stats.stages_skipped.append("download")
+                if self.playlist_db:
+                    self.playlist_db.record_download(pl_key)
                 return True  # Continue to next stage
             else:
                 # Actual failure

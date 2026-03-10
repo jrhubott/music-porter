@@ -1747,11 +1747,12 @@ class PlaylistDB:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS playlists (
-                    key         TEXT PRIMARY KEY,
-                    url         TEXT NOT NULL,
-                    name        TEXT NOT NULL,
-                    created_at  REAL NOT NULL,
-                    updated_at  REAL NOT NULL
+                    key                TEXT PRIMARY KEY,
+                    url                TEXT NOT NULL,
+                    name               TEXT NOT NULL,
+                    created_at         REAL NOT NULL,
+                    updated_at         REAL NOT NULL,
+                    last_downloaded_at REAL
                 )
             """)
             conn.commit()
@@ -1763,7 +1764,8 @@ class PlaylistDB:
         conn = self._connect()
         try:
             row = conn.execute(
-                "SELECT key, url, name, created_at, updated_at "
+                "SELECT key, url, name, created_at, updated_at,"
+                " last_downloaded_at "
                 "FROM playlists WHERE key = ? COLLATE NOCASE",
                 (key,),
             ).fetchone()
@@ -1776,7 +1778,8 @@ class PlaylistDB:
         conn = self._connect()
         try:
             rows = conn.execute(
-                "SELECT key, url, name, created_at, updated_at "
+                "SELECT key, url, name, created_at, updated_at,"
+                " last_downloaded_at "
                 "FROM playlists ORDER BY rowid"
             ).fetchall()
             return [dict(r) for r in rows]
@@ -1858,6 +1861,22 @@ class PlaylistDB:
                 'completed', params={'key': key},
                 source=self._audit_source)
         return deleted
+
+    def record_download(self, key):
+        """Record that a download was attempted for this playlist."""
+        now = time.time()
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                cursor = conn.execute(
+                    "UPDATE playlists SET last_downloaded_at = ? "
+                    "WHERE key = ? COLLATE NOCASE",
+                    (now, key),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+            finally:
+                conn.close()
 
     def count(self):
         """Return total playlist count."""

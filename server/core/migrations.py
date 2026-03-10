@@ -626,6 +626,16 @@ def migrate_db_schema(logger=None):
                 logger.info(
                     "DB migration 14→15: dropped removed_tracks table")
 
+        if current < 16:
+            conn.execute(
+                "ALTER TABLE playlists ADD COLUMN last_downloaded_at REAL")
+            conn.execute("PRAGMA user_version = 16")
+            conn.commit()
+            changes.append("added last_downloaded_at column to playlists table")
+            if logger:
+                logger.info(
+                    "DB migration 15→16: added last_downloaded_at to playlists")
+
         return [MigrationEvent(
             'schema_migrate',
             f"DB schema migrated from version {from_version} to {DB_SCHEMA_VERSION}",

@@ -181,11 +181,11 @@ Detailed library summary from TrackDB with per-playlist breakdowns.
 | `total_files` | integer | Total tracks across all playlists |
 | `total_size_bytes` | integer | Total library size in bytes |
 | `scan_duration` | number | Time to generate summary (seconds) |
-| `freshness` | object | Counts by freshness level |
-| `freshness.current` | integer | Playlists updated today |
-| `freshness.recent` | integer | Playlists updated within 7 days |
-| `freshness.stale` | integer | Playlists updated within 30 days |
-| `freshness.outdated` | integer | Playlists not updated in 30+ days |
+| `freshness` | object | Counts by download freshness level |
+| `freshness.current` | integer | Playlists downloaded today |
+| `freshness.recent` | integer | Playlists downloaded within 7 days |
+| `freshness.stale` | integer | Playlists downloaded within 30 days |
+| `freshness.outdated` | integer | Playlists not downloaded in 30+ days |
 | `tag_integrity` | object | Tag protection stats |
 | `tag_integrity.protected` | integer | Tracks with UUID tag |
 | `tag_integrity.checked` | integer | Total tracks checked |
@@ -205,8 +205,9 @@ Detailed library summary from TrackDB with per-playlist breakdowns.
 | `file_count` | integer | Number of tracks |
 | `size_bytes` | integer | Total size in bytes |
 | `avg_size_mb` | number | Average file size in MB |
-| `last_modified` | string? | ISO timestamp of most recent update, or `null` |
-| `freshness` | string | One of: `"current"`, `"recent"`, `"stale"`, `"outdated"` |
+| `last_modified` | string? | ISO timestamp of most recent track content change, or `null` |
+| `last_downloaded` | string? | ISO timestamp of last download attempt, or `null` |
+| `download_freshness` | string | One of: `"current"`, `"recent"`, `"stale"`, `"outdated"` — based on `last_downloaded` |
 | `tags_checked` | integer | Tracks checked for tag integrity |
 | `tags_protected` | integer | Tracks with valid UUID tag |
 | `cover_with` | integer | Tracks with cover art |
@@ -334,7 +335,7 @@ List all playlists with aggregate stats from TrackDB. Supports ETag caching.
 | `file_count` | integer | Number of converted MP3 tracks |
 | `size_bytes` | integer | Total size of MP3 files in bytes |
 | `duration_s` | number | Total duration in seconds |
-| `freshness` | string | One of: `"current"`, `"recent"`, `"stale"`, `"outdated"` |
+| `freshness` | string | Download freshness: `"current"`, `"recent"`, `"stale"`, `"outdated"` |
 
 ```json
 [
