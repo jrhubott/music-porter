@@ -294,6 +294,10 @@
 {% endblock content %}
 
 {% block scripts %}
+<style>
+.dest-edit-icon { opacity: 0; transition: opacity 0.15s; }
+.dest-desc-cell:hover .dest-edit-icon { opacity: 1; }
+</style>
 <script>
 // ── State ──
 let destsMeta = []; // [{name, path, type, available, linked_destinations, playlist_prefs}]
@@ -771,9 +775,10 @@ function renderDestsTable(saved) {
       ? `<button class="btn btn-outline-warning btn-sm py-0 px-1 me-1" onclick="unlinkDest('${dName}')" title="Unlink"><i class="bi bi-link-45deg"></i></button>`
       : `<button class="btn btn-outline-info btn-sm py-0 px-1 me-1" onclick="promptLinkDest('${dName}')" title="Link to destination"><i class="bi bi-link"></i></button>`;
     const descText = d.description || '';
-    const descCell = descText
+    const descInner = descText
       ? `<span class="text-muted small">${descText}</span>`
       : `<span class="text-muted small fst-italic">—</span>`;
+    const descCell = `<span class="dest-desc-wrap d-flex align-items-center gap-1">${descInner}<i class="bi bi-pencil dest-edit-icon text-muted small"></i></span>`;
     return `<tr>
       <td>${d.name}</td>
       <td class="dest-desc-cell" data-dest="${dName}" onclick="editDescription(this)" style="cursor:pointer" title="Click to edit description">${descCell}</td>
@@ -798,9 +803,9 @@ function renderDestsTable(saved) {
 function editDescription(cell) {
   if (cell.querySelector('input')) return; // already editing
   const destName = cell.dataset.dest;
-  const currentText = cell.querySelector('span').textContent;
   const isPlaceholder = cell.querySelector('.fst-italic') !== null;
-  const currentVal = isPlaceholder ? '' : currentText;
+  const textSpan = cell.querySelector('.dest-desc-wrap > span:first-child');
+  const currentVal = isPlaceholder ? '' : (textSpan ? textSpan.textContent : '');
 
   const input = document.createElement('input');
   input.type = 'text';
@@ -820,16 +825,17 @@ function editDescription(cell) {
       body: JSON.stringify({description: newDesc})
     }).then(data => {
       if (data.error) { showToast(data.error, 'error'); loadDestinations(); return; }
+      const wrap = document.createElement('span');
+      wrap.className = 'dest-desc-wrap d-flex align-items-center gap-1';
       const span = document.createElement('span');
-      if (newDesc) {
-        span.className = 'text-muted small';
-        span.textContent = newDesc;
-      } else {
-        span.className = 'text-muted small fst-italic';
-        span.textContent = '—';
-      }
+      span.className = newDesc ? 'text-muted small' : 'text-muted small fst-italic';
+      span.textContent = newDesc || '—';
+      const icon = document.createElement('i');
+      icon.className = 'bi bi-pencil dest-edit-icon text-muted small';
+      wrap.appendChild(span);
+      wrap.appendChild(icon);
       cell.innerHTML = '';
-      cell.appendChild(span);
+      cell.appendChild(wrap);
       // Update cached destsMeta
       const meta = destsMeta.find(d => d.name === destName);
       if (meta) meta.description = newDesc;
