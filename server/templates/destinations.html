@@ -355,7 +355,7 @@ function findGroupName(primaryDest) {
 
 // ── Library stats ──
 function loadLibraryStats() {
-  fetch('/api/library-stats').then(r => r.json()).then(data => {
+  jsonFetch('/api/library-stats').then(data => {
     totalLibraryBytes = data.total_size_bytes || 0;
     document.getElementById('destStatLibSize').textContent = formatBytes(totalLibraryBytes);
     updateLibrarySyncBar();
@@ -385,7 +385,7 @@ function updateLibrarySyncBar() {
 
 // ── Load all destinations ──
 function loadDestinations() {
-  fetch('/api/sync/destinations').then(r => r.json()).then(data => {
+  jsonFetch('/api/sync/destinations').then(data => {
     destsMeta = data.destinations || [];
     renderDestsTable(destsMeta.filter(d => !d.auto_detected));
     loadSyncStatusData();
@@ -394,7 +394,7 @@ function loadDestinations() {
 
 // ── Sync status ──
 function loadSyncStatusData() {
-  fetch('/api/sync/status').then(r => r.json()).then(data => {
+  jsonFetch('/api/sync/status').then(data => {
     allGroupsData = data;
     const empty = document.getElementById('destEmpty');
     const card = document.getElementById('destGroupsCard');
@@ -503,8 +503,7 @@ function showSyncHistory(destName, groupLabel) {
   const modal = new bootstrap.Modal(document.getElementById('syncHistoryModal'));
   modal.show();
 
-  fetch('/api/sync/status/' + encodeURIComponent(destName) + '/history')
-    .then(r => r.json())
+  jsonFetch('/api/sync/status/' + encodeURIComponent(destName) + '/history')
     .then(data => {
       const entries = data.history || [];
       if (!entries.length) {
@@ -619,7 +618,7 @@ function syncToKey(destName, playlistKey) {
 
 // ── Playlist Breakdown ──
 function showDetail(destName) {
-  fetch('/api/sync/status/' + encodeURIComponent(destName)).then(r => r.json()).then(data => {
+  jsonFetch('/api/sync/status/' + encodeURIComponent(destName)).then(data => {
     const card = document.getElementById('detailCard');
     card.classList.remove('d-none');
     const dests = data.destinations || [destName];
@@ -697,11 +696,11 @@ function handlePrefToggle(destName) {
 
 function savePrefAndRefresh(destName, playlistKeys) {
   document.querySelectorAll('#detailTableBody .pref-playlist-cb, #prefAllCheckbox').forEach(cb => { cb.disabled = true; });
-  fetch('/api/sync/destinations/' + encodeURIComponent(destName) + '/playlist-prefs', {
+  jsonFetch('/api/sync/destinations/' + encodeURIComponent(destName) + '/playlist-prefs', {
     method: 'PUT',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({playlist_keys: playlistKeys})
-  }).then(r => r.json()).then(data => {
+  }).then(data => {
     if (data.error) {
       showToast('Failed to save prefs: ' + data.error, 'error');
     } else {
@@ -729,8 +728,7 @@ function promptResetTracking() {
 document.getElementById('confirmResetBtn').addEventListener('click', function() {
   const destName = document.getElementById('detailCard').dataset.destName;
   if (!destName) return;
-  fetch('/api/sync/destinations/' + encodeURIComponent(destName) + '/reset', {method: 'POST'})
-    .then(r => r.json())
+  jsonFetch('/api/sync/destinations/' + encodeURIComponent(destName) + '/reset', {method: 'POST'})
     .then(data => {
       bootstrap.Modal.getInstance(document.getElementById('resetTrackingModal')).hide();
       showToast(`Reset tracking for '${destName}' (${data.files_cleared} record(s) cleared)`, 'success');
@@ -796,11 +794,11 @@ document.getElementById('addDestForm').addEventListener('submit', function(e) {
   const linkTo = document.getElementById('newDestLinkTo').value;
   if (linkTo) payload.link_to = linkTo;
 
-  fetch('/api/sync/destinations', {
+  jsonFetch('/api/sync/destinations', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(payload)
-  }).then(r => r.json()).then(data => {
+  }).then(data => {
     if (data.error) { showToast(data.error, 'error'); return; }
     const msg = linkTo ? `Added destination '${name}' linked to '${linkTo}'` : `Added destination '${name}'`;
     showToast(msg, 'success');
@@ -813,8 +811,7 @@ document.getElementById('addDestForm').addEventListener('submit', function(e) {
 
 function removeDest(name) {
   if (!confirm(`Remove saved destination "${name}"?`)) return;
-  fetch('/api/sync/destinations/' + encodeURIComponent(name), {method: 'DELETE'})
-    .then(r => r.json())
+  jsonFetch('/api/sync/destinations/' + encodeURIComponent(name), {method: 'DELETE'})
     .then(data => {
       if (data.error) { showToast(data.error, 'error'); return; }
       showToast(`Removed destination '${name}'`, 'success');
@@ -853,11 +850,11 @@ document.getElementById('confirmLinkBtn').addEventListener('click', function() {
   const targetDest = document.getElementById('linkDestKeySelect').value;
   if (!targetDest) { showToast('Select a destination to link to', 'warning'); return; }
 
-  fetch('/api/sync/destinations/' + encodeURIComponent(pendingLinkDest) + '/link', {
+  jsonFetch('/api/sync/destinations/' + encodeURIComponent(pendingLinkDest) + '/link', {
     method: 'PUT',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({destination: targetDest})
-  }).then(r => r.json()).then(data => {
+  }).then(data => {
     if (data.error) { showToast(data.error, 'error'); return; }
     bootstrap.Modal.getInstance(document.getElementById('linkDestModal')).hide();
     let msg = `Linked '${pendingLinkDest}' to '${targetDest}'`;
@@ -872,11 +869,11 @@ document.getElementById('confirmLinkBtn').addEventListener('click', function() {
 
 function unlinkDest(name) {
   if (!confirm(`Unlink destination "${name}" from its group?`)) return;
-  fetch('/api/sync/destinations/' + encodeURIComponent(name) + '/link', {
+  jsonFetch('/api/sync/destinations/' + encodeURIComponent(name) + '/link', {
     method: 'PUT',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({destination: null})
-  }).then(r => r.json()).then(data => {
+  }).then(data => {
     if (data.error) { showToast(data.error, 'error'); return; }
     showToast(`Unlinked destination '${name}'`, 'success');
     loadDestinations();
@@ -902,11 +899,11 @@ document.getElementById('confirmRenameDestBtn').addEventListener('click', functi
   if (!/^[A-Za-z0-9_-]+$/.test(newName)) { showToast('Name must be alphanumeric, hyphens, or underscores', 'warning'); return; }
   if (newName === pendingRenameDest) { showToast('New name must be different', 'warning'); return; }
 
-  fetch('/api/sync/destinations/' + encodeURIComponent(pendingRenameDest) + '/rename', {
+  jsonFetch('/api/sync/destinations/' + encodeURIComponent(pendingRenameDest) + '/rename', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({new_name: newName})
-  }).then(r => r.json()).then(data => {
+  }).then(data => {
     if (data.error) { showToast(data.error, 'error'); return; }
     bootstrap.Modal.getInstance(document.getElementById('renameDestModal')).hide();
     let msg = `Renamed '${pendingRenameDest}' to '${newName}'`;
@@ -932,11 +929,11 @@ function promptRenameGroup(primaryDest) {
 document.getElementById('confirmRenameGroupBtn').addEventListener('click', function() {
   if (!pendingRenameGroupDest) return;
   const newName = document.getElementById('renameGroupInput').value;
-  fetch('/api/sync/destinations/' + encodeURIComponent(pendingRenameGroupDest) + '/group-name', {
+  jsonFetch('/api/sync/destinations/' + encodeURIComponent(pendingRenameGroupDest) + '/group-name', {
     method: 'PUT',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({name: newName})
-  }).then(r => r.json()).then(data => {
+  }).then(data => {
     if (data.error) { showToast(data.error, 'error'); return; }
     bootstrap.Modal.getInstance(document.getElementById('renameGroupModal')).hide();
     showToast(newName ? `Group renamed to '${newName}'` : 'Group name cleared', 'success');

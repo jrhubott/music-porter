@@ -311,7 +311,7 @@ Cross-platform sync client (`sync-client/` subdirectory) with both a CLI tool (`
 ### Low Priority / Nice to Have
 
 1. **Spotify integration** - Download from Spotify playlists
-2. **YouTube Music integration** - Download from YouTube Music playlists
+2. ~~**YouTube Music integration** - Download from YouTube Music playlists~~ *(implemented in v2.40.1)*
 3. **Metadata enrichment** - Fetch additional metadata from online databases
 4. **Lyrics embedding** - Download and embed synchronized lyrics
 5. **BPM detection** - Analyze and tag tracks with BPM information

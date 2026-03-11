@@ -29,8 +29,7 @@
 
 {% block scripts %}
 <script>
-fetch('/api/about')
-  .then(r => r.json())
+jsonFetch('/api/about')
   .then(data => {
     document.getElementById('versionDisplay').textContent = 'v' + data.version;
 

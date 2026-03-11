@@ -1,8 +1,9 @@
 FROM python:3.12-slim
 
-# System dependencies: ffmpeg (audio conversion), lsof (port cleanup at startup)
+# System dependencies: ffmpeg (audio conversion), lsof (port cleanup at startup),
+# nodejs (JS runtime required by yt-dlp for YouTube extraction)
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg lsof \
+    && apt-get install -y --no-install-recommends ffmpeg lsof nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

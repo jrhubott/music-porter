@@ -44,10 +44,31 @@
   </div>
 </div>
 
-<!-- Cookie Management -->
+<!-- YouTube Music Cookies -->
 <div class="card mt-4">
   <div class="card-body">
-    <h6 class="card-title"><i class="bi bi-shield-lock"></i> Cookie Management</h6>
+    <h6 class="card-title"><i class="bi bi-youtube"></i> YouTube Music Cookies</h6>
+    <div class="mt-3">
+      <div class="row align-items-center">
+        <div class="col-auto">
+          <label class="form-label mb-1">Status</label>
+          <div id="ytCookieStatusBadge"><span class="spinner-border spinner-border-sm"></span> Checking...</div>
+        </div>
+      </div>
+      <div class="form-text mt-2">
+        Place a Netscape-format cookies file at <code>data/yt-cookies.txt</code> to enable
+        premium-quality downloads and access to private playlists.
+        Export cookies using a browser extension (e.g. <em>Get cookies.txt LOCALLY</em>) while
+        logged into YouTube Music.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Apple Music Cookie Management -->
+<div class="card mt-4">
+  <div class="card-body">
+    <h6 class="card-title"><i class="bi bi-shield-lock"></i> Apple Music Cookie Management</h6>
     <div class="row align-items-end mt-3">
       <div class="col-auto">
         <label class="form-label mb-1">Status</label>
@@ -333,7 +354,7 @@
 let currentSettings = {};
 
 function loadSettings() {
-  fetch('/api/settings').then(r=>r.json()).then(data => {
+  jsonFetch('/api/settings').then(data => {
     currentSettings = data.settings;
     document.getElementById('settingExternalUrl').value = data.settings.external_url || '';
     document.getElementById('settingWorkers').value = data.settings.workers || 6;
@@ -356,8 +377,8 @@ document.getElementById('settingsForm').addEventListener('submit', function(e) {
     cleanup_removed_tracks: document.getElementById('settingCleanupRemovedTracks').checked,
     clean_sync_destination: document.getElementById('settingCleanSyncDestination').checked,
   };
-  fetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
-    .then(r=>r.json()).then(() => { showToast('Settings saved', 'success'); });
+  jsonFetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
+    .then(() => { showToast('Settings saved', 'success'); });
 });
 
 loadSettings();
@@ -369,13 +390,28 @@ document.getElementById('retentionForm').addEventListener('submit', function(e) 
     task_history_retention_days: parseInt(document.getElementById('retentionTaskHistory').value) || 0,
     removed_tracks_retention_days: parseInt(document.getElementById('retentionRemovedTracks').value) || 0,
   };
-  fetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
-    .then(r=>r.json()).then(() => { showToast('Retention settings saved', 'success'); });
+  jsonFetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
+    .then(() => { showToast('Retention settings saved', 'success'); });
 });
 
-// ── Cookie Management ──
+// ── YouTube Music Cookie Status ──
+function loadYtCookieStatus() {
+  fetch('/api/settings').then(r=>r.json()).then(data => {
+    const present = data.yt_cookies_present;
+    let html;
+    if (present) {
+      html = '<span class="badge bg-success">Present</span> <small class="text-muted ms-2">yt-dlp will use cookies for premium downloads</small>';
+    } else {
+      html = '<span class="badge bg-secondary">Missing</span> <small class="text-muted ms-2">Place cookies file at data/yt-cookies.txt to enable premium downloads</small>';
+    }
+    document.getElementById('ytCookieStatusBadge').innerHTML = html;
+  });
+}
+loadYtCookieStatus();
+
+// ── Apple Music Cookie Management ──
 function loadCookieStatus() {
-  fetch('/api/status').then(r=>r.json()).then(data => {
+  jsonFetch('/api/status').then(data => {
     const cs = data.cookies;
     let html;
     if (cs.valid) {
@@ -390,7 +426,7 @@ function loadCookieStatus() {
 }
 
 function loadBrowsers() {
-  fetch('/api/cookies/browsers').then(r=>r.json()).then(data => {
+  jsonFetch('/api/cookies/browsers').then(data => {
     const sel = document.getElementById('browserSelect');
     sel.innerHTML = '<option value="auto">Auto-detect</option>';
     (data.installed || []).forEach(b => {
@@ -490,7 +526,7 @@ function loadSchedulerStatus() {
 }
 
 function loadSchedulerPlaylists(selectedKeys) {
-  fetch('/api/playlists').then(r => r.json()).then(playlists => {
+  jsonFetch('/api/playlists').then(playlists => {
     const container = document.getElementById('schedulerPlaylists');
     const allSelected = !selectedKeys || selectedKeys.length === 0;
 
@@ -549,11 +585,11 @@ document.getElementById('schedulerForm').addEventListener('submit', function(e) 
     on_missed: document.getElementById('schedulerOnMissed').value,
   };
 
-  fetch('/api/scheduler/config', {
+  jsonFetch('/api/scheduler/config', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(data),
-  }).then(r => r.json()).then(resp => {
+  }).then(resp => {
     if (resp.ok) {
       showToast('Schedule saved', 'success');
       loadSchedulerStatus();
@@ -566,8 +602,7 @@ document.getElementById('schedulerForm').addEventListener('submit', function(e) 
 document.getElementById('btnRunNow').addEventListener('click', function() {
   const btn = this;
   btn.disabled = true;
-  fetch('/api/scheduler/run-now', {method: 'POST'})
-    .then(r => r.json())
+  jsonFetch('/api/scheduler/run-now', {method: 'POST'})
     .then(data => {
       if (data.ok) {
         showToast('Scheduled pipeline started', 'success');
@@ -624,7 +659,7 @@ function getActiveProfile() {
 
 function loadEQPresets() {
   const profile = getActiveProfile();
-  fetch('/api/eq?profile=' + encodeURIComponent(profile)).then(r => r.json()).then(data => {
+  jsonFetch('/api/eq?profile=' + encodeURIComponent(profile)).then(data => {
     const configs = data.configs || [];
     // Profile default
     const def = configs.find(c => !c.playlist);
@@ -655,7 +690,7 @@ function loadEQPresets() {
 }
 
 function loadEQPlaylistOptions() {
-  fetch('/api/playlists').then(r => r.json()).then(playlists => {
+  jsonFetch('/api/playlists').then(playlists => {
     const sel = document.getElementById('eqAddPlaylist');
     sel.innerHTML = '<option value="">Select playlist...</option>' +
       playlists.map(p => '<option value="' + p.key + '">' + p.name + '</option>').join('');
@@ -670,8 +705,8 @@ document.getElementById('btnSaveEqDefault').addEventListener('click', function()
     treble_boost: document.getElementById('eqDefaultTrebleBoost').checked,
     compressor: document.getElementById('eqDefaultCompressor').checked,
   };
-  fetch('/api/eq', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)})
-    .then(r => r.json()).then(() => { showToast('EQ default saved', 'success'); loadEQPresets(); });
+  jsonFetch('/api/eq', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)})
+    .then(() => { showToast('EQ default saved', 'success'); loadEQPresets(); });
 });
 
 document.getElementById('btnAddEqOverride').addEventListener('click', function() {
@@ -685,8 +720,8 @@ document.getElementById('btnAddEqOverride').addEventListener('click', function()
     treble_boost: document.getElementById('eqAddTrebleBoost').checked,
     compressor: document.getElementById('eqAddCompressor').checked,
   };
-  fetch('/api/eq', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)})
-    .then(r => r.json()).then(() => {
+  jsonFetch('/api/eq', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)})
+    .then(() => {
       showToast('EQ override added for ' + playlist, 'success');
       loadEQPresets();
       // Reset add form
@@ -700,8 +735,8 @@ document.getElementById('btnAddEqOverride').addEventListener('click', function()
 
 function deleteEQOverride(playlist) {
   const data = { profile: getActiveProfile(), playlist: playlist };
-  fetch('/api/eq', {method: 'DELETE', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)})
-    .then(r => r.json()).then(() => { showToast('EQ override removed', 'success'); loadEQPresets(); });
+  jsonFetch('/api/eq', {method: 'DELETE', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)})
+    .then(() => { showToast('EQ override removed', 'success'); loadEQPresets(); });
 }
 
 loadEQPresets();
@@ -712,7 +747,7 @@ loadEQPlaylistOptions();
   const addrEl = document.getElementById('pairingAddress');
   const keyEl = document.getElementById('pairingApiKey');
   if (!addrEl) return; // Not in server mode
-  fetch('/api/pairing-info').then(r=>r.json()).then(data => {
+  jsonFetch('/api/pairing-info').then(data => {
     addrEl.textContent = data.address;
     keyEl.value = data.api_key;
   }).catch(() => {

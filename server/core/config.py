@@ -121,6 +121,21 @@ def _validate_profile(name, data):
                 f"Profile '{name}': 'usb_dir' must be a string, got {ud!r}")
 
 
+def detect_source_type(url):
+    """Detect playlist source type from URL.
+
+    Returns 'apple_music' or 'youtube_music'.
+    Raises ValueError for unrecognised URLs.
+    """
+    if 'music.apple.com' in url:
+        return 'apple_music'
+    if 'music.youtube.com' in url or 'youtube.com/playlist' in url:
+        return 'youtube_music'
+    raise ValueError(
+        f"Unrecognised playlist URL. Expected music.apple.com or music.youtube.com — got: {url}"
+    )
+
+
 _KNOWN_SETTINGS_KEYS = {
     'output_type', 'workers', 'quality_preset',
     'api_key', 'server_name', 'log_retention_days', 'scheduler',
@@ -472,6 +487,7 @@ class DependencyChecker:
         'Pillow': 'PIL',
         'PyYAML': 'yaml',
         'Flask': 'flask',
+        'yt-dlp': 'yt_dlp',
     }
 
     # Packages that must be checked via subprocess instead of import

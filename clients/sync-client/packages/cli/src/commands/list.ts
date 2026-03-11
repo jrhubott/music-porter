@@ -21,8 +21,13 @@ export function registerListCommand(program: Command): void {
 
       console.log();
       printTable(
-        ['#', 'Key', 'Name'],
-        playlists.map((p, i) => [String(i + 1), p.key, p.name]),
+        ['#', 'Key', 'Name', 'Source'],
+        playlists.map((p, i) => [
+          String(i + 1),
+          p.key,
+          p.name,
+          p.source_type === 'youtube_music' ? 'YouTube Music' : 'Apple Music',
+        ]),
       );
       console.log();
     });

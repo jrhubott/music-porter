@@ -8,6 +8,7 @@ import { registerListCommand } from './commands/list.js';
 import { registerStatusCommand } from './commands/status.js';
 import { registerSyncCommand } from './commands/sync.js';
 import { registerDestinationsCommand } from './commands/destinations.js';
+import { registerPlaylistCommand } from './commands/playlist.js';
 import { runInteractiveMode } from './interactive.js';
 
 const program = new Command();
@@ -25,6 +26,7 @@ registerListCommand(program);
 registerStatusCommand(program);
 registerSyncCommand(program);
 registerDestinationsCommand(program);
+registerPlaylistCommand(program);
 
 // If no arguments, run interactive mode
 if (process.argv.length <= 2) {

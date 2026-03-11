@@ -335,7 +335,7 @@
 <script>
 // ── Dashboard status ──
 function loadDashboard() {
-  fetch('/api/status').then(r => r.json()).then(data => {
+  jsonFetch('/api/status').then(data => {
     // Cookie status
     const cs = data.cookies;
     let cookieHtml;
@@ -353,7 +353,7 @@ function loadDashboard() {
   });
 
   // Active operations
-  fetch('/api/tasks').then(r => r.json()).then(tasks => {
+  jsonFetch('/api/tasks').then(tasks => {
     const running = tasks.filter(t => t.status === 'running');
     const el = document.getElementById('activeOps');
     if (running.length === 0) {
@@ -430,8 +430,7 @@ function loadLibraryStats() {
   empty.classList.add('d-none');
   btn.disabled = true;
 
-  fetch('/api/library-stats')
-    .then(r => r.json())
+  jsonFetch('/api/library-stats')
     .then(data => {
       spinner.classList.add('d-none');
       btn.disabled = false;
@@ -530,8 +529,7 @@ function loadUnconvertedFiles(playlist, containerId) {
     return;
   }
 
-  fetch('/api/library-stats/' + encodeURIComponent(playlist) + '/unconverted')
-    .then(r => r.json())
+  jsonFetch('/api/library-stats/' + encodeURIComponent(playlist) + '/unconverted')
     .then(data => {
       if (data.error) {
         container.innerHTML = '<span class="text-danger">' + data.error + '</span>';
@@ -643,8 +641,7 @@ function loadSummary() {
   empty.classList.add('d-none');
   btn.disabled = true;
 
-  fetch('/api/summary')
-    .then(r => r.json())
+  jsonFetch('/api/summary')
     .then(data => {
       summaryData = data;
       spinner.classList.add('d-none');
@@ -792,8 +789,8 @@ function syncStatusBadge(k) {
 
 function loadSyncStatus() {
   Promise.all([
-    fetch('/api/sync/status').then(r => r.json()),
-    fetch('/api/sync/destinations').then(r => r.json()).catch(() => ({destinations: []}))
+    jsonFetch('/api/sync/status'),
+    jsonFetch('/api/sync/destinations').catch(() => ({destinations: []}))
   ]).then(([data, destData]) => {
     const row = document.getElementById('usbSyncRow');
     const badges = document.getElementById('usbSyncBadges');

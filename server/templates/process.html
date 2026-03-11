@@ -297,7 +297,7 @@
 {% block scripts %}
 <script>
 let _activeProfile = 'ride-command';
-fetch('/api/settings').then(r=>r.json()).then(d => {
+jsonFetch('/api/settings').then(d => {
   _activeProfile = (d.settings && d.settings.output_type) || 'ride-command';
   if (d.settings && d.settings.cleanup_removed_tracks) {
     document.getElementById('pipelineCleanup').checked = true;
@@ -309,7 +309,7 @@ fetch('/api/settings').then(r=>r.json()).then(d => {
 // ══════════════════════════════════════════════════
 
 // Load playlists
-fetch('/api/playlists').then(r=>r.json()).then(playlists => {
+jsonFetch('/api/playlists').then(playlists => {
   const sel = document.getElementById('pipelinePlaylist');
   sel.innerHTML = playlists.map(p => `<option value="${p.key}">${p.name} (${p.key})</option>`).join('');
   if (playlists.length === 0) sel.innerHTML = '<option value="">No playlists configured</option>';
@@ -318,8 +318,7 @@ fetch('/api/playlists').then(r=>r.json()).then(playlists => {
 });
 
 function loadPipelineEQ(playlist) {
-  fetch('/api/eq/resolve?profile=' + encodeURIComponent(_activeProfile) + '&playlist=' + encodeURIComponent(playlist))
-    .then(r => r.json())
+  jsonFetch('/api/eq/resolve?profile=' + encodeURIComponent(_activeProfile) + '&playlist=' + encodeURIComponent(playlist))
     .then(data => {
       if (data.eq) {
         document.getElementById('pipelineEqLoudnorm').checked = data.eq.loudnorm;
@@ -344,7 +343,7 @@ function toggleSyncDest() {
 }
 
 function loadPipelineSyncDests() {
-  fetch('/api/sync/destinations').then(r => r.json()).then(data => {
+  jsonFetch('/api/sync/destinations').then(data => {
     const sel = document.getElementById('pipelineSyncDestSelect');
     let opts = '';
     const dests = data.destinations || [];
@@ -668,7 +667,7 @@ function renderAggregateSummary(r) {
 // ── Convert Tab ──────────────────────────────────
 // ══════════════════════════════════════════════════
 
-fetch('/api/directories/music').then(r=>r.json()).then(dirs => {
+jsonFetch('/api/directories/music').then(dirs => {
   const sel = document.getElementById('convertInput');
   sel.innerHTML = dirs.map(d => `<option value="library/source/gamdl/${d}">library/source/gamdl/${d}</option>`).join('');
   if (dirs.length === 0) sel.innerHTML = '<option value="">No source directories found</option>';
@@ -677,8 +676,7 @@ fetch('/api/directories/music').then(r=>r.json()).then(dirs => {
 });
 
 function loadConvertEQ(playlist) {
-  fetch('/api/eq/resolve?profile=' + encodeURIComponent(_activeProfile) + '&playlist=' + encodeURIComponent(playlist))
-    .then(r => r.json())
+  jsonFetch('/api/eq/resolve?profile=' + encodeURIComponent(_activeProfile) + '&playlist=' + encodeURIComponent(playlist))
     .then(data => {
       if (data.eq) {
         document.getElementById('convertEqLoudnorm').checked = data.eq.loudnorm;

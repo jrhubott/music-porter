@@ -99,14 +99,27 @@
       el.addEventListener('hidden.bs.toast', () => el.remove());
     }
 
+    // ── Safe JSON fetch — checks r.ok before parsing ──
+    function jsonFetch(url, opts) {
+      return fetch(url, opts).then(r => {
+        if (!r.ok) {
+          return r.text().then(body => {
+            let msg;
+            try { msg = JSON.parse(body).error; } catch (_) { msg = r.statusText; }
+            throw new Error(msg || ('HTTP ' + r.status));
+          });
+        }
+        return r.json();
+      });
+    }
+
     // ── Submit operation and start SSE ──
     function submitOperation(url, formData, logContainerId, onComplete) {
-      fetch(url, {
+      jsonFetch(url, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(formData),
       })
-      .then(r => r.json())
       .then(data => {
         if (data.error) {
           showToast(data.error, 'error');
@@ -236,7 +249,7 @@
 
     // ── Operations badge updater ──
     function updateOpsBadge() {
-      fetch('/api/tasks').then(r=>r.json()).then(tasks => {
+      jsonFetch('/api/tasks').then(tasks => {
         const running = tasks.filter(t => t.status === 'running').length;
         const badge = document.getElementById('opsBadge');
         if (running > 0) { badge.textContent = running; badge.classList.remove('d-none'); }
@@ -245,7 +258,7 @@
     }
 
     // ── Version badge ──
-    fetch('/api/status').then(r=>r.json()).then(d => {
+    jsonFetch('/api/status').then(d => {
       document.getElementById('versionBadge').textContent = 'v' + d.version;
       document.getElementById('sidebarProfile').textContent = d.profile;
     }).catch(()=>{});
