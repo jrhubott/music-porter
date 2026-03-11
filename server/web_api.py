@@ -256,6 +256,107 @@ def api_cookies_upload():
     })
 
 
+@api_bp.route('/api/cookies/yt-refresh', methods=['POST'])
+def api_cookies_yt_refresh():
+    """Extract YouTube Music cookies from the user's browser using yt-dlp."""
+    import shutil
+    import subprocess
+
+    ctx = _ctx()
+    data = request.get_json(silent=True) or {}
+    browser = data.get('browser', 'auto')
+
+    desc = f'YouTube Music cookie extraction ({browser})'
+
+    def _run(task_id):
+        logger = ctx.make_logger(task_id, verbose=False)
+
+        yt_dlp_bin = shutil.which('yt-dlp')
+        if not yt_dlp_bin:
+            logger.error('yt-dlp not found — is it installed?')
+            return {'success': False, 'reason': 'yt-dlp not found'}
+
+        cookie_path = Path(mp.YT_COOKIE_PATH)
+        cookie_path.parent.mkdir(parents=True, exist_ok=True)
+
+        browser_arg = browser
+        if browser == 'auto':
+            cookie_mgr = mp.CookieManager(mp.DEFAULT_COOKIES, mp.Logger(verbose=False))
+            browser_arg = cookie_mgr._detect_default_browser() or 'chrome'
+            logger.info(f'Auto-detected browser: {browser_arg}')
+
+        cmd = [
+            yt_dlp_bin,
+            '--cookies-from-browser', browser_arg,
+            '--cookies', str(cookie_path),
+            '--skip-download',
+            'https://music.youtube.com',
+        ]
+
+        logger.info(f'Extracting YouTube Music cookies from {browser_arg}...')
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            if result.returncode == 0:
+                logger.ok('Cookies extracted successfully')
+                if ctx.audit_logger:
+                    ctx.audit_logger.log(
+                        operation='yt_cookie_refresh',
+                        description=f'YouTube Music cookies extracted from {browser_arg}',
+                        params={'browser': browser_arg},
+                        status='success',
+                        source=ctx.detect_source(),
+                    )
+                return {'success': True}
+            err = (result.stderr or result.stdout).strip()
+            logger.error(f'yt-dlp failed: {err}')
+            return {'success': False, 'reason': err}
+        except subprocess.TimeoutExpired:
+            logger.error('Timed out waiting for yt-dlp')
+            return {'success': False, 'reason': 'timeout'}
+        except Exception as exc:
+            logger.error(f'Error: {exc}')
+            return {'success': False, 'reason': str(exc)}
+
+    task_id = ctx.task_manager.submit('yt_cookie_refresh', desc, _run,
+                                      source=ctx.detect_source())
+    if task_id is None:
+        return jsonify({'error': 'Another operation is already running'}), 409
+    return jsonify({'task_id': task_id})
+
+
+@api_bp.route('/api/cookies/yt-upload', methods=['POST'])
+def api_cookies_yt_upload():
+    """Accept a Netscape-format YouTube Music cookies file uploaded via the web UI."""
+    import shutil
+
+    ctx = _ctx()
+    data = request.get_json(silent=True) or {}
+    cookie_text = data.get('cookies', '').strip()
+
+    if not cookie_text:
+        return jsonify({'error': 'Missing or empty "cookies" field'}), 400
+
+    cookie_path = Path(mp.YT_COOKIE_PATH)
+
+    if cookie_path.exists():
+        backup_path = Path(str(cookie_path) + '.backup')
+        shutil.copy2(cookie_path, backup_path)
+
+    cookie_path.parent.mkdir(parents=True, exist_ok=True)
+    cookie_path.write_text(cookie_text, encoding='utf-8')
+
+    if ctx.audit_logger:
+        ctx.audit_logger.log(
+            operation='yt_cookie_upload',
+            description='YouTube Music cookies uploaded via web',
+            params={},
+            status='success',
+            source=ctx.detect_source(),
+        )
+
+    return jsonify({'success': True})
+
+
 # ══════════════════════════════════════════════════════════════════
 # API: Library Summary
 # ══════════════════════════════════════════════════════════════════
