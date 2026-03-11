@@ -120,6 +120,7 @@ export interface SyncDestination {
   available: boolean;
   linked_destinations: string[];
   playlist_prefs: string[] | null;
+  description?: string;
 }
 
 export interface ResolveDestinationResponse {

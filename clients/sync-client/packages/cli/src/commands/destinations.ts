@@ -19,13 +19,13 @@ export function registerDestinationsCommand(program: Command): void {
         if (response.destinations.length > 0) {
           console.log('\nSaved Destinations:');
           printTable(
-            ['Name', 'Path', 'Linked'],
+            ['Name', 'Description', 'Path', 'Linked'],
             response.destinations.map((d) => {
               const linked = d.linked_destinations ?? [];
               const linkedLabel = linked.length > 0
                 ? `${linked.join(', ')}`
                 : '—';
-              return [d.name, d.path, linkedLabel];
+              return [d.name, d.description ?? '', d.path, linkedLabel];
             }),
           );
           console.log();

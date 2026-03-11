@@ -104,6 +104,8 @@ struct SyncDestination: Identifiable, Codable {
     let linkedDestinations: [String]
     /// Saved playlist preferences. nil = sync all playlists.
     let playlistPrefs: [String]?
+    /// Optional free-text description for this destination.
+    let description: String?
 
     var id: String { name }
 
@@ -111,7 +113,7 @@ struct SyncDestination: Identifiable, Codable {
     var hasLinkedDestinations: Bool { !linkedDestinations.isEmpty }
 
     enum CodingKeys: String, CodingKey {
-        case name, path, type, available
+        case name, path, type, available, description
         case linkedDestinations = "linked_destinations"
         case playlistPrefs = "playlist_prefs"
     }

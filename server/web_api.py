@@ -2027,6 +2027,7 @@ def api_sync_destination_add():
     name = data.get('name', '').strip()
     path = data.get('path', '').strip()
     link_to = (data.get('link_to') or '').strip() or None
+    description = (data.get('description') or '')[:mp.MAX_DEST_DESCRIPTION_LEN]
     if not name or not path:
         return jsonify({'error': 'name and path are required'}), 400
 
@@ -2039,6 +2040,7 @@ def api_sync_destination_add():
         sync_key = target.sync_key
 
     ok = ctx.sync_tracker.add_destination(name, path, sync_key=sync_key,
+                                          description=description,
                                           audit_source=ctx.detect_source())
     if not ok:
         return jsonify({'error': f"Failed to add destination '{name}'"}), 400
@@ -2056,6 +2058,18 @@ def api_sync_destination_delete(name):
     if not ok:
         return jsonify({'error': f"Destination '{name}' not found"}), 404
     return jsonify({'ok': True})
+
+
+@api_bp.route('/api/sync/destinations/<name>/description', methods=['PUT'])
+def api_sync_destination_description(name):
+    """Set (or clear) the description for a saved destination."""
+    ctx = _ctx()
+    data = request.get_json(force=True)
+    description = (data.get('description') or '')[:mp.MAX_DEST_DESCRIPTION_LEN]
+    ok = ctx.sync_tracker.update_description(name, description)
+    if not ok:
+        return jsonify({'error': f"Destination '{name}' not found"}), 404
+    return jsonify({'ok': True, 'name': name, 'description': description})
 
 
 @api_bp.route('/api/sync/destinations/<name>/link', methods=['PUT'])

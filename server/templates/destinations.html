@@ -134,6 +134,7 @@
         <thead>
           <tr>
             <th>Name</th>
+            <th>Description</th>
             <th>Type</th>
             <th>Path</th>
             <th class="text-center">Linked</th>
@@ -142,7 +143,7 @@
           </tr>
         </thead>
         <tbody id="destsTableBody">
-          <tr><td colspan="6" class="text-center text-muted">Loading...</td></tr>
+          <tr><td colspan="7" class="text-center text-muted">Loading...</td></tr>
         </tbody>
       </table>
     </div>
@@ -152,17 +153,21 @@
         <label class="form-label">Name</label>
         <input type="text" class="form-control form-control-sm" id="newDestName" placeholder="my-nas" pattern="[a-zA-Z0-9_-]+">
       </div>
-      <div class="col-md-4">
+      <div class="col-md-3">
         <label class="form-label">Path</label>
         <input type="text" class="form-control form-control-sm" id="newDestPath" placeholder="/Volumes/NAS/Music">
       </div>
       <div class="col-md-3">
+        <label class="form-label">Description <span class="text-muted">(optional)</span></label>
+        <input type="text" class="form-control form-control-sm" id="newDestDescription" placeholder="e.g. DJ USB for Saturday gigs" maxlength="200">
+      </div>
+      <div class="col-md-2">
         <label class="form-label">Link to <span class="text-muted">(optional)</span></label>
         <select class="form-select form-select-sm" id="newDestLinkTo">
           <option value="">None</option>
         </select>
       </div>
-      <div class="col-md-2">
+      <div class="col-md-1">
         <button type="submit" class="btn btn-outline-primary btn-sm w-100"><i class="bi bi-plus"></i> Add</button>
       </div>
     </form>
@@ -742,7 +747,7 @@ document.getElementById('confirmResetBtn').addEventListener('click', function() 
 function renderDestsTable(saved) {
   const tbody = document.getElementById('destsTableBody');
   if (!saved || !saved.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No saved destinations</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No saved destinations</td></tr>';
     return;
   }
   tbody.innerHTML = saved.map(d => {
@@ -765,8 +770,13 @@ function renderDestsTable(saved) {
     const linkBtn = linked.length > 0
       ? `<button class="btn btn-outline-warning btn-sm py-0 px-1 me-1" onclick="unlinkDest('${dName}')" title="Unlink"><i class="bi bi-link-45deg"></i></button>`
       : `<button class="btn btn-outline-info btn-sm py-0 px-1 me-1" onclick="promptLinkDest('${dName}')" title="Link to destination"><i class="bi bi-link"></i></button>`;
+    const descText = d.description || '';
+    const descCell = descText
+      ? `<span class="text-muted small">${descText}</span>`
+      : `<span class="text-muted small fst-italic">—</span>`;
     return `<tr>
       <td>${d.name}</td>
+      <td class="dest-desc-cell" data-dest="${dName}" onclick="editDescription(this)" style="cursor:pointer" title="Click to edit description">${descCell}</td>
       <td>${typeBadge}</td>
       <td><code>${d.path}</code></td>
       <td class="text-center">${linkedBadge}</td>
@@ -784,13 +794,64 @@ function renderDestsTable(saved) {
   }).join('');
 }
 
+// ── Inline description edit ──
+function editDescription(cell) {
+  if (cell.querySelector('input')) return; // already editing
+  const destName = cell.dataset.dest;
+  const currentText = cell.querySelector('span').textContent;
+  const isPlaceholder = cell.querySelector('.fst-italic') !== null;
+  const currentVal = isPlaceholder ? '' : currentText;
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'form-control form-control-sm';
+  input.value = currentVal;
+  input.maxLength = 200;
+  cell.innerHTML = '';
+  cell.appendChild(input);
+  input.focus();
+  input.select();
+
+  function save() {
+    const newDesc = input.value.trim();
+    jsonFetch('/api/sync/destinations/' + encodeURIComponent(destName) + '/description', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({description: newDesc})
+    }).then(data => {
+      if (data.error) { showToast(data.error, 'error'); loadDestinations(); return; }
+      const span = document.createElement('span');
+      if (newDesc) {
+        span.className = 'text-muted small';
+        span.textContent = newDesc;
+      } else {
+        span.className = 'text-muted small fst-italic';
+        span.textContent = '—';
+      }
+      cell.innerHTML = '';
+      cell.appendChild(span);
+      // Update cached destsMeta
+      const meta = destsMeta.find(d => d.name === destName);
+      if (meta) meta.description = newDesc;
+    }).catch(() => loadDestinations());
+  }
+
+  input.addEventListener('blur', save);
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { input.blur(); }
+    if (e.key === 'Escape') { input.removeEventListener('blur', save); loadDestinations(); }
+  });
+}
+
 document.getElementById('addDestForm').addEventListener('submit', function(e) {
   e.preventDefault();
   const name = document.getElementById('newDestName').value.trim();
   const path = document.getElementById('newDestPath').value.trim();
   if (!name || !path) { showToast('Name and path required', 'warning'); return; }
 
+  const description = document.getElementById('newDestDescription').value.trim();
   const payload = {name, path};
+  if (description) payload.description = description;
   const linkTo = document.getElementById('newDestLinkTo').value;
   if (linkTo) payload.link_to = linkTo;
 
@@ -804,6 +865,7 @@ document.getElementById('addDestForm').addEventListener('submit', function(e) {
     showToast(msg, 'success');
     document.getElementById('newDestName').value = '';
     document.getElementById('newDestPath').value = '';
+    document.getElementById('newDestDescription').value = '';
     document.getElementById('newDestLinkTo').value = '';
     loadDestinations();
   }).catch(err => showToast('Failed: ' + err, 'error'));

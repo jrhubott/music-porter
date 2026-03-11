@@ -1259,6 +1259,9 @@ paths:
                   type: string
                 path:
                   type: string
+                description:
+                  type: string
+                  description: Optional free-text note (max 200 characters)
                 link_to:
                   type: string
                   description: Name of an existing destination to link tracking with
@@ -1299,6 +1302,48 @@ paths:
       responses:
         "200":
           $ref: "#/components/responses/Ok"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/sync/destinations/{name}/description:
+    put:
+      operationId: updateSyncDestinationDescription
+      summary: Update destination description
+      description: Set or clear the free-text description for a saved destination.
+      tags: [Sync Destinations]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Destination name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [description]
+              properties:
+                description:
+                  type: string
+                  description: New description text (max 200 chars). Empty string clears it.
+      responses:
+        "200":
+          description: Description updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, name, description]
+                properties:
+                  ok:
+                    type: boolean
+                  name:
+                    type: string
+                  description:
+                    type: string
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -2279,6 +2324,9 @@ components:
           type: array
           items:
             type: string
+        description:
+          type: string
+          description: Optional free-text note (empty string if not set)
 
     SyncStatusSummary:
       type: object

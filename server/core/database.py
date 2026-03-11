@@ -19,6 +19,7 @@ from core.constants import (
     DEFAULT_DB_FILE,
     IS_MACOS,
     KNOWN_DEST_SCHEMES,
+    MAX_DEST_DESCRIPTION_LEN,
     VALID_DEST_NAME_RE,
     VIRTUAL_DEST_TYPES,
 )
@@ -1361,7 +1362,7 @@ class SyncTracker:
         return str(uuid.uuid4())
 
     def add_destination(self, name, path, sync_key=None,
-                        validate_path=True, audit_source=None):
+                        description='', validate_path=True, audit_source=None):
         """Add a saved destination to the DB.
 
         If sync_key is not provided, generates a new UUID internally.
@@ -1406,9 +1407,9 @@ class SyncTracker:
                 if existing:
                     return False
                 conn.execute(
-                    "INSERT INTO destinations (name, path, sync_key, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (name, path, sync_key, now, now),
+                    "INSERT INTO destinations (name, path, sync_key, description, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (name, path, sync_key, description[:MAX_DEST_DESCRIPTION_LEN], now, now),
                 )
                 # Ensure sync_keys row exists
                 conn.execute(
@@ -1429,7 +1430,7 @@ class SyncTracker:
         conn = self._connect()
         try:
             row = conn.execute(
-                """SELECT d.name, d.path, d.sync_key, k.playlist_prefs
+                """SELECT d.name, d.path, d.sync_key, d.description, k.playlist_prefs
                    FROM destinations d
                    LEFT JOIN sync_keys k ON k.key_name = d.sync_key
                    WHERE d.name = ? COLLATE NOCASE""",
@@ -1440,7 +1441,8 @@ class SyncTracker:
                 prefs = json.loads(raw) if raw else None
                 return SyncDestination(row['name'], row['path'],
                                        sync_key=row['sync_key'],
-                                       playlist_prefs=prefs)
+                                       playlist_prefs=prefs,
+                                       description=row['description'] or '')
             return None
         finally:
             conn.close()
@@ -1450,7 +1452,7 @@ class SyncTracker:
         conn = self._connect()
         try:
             rows = conn.execute(
-                """SELECT d.name, d.path, d.sync_key, k.playlist_prefs
+                """SELECT d.name, d.path, d.sync_key, d.description, k.playlist_prefs
                    FROM destinations d
                    LEFT JOIN sync_keys k ON k.key_name = d.sync_key
                    ORDER BY d.rowid"""
@@ -1468,7 +1470,8 @@ class SyncTracker:
                 prefs = json.loads(raw) if raw else None
                 dests.append(SyncDestination(
                     r['name'], r['path'], sync_key=r['sync_key'],
-                    linked_destinations=linked, playlist_prefs=prefs))
+                    linked_destinations=linked, playlist_prefs=prefs,
+                    description=r['description'] or ''))
             return dests
         finally:
             conn.close()
@@ -1536,18 +1539,34 @@ class SyncTracker:
             finally:
                 conn.close()
 
+    def update_description(self, name, description):
+        """Set (or clear) the description for a destination. Returns True on success."""
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                cursor = conn.execute(
+                    "UPDATE destinations SET description = ?, updated_at = ? "
+                    "WHERE name = ? COLLATE NOCASE",
+                    (description[:MAX_DEST_DESCRIPTION_LEN], time.time(), name),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+            finally:
+                conn.close()
+
     def find_destination_by_path(self, path):
         """Find a destination by schemed path. Returns SyncDestination or None."""
         normalized = path.rstrip('/\\')
         conn = self._connect()
         try:
             rows = conn.execute(
-                "SELECT name, path, sync_key FROM destinations"
+                "SELECT name, path, sync_key, description FROM destinations"
             ).fetchall()
             for r in rows:
                 if r['path'].rstrip('/\\') == normalized:
                     return SyncDestination(r['name'], r['path'],
-                                           sync_key=r['sync_key'])
+                                           sync_key=r['sync_key'],
+                                           description=r['description'] or '')
             return None
         finally:
             conn.close()

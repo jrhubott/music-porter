@@ -89,6 +89,7 @@ class SyncDestination:
     sync_key: str = ''  # internal UUID; never shown to users
     linked_destinations: list = field(default_factory=list)
     playlist_prefs: list | None = None  # None = all playlists
+    description: str = ''  # optional free-text note
 
     @property
     def type(self) -> str:
@@ -130,7 +131,8 @@ class SyncDestination:
         return {'name': self.name, 'path': self.path,
                 'type': self.type, 'available': self.available,
                 'linked_destinations': self.linked_destinations,
-                'playlist_prefs': self.playlist_prefs}
+                'playlist_prefs': self.playlist_prefs,
+                'description': self.description}
 
 
 class _DisplayProgress:

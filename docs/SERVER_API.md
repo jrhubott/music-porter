@@ -938,6 +938,7 @@ List all sync destinations (saved from DB + auto-detected USB drives in web mode
 | `destinations[].available` | boolean | Whether the destination path is currently accessible |
 | `destinations[].linked_destinations` | string[] | Names of other destinations sharing the same sync tracking group |
 | `destinations[].playlist_prefs` | string[] \| null | Saved playlist selection for this group. `null` = sync all playlists; array = sync only listed playlist keys |
+| `destinations[].description` | string | Optional free-text note for this destination (empty string if not set) |
 
 ---
 
@@ -951,6 +952,7 @@ Add a saved sync destination.
 |-------|------|----------|-------------|
 | `name` | string | Yes | Destination display name |
 | `path` | string | Yes | Destination path with scheme |
+| `description` | string | No | Optional free-text note (max 200 characters) |
 | `link_to` | string | No | Name of an existing destination to share tracking with (instead of independent tracking) |
 
 **Response:**
@@ -979,6 +981,34 @@ Remove a saved sync destination.
 | `name` | string | Destination name |
 
 **Response:** `{"ok": true}`
+
+**Status codes:** 404 if destination not found
+
+---
+
+### PUT /api/sync/destinations/\<name\>/description
+
+Set or clear the description for a saved destination.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `name` | string | Destination name |
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `description` | string | Yes | New description text (max 200 characters). Empty string clears the description. |
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ok` | boolean | Always `true` on success |
+| `name` | string | Destination name |
+| `description` | string | The saved description value |
 
 **Status codes:** 404 if destination not found
 

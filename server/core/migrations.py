@@ -648,6 +648,18 @@ def migrate_db_schema(logger=None):
                 logger.info(
                     "DB migration 16→17: added source_type to playlists table")
 
+        if current < 18:
+            # Add description column to destinations for optional free-text notes.
+            conn.execute(
+                "ALTER TABLE destinations ADD COLUMN description TEXT NOT NULL DEFAULT ''"
+            )
+            conn.execute("PRAGMA user_version = 18")
+            conn.commit()
+            changes.append("added description column to destinations (v18)")
+            if logger:
+                logger.info(
+                    "DB migration 17→18: added description to destinations table")
+
         return [MigrationEvent(
             'schema_migrate',
             f"DB schema migrated from version {from_version} to {DB_SCHEMA_VERSION}",

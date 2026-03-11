@@ -203,6 +203,9 @@ export function DestinationsPage() {
               <div key={d.name} className="list-group-item bg-dark d-flex justify-content-between align-items-center">
                 <div>
                   <div className="fw-bold text-light">{d.name}</div>
+                  {d.description && (
+                    <small className="text-secondary d-block">{d.description}</small>
+                  )}
                   <small className="text-secondary">
                     {d.path}
                     {hasLinked && (

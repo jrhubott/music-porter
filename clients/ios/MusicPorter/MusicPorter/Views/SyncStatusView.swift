@@ -289,6 +289,11 @@ struct SyncStatusView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(dest.name)
                             .font(.subheadline.weight(.medium))
+                        if let desc = dest.description, !desc.isEmpty {
+                            Text(desc)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                         Text(dest.path)
                             .font(.caption)
                             .foregroundStyle(.secondary)
