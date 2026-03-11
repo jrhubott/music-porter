@@ -33,7 +33,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.40.3-youtube-music"
+VERSION = "2.40.3-dev+085210c"
 
 DEFAULT_DATA_DIR = "data"
 DEFAULT_LIBRARY_DIR = "library"
