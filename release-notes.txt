@@ -1,3 +1,12 @@
+Version 2.40.4 (2026-03-11):
+• Add codebase-memory MCP tool permissions
+• Add client build script and complete YouTube Music feature
+• Set branch version to 2.40.1-youtube-music and add SRS-24
+• Add jsonFetch() helper to prevent SyntaxError on non-JSON responses
+• Fix MigrationEvent missing @dataclass decorator
+• iOS companion app updated to v2.40.2
+• Sync client updated to v2.40.1
+
 Version 2.40.2 (2026-03-10):
 • Add Last Downloaded column to dashboard playlist table
 • Add favicon to web UI
