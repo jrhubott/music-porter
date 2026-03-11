@@ -564,6 +564,7 @@ def api_playlists_list():
 
     resp = jsonify([
         {'key': p['key'], 'url': p['url'], 'name': p['name'],
+         'source_type': p.get('source_type', 'apple_music'),
          'file_count': stats.get(p['key'], {}).get('track_count', 0),
          'total_track_count': stats.get(p['key'], {}).get('total_track_count', 0),
          'hidden_count': stats.get(p['key'], {}).get('hidden_count', 0),
@@ -587,7 +588,12 @@ def api_playlists_add():
     if not key or not url or not name:
         return jsonify({'error': 'key, url, and name are required'}), 400
 
-    if ctx.playlist_db.add(key, url, name):
+    try:
+        source_type = mp.detect_source_type(url)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
+    if ctx.playlist_db.add(key, url, name, source_type=source_type):
         return jsonify({'ok': True})
     return jsonify({'error': f"Playlist key '{key}' already exists"}), 409
 
@@ -813,10 +819,13 @@ def api_settings_get():
         }
         for name, p in mp.OUTPUT_PROFILES.items()
     }
+    from pathlib import Path as _Path
+    yt_cookies_present = _Path(mp.YT_COOKIE_PATH).exists()
     return jsonify({
         'settings': config.settings,
         'profiles': profiles,
         'quality_presets': list(mp.QUALITY_PRESETS.keys()),
+        'yt_cookies_present': yt_cookies_present,
     })
 
 

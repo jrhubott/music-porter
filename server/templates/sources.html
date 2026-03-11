@@ -12,7 +12,7 @@
         <input type="text" class="form-control form-control-sm" id="addKey" placeholder="Key (e.g. Pop_Workout)" required>
       </div>
       <div class="col-md-5">
-        <input type="url" class="form-control form-control-sm" id="addUrl" placeholder="Apple Music URL" required>
+        <input type="url" class="form-control form-control-sm" id="addUrl" placeholder="music.apple.com or music.youtube.com URL" required>
       </div>
       <div class="col-md-3">
         <input type="text" class="form-control form-control-sm" id="addName" placeholder="Display Name" required>
@@ -45,13 +45,14 @@
             <th>#</th>
             <th>Key</th>
             <th>Name</th>
+            <th>Source</th>
             <th>Tracks</th>
             <th>URL</th>
             <th class="text-end">Actions</th>
           </tr>
         </thead>
         <tbody id="playlistTable">
-          <tr><td colspan="6" class="text-center text-muted">Loading...</td></tr>
+          <tr><td colspan="7" class="text-center text-muted">Loading...</td></tr>
         </tbody>
       </table>
     </div>
@@ -145,7 +146,7 @@ function loadPlaylists() {
   jsonFetch('/api/playlists').then(playlists => {
     const tbody = document.getElementById('playlistTable');
     if (playlists.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No playlists configured</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No playlists configured</td></tr>';
       return;
     }
     tbody.innerHTML = playlists.map((p, i) => {
@@ -154,11 +155,16 @@ function loadPlaylists() {
       const trackCell = hidden > 0
         ? `${total} <span class="badge bg-secondary ms-1" title="${hidden} hidden">${hidden} hidden</span>`
         : `${total}`;
+      const sourceType = p.source_type || 'apple_music';
+      const sourceBadge = sourceType === 'youtube_music'
+        ? '<span class="badge bg-danger" title="YouTube Music"><i class="bi bi-youtube"></i> YT Music</span>'
+        : '<span class="badge bg-secondary" title="Apple Music"><i class="bi bi-apple"></i> Apple</span>';
       return `
       <tr>
         <td>${i + 1}</td>
         <td><code>${p.key}</code></td>
         <td>${p.name}</td>
+        <td class="text-nowrap">${sourceBadge}</td>
         <td class="text-nowrap">${trackCell}</td>
         <td><small class="text-muted text-truncate d-inline-block" style="max-width:300px" title="${p.url}">${p.url}</small></td>
         <td class="text-end">
@@ -175,9 +181,14 @@ function loadPlaylists() {
 
 document.getElementById('addForm').addEventListener('submit', function(e) {
   e.preventDefault();
+  const url = document.getElementById('addUrl').value.trim();
+  if (!url.includes('music.apple.com') && !url.includes('music.youtube.com')) {
+    showToast('URL must be from music.apple.com or music.youtube.com', 'error');
+    return;
+  }
   const data = {
     key: document.getElementById('addKey').value.trim(),
-    url: document.getElementById('addUrl').value.trim(),
+    url,
     name: document.getElementById('addName').value.trim(),
   };
   jsonFetch('/api/playlists', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})

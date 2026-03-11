@@ -42,10 +42,13 @@ export interface ServerInfoResponse {
 
 export type FreshnessLevel = 'current' | 'recent' | 'stale' | 'outdated';
 
+export type PlaylistSourceType = 'apple_music' | 'youtube_music';
+
 export interface Playlist {
   key: string;
   url: string;
   name: string;
+  source_type?: PlaylistSourceType;
   file_count?: number;
   size_bytes?: number;
   duration_s?: number;

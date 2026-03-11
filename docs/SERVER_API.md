@@ -330,8 +330,9 @@ List all playlists with aggregate stats from TrackDB. Supports ETag caching.
 | Field | Type | Description |
 |-------|------|-------------|
 | `key` | string | Unique playlist identifier |
-| `url` | string | Apple Music playlist URL |
+| `url` | string | Playlist URL (Apple Music or YouTube Music) |
 | `name` | string | Human-readable playlist name |
+| `source_type` | string | `"apple_music"` or `"youtube_music"` |
 | `file_count` | integer | Number of converted MP3 tracks |
 | `size_bytes` | integer | Total size of MP3 files in bytes |
 | `duration_s` | number | Total duration in seconds |
@@ -343,6 +344,7 @@ List all playlists with aggregate stats from TrackDB. Supports ETag caching.
     "key": "my_playlist",
     "url": "https://music.apple.com/us/playlist/my-playlist/pl.abc123",
     "name": "My Playlist",
+    "source_type": "apple_music",
     "file_count": 15,
     "size_bytes": 52428800,
     "duration_s": 3600,
@@ -355,19 +357,19 @@ List all playlists with aggregate stats from TrackDB. Supports ETag caching.
 
 ### POST /api/playlists
 
-Add a new playlist to the config.
+Add a new playlist. The `source_type` is auto-detected from the URL.
 
 **Request body:**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `key` | string | Yes | Unique playlist key (used as directory name) |
-| `url` | string | Yes | Apple Music playlist URL |
+| `url` | string | Yes | Apple Music (`music.apple.com`) or YouTube Music (`music.youtube.com`) URL |
 | `name` | string | Yes | Human-readable display name |
 
 **Response:** `{"ok": true}`
 
-**Status codes:** 400 if missing fields, 409 if key already exists
+**Status codes:** 400 if missing fields or unrecognised URL, 409 if key already exists
 
 ---
 

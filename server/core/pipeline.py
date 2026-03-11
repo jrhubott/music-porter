@@ -8,17 +8,23 @@ import shutil
 import time
 from pathlib import Path
 
-from core.config import ConfigManager, DependencyChecker, NonInteractivePromptHandler, NullDisplayHandler
+from core.config import (
+    ConfigManager,
+    DependencyChecker,
+    NonInteractivePromptHandler,
+    NullDisplayHandler,
+)
 from core.constants import (
     DEFAULT_COOKIES,
     DEFAULT_IMPORTER,
     DEFAULT_LIBRARY_DIR,
     DEFAULT_OUTPUT_TYPE,
+    IMPORTER_YTDLP,
     OUTPUT_PROFILES,
     SOURCE_SUBDIR,
 )
 from core.converter import ConversionStatistics, Converter
-from core.downloader import Downloader
+from core.downloader import Downloader, YouTubeMusicDownloader
 from core.logging import Logger
 from core.models import (
     AggregateResult,
@@ -664,12 +670,18 @@ class DataManager:
                              remove_config=False, dry_run=False):
         """Delete source M4A and/or library MP3/artwork for a playlist.
 
-        Source files are in library/source/gamdl/<playlist>/ (directory).
+        Source files are in library/source/<importer>/<playlist>/ (directory).
         MP3 and artwork files are in flat dirs — identified via TrackDB.
 
         Returns DeleteResult with stats about what was deleted.
         """
-        source_dir = Path(get_source_dir(playlist_key))
+        # Determine importer from playlist source_type (falls back to gamdl)
+        importer = DEFAULT_IMPORTER
+        if self.playlist_db:
+            pl = self.playlist_db.get(playlist_key)
+            if pl and pl.get('source_type') == 'youtube_music':
+                importer = IMPORTER_YTDLP
+        source_dir = Path(get_source_dir(playlist_key, importer))
 
         errors = []
         files_deleted = 0
@@ -821,6 +833,7 @@ class PipelineStatistics:
         self.download_success = False
         self.playlist_key = None
         self.playlist_name = None
+        self.playlist_importer = DEFAULT_IMPORTER  # gamdl or ytdlp
         self.download_stats = None  # DownloadStatistics object
 
         # Conversion stats
@@ -1071,7 +1084,8 @@ class PipelineOrchestrator:
 
         # ── Stage 2: Convert M4A → clean library MP3 ─────────────────
         self.logger.info("\n=== STAGE 2: Convert M4A → MP3 ===")
-        music_dir = str(self.project_root / get_source_dir(self.stats.playlist_key))
+        music_dir = str(self.project_root / get_source_dir(
+            self.stats.playlist_key, self.stats.playlist_importer))
         library_dir = str(self.project_root / get_audio_dir())
 
         preset = (quality_preset if quality_preset is not None
@@ -1263,25 +1277,42 @@ class PipelineOrchestrator:
         pl_key = playlist['key']
         pl_name = playlist['name']
         pl_url = playlist['url']
+        pl_source_type = playlist.get('source_type', 'apple_music')
         self.stats.playlist_key = pl_key
         self.stats.playlist_name = pl_name
 
-        output_dir = get_source_dir(pl_key)
-
-        downloader = Downloader(self.logger, self.deps.venv_python,
-                               cookie_path=self.cookie_path,
-                               prompt_handler=self.prompt_handler,
-                               display_handler=self.display_handler,
-                               cancel_event=self.cancel_event)
-        dl_result = downloader.download(
-            pl_url,
-            output_dir,
-            key=pl_key,
-            confirm=not auto,
-            dry_run=dry_run,
-            validate_cookies=validate_cookies,
-            auto_refresh=auto_refresh_cookies
-        )
+        if pl_source_type == 'youtube_music':
+            self.stats.playlist_importer = IMPORTER_YTDLP
+            output_dir = get_source_dir(pl_key, IMPORTER_YTDLP)
+            ytdl = YouTubeMusicDownloader(
+                logger=self.logger,
+                display_handler=self.display_handler,
+                cancel_event=self.cancel_event,
+            )
+            dl_result = ytdl.download(
+                pl_url,
+                output_dir,
+                key=pl_key,
+                display_handler=self.display_handler,
+                cancel_event=self.cancel_event,
+            )
+        else:
+            self.stats.playlist_importer = DEFAULT_IMPORTER
+            output_dir = get_source_dir(pl_key, DEFAULT_IMPORTER)
+            downloader = Downloader(self.logger, self.deps.venv_python,
+                                   cookie_path=self.cookie_path,
+                                   prompt_handler=self.prompt_handler,
+                                   display_handler=self.display_handler,
+                                   cancel_event=self.cancel_event)
+            dl_result = downloader.download(
+                pl_url,
+                output_dir,
+                key=pl_key,
+                confirm=not auto,
+                dry_run=dry_run,
+                validate_cookies=validate_cookies,
+                auto_refresh=auto_refresh_cookies
+            )
 
         if dl_result.success:
             self.stats.download_success = True

@@ -20,6 +20,7 @@ export type {
   PipelineProgress,
   PipelineStartResult,
   Playlist,
+  PlaylistSourceType,
   ProfileInfo,
   ResetTrackingResponse,
   ResolveDestinationResponse,

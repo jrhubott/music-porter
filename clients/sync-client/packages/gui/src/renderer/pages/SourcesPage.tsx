@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useIPC } from '../hooks/useIPC.js';
 import { useAppState } from '../store/app-state.js';
-import type { FileInfo, FreshnessLevel, Playlist, PipelineProgress } from '@mporter/core';
+import type { FileInfo, FreshnessLevel, Playlist, PlaylistSourceType, PipelineProgress } from '@mporter/core';
 
 // ── Constants ──
 
@@ -12,6 +12,8 @@ const SECONDS_PER_HOUR = 3600;
 const PERCENT_MULTIPLIER = 100;
 const APPLE_MUSIC_URL_PATTERN =
   /^https?:\/\/music\.apple\.com\/[a-z]{2}\/playlist\/([^/]+)\/[a-zA-Z0-9.]+/;
+const YOUTUBE_MUSIC_URL_PATTERN =
+  /^https?:\/\/music\.youtube\.com\/playlist\?list=([^&]+)/;
 
 // ── Helpers ──
 
@@ -29,16 +31,29 @@ function formatDuration(seconds: number): string {
   return `${minutes}m`;
 }
 
-function parseAppleMusicURL(url: string): { key: string; name: string } | null {
-  const match = url.match(APPLE_MUSIC_URL_PATTERN);
-  if (!match?.[1]) return null;
-  const slug = match[1];
-  const name = slug
-    .split('-')
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(' ');
-  const key = slug.replace(/-/g, '_').toLowerCase();
-  return { key, name };
+function parsePlaylistURL(url: string): { key: string; name: string; sourceType: PlaylistSourceType } | null {
+  // Apple Music
+  const appleMatch = url.match(APPLE_MUSIC_URL_PATTERN);
+  if (appleMatch?.[1]) {
+    const slug = appleMatch[1];
+    const name = slug.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    const key = slug.replace(/-/g, '_').toLowerCase();
+    return { key, name, sourceType: 'apple_music' };
+  }
+  // YouTube Music
+  const ytMatch = url.match(YOUTUBE_MUSIC_URL_PATTERN);
+  if (ytMatch?.[1]) {
+    const listId = ytMatch[1];
+    return { key: listId, name: listId, sourceType: 'youtube_music' };
+  }
+  return null;
+}
+
+function sourceBadge(sourceType?: PlaylistSourceType): React.ReactElement {
+  if (sourceType === 'youtube_music') {
+    return <span className="badge bg-danger me-2" style={{ fontSize: '0.65em' }}>YT Music</span>;
+  }
+  return <span className="badge bg-secondary me-2" style={{ fontSize: '0.65em' }}>Apple</span>;
 }
 
 function freshnessBadge(level?: FreshnessLevel): { className: string; label: string } {
@@ -151,7 +166,7 @@ export function SourcesPage() {
   function handleURLChange(url: string) {
     setAddURL(url);
     setAddError('');
-    const parsed = parseAppleMusicURL(url);
+    const parsed = parsePlaylistURL(url);
     if (parsed) {
       setAddName(parsed.name);
       setAddKey(parsed.key);
@@ -281,12 +296,12 @@ export function SourcesPage() {
         )}
       </div>
 
-      {/* Apple Music Card */}
+      {/* Playlists Card */}
       <div className="card bg-dark border-secondary mb-4">
         <div className="card-header d-flex justify-content-between align-items-center">
           <span>
             <i className="bi bi-music-note-beamed me-2" />
-            Apple Music
+            Playlists
           </span>
           {!isOffline && (
             <button
@@ -305,7 +320,7 @@ export function SourcesPage() {
               <input
                 type="text"
                 className="form-control form-control-sm bg-dark text-light border-secondary"
-                placeholder="Apple Music playlist URL"
+                placeholder="music.apple.com or music.youtube.com URL"
                 value={addURL}
                 onChange={(e) => handleURLChange(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
@@ -396,7 +411,10 @@ export function SourcesPage() {
                 /* Display mode */
                 <div className="d-flex justify-content-between align-items-center">
                   <div>
-                    <div className="fw-bold text-light">{p.name}</div>
+                    <div className="fw-bold text-light">
+                      {sourceBadge(p.source_type)}
+                      {p.name}
+                    </div>
                     <small className="text-secondary">
                       <code>{p.key}</code>
                       {(p.file_count ?? 0) > 0 && (

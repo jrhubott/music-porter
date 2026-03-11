@@ -33,7 +33,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.40.3-dev"
+VERSION = "2.40.3-youtube-music"
 
 DEFAULT_DATA_DIR = "data"
 DEFAULT_LIBRARY_DIR = "library"
@@ -41,6 +41,8 @@ SOURCE_SUBDIR = "source"
 AUDIO_SUBDIR = "audio"
 ARTWORK_SUBDIR = "artwork"
 DEFAULT_IMPORTER = "gamdl"
+IMPORTER_YTDLP = "ytdlp"
+YT_COOKIE_PATH = "data/yt-cookies.txt"
 DEFAULT_LOG_DIR = "logs"
 DEFAULT_LOG_RETENTION_DAYS = 7
 DEFAULT_AUDIT_RETENTION_DAYS = 90
@@ -69,7 +71,7 @@ KNOWN_DEST_SCHEMES = ('usb://', 'folder://', 'web-client://', 'ios://')
 # the config.yaml structure or DB tables/columns.
 CONFIG_SCHEMA_VERSION = 5
 PROFILES_SCHEMA_VERSION = 1  # increment + add a migration case when changing profiles.yaml structure
-DB_SCHEMA_VERSION = 16
+DB_SCHEMA_VERSION = 17
 
 # Excluded USB volumes by OS
 if IS_MACOS:
