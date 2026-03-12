@@ -25,6 +25,8 @@ export interface SyncOptions {
   destinationName?: string;
   /** USB drive name — triggers USB-type destination resolution. */
   usbDriveName?: string;
+  /** USB drive filesystem UUID — used by server for drive re-identification. */
+  usbVolumeId?: string;
   /** Output profile name — when set, server applies profile-specific tags to downloads. */
   profile?: string;
   /** Number of parallel downloads. */
@@ -99,6 +101,7 @@ export class SyncEngine {
       path: `${scheme}${destDir}`,
       driveName: options.usbDriveName,
       name: options.destinationName,
+      volumeId: options.usbVolumeId,
     });
     const destName = resolved.destination.name;
     log('info', `Destination: ${destName}`);

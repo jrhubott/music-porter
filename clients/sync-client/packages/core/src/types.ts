@@ -188,6 +188,7 @@ export interface DriveInfo {
   name: string;
   path: string;
   freeSpace?: number;
+  volumeId?: string;
 }
 
 // ── Sync Engine ──
@@ -327,6 +328,7 @@ export interface WindowState {
 export interface SyncPreferences {
   concurrency: number;
   autoSyncDrives: string[];
+  autoSyncVolumeIds?: string[];
   ejectAfterSync: boolean;
   notifications: boolean;
   pinnedPlaylists: string[];

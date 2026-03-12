@@ -582,10 +582,13 @@ function toggleGroupExpand(btn, idx) {
         : d.available
         ? '<span class="badge bg-success">Available</span>'
         : '<span class="badge bg-danger">Not Found</span>';
+    const volId = (d.volume_id && d.type === 'usb')
+      ? `<br><small class="text-secondary">Vol: ${d.volume_id}</small>`
+      : '';
     return `<tr class="table-active">
       <td></td>
       <td colspan="2"><i class="bi ${typeIcon} me-2 text-muted"></i><strong>${d.name}</strong> ${typeBadge}</td>
-      <td colspan="2"><code class="small">${d.path}</code></td>
+      <td colspan="2"><code class="small">${d.path}</code>${volId}</td>
       <td colspan="2">${availBadge}</td>
     </tr>`;
   }).join('');
@@ -779,11 +782,14 @@ function renderDestsTable(saved) {
       ? `<span class="text-muted small">${descText}</span>`
       : `<span class="text-muted small fst-italic">—</span>`;
     const descCell = `<span class="dest-desc-wrap d-flex align-items-center gap-1">${descInner}<i class="bi bi-pencil dest-edit-icon text-muted small"></i></span>`;
+    const volIdHtml = (d.volume_id && d.type === 'usb')
+      ? `<br><small class="text-secondary">Vol: ${d.volume_id}</small>`
+      : '';
     return `<tr>
       <td>${d.name}</td>
       <td class="dest-desc-cell" data-dest="${dName}" onclick="editDescription(this)" style="cursor:pointer" title="Click to edit description">${descCell}</td>
       <td>${typeBadge}</td>
-      <td><code>${d.path}</code></td>
+      <td><code>${d.path}</code>${volIdHtml}</td>
       <td class="text-center">${linkedBadge}</td>
       <td class="text-center">${avail}</td>
       <td class="text-center">

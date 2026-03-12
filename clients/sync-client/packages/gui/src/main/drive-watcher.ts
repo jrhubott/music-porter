@@ -13,9 +13,8 @@ export function startDriveWatcher(mainWindow: BrowserWindow): void {
       // Check for per-drive auto-sync triggers
       if (added.length > 0) {
         const configStore = new ConfigStore();
-        const autoSyncDrives = configStore.preferences.autoSyncDrives;
         for (const drive of added) {
-          if (autoSyncDrives.includes(drive.name)) {
+          if (configStore.isAutoSyncDrive(drive.name, drive.volumeId)) {
             mainWindow.webContents.send('drives:autoSync', { drive });
           }
         }

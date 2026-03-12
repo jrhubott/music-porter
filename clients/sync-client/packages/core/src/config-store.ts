@@ -80,24 +80,44 @@ export class ConfigStore {
 
   // ── Auto-Sync Drive Helpers ──
 
-  addAutoSyncDrive(name: string): void {
+  addAutoSyncDrive(name: string, volumeId?: string): void {
     const drives = this.config.preferences.autoSyncDrives;
     if (!drives.includes(name)) {
       drives.push(name);
-      this.save();
     }
+    if (volumeId) {
+      const volIds = this.config.preferences.autoSyncVolumeIds ?? [];
+      if (!volIds.includes(volumeId)) {
+        volIds.push(volumeId);
+        this.config.preferences.autoSyncVolumeIds = volIds;
+      }
+    }
+    this.save();
   }
 
-  removeAutoSyncDrive(name: string): void {
+  removeAutoSyncDrive(name: string, volumeId?: string): void {
     const drives = this.config.preferences.autoSyncDrives;
     const index = drives.indexOf(name);
     if (index !== -1) {
       drives.splice(index, 1);
-      this.save();
     }
+    if (volumeId) {
+      const volIds = this.config.preferences.autoSyncVolumeIds ?? [];
+      const vidx = volIds.indexOf(volumeId);
+      if (vidx !== -1) {
+        volIds.splice(vidx, 1);
+        this.config.preferences.autoSyncVolumeIds = volIds;
+      }
+    }
+    this.save();
   }
 
-  isAutoSyncDrive(name: string): boolean {
+  isAutoSyncDrive(name: string, volumeId?: string): boolean {
+    // Match by volumeId first (survives drive renames), fall back to name
+    if (volumeId) {
+      const volIds = this.config.preferences.autoSyncVolumeIds ?? [];
+      if (volIds.includes(volumeId)) return true;
+    }
     return this.config.preferences.autoSyncDrives.includes(name);
   }
 

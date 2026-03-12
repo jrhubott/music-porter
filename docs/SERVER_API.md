@@ -939,6 +939,7 @@ List all sync destinations (saved from DB + auto-detected USB drives in web mode
 | `destinations[].linked_destinations` | string[] | Names of other destinations sharing the same sync tracking group |
 | `destinations[].playlist_prefs` | string[] \| null | Saved playlist selection for this group. `null` = sync all playlists; array = sync only listed playlist keys |
 | `destinations[].description` | string | Optional free-text note for this destination (empty string if not set) |
+| `destinations[].volume_id` | string | Filesystem UUID of the drive (empty string if not set or not a USB destination) |
 
 ---
 
@@ -953,6 +954,7 @@ Add a saved sync destination.
 | `name` | string | Yes | Destination display name |
 | `path` | string | Yes | Destination path with scheme |
 | `description` | string | No | Optional free-text note (max 200 characters) |
+| `volume_id` | string | No | Filesystem UUID of the drive for persistent identification |
 | `link_to` | string | No | Name of an existing destination to share tracking with (instead of independent tracking) |
 
 **Response:**
@@ -1066,6 +1068,7 @@ This endpoint moves destination resolution logic from clients to the server.
 | `drive_name` | string | No | Drive display name, used when creating a new destination from path |
 | `link_to` | string | No | Name of an existing destination to share tracking with |
 | `name` | string | No | Name of an existing saved destination to resolve |
+| `volume_id` | string | No | Filesystem UUID — if provided, used to match by UUID before path (allows re-identification after drive rename) |
 
 **Response:**
 

@@ -168,12 +168,21 @@ export function SettingsPage() {
 
   async function removeAutoSyncDrive(driveName: string) {
     if (!prefs) return;
-    const updated = {
-      ...prefs,
-      autoSyncDrives: prefs.autoSyncDrives.filter((d) => d !== driveName),
-    };
+    const updatedDrives = prefs.autoSyncDrives.filter((d) => d !== driveName);
+    // Also remove the volumeId if the drive is currently connected
+    let updatedVolumeIds = prefs.autoSyncVolumeIds ?? [];
+    try {
+      const currentDrives = await ipc.listDrives();
+      const match = currentDrives.find((d) => d.name === driveName);
+      if (match?.volumeId) {
+        updatedVolumeIds = updatedVolumeIds.filter((v) => v !== match.volumeId);
+      }
+    } catch {
+      // Non-critical — skip volumeId cleanup if drives can't be fetched
+    }
+    const updated = { ...prefs, autoSyncDrives: updatedDrives, autoSyncVolumeIds: updatedVolumeIds };
     setPrefs(updated);
-    await ipc.updatePreferences({ autoSyncDrives: updated.autoSyncDrives });
+    await ipc.updatePreferences({ autoSyncDrives: updatedDrives, autoSyncVolumeIds: updatedVolumeIds });
   }
 
   async function handleCookieRefresh() {

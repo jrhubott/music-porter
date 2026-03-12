@@ -74,7 +74,7 @@ KNOWN_DEST_SCHEMES = ('usb://', 'folder://', 'web-client://', 'ios://')
 # the config.yaml structure or DB tables/columns.
 CONFIG_SCHEMA_VERSION = 5
 PROFILES_SCHEMA_VERSION = 1  # increment + add a migration case when changing profiles.yaml structure
-DB_SCHEMA_VERSION = 18
+DB_SCHEMA_VERSION = 19
 
 # Excluded USB volumes by OS
 if IS_MACOS:

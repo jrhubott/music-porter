@@ -326,6 +326,7 @@ export function registerIPCHandlers(): void {
         destinationName?: string;
         concurrency?: number;
         usbDriveName?: string;
+        usbVolumeId?: string;
         profile?: string;
         force?: boolean;
         offlineOnly?: boolean;
@@ -343,6 +344,7 @@ export function registerIPCHandlers(): void {
         playlists: opts.playlists,
         destinationName: opts.destinationName,
         usbDriveName: opts.usbDriveName,
+        usbVolumeId: opts.usbVolumeId,
         profile: opts.profile,
         force: opts.force,
         concurrency: opts.concurrency,

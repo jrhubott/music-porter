@@ -224,10 +224,11 @@ Sync destination configuration previously stored in `config.yaml`, migrated to t
 | path | TEXT | NOT NULL | Destination path (with `usb://` or `folder://` scheme) |
 | sync\_key | TEXT | NOT NULL | Internal UUID (references sync\_keys). Multiple destinations sharing the same sync\_key form a linked group with shared tracking. |
 | description | TEXT | NOT NULL DEFAULT '' | Optional free-text note (max 200 chars). Added in **migration 17 -> 18**. |
+| volume\_id | TEXT | DEFAULT NULL | Filesystem UUID for drive re-identification regardless of mount point or label changes. Added in **migration 18 -> 19**. |
 | created\_at | REAL | NOT NULL | Unix epoch timestamp |
 | updated\_at | REAL | NOT NULL | Unix epoch timestamp |
 
-**Indexes:** `idx_destinations_sync_key(sync_key)`
+**Indexes:** `idx_destinations_sync_key(sync_key)`, `idx_destinations_volume_id(volume_id)`
 
 **Class:** `SyncTracker`
 
@@ -253,6 +254,7 @@ Sync destination configuration previously stored in `config.yaml`, migrated to t
 | 15 | 16 | Added nullable `last_downloaded_at` column to `playlists` table for tracking when a playlist was last downloaded. |
 | 16 | 17 | Added `source_type` column to `playlists` table for YouTube Music support. |
 | 17 | 18 | Added `description` column to `destinations` table for optional free-text notes. |
+| 18 | 19 | Added `volume_id` column to `destinations` table for filesystem UUID-based drive re-identification. Added `idx_destinations_volume_id` index. |
 
 ## Notes
 

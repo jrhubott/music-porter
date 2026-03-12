@@ -1988,26 +1988,44 @@ def api_sync_destinations():
     """List all sync destinations (saved + auto-detected USB) as a flat list."""
     ctx = _ctx()
     config = ctx.get_config()
-    destinations = []
-    saved_names = set()
 
-    # Saved destinations from DB
-    for d in ctx.sync_tracker.get_all_destinations():
-        destinations.append(d.to_api_dict())
-        saved_names.add(d.name)
-
-    # Auto-detected USB drives (only in web mode, not server mode)
-    # Deduplicate: skip USB drives already saved as destinations
+    # Auto-detected USB drives (only in web/no-auth mode — sync client context)
+    detected = []
     if current_app.config.get('NO_AUTH'):
         profile = ctx.get_output_profile(config)
         usb_dir = profile.usb_dir if profile else mp.DEFAULT_USB_DIR
         usb_mgr = mp.SyncManager(mp.Logger(verbose=False))
-        for vol in usb_mgr.find_usb_drives():
-            if vol in saved_names:
+        detected = usb_mgr.find_usb_drives()  # list[dict]
+
+        # Backfill volume_id for saved USB destinations whose volume is currently connected
+        detected_by_name = {v['name']: v for v in detected}
+        for d in ctx.sync_tracker.get_all_destinations():
+            if d.is_usb and not d.volume_id:
+                vol = detected_by_name.get(d.name)
+                if vol and vol.get('volume_id'):
+                    ctx.sync_tracker.update_destination_volume_id(
+                        d.name, vol['volume_id'])
+
+    destinations = []
+    saved_names = set()
+
+    # Saved destinations from DB (fetch after potential backfill)
+    for d in ctx.sync_tracker.get_all_destinations():
+        destinations.append(d.to_api_dict())
+        saved_names.add(d.name)
+
+    # Add auto-detected USB drives not already saved
+    if detected:
+        profile = ctx.get_output_profile(config)
+        usb_dir = profile.usb_dir if profile else mp.DEFAULT_USB_DIR
+        for vol in detected:
+            if vol['name'] in saved_names:
                 continue
-            base = usb_mgr._get_usb_base_path(vol)
+            from pathlib import Path as _Path
+            base = _Path(vol['mount_path'])
             usb_path = f"usb://{base / usb_dir}" if usb_dir else f"usb://{base}"
-            dest = mp.SyncDestination(name=vol, path=usb_path)
+            dest = mp.SyncDestination(name=vol['name'], path=usb_path,
+                                      volume_id=vol['volume_id'])
             dest_dict = dest.to_api_dict()
             dest_dict['auto_detected'] = True
             destinations.append(dest_dict)
@@ -2028,6 +2046,7 @@ def api_sync_destination_add():
     path = data.get('path', '').strip()
     link_to = (data.get('link_to') or '').strip() or None
     description = (data.get('description') or '')[:mp.MAX_DEST_DESCRIPTION_LEN]
+    volume_id = (data.get('volume_id') or '').strip()
     if not name or not path:
         return jsonify({'error': 'name and path are required'}), 400
 
@@ -2040,6 +2059,7 @@ def api_sync_destination_add():
         sync_key = target.sync_key
 
     ok = ctx.sync_tracker.add_destination(name, path, sync_key=sync_key,
+                                          volume_id=volume_id,
                                           description=description,
                                           audit_source=ctx.detect_source())
     if not ok:
@@ -2163,6 +2183,7 @@ def api_sync_destination_resolve():
     name = (data.get('name') or '').strip() or None
     drive_name = (data.get('drive_name') or '').strip() or None
     link_to = (data.get('link_to') or '').strip() or None
+    volume_id = (data.get('volume_id') or '').strip()
 
     if not path and not name:
         return jsonify({'error': 'At least path or name is required'}), 400
@@ -2174,7 +2195,7 @@ def api_sync_destination_resolve():
 
     result = ctx.sync_tracker.resolve_destination(
         path=path, name=name, drive_name=drive_name,
-        link_to=link_to)
+        link_to=link_to, volume_id=volume_id)
     if not result:
         return jsonify({'error': 'Failed to resolve destination'}), 500
 
@@ -2277,7 +2298,7 @@ def api_sync_run():
             dry_run=dry_run,
             tag_applicator=tag_applicator, profile=profile,
             playlist_name=playlist_name, playlist_keys=playlist_keys,
-            clean_destination=clean_dest)
+            clean_destination=clean_dest, dest_name=dest.name)
         return {
             'success': result.success,
             'files_found': result.files_found,
@@ -2321,6 +2342,7 @@ def api_sync_status():
             'path': d.path,
             'type': d.type,
             'available': d.available,
+            'volume_id': d.volume_id,
         })
 
     keys = ctx.sync_tracker._get_keys()

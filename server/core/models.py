@@ -90,6 +90,7 @@ class SyncDestination:
     linked_destinations: list = field(default_factory=list)
     playlist_prefs: list | None = None  # None = all playlists
     description: str = ''  # optional free-text note
+    volume_id: str = ''  # filesystem UUID for drive re-identification
 
     @property
     def type(self) -> str:
@@ -132,7 +133,8 @@ class SyncDestination:
                 'type': self.type, 'available': self.available,
                 'linked_destinations': self.linked_destinations,
                 'playlist_prefs': self.playlist_prefs,
-                'description': self.description}
+                'description': self.description,
+                'volume_id': self.volume_id}
 
 
 class _DisplayProgress:

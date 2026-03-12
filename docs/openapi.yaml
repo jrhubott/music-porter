@@ -1262,6 +1262,9 @@ paths:
                 description:
                   type: string
                   description: Optional free-text note (max 200 characters)
+                volume_id:
+                  type: string
+                  description: Filesystem UUID for drive re-identification
                 link_to:
                   type: string
                   description: Name of an existing destination to link tracking with
@@ -1436,6 +1439,9 @@ paths:
                 name:
                   type: string
                   description: Name of an existing saved destination to resolve
+                volume_id:
+                  type: string
+                  description: Filesystem UUID — used to match by UUID before path (allows re-identification after drive rename)
       responses:
         "200":
           description: Destination resolved
@@ -2327,6 +2333,9 @@ components:
         description:
           type: string
           description: Optional free-text note (empty string if not set)
+        volume_id:
+          type: string
+          description: Filesystem UUID for drive re-identification (empty string if not set)
 
     SyncStatusSummary:
       type: object
