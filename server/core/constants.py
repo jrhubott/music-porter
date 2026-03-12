@@ -33,7 +33,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.40.5-usb-volume-id"
+VERSION = "2.40.5-dev+8b85b0c"
 
 DEFAULT_DATA_DIR = "data"
 DEFAULT_LIBRARY_DIR = "library"
