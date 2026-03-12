@@ -33,7 +33,7 @@ def get_os_display_name():
 # Section 1: Constants and Configuration
 # ══════════════════════════════════════════════════════════════════
 
-VERSION = "2.40.5-dev"
+VERSION = "2.40.5-usb-volume-id"
 
 DEFAULT_DATA_DIR = "data"
 DEFAULT_LIBRARY_DIR = "library"
@@ -61,6 +61,9 @@ TXXX_TRACK_UUID = "TrackUUID"
 # Destination name validation pattern
 VALID_DEST_NAME_RE = r'^[a-zA-Z0-9_-]+$'
 
+# Maximum length for destination description (free-text field)
+MAX_DEST_DESCRIPTION_LEN = 200
+
 # Virtual (non-filesystem) destination types — not backed by a server-visible path
 VIRTUAL_DEST_TYPES = {'web-client', 'ios'}
 
@@ -71,7 +74,7 @@ KNOWN_DEST_SCHEMES = ('usb://', 'folder://', 'web-client://', 'ios://')
 # the config.yaml structure or DB tables/columns.
 CONFIG_SCHEMA_VERSION = 5
 PROFILES_SCHEMA_VERSION = 1  # increment + add a migration case when changing profiles.yaml structure
-DB_SCHEMA_VERSION = 17
+DB_SCHEMA_VERSION = 19
 
 # Excluded USB volumes by OS
 if IS_MACOS:

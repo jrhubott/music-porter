@@ -165,6 +165,7 @@ export function registerSyncCommand(program: Command): void {
       // Resolve destination, detecting USB drives
       let dest = opts.dest ?? process.cwd();
       let usbDriveName: string | undefined;
+      let usbVolumeId: string | undefined;
 
       if (opts.dest) {
         // Check if --dest points to a detected USB drive
@@ -175,6 +176,7 @@ export function registerSyncCommand(program: Command): void {
         );
         if (matchingDrive) {
           usbDriveName = matchingDrive.name;
+          usbVolumeId = matchingDrive.volumeId;
           // Append usb_dir if dest is the drive root
           if (usbDir && opts.dest === matchingDrive.path) {
             dest = join(matchingDrive.path, usbDir);
@@ -236,6 +238,7 @@ export function registerSyncCommand(program: Command): void {
           playlists,
           destinationName: opts.name,
           usbDriveName,
+          usbVolumeId,
           profile: resolvedProfileName || undefined,
           concurrency,
           signal: abortController.signal,

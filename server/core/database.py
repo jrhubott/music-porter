@@ -19,6 +19,7 @@ from core.constants import (
     DEFAULT_DB_FILE,
     IS_MACOS,
     KNOWN_DEST_SCHEMES,
+    MAX_DEST_DESCRIPTION_LEN,
     VALID_DEST_NAME_RE,
     VIRTUAL_DEST_TYPES,
 )
@@ -1361,7 +1362,7 @@ class SyncTracker:
         return str(uuid.uuid4())
 
     def add_destination(self, name, path, sync_key=None,
-                        validate_path=True, audit_source=None):
+                        description='', volume_id='', validate_path=True, audit_source=None):
         """Add a saved destination to the DB.
 
         If sync_key is not provided, generates a new UUID internally.
@@ -1406,9 +1407,10 @@ class SyncTracker:
                 if existing:
                     return False
                 conn.execute(
-                    "INSERT INTO destinations (name, path, sync_key, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (name, path, sync_key, now, now),
+                    "INSERT INTO destinations (name, path, sync_key, description, volume_id, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (name, path, sync_key, description[:MAX_DEST_DESCRIPTION_LEN],
+                     volume_id or None, now, now),
                 )
                 # Ensure sync_keys row exists
                 conn.execute(
@@ -1429,7 +1431,8 @@ class SyncTracker:
         conn = self._connect()
         try:
             row = conn.execute(
-                """SELECT d.name, d.path, d.sync_key, k.playlist_prefs
+                """SELECT d.name, d.path, d.sync_key, d.description, d.volume_id,
+                          k.playlist_prefs
                    FROM destinations d
                    LEFT JOIN sync_keys k ON k.key_name = d.sync_key
                    WHERE d.name = ? COLLATE NOCASE""",
@@ -1440,7 +1443,9 @@ class SyncTracker:
                 prefs = json.loads(raw) if raw else None
                 return SyncDestination(row['name'], row['path'],
                                        sync_key=row['sync_key'],
-                                       playlist_prefs=prefs)
+                                       playlist_prefs=prefs,
+                                       description=row['description'] or '',
+                                       volume_id=row['volume_id'] or '')
             return None
         finally:
             conn.close()
@@ -1450,7 +1455,8 @@ class SyncTracker:
         conn = self._connect()
         try:
             rows = conn.execute(
-                """SELECT d.name, d.path, d.sync_key, k.playlist_prefs
+                """SELECT d.name, d.path, d.sync_key, d.description, d.volume_id,
+                          k.playlist_prefs
                    FROM destinations d
                    LEFT JOIN sync_keys k ON k.key_name = d.sync_key
                    ORDER BY d.rowid"""
@@ -1468,7 +1474,9 @@ class SyncTracker:
                 prefs = json.loads(raw) if raw else None
                 dests.append(SyncDestination(
                     r['name'], r['path'], sync_key=r['sync_key'],
-                    linked_destinations=linked, playlist_prefs=prefs))
+                    linked_destinations=linked, playlist_prefs=prefs,
+                    description=r['description'] or '',
+                    volume_id=r['volume_id'] or ''))
             return dests
         finally:
             conn.close()
@@ -1536,21 +1544,94 @@ class SyncTracker:
             finally:
                 conn.close()
 
+    def update_description(self, name, description):
+        """Set (or clear) the description for a destination. Returns True on success."""
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                cursor = conn.execute(
+                    "UPDATE destinations SET description = ?, updated_at = ? "
+                    "WHERE name = ? COLLATE NOCASE",
+                    (description[:MAX_DEST_DESCRIPTION_LEN], time.time(), name),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+            finally:
+                conn.close()
+
     def find_destination_by_path(self, path):
         """Find a destination by schemed path. Returns SyncDestination or None."""
         normalized = path.rstrip('/\\')
         conn = self._connect()
         try:
             rows = conn.execute(
-                "SELECT name, path, sync_key FROM destinations"
+                "SELECT name, path, sync_key, description, volume_id FROM destinations"
             ).fetchall()
             for r in rows:
                 if r['path'].rstrip('/\\') == normalized:
                     return SyncDestination(r['name'], r['path'],
-                                           sync_key=r['sync_key'])
+                                           sync_key=r['sync_key'],
+                                           description=r['description'] or '',
+                                           volume_id=r['volume_id'] or '')
             return None
         finally:
             conn.close()
+
+    def find_destination_by_volume_id(self, volume_id):
+        """Find a destination by filesystem volume UUID. Returns SyncDestination or None."""
+        if not volume_id:
+            return None
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """SELECT d.name, d.path, d.sync_key, d.description, d.volume_id,
+                          k.playlist_prefs
+                   FROM destinations d
+                   LEFT JOIN sync_keys k ON k.key_name = d.sync_key
+                   WHERE d.volume_id = ?""",
+                (volume_id,),
+            ).fetchone()
+            if row:
+                raw = row['playlist_prefs']
+                prefs = json.loads(raw) if raw else None
+                return SyncDestination(row['name'], row['path'],
+                                       sync_key=row['sync_key'],
+                                       playlist_prefs=prefs,
+                                       description=row['description'] or '',
+                                       volume_id=row['volume_id'] or '')
+            return None
+        finally:
+            conn.close()
+
+    def update_destination_volume_id(self, name, volume_id):
+        """Set the volume_id for a destination. Returns True on success."""
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                cursor = conn.execute(
+                    "UPDATE destinations SET volume_id = ?, updated_at = ? "
+                    "WHERE name = ? COLLATE NOCASE",
+                    (volume_id or None, time.time(), name),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+            finally:
+                conn.close()
+
+    def update_destination_path(self, name, new_path):
+        """Update the stored path for a destination (e.g. after remount). Returns True on success."""
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                cursor = conn.execute(
+                    "UPDATE destinations SET path = ?, updated_at = ? "
+                    "WHERE name = ? COLLATE NOCASE",
+                    (new_path, time.time(), name),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+            finally:
+                conn.close()
 
     def link_destination(self, name, target_dest_name):
         """Link a destination to another destination's tracking group.
@@ -1652,7 +1733,7 @@ class SyncTracker:
         return True
 
     def resolve_destination(self, path=None, name=None, drive_name=None,
-                            link_to=None):
+                            link_to=None, volume_id=''):
         """Server-side destination resolution.
 
         Finds or creates a destination from the provided hints.
@@ -1664,6 +1745,16 @@ class SyncTracker:
         if name:
             dest = self.get_destination(name)
             if dest:
+                return {'destination': dest, 'created': False}
+
+        # 1b. Look up by volume_id if provided (drive renamed/remounted)
+        if volume_id:
+            dest = self.find_destination_by_volume_id(volume_id)
+            if dest:
+                # If path changed (drive remounted at different location), update stored path
+                if path and dest.path.rstrip('/\\') != path.rstrip('/\\'):
+                    self.update_destination_path(dest.name, path)
+                    dest = self.get_destination(dest.name)
                 return {'destination': dest, 'created': False}
 
         # 2. Look up by path if provided
@@ -1702,13 +1793,15 @@ class SyncTracker:
                 sync_key = target.sync_key
 
         ok = self.add_destination(name, path or f'folder:///{name}',
-                                  sync_key=sync_key, validate_path=False)
+                                  sync_key=sync_key, volume_id=volume_id,
+                                  validate_path=False)
         if not ok:
             # Name collision — try suffixed names
             for i in range(2, 100):
                 suffixed = f'{name}-{i}'
                 ok = self.add_destination(suffixed, path or f'folder:///{suffixed}',
-                                          sync_key=sync_key, validate_path=False)
+                                          sync_key=sync_key, volume_id=volume_id,
+                                          validate_path=False)
                 if ok:
                     name = suffixed
                     break

@@ -495,12 +495,14 @@ export class APIClient {
     name?: string;
     driveName?: string;
     linkTo?: string;
+    volumeId?: string;
   }): Promise<ResolveDestinationResponse> {
     const body: Record<string, string> = {};
     if (opts.path) body['path'] = opts.path;
     if (opts.name) body['name'] = opts.name;
     if (opts.driveName) body['drive_name'] = opts.driveName;
     if (opts.linkTo) body['link_to'] = opts.linkTo;
+    if (opts.volumeId) body['volume_id'] = opts.volumeId;
     return this.post<ResolveDestinationResponse>(
       '/api/sync/destinations/resolve',
       body,

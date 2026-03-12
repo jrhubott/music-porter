@@ -54,10 +54,10 @@ class SyncManager:
         self.excluded_volumes = excluded_volumes or EXCLUDED_USB_VOLUMES
         self.sync_tracker = sync_tracker
 
-    def find_usb_drives(self):
+    def find_usb_drives(self) -> list:
         """
         Find available USB drives on current platform.
-        Returns list of volume names/mount points.
+        Returns list of dicts: {'name': str, 'mount_path': str, 'volume_id': str}
         """
         if IS_MACOS:
             return self._find_usb_drives_macos()
@@ -69,7 +69,7 @@ class SyncManager:
             self.logger.error(f"Unsupported operating system: {CURRENT_OS}")
             return []
 
-    def _find_usb_drives_macos(self):
+    def _find_usb_drives_macos(self) -> list:
         """Find USB drives on macOS using /Volumes/."""
         volumes_path = Path('/Volumes')
 
@@ -77,58 +77,120 @@ class SyncManager:
             self.logger.error("/Volumes directory not found")
             return []
 
-        # Get all volumes, excluding system volumes
-        volumes = [
-            v.name for v in volumes_path.iterdir()
-            if v.is_dir() and v.name not in self.excluded_volumes
-        ]
+        drives = []
+        for v in volumes_path.iterdir():
+            if v.is_dir() and v.name not in self.excluded_volumes:
+                drives.append({
+                    'name': v.name,
+                    'mount_path': str(v),
+                    'volume_id': self._get_volume_id(str(v)),
+                })
+        return drives
 
-        return volumes
-
-    def _find_usb_drives_linux(self):
+    def _find_usb_drives_linux(self) -> list:
         """Find USB drives on Linux using /media/ and /mnt/."""
         drives = []
+        seen_names = set()
 
         # Check /media/$USER/ (common for desktop environments)
         if 'USER' in os.environ:
             media_user_path = Path(f"/media/{os.environ['USER']}")
             if media_user_path.exists():
-                drives.extend([
-                    d.name for d in media_user_path.iterdir()
-                    if d.is_dir() and d.name not in self.excluded_volumes
-                ])
+                for d in media_user_path.iterdir():
+                    if d.is_dir() and d.name not in self.excluded_volumes:
+                        drives.append({
+                            'name': d.name,
+                            'mount_path': str(d),
+                            'volume_id': self._get_volume_id(str(d)),
+                        })
+                        seen_names.add(d.name)
 
         # Check /mnt/ (common for manual mounts)
         mnt_path = Path('/mnt')
         if mnt_path.exists():
-            drives.extend([
-                d.name for d in mnt_path.iterdir()
-                if d.is_dir() and d.name not in self.excluded_volumes
-            ])
+            for d in mnt_path.iterdir():
+                if (d.is_dir() and d.name not in self.excluded_volumes
+                        and d.name not in seen_names):
+                    drives.append({
+                        'name': d.name,
+                        'mount_path': str(d),
+                        'volume_id': self._get_volume_id(str(d)),
+                    })
 
         if not drives:
             self.logger.warn("No USB drives found in /media/ or /mnt/")
 
-        return list(set(drives))  # Remove duplicates
+        return drives
 
-    def _find_usb_drives_windows(self):
+    def _find_usb_drives_windows(self) -> list:
         """Find USB drives on Windows using drive letters."""
         import string
 
         drives = []
-        # Check all drive letters
         for letter in string.ascii_uppercase:
             drive = f"{letter}:"
             drive_path = Path(drive + "\\")
 
-            # Check if drive exists and is not in excluded list
             if drive_path.exists() and drive not in self.excluded_volumes:
-                drives.append(drive)
+                drives.append({
+                    'name': drive,
+                    'mount_path': str(drive_path),
+                    'volume_id': self._get_volume_id(str(drive_path)),
+                })
 
         if not drives:
             self.logger.warn("No removable drives found")
 
         return drives
+
+    def _get_volume_id(self, mount_path: str) -> str:
+        """Return the filesystem UUID for a mount path. Returns '' on failure."""
+        try:
+            if IS_MACOS:
+                return self._get_volume_id_macos(mount_path)
+            elif IS_LINUX:
+                return self._get_volume_id_linux(mount_path)
+            elif IS_WINDOWS:
+                return self._get_volume_id_windows(mount_path)
+        except Exception as e:
+            self.logger.debug(f"Volume ID detection failed for {mount_path}: {e}")
+        return ''
+
+    def _get_volume_id_macos(self, mount_path: str) -> str:
+        """Get volume UUID via diskutil info on macOS."""
+        import plistlib
+        result = subprocess.run(
+            ['diskutil', 'info', '-plist', mount_path],
+            capture_output=True, timeout=5,
+        )
+        if result.returncode == 0:
+            info = plistlib.loads(result.stdout)
+            vol_uuid = info.get('VolumeUUID') or info.get('DiskUUID', '')
+            return str(vol_uuid) if vol_uuid else ''
+        return ''
+
+    def _get_volume_id_linux(self, mount_path: str) -> str:
+        """Get volume UUID via findmnt on Linux."""
+        result = subprocess.run(
+            ['findmnt', '-no', 'UUID', mount_path],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+        return ''
+
+    def _get_volume_id_windows(self, mount_path: str) -> str:
+        """Get volume GUID via GetVolumeNameForVolumeMountPointW on Windows."""
+        import ctypes
+        import re as _re
+        buf = ctypes.create_unicode_buffer(50)
+        mp = mount_path if mount_path.endswith('\\') else mount_path + '\\'
+        if ctypes.windll.kernel32.GetVolumeNameForVolumeMountPointW(
+                mp, buf, len(buf)):
+            m = _re.search(r'\{([^}]+)\}', buf.value)
+            if m:
+                return m.group(1)
+        return ''
 
     def _get_usb_base_path(self, volume):
         """Get the full path to a USB volume based on OS."""
@@ -150,25 +212,27 @@ class SyncManager:
     def select_usb_drive(self):
         """
         Interactively select a USB drive if multiple are available.
-        Returns selected volume name or None.
+        Returns selected volume name string or None.
         """
-        volumes = self.find_usb_drives()
+        drives = self.find_usb_drives()
 
-        if not volumes:
+        if not drives:
             self.logger.error("No external drives found")
             self.logger.error("Make sure your USB drive is connected and mounted")
             return None
 
-        if len(volumes) == 1:
-            self.logger.info(f"Using USB drive: {volumes[0]}")
-            return volumes[0]
+        drive_names = [d['name'] for d in drives]
+
+        if len(drives) == 1:
+            self.logger.info(f"Using USB drive: {drive_names[0]}")
+            return drive_names[0]
 
         # Multiple drives found - prompt user
         selection = self.prompt_handler.select_from_list(
-            "Select USB drive", volumes, allow_cancel=True)
+            "Select USB drive", drive_names, allow_cancel=True)
 
         if selection is not None:
-            return volumes[selection]
+            return drive_names[selection]
         return None
 
     def _should_copy_file(self, src_path, dst_path):
@@ -217,14 +281,15 @@ class SyncManager:
         saved = self.sync_tracker.get_all_destinations() if self.sync_tracker else []
         saved_names = {d.name.lower() for d in saved}
         for vol in usb_drives:
-            base = self._get_usb_base_path(vol)
+            base = Path(vol['mount_path'])
             full_path = str(base / usb_dir) if usb_dir else str(base)
             # Skip if already saved as a destination
-            if vol.lower() in saved_names:
+            if vol['name'].lower() in saved_names:
                 continue
-            options.append(f"[USB] {vol} ({full_path})")
+            options.append(f"[USB] {vol['name']} ({full_path})")
             option_dests.append(
-                SyncDestination(vol, f'usb://{full_path}'))
+                SyncDestination(vol['name'], f'usb://{full_path}',
+                                volume_id=vol['volume_id']))
 
         # 2. Saved destinations from DB
         for dest in saved:
@@ -295,7 +360,8 @@ class SyncManager:
     def sync_to_destination(self, source_dir, dest_path, sync_key,
                             dry_run=False, tag_applicator=None,
                             profile=None, playlist_name=None,
-                            playlist_keys=None, clean_destination=False):
+                            playlist_keys=None, clean_destination=False,
+                            dest_name=None):
         """Sync files to any destination with incremental copy logic.
 
         Args:
@@ -328,6 +394,15 @@ class SyncManager:
             fs_path = dest_path[9:]
         else:
             fs_path = dest_path
+
+        # Backfill volume_id for USB destinations that don't have one yet
+        if is_usb and not dry_run and self.sync_tracker and dest_name:
+            saved_dest = self.sync_tracker.get_destination(dest_name)
+            if saved_dest and not saved_dest.volume_id:
+                volume_id = self._get_volume_id(fs_path)
+                if volume_id:
+                    self.sync_tracker.update_destination_volume_id(
+                        dest_name, volume_id)
 
         if not source_path.exists():
             self.logger.error(

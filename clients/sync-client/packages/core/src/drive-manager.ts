@@ -76,7 +76,12 @@ export class DriveManager {
         try {
           const stat = statSync(path);
           if (stat.isDirectory()) {
-            drives.push({ name, path, freeSpace: this.getFreeSpace(path) });
+            drives.push({
+              name,
+              path,
+              freeSpace: this.getFreeSpace(path),
+              volumeId: this.getVolumeId(path),
+            });
           }
         } catch {
           // Skip inaccessible volumes
@@ -100,7 +105,12 @@ export class DriveManager {
           try {
             const stat = statSync(path);
             if (stat.isDirectory()) {
-              drives.push({ name, path, freeSpace: this.getFreeSpace(path) });
+              drives.push({
+                name,
+                path,
+                freeSpace: this.getFreeSpace(path),
+                volumeId: this.getVolumeId(path),
+              });
             }
           } catch {
             // Skip inaccessible
@@ -133,6 +143,7 @@ export class DriveManager {
               name,
               path,
               freeSpace: freeSpace && !isNaN(freeSpace) ? freeSpace : undefined,
+              volumeId: this.getVolumeId(path),
             });
           }
         }
@@ -141,6 +152,71 @@ export class DriveManager {
       // wmic not available or failed
     }
     return drives;
+  }
+
+  /** Get the filesystem UUID for a mounted volume path. Returns undefined on failure. */
+  private getVolumeId(mountPath: string): string | undefined {
+    try {
+      if (currentPlatform() === 'darwin') {
+        return this.getVolumeIdMac(mountPath);
+      } else if (currentPlatform() === 'linux') {
+        return this.getVolumeIdLinux(mountPath);
+      } else if (currentPlatform() === 'win32') {
+        return this.getVolumeIdWindows(mountPath);
+      }
+    } catch {
+      // Fall through
+    }
+    return undefined;
+  }
+
+  private getVolumeIdMac(mountPath: string): string | undefined {
+    try {
+      const output = execSync(`diskutil info -plist "${mountPath}"`, {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 5000,
+      });
+      // Extract VolumeUUID from plist XML using a simple regex (no stdlib XML parser needed)
+      const match = output.match(/<key>VolumeUUID<\/key>\s*<string>([^<]+)<\/string>/);
+      if (match) return match[1];
+      const fallback = output.match(/<key>DiskUUID<\/key>\s*<string>([^<]+)<\/string>/);
+      if (fallback) return fallback[1];
+    } catch {
+      // diskutil not available or failed
+    }
+    return undefined;
+  }
+
+  private getVolumeIdLinux(mountPath: string): string | undefined {
+    try {
+      const output = execSync(`findmnt -no UUID "${mountPath}"`, {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 5000,
+      });
+      const uuid = output.trim();
+      return uuid || undefined;
+    } catch {
+      // findmnt not available or failed
+    }
+    return undefined;
+  }
+
+  private getVolumeIdWindows(mountPath: string): string | undefined {
+    try {
+      // PowerShell fallback: Get-Volume UniqueId
+      const driveLetter = mountPath.replace(/[:\\]+$/, '');
+      const output = execSync(
+        `powershell -Command "(Get-Volume -DriveLetter ${driveLetter}).UniqueId"`,
+        { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000 },
+      );
+      const guid = output.trim();
+      return guid || undefined;
+    } catch {
+      // PowerShell not available or failed
+    }
+    return undefined;
   }
 
   /** Get free space on a mounted volume (macOS/Linux). */

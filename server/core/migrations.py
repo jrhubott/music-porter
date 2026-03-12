@@ -648,6 +648,34 @@ def migrate_db_schema(logger=None):
                 logger.info(
                     "DB migration 16→17: added source_type to playlists table")
 
+        if current < 18:
+            # Add description column to destinations for optional free-text notes.
+            conn.execute(
+                "ALTER TABLE destinations ADD COLUMN description TEXT NOT NULL DEFAULT ''"
+            )
+            conn.execute("PRAGMA user_version = 18")
+            conn.commit()
+            changes.append("added description column to destinations (v18)")
+            if logger:
+                logger.info(
+                    "DB migration 17→18: added description to destinations table")
+
+        if current < 19:
+            # Add volume_id column to destinations for filesystem UUID-based identification.
+            conn.execute(
+                "ALTER TABLE destinations ADD COLUMN volume_id TEXT DEFAULT NULL"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_destinations_volume_id "
+                "ON destinations(volume_id)"
+            )
+            conn.execute("PRAGMA user_version = 19")
+            conn.commit()
+            changes.append("added volume_id column to destinations (v19)")
+            if logger:
+                logger.info(
+                    "DB migration 18→19: added volume_id to destinations table")
+
         return [MigrationEvent(
             'schema_migrate',
             f"DB schema migrated from version {from_version} to {DB_SCHEMA_VERSION}",

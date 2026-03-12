@@ -74,6 +74,7 @@ export function SyncPage() {
   } = useAppState();
 
   const [autoSyncDrives, setAutoSyncDrives] = useState<string[]>([]);
+  const [autoSyncVolumeIds, setAutoSyncVolumeIds] = useState<string[]>([]);
   const [ejectAfterSync, setEjectAfterSync] = useState(false);
   const [ejected, setEjected] = useState(false);
   const [localDestinations, setLocalDestinations] = useState<SyncDestination[]>([]);
@@ -135,6 +136,7 @@ export function SyncPage() {
       setPlaylists(playlistData);
       setServerProfiles(settingsData.profiles);
       setAutoSyncDrives(prefs.autoSyncDrives);
+      setAutoSyncVolumeIds(prefs.autoSyncVolumeIds ?? []);
       setEjectAfterSync(prefs.ejectAfterSync);
       setAutoPinNewPlaylists(autoPin);
       setLocalDestinations(localDests);
@@ -205,13 +207,23 @@ export function SyncPage() {
     }
   }
 
-  async function toggleAutoSync(driveName: string) {
-    const isEnabled = autoSyncDrives.includes(driveName);
-    const updated = isEnabled
-      ? autoSyncDrives.filter((d) => d !== driveName)
-      : [...autoSyncDrives, driveName];
-    setAutoSyncDrives(updated);
-    await ipc.updatePreferences({ autoSyncDrives: updated });
+  async function toggleAutoSync(drive: { name: string; volumeId?: string }) {
+    const isEnabled = autoSyncDrives.includes(drive.name)
+      || (drive.volumeId != null && autoSyncVolumeIds.includes(drive.volumeId));
+    const updatedDrives = isEnabled
+      ? autoSyncDrives.filter((d) => d !== drive.name)
+      : [...autoSyncDrives, drive.name];
+    let updatedVolIds = autoSyncVolumeIds;
+    if (drive.volumeId) {
+      updatedVolIds = isEnabled
+        ? autoSyncVolumeIds.filter((v) => v !== drive.volumeId)
+        : autoSyncVolumeIds.includes(drive.volumeId)
+          ? autoSyncVolumeIds
+          : [...autoSyncVolumeIds, drive.volumeId];
+    }
+    setAutoSyncDrives(updatedDrives);
+    setAutoSyncVolumeIds(updatedVolIds);
+    await ipc.updatePreferences({ autoSyncDrives: updatedDrives, autoSyncVolumeIds: updatedVolIds });
   }
 
   async function toggleEjectAfterSync() {
@@ -355,6 +367,7 @@ export function SyncPage() {
         dest: destPath,
         playlists: selectedKeys ?? undefined,
         usbDriveName: syncDrive?.name,
+        usbVolumeId: syncDrive?.volumeId,
         profile: activeProfile || undefined,
         force,
         offlineOnly: isOffline,
@@ -373,7 +386,9 @@ export function SyncPage() {
       // Auto-eject on successful USB sync when auto-sync or eject-after-sync is enabled
       const syncSucceeded = !result.aborted && result.failed === 0;
       const shouldAutoEject = syncDrive && syncSucceeded
-        && (autoSyncDrives.includes(syncDrive.name) || ejectAfterSync);
+        && (autoSyncDrives.includes(syncDrive.name)
+          || (syncDrive.volumeId != null && autoSyncVolumeIds.includes(syncDrive.volumeId))
+          || ejectAfterSync);
       if (shouldAutoEject) {
         const success = await ipc.ejectDrive(syncDrive.path);
         if (success) {
@@ -607,7 +622,8 @@ export function SyncPage() {
                 {drives.map((d) => {
                   const targetPath = usbDir ? `${d.path}/${usbDir}` : d.path;
                   const isSelected = selectedDrive?.path === d.path;
-                  const hasAutoSync = autoSyncDrives.includes(d.name);
+                  const hasAutoSync = autoSyncDrives.includes(d.name)
+                    || (d.volumeId != null && autoSyncVolumeIds.includes(d.volumeId));
                   return (
                     <button
                       key={d.path}
@@ -637,8 +653,9 @@ export function SyncPage() {
                     <input
                       className="form-check-input"
                       type="checkbox"
-                      checked={autoSyncDrives.includes(selectedDrive.name)}
-                      onChange={() => toggleAutoSync(selectedDrive.name)}
+                      checked={autoSyncDrives.includes(selectedDrive.name)
+                        || (selectedDrive.volumeId != null && autoSyncVolumeIds.includes(selectedDrive.volumeId))}
+                      onChange={() => toggleAutoSync(selectedDrive)}
                     />
                     <label className="form-check-label small">
                       Auto-sync

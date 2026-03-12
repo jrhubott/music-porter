@@ -120,6 +120,7 @@ export interface SyncDestination {
   available: boolean;
   linked_destinations: string[];
   playlist_prefs: string[] | null;
+  description?: string;
 }
 
 export interface ResolveDestinationResponse {
@@ -187,6 +188,7 @@ export interface DriveInfo {
   name: string;
   path: string;
   freeSpace?: number;
+  volumeId?: string;
 }
 
 // ── Sync Engine ──
@@ -326,6 +328,7 @@ export interface WindowState {
 export interface SyncPreferences {
   concurrency: number;
   autoSyncDrives: string[];
+  autoSyncVolumeIds?: string[];
   ejectAfterSync: boolean;
   notifications: boolean;
   pinnedPlaylists: string[];

@@ -77,6 +77,7 @@ const electronAPI = {
     destinationName?: string;
     concurrency?: number;
     usbDriveName?: string;
+    usbVolumeId?: string;
     profile?: string;
     force?: boolean;
     offlineOnly?: boolean;
